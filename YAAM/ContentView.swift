@@ -1,3 +1,10 @@
+//
+//  ContentView.swift
+//  YAAM
+//
+//  Created by factoreal on 7/30/26.
+//
+
 import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
@@ -26,10 +33,11 @@ struct ContentView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Mode Selector Bar
+            // MARK: - Top Global Tab Navigation Selector
             Picker("", selection: $appState.selectedTab) {
                 Text("Log Table Viewer").tag(0)
                 Text("Filter & Convert Tool").tag(1)
+                Text("Global Leaderboard").tag(2) // <--- NEW LEADERBOARD TAB
             }
             .pickerStyle(.segmented)
             .padding(12)
@@ -37,10 +45,11 @@ struct ContentView: View {
             
             Divider()
             
+            // MARK: - Tab Views Routing
             if appState.selectedTab == 0 {
-                // Tab 0: ADIFMaster Table View
+                // Tab 0: ADIFMaster High-Performance Table Grid
                 LogTableView()
-            } else {
+            } else if appState.selectedTab == 1 {
                 // Tab 1: Conversion & Contest Filter Tool
                 VStack(alignment: .leading, spacing: 14) {
                     // Row 1: ADIF File Picker
@@ -203,14 +212,14 @@ struct ContentView: View {
                     }
                 }
                 .padding(16)
+            } else if appState.selectedTab == 2 {
+                // Tab 2: NEW FULL-PAGE LEADERBOARD VIEW
+                LeaderboardView()
             }
         }
-        .alert(isPresented: $appState.showAlert) {
-            Alert(
-                title: Text(appState.alertTitle),
-                message: Text(appState.alertMessage),
-                dismissButton: .default(Text("OK"))
-            )
+        .sheet(isPresented: $appState.showAboutSheet) {
+            AboutView()
+                .environmentObject(appState)
         }
     }
 

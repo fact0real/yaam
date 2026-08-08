@@ -1,6 +1,6 @@
 //
 //  LogTableView.swift
-//  ADIF to Excel
+//  YAAM
 //
 //  Created by factoreal on 7/30/26.
 //
@@ -58,6 +58,20 @@ struct LogTableView: View {
                 
                 Divider().frame(height: 14)
                 
+                // Standalone Cloud Logbook Fetcher
+                Button(action: { appState.fetchAndManageCloudLogbook() }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "icloud.and.arrow.down.fill")
+                            .foregroundColor(.blue)
+                        Text("Cloud Logbook")
+                            .font(.caption)
+                            .fontWeight(.bold)
+                    }
+                }
+                .buttonStyle(.plain)
+                
+                Divider().frame(height: 14)
+
                 // 2. Toolbar Global Search Input Field
                 HStack(spacing: 4) {
                     Image(systemName: "magnifyingglass")
@@ -435,7 +449,7 @@ struct LogTableView: View {
                 }
                 .contextMenu {
                     Button("Delete Record #\(record.index)") {
-                        appState.deleteRecord(id: record.index == record.index ? record.id : record.id)
+                        appState.deleteRecord(id: record.id)
                     }
                     Button("Delete Column '\(header)'") {
                         appState.deleteColumn(header: header)

@@ -180,6 +180,16 @@ class AppState: NSObject, ObservableObject {
     @Published var isLoading: Bool = false
     @Published var isSyncingAPI: Bool = false
     
+     
+    // QRZ rank
+    @Published var isFetchingRank: Bool = false
+    @Published var qrzRankData: QRZRankResponse? = nil
+    @Published var leaderboardSearchCallsign: String = ""
+    @Published var ownerRankData: QRZRankResponse? = nil
+
+    private let qrzSecureSessionToken = "eyJ1c2VybmFtZSI6ImZhY3RvcmVhbCJ9.amtpHA.AzDgCiVIUz64RzWEOtlXb_DENnI"
+
+    
     // Search & Smart Sorting States
     @Published var searchText: String = ""
     @Published var sortHeader: String? = nil
@@ -205,6 +215,10 @@ class AppState: NSObject, ObservableObject {
     @Published var showAlert: Bool = false
     @Published var alertTitle: String = ""
     @Published var alertMessage: String = ""
+
+    
+    //
+    @Published var showAboutSheet: Bool = false
 
     override init() {
         super.init()
@@ -381,7 +395,152 @@ class AppState: NSObject, ObservableObject {
     func appendLog(_ text: String) {
         logText += "\(text)\n"
     }
+    
+        // MARK: - LIVE QRZ LEADERBOARD ENGINE (WITH VS COMPARISON)
+    func fetchQRZLeaderboard(for searchedCallsign: String) {
+        let ownerCall = (UserDefaults.standard.string(forKey: "stationCallsign") ?? "EP2AES").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let targetCall = searchedCallsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        
+        guard !targetCall.isEmpty else { return }
+        
+        isFetchingRank = true
+        qrzRankData = nil
+        
+        let group = DispatchGroup()
+        
+        // 1. Fetch Owner Rank (if not fetched yet)
+        if ownerRankData == nil || ownerRankData?.callsign?.uppercased() != ownerCall {
+            group.enter()
+            fetchSingleRank(callsign: ownerCall) { [weak self] result in
+                self?.ownerRankData = result
+                group.leave()
+            }
+        }
+        
+        // 2. Fetch Searched Callsign Rank
+        group.enter()
+        fetchSingleRank(callsign: targetCall) { [weak self] result in
+            self?.qrzRankData = result
+            group.leave()
+        }
+        
+        group.notify(queue: .main) { [weak self] in
+            self?.isFetchingRank = false
+            if let target = self?.qrzRankData?.callsign {
+                self?.appendLog("Leaderboard Comparison loaded: \(ownerCall) VS \(target)")
+            }
+        }
+    }
 
+    private func fetchSingleRank(callsign: String, completion: @escaping (QRZRankResponse?) -> Void) {
+        guard let url = URL(string: "https://qrz-rank.asis.sh/api/rank/\(callsign)") else {
+            completion(nil)
+            return
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("session=\(qrzSecureSessionToken)", forHTTPHeaderField: "Cookie")
+        request.setValue("YAAM-macOS/1.1.0", forHTTPHeaderField: "User-Agent")
+        
+        URLSession.shared.dataTask(with: request) { data, _, _ in
+            guard let data = data, let decoded = try? JSONDecoder().decode(QRZRankResponse.self, from: data) else {
+                completion(nil)
+                return
+            }
+            completion(decoded)
+        }.resume()
+    }
+
+
+    // MARK: - STANDALONE CLOUD LOGBOOK ENGINE
+    private var cloudLogbookFileURL: URL? {
+        let fm = FileManager.default
+        guard let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return nil }
+        let dir = appSupport.appendingPathComponent("YAAM/CloudLog")
+        if !fm.fileExists(atPath: dir.path) {
+            try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        }
+        return dir.appendingPathComponent("MyCloudLogbook.adi")
+    }
+
+    func fetchAndManageCloudLogbook() {
+        let lotwUser = UserDefaults.standard.string(forKey: "lotwUsername") ?? ""
+        let lotwPass = UserDefaults.standard.string(forKey: "lotwPassword") ?? ""
+        
+        if lotwUser.isEmpty {
+            self.alertTitle = "Credentials Required"
+            self.alertMessage = "Enter LoTW credentials in Preferences (Cmd+,) to fetch your Cloud Logbook."
+            self.showAlert = true
+            return
+        }
+        
+        isLoading = true
+        appendLog("Connecting to Cloud Logbook servers...")
+        
+        let lastCloudFetch = UserDefaults.standard.object(forKey: "lastCloudLogbookFetch") as? Date
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyy-MM-dd"
+        dateFormatter.timeZone = TimeZone(secondsFromGMT: 0)
+        
+        let sinceDateString = lastCloudFetch != nil ? dateFormatter.string(from: lastCloudFetch!) : "1900-01-01"
+        let isIncremental = lastCloudFetch != nil
+        
+        guard let encodedUser = lotwUser.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let encodedPass = lotwPass.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let endpoint = URL(string: "https://lotw.arrl.org/lotwuser/lotwreport.adi?login=\(encodedUser)&password=\(encodedPass)&qso_query=1&qso_qslsince=\(sinceDateString)") else {
+            self.isLoading = false
+            return
+        }
+        
+        var request = URLRequest(url: endpoint)
+        request.setValue("YAAM-macOS/1.1.0", forHTTPHeaderField: "User-Agent")
+        
+        URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+            guard let self = self else { return }
+            
+            if let error = error {
+                DispatchQueue.main.async {
+                    self.isLoading = false
+                    self.alertTitle = "Cloud Fetch Failed"
+                    self.alertMessage = error.localizedDescription
+                    self.showAlert = true
+                }
+                return
+            }
+            
+            guard let data = data, let newADIF = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) else {
+                DispatchQueue.main.async { self.isLoading = false }
+                return
+            }
+            
+            DispatchQueue.global(qos: .userInitiated).async {
+                guard let cloudFileURL = self.cloudLogbookFileURL else { return }
+                let fm = FileManager.default
+                var finalADIF = newADIF
+                
+                if isIncremental && fm.fileExists(atPath: cloudFileURL.path) {
+                    if let existingADIF = try? String(contentsOfFile: cloudFileURL.path, encoding: .utf8) {
+                        if let eohrRange = newADIF.range(of: "<eohr>", options: .caseInsensitive) {
+                            let onlyNewRecords = String(newADIF[eohrRange.upperBound...])
+                            finalADIF = existingADIF + "\n" + onlyNewRecords
+                        }
+                    }
+                }
+                
+                do {
+                    try finalADIF.write(to: cloudFileURL, atomically: true, encoding: .utf8)
+                    DispatchQueue.main.async {
+                        UserDefaults.standard.set(Date(), forKey: "lastCloudLogbookFetch")
+                        self.loadADIFFile(from: cloudFileURL)
+                        self.appendLog("Cloud Logbook updated and saved offline.")
+                    }
+                } catch {
+                    DispatchQueue.main.async { self.isLoading = false }
+                }
+            }
+        }.resume()
+    }
+    
     func deleteRecord(id: UUID) {
         if let idx = qsoRecords.firstIndex(where: { $0.id == id }) {
             let recordNum = qsoRecords[idx].index
@@ -699,7 +858,7 @@ class AppState: NSObject, ObservableObject {
         }
         
         var request = URLRequest(url: lotwEndpoint, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: 30)
-        request.setValue("YAAM-macOS/1.0.0", forHTTPHeaderField: "User-Agent")
+        request.setValue("YAAM-macOS/1.1.0", forHTTPHeaderField: "User-Agent")
         
         URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
             guard let self = self else { return }
@@ -812,23 +971,15 @@ class AppState: NSObject, ObservableObject {
     }
 
     func showAboutDialog() {
-        alertTitle = "About YAAM"
-        alertMessage = """
-        YAAM - Yet Another ADIF Manager
-        Version \(currentVersion)
-
-        Developed by EP2AES
-
-        A fast, native macOS Amateur Radio logbook manager featuring offline QSL caching, live LoTW cloud sync, interactive grid editing, and advanced analytics.
-        """
-        showAlert = true
+        showAboutSheet = true
     }
 
+    // MARK: - GITHUB AUTO UPDATER (Open Source Linked)
     func checkForUpdates() {
-        appendLog("Checking for updates...")
+        appendLog("Checking GitHub repository for updates...")
         isCheckingUpdates = true
         
-        guard let url = URL(string: "https://api.github.com/repos/factoreal/ADIF-to-Excel/releases/latest") else {
+        guard let url = URL(string: "https://api.github.com/repos/fact0real/yaam/releases/latest") else {
             isCheckingUpdates = false
             return
         }
@@ -840,36 +991,63 @@ class AppState: NSObject, ObservableObject {
                 
                 if let error = error {
                     self.appendLog("Update check failed: \(error.localizedDescription)")
-                    self.alertTitle = "Check Updates"
-                    self.alertMessage = "Unable to connect to update server.\nYou are currently running version \(self.currentVersion)."
-                    self.showAlert = true
+                    self.showNativeAlert(
+                        title: "Update Check Failed 🔴",
+                        message: "Unable to connect to GitHub releases.\n\nError: \(error.localizedDescription)"
+                    )
                     return
                 }
                 
                 if let data = data,
                    let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                    let latestTag = json["tag_name"] as? String {
+                    
                     let cleanTag = latestTag.replacingOccurrences(of: "v", with: "")
+                    let htmlUrl = json["html_url"] as? String
+                    let downloadURL = htmlUrl != nil ? URL(string: htmlUrl!) : nil
+                    
                     if cleanTag != self.currentVersion {
-                        self.appendLog("New update available: \(latestTag)")
-                        self.alertTitle = "Update Available!"
-                        self.alertMessage = "A new version (\(latestTag)) is available.\nYour current version is \(self.currentVersion)."
-                        
-                        if let htmlUrl = json["html_url"] as? String, let downloadURL = URL(string: htmlUrl) {
-                            NSWorkspace.shared.open(downloadURL)
-                        }
+                        self.appendLog("YAAM Update available: \(latestTag)")
+                        self.showNativeAlert(
+                            title: "YAAM Update Available! 🚀",
+                            message: "A new version (\(latestTag)) is available on GitHub!\nYour current version is v\(self.currentVersion).\n\nWould you like to open the release page?",
+                            actionURL: downloadURL
+                        )
                     } else {
-                        self.appendLog("You are running the latest version.")
-                        self.alertTitle = "Up to Date"
-                        self.alertMessage = "You are running the latest version (\(self.currentVersion))."
+                        self.appendLog("YAAM is up to date (v\(self.currentVersion)).")
+                        self.showNativeAlert(
+                            title: "Up to Date 🟢",
+                            message: "You are running the latest version of YAAM (v\(self.currentVersion))."
+                        )
                     }
                 } else {
-                    self.appendLog("You are running the latest version.")
-                    self.alertTitle = "Up to Date"
-                    self.alertMessage = "You are running the latest version (\(self.currentVersion))."
+                    self.showNativeAlert(
+                        title: "Up to Date 🟢",
+                        message: "You are running the latest version of YAAM (v\(self.currentVersion))."
+                    )
                 }
-                self.showAlert = true
             }
         }.resume()
+    }
+    // MARK: - Bulletproof Native macOS Alert Engine (AppKit Bridge)
+    func showNativeAlert(title: String, message: String, actionURL: URL? = nil) {
+        DispatchQueue.main.async {
+            let alert = NSAlert()
+            alert.messageText = title
+            alert.informativeText = message
+            alert.alertStyle = .informational
+            
+            if let _ = actionURL {
+                alert.addButton(withTitle: "Open Release Page")
+                alert.addButton(withTitle: "Cancel")
+            } else {
+                alert.addButton(withTitle: "OK")
+            }
+            
+            let response = alert.runModal()
+            if response == .alertFirstButtonReturn, let url = actionURL {
+                NSWorkspace.shared.open(url)
+            }
+        }
     }
 }
