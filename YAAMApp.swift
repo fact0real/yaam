@@ -1,5 +1,5 @@
 //  In the name of Allah
-//  ADIF_to_ExcelApp.swift
+//  YAAMApp.swift
 //  ADIF to Excel
 //
 //  Created by factoreal on 7/29/26.
@@ -10,7 +10,7 @@ import Combine
 
 // MARK: - Main Application Entry Point & Global Menu Commands
 @main
-struct ADIF_to_ExcelApp: App {
+struct YAAMApp: App {
     @StateObject private var appState = AppState()
     @Environment(\.openWindow) private var openWindow
 
