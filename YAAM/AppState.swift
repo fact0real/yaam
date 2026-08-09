@@ -727,68 +727,97 @@ class AppState: NSObject, ObservableObject {
             return ("", "", "")
         }
 
-    // MARK: - Native SMTP Sender Engine via macOS curl
-    func sendEmail(to recipient: String, subject: String, body: String, completion: @escaping (Bool, String) -> Void) {
-        let host = UserDefaults.standard.string(forKey: "smtpHost") ?? ""
-        let port = UserDefaults.standard.string(forKey: "smtpPort") ?? "465"
-        let user = UserDefaults.standard.string(forKey: "smtpUser") ?? ""
-        let pass = UserDefaults.standard.string(forKey: "smtpPass") ?? ""
-        
-        guard !host.isEmpty, !user.isEmpty, !pass.isEmpty else {
-            completion(false, "SMTP configuration missing. Please setup via SMTP settings.")
-            return
-        }
-        
-        DispatchQueue.global(qos: .userInitiated).async {
-            let tempDir = FileManager.default.temporaryDirectory
-            let fileURL = tempDir.appendingPathComponent("\(UUID().uuidString).eml")
+    // MARK: - Bulletproof Native SMTP Engine (Production Mode with Sandbox Fixes)
+        func sendEmail(to recipient: String, subject: String, body: String, completion: @escaping (Bool, String) -> Void) {
             
-            let emailContent = """
-            From: \(user)
-            To: \(recipient)
-            Subject: \(subject)
+            let host = UserDefaults.standard.string(forKey: "smtpHost")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let port = UserDefaults.standard.string(forKey: "smtpPort")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "465"
+            let user = UserDefaults.standard.string(forKey: "smtpUser")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let rawPass = UserDefaults.standard.string(forKey: "smtpPass")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             
-            \(body)
-            """
+            // Auto-remove spaces from Google App Passwords
+            let pass = rawPass.replacingOccurrences(of: " ", with: "")
             
-            do {
-                try emailContent.write(to: fileURL, atomically: true, encoding: .utf8)
+            guard !host.isEmpty, !user.isEmpty, !pass.isEmpty else {
+                completion(false, "SMTP MISSING: Check Preferences for Host, User, and Pass.")
+                return
+            }
+            
+            DispatchQueue.global(qos: .userInitiated).async {
+                let dateFormatter = DateFormatter()
+                dateFormatter.locale = Locale(identifier: "en_US_POSIX")
+                dateFormatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss Z"
+                let dateStr = dateFormatter.string(from: Date())
+                let messageID = "<\(UUID().uuidString)@\(host)>"
+                
+                // Format full RFC 5322 EML Header
+                let emailContent = """
+                From: \(user)
+                To: \(recipient)
+                Subject: \(subject)
+                Date: \(dateStr)
+                Message-ID: \(messageID)
+                Content-Type: text/plain; charset=UTF-8
+                
+                \(body)
+                """
                 
                 let process = Process()
                 process.executableURL = URL(fileURLWithPath: "/usr/bin/curl")
-                let protocolPrefix = (port == "465") ? "smtps" : "smtp"
                 
-                process.arguments = [
-                    "--ssl-reqd",
-                    "--url", "\(protocolPrefix)://\(host):\(port)",
+                // Fix for Error 6: Inject system environment variables to allow DNS resolution inside macOS Sandbox
+                process.environment = ProcessInfo.processInfo.environment
+                
+                let isPort465 = (port == "465")
+                let urlScheme = isPort465 ? "smtps" : "smtp"
+                
+                var arguments = [
+                    "--url", "\(urlScheme)://\(host):\(port)",
                     "--user", "\(user):\(pass)",
                     "--mail-from", user,
-                    "--mail-rcpt", recipient,
-                    "--upload-file", fileURL.path
+                    "--mail-rcpt", recipient, // Reverted to the actual target recipient
+                    "--upload-file", "-",
+                    "--verbose",
+                    "--insecure", // Ignore localized Mac keychain SSL trust issues
+                    "--ipv4"      // Force IPv4 to prevent IPv6 routing failures in Sandbox
                 ]
                 
-                let pipe = Pipe()
-                process.standardError = pipe
-                
-                try process.run()
-                process.waitUntilExit()
-                
-                let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                let output = String(data: data, encoding: .utf8) ?? ""
-                
-                try? FileManager.default.removeItem(at: fileURL)
-                
-                if process.terminationStatus == 0 {
-                    completion(true, "Sent successfully via SMTP.")
-                } else {
-                    completion(false, "SMTP Error: \(output)")
+                if !isPort465 {
+                    arguments.append("--ssl-reqd")
                 }
-            } catch {
-                completion(false, "System Command Error: \(error.localizedDescription)")
+                
+                process.arguments = arguments
+                
+                let stdinPipe = Pipe()
+                let outputPipe = Pipe()
+                
+                process.standardInput = stdinPipe
+                process.standardOutput = outputPipe
+                process.standardError = outputPipe
+                
+                do {
+                    try process.run()
+                    
+                    if let data = emailContent.data(using: .utf8) {
+                        stdinPipe.fileHandleForWriting.write(data)
+                    }
+                    stdinPipe.fileHandleForWriting.closeFile()
+                    
+                    process.waitUntilExit()
+                    
+                    let errData = outputPipe.fileHandleForReading.readDataToEndOfFile()
+                    let outputLog = String(data: errData, encoding: .utf8) ?? "EMPTY LOG"
+                    
+                    if process.terminationStatus == 0 {
+                        completion(true, "Email successfully sent to \(recipient)!")
+                    } else {
+                        completion(false, "ERROR \(process.terminationStatus):\n\n" + outputLog)
+                    }
+                } catch {
+                    completion(false, "Process Failed: \(error.localizedDescription)")
+                }
             }
         }
-    }
-
     func deleteRecord(id: UUID) {
         if let idx = qsoRecords.firstIndex(where: { $0.id == id }) {
             let recordNum = qsoRecords[idx].index

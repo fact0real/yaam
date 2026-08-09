@@ -12,19 +12,54 @@ struct EmailComposerView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var appState: AppState
     
+    @AppStorage("stationCallsign") private var savedStationCallsign: String = ""
+    @AppStorage("qrzUsername") private var qrzUser: String = ""
+    @AppStorage("lotwUsername") private var lotwUser: String = ""
+    
     @State private var selectedTemplate: String = "QSL Request"
     @State private var emailSubject: String = ""
     @State private var emailBody: String = ""
     @State private var isSending: Bool = false
     
+    // Debugger States
+    @State private var showDebugLog: Bool = false
+    @State private var smtpDebugOutput: String = ""
+    
     let templates = ["QSL Request", "Sked Request", "LoTW Confirmation"]
+    
+    // Strict Callsign Resolver
+    private var resolvedMyCallsign: String {
+        let saved = savedStationCallsign.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !saved.isEmpty && !saved.contains("@") { return saved.uppercased() }
+
+        let qrz = qrzUser.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !qrz.isEmpty && !qrz.contains("@") { return qrz.uppercased() }
+
+        let lotw = lotwUser.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !lotw.isEmpty && !lotw.contains("@") { return lotw.uppercased() }
+
+        if let recCall = appState.qsoRecords.first(where: {
+            let c = $0["STATION_CALLSIGN"].trimmingCharacters(in: .whitespaces)
+            return !c.isEmpty && !c.contains("@")
+        })?["STATION_CALLSIGN"] {
+            return recCall.uppercased()
+        }
+
+        if let recOp = appState.qsoRecords.first(where: {
+            let o = $0["OPERATOR"].trimmingCharacters(in: .whitespaces)
+            return !o.isEmpty && !o.contains("@")
+        })?["OPERATOR"] {
+            return recOp.uppercased()
+        }
+
+        return "EP2AES"
+    }
     
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Send Email to \(appState.selectedEmailCallsign)")
                 .font(.headline)
             
-            // Recipient & Template Info
             HStack {
                 Text("To:")
                     .fontWeight(.bold)
@@ -39,7 +74,7 @@ struct EmailComposerView: View {
                     }
                 }
                 .pickerStyle(.menu)
-                .frame(width: 200)
+                .frame(width: 180)
                 .onChange(of: selectedTemplate) { _, newValue in
                     loadTemplate(newValue)
                 }
@@ -50,16 +85,32 @@ struct EmailComposerView: View {
             TextField("Subject", text: $emailSubject)
                 .textFieldStyle(.roundedBorder)
             
-            TextEditor(text: $emailBody)
-                .font(.system(.body, design: .monospaced))
-                .frame(minHeight: 150)
-                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.gray.opacity(0.3), lineWidth: 1))
+            if showDebugLog {
+                // MARK: - Debug Terminal Console
+                VStack(alignment: .leading) {
+                    Text("SMTP Connection Log:")
+                        .font(.caption)
+                        .bold()
+                        .foregroundColor(.red)
+                    TextEditor(text: $smtpDebugOutput)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(.green)
+                        .background(Color.black.opacity(0.8))
+                        .frame(minHeight: 160)
+                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.red, lineWidth: 1))
+                }
+            } else {
+                TextEditor(text: $emailBody)
+                    .font(.system(.body, design: .monospaced))
+                    .frame(minHeight: 160)
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.gray.opacity(0.3), lineWidth: 1))
+            }
             
             HStack {
                 if isSending {
                     ProgressView()
                         .scaleEffect(0.6)
-                    Text("Sending via SMTP...")
+                    Text("Authenticating & Sending...")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -72,7 +123,7 @@ struct EmailComposerView: View {
                 Button(action: sendMail) {
                     HStack {
                         Image(systemName: "paperplane.fill")
-                        Text("Send Email")
+                        Text(showDebugLog ? "Retry Sending" : "Send Email")
                     }
                 }
                 .buttonStyle(.borderedProminent)
@@ -81,15 +132,14 @@ struct EmailComposerView: View {
             }
         }
         .padding(20)
-        .frame(width: 500, height: 400)
+        .frame(width: 580, height: showDebugLog ? 500 : 430)
         .onAppear {
             loadTemplate(selectedTemplate)
         }
     }
     
-    // MARK: - Template Engine
     private func loadTemplate(_ template: String) {
-        let myCall = UserDefaults.standard.string(forKey: "stationCallsign") ?? "MYCALL"
+        let myCall = resolvedMyCallsign
         let targetCall = appState.selectedEmailCallsign
         
         switch template {
@@ -109,21 +159,30 @@ struct EmailComposerView: View {
     
     private func sendMail() {
         isSending = true
-        appState.sendEmail(to: appState.selectedEmailAddress, subject: emailSubject, body: emailBody) { success, msg in
+        showDebugLog = false
+        
+        appState.sendEmail(to: appState.selectedEmailAddress, subject: emailSubject, body: emailBody) { success, log in
             DispatchQueue.main.async {
                 self.isSending = false
-                self.appState.alertTitle = success ? "Email Sent 🚀" : "Email Failed 🔴"
-                self.appState.alertMessage = msg
-                self.appState.showAlert = true
-                if success { dismiss() }
+                if success {
+                    self.appState.alertTitle = "Email Sent Successfully 🚀"
+                    self.appState.alertMessage = "Your email has been dispatched via SMTP."
+                    self.appState.showAlert = true
+                    self.dismiss()
+                } else {
+                    // Show raw debug terminal inline!
+                    self.smtpDebugOutput = log
+                    self.showDebugLog = true
+                }
             }
         }
     }
 }
 
-// MARK: - SMTP Settings Sheet
+// MARK: - SMTP & Station Settings Sheet
 struct SMTPSettingsView: View {
     @Environment(\.dismiss) private var dismiss
+    @AppStorage("stationCallsign") private var stationCallsign = "EP2AES"
     @AppStorage("smtpHost") private var smtpHost = "smtp.gmail.com"
     @AppStorage("smtpPort") private var smtpPort = "465"
     @AppStorage("smtpUser") private var smtpUser = ""
@@ -135,19 +194,20 @@ struct SMTPSettingsView: View {
                 Image(systemName: "server.rack")
                     .font(.title)
                     .foregroundColor(.blue)
-                Text("SMTP Server Configuration")
+                Text("SMTP & Station Configuration")
                     .font(.headline)
             }
             
-            Text("Configure your email server to send QSL and Sked requests directly from YAAM. (For Gmail, use an App Password).")
+            Text("Enter your station callsign and SMTP settings. For Gmail / Google Workspace, use your 16-character App Password.")
                 .font(.caption)
                 .foregroundColor(.secondary)
             
             Form {
+                TextField("My Station Callsign (e.g. EP2AES):", text: $stationCallsign)
                 TextField("SMTP Host (e.g. smtp.gmail.com):", text: $smtpHost)
-                TextField("SMTP Port (e.g. 465 or 587):", text: $smtpPort)
+                TextField("SMTP Port (465 for SSL or 587 for TLS):", text: $smtpPort)
                 TextField("Email Address:", text: $smtpUser)
-                SecureField("Password (or App Password):", text: $smtpPass)
+                SecureField("App Password (spaces auto-removed):", text: $smtpPass)
             }
             .padding(.vertical, 8)
             
@@ -158,6 +218,6 @@ struct SMTPSettingsView: View {
             }
         }
         .padding(20)
-        .frame(width: 450)
+        .frame(width: 480)
     }
 }
