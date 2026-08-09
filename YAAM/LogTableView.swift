@@ -58,8 +58,8 @@ struct LogTableView: View {
                 
                 Divider().frame(height: 14)
                 
-                // Standalone Cloud Logbook Fetcher
-                Button(action: { appState.fetchAndManageCloudLogbook() }) {
+                // Standalone Cloud Logbook Fetcher (With Native Confirmation Dialog)
+                Button(action: { appState.confirmAndFetchCloudLogbook() }) {
                     HStack(spacing: 4) {
                         Image(systemName: "icloud.and.arrow.down.fill")
                             .foregroundColor(.blue)
@@ -72,22 +72,57 @@ struct LogTableView: View {
                 
                 Divider().frame(height: 14)
 
-                // NEW: Enrich Log Data Button (Ranks & Emails)
-                Button(action: { appState.enrichLogData() }) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "wand.and.stars")
-                            .foregroundColor(.purple)
-                        Text("Enrich Data")
-                            .font(.caption)
-                            .fontWeight(.bold)
+                // ENRICH DATA / STOP ENRICHING TOGGLE BUTTON
+                if appState.isEnriching {
+                    Button(action: { appState.stopEnrichment() }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "stop.circle.fill")
+                                .foregroundColor(.red)
+                            Text("Stop Enriching")
+                                .font(.caption)
+                                .fontWeight(.bold)
+                                .foregroundColor(.red)
+                        }
                     }
+                    .buttonStyle(.plain)
+                } else if !appState.selectedRecordIDs.isEmpty {
+                    // Enrich Selected Rows Button (Max 19)
+                    Button(action: { appState.enrichSelectedRecords() }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "wand.and.stars.inverse")
+                                .foregroundColor(.orange)
+                            Text("Enrich Selected (\(appState.selectedRecordIDs.count))")
+                                .font(.caption)
+                                .fontWeight(.bold)
+                                .foregroundColor(.orange)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    
+                    Button(action: { appState.clearSelection() }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Clear row selections")
+                } else {
+                    Button(action: { appState.enrichLogData() }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "wand.and.stars")
+                                .foregroundColor(.purple)
+                            Text("Enrich Data")
+                                .font(.caption)
+                                .fontWeight(.bold)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(appState.qsoRecords.isEmpty)
                 }
-                .buttonStyle(.plain)
-                .disabled(appState.isEnriching || appState.qsoRecords.isEmpty)
                 
                 Divider().frame(height: 14)
                 
-                // NEW: SMTP Settings Button
+                // SMTP Settings Button
                 Button(action: { appState.showSMTPSettings = true }) {
                     HStack(spacing: 4) {
                         Image(systemName: "gearshape.fill")
@@ -209,7 +244,7 @@ struct LogTableView: View {
                         .padding(.trailing, 4)
                 }
                 
-                Text("Tip: Click header to sort | Drag edge to resize")
+                Text("Tip: Click checkbox to select up to 19 rows")
                     .font(.caption2)
                     .foregroundColor(.secondary)
             }
@@ -281,6 +316,14 @@ struct LogTableView: View {
                 
                 Spacer()
                 
+                if !appState.selectedRecordIDs.isEmpty {
+                    Text("Selected: \(appState.selectedRecordIDs.count) / 19 Max")
+                        .font(.system(.caption, design: .monospaced))
+                        .bold()
+                        .foregroundColor(.blue)
+                        .padding(.trailing, 8)
+                }
+                
                 if appState.filterCriteria.isActive || !appState.searchText.isEmpty {
                     Text("Filtered: \(appState.filteredRecords.count) / Total: \(appState.qsoRecords.count)")
                         .font(.system(.caption, design: .monospaced))
@@ -302,14 +345,12 @@ struct LogTableView: View {
         .sheet(isPresented: $appState.showStatsSheet) {
             StatisticsView().environmentObject(appState)
         }
-        // Link to Email & SMTP Settings Sheets
         .sheet(isPresented: $appState.showEmailComposer) {
             EmailComposerView().environmentObject(appState)
         }
         .sheet(isPresented: $appState.showSMTPSettings) {
             SMTPSettingsView()
         }
-        // Link to Native WKWebView QRZ Authenticator Sheet
         .sheet(isPresented: $appState.showQRZLoginSheet) {
             QRZLoginView().environmentObject(appState)
         }
@@ -325,16 +366,18 @@ struct LogTableView: View {
                 let isPinned = minX < 0
                 let offset = isPinned ? -minX : 0
                 
-                Text("#")
-                    .font(.system(size: 11, weight: .bold, design: .monospaced))
-                    .foregroundColor(.white)
-                    .frame(width: 70, height: 28, alignment: .center)
-                    .background(Color.accentColor)
-                    .border(Color.black.opacity(0.3), width: 0.5)
-                    .shadow(color: isPinned ? Color.black.opacity(0.4) : .clear, radius: 3, x: 2, y: 0)
-                    .offset(x: offset)
+                HStack(spacing: 4) {
+                    Text("#")
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .foregroundColor(.white)
+                }
+                .frame(width: 80, height: 28, alignment: .center)
+                .background(Color.accentColor)
+                .border(Color.black.opacity(0.3), width: 0.5)
+                .shadow(color: isPinned ? Color.black.opacity(0.4) : .clear, radius: 3, x: 2, y: 0)
+                .offset(x: offset)
             }
-            .frame(width: 70, height: 28)
+            .frame(width: 80, height: 28)
             .zIndex(10)
             
             // 2. Click-to-Sort & Resizable Scrollable Headers
@@ -415,20 +458,31 @@ struct LogTableView: View {
     }
 
     private func rowView(for record: QSORecordModel) -> some View {
-        let statusBgColor = record.isConfirmed ? Color.green.opacity(0.15) : Color.orange.opacity(0.12)
+        let isSelected = appState.selectedRecordIDs.contains(record.id)
+        let statusBgColor = isSelected ? Color.accentColor.opacity(0.35) : (record.isConfirmed ? Color.green.opacity(0.15) : Color.orange.opacity(0.12))
+        let call = record["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         
         return HStack(spacing: 0) {
-            // 1. Sticky Index Cell
+            // 1. Sticky Index Cell (With Checkbox Selection + Delete Button)
             GeometryReader { geo in
                 let minX = geo.frame(in: .named("TableScroll")).minX
                 let isPinned = minX < 0
                 let offset = isPinned ? -minX : 0
                 
                 HStack(spacing: 4) {
+                    // Checkbox Button
+                    Button(action: { appState.toggleRecordSelection(record.id) }) {
+                        Image(systemName: isSelected ? "checkmark.square.fill" : "square")
+                            .font(.system(size: 11))
+                            .foregroundColor(isSelected ? .accentColor : .gray)
+                    }
+                    .buttonStyle(.plain)
+                    
+                    // Delete Button
                     Button(action: { appState.deleteRecord(id: record.id) }) {
                         Image(systemName: "trash.fill")
-                            .font(.system(size: 9))
-                            .foregroundColor(.red.opacity(0.7))
+                            .font(.system(size: 8))
+                            .foregroundColor(.red.opacity(0.6))
                     }
                     .buttonStyle(.plain)
                     
@@ -438,13 +492,13 @@ struct LogTableView: View {
                         .lineLimit(1)
                         .fixedSize()
                 }
-                .frame(width: 70, height: 28, alignment: .center)
+                .frame(width: 80, height: 28, alignment: .center)
                 .background(statusBgColor)
                 .border(Color.gray.opacity(0.2), width: 0.5)
                 .shadow(color: isPinned ? Color.black.opacity(0.2) : .clear, radius: 3, x: 2, y: 0)
                 .offset(x: offset)
             }
-            .frame(width: 70, height: 28)
+            .frame(width: 80, height: 28)
             .zIndex(10)
             
             // 2. Scrollable Data Cells with Enrichment Formatting
@@ -471,8 +525,28 @@ struct LogTableView: View {
                                     .font(.system(size: 10))
                             }
                             
+                            // Interactive QRZ Profile URL Renderer
+                            if header == "QRZ_URL" || header == "QRZ" {
+                                let targetUrlStr = val.isEmpty ? "https://www.qrz.com/db/\(call)" : val
+                                HStack(spacing: 4) {
+                                    Image(systemName: "safari.fill")
+                                        .font(.system(size: 10))
+                                        .foregroundColor(.blue)
+                                    Text(targetUrlStr)
+                                        .font(.system(size: 10, design: .monospaced))
+                                        .foregroundColor(.blue)
+                                        .underline()
+                                        .lineLimit(1)
+                                }
+                                .onTapGesture {
+                                    if let url = URL(string: "https://www.qrz.com/db/\(call)"), !call.isEmpty {
+                                        NSWorkspace.shared.open(url)
+                                    }
+                                }
+                                .help("Click to open \(call) profile on QRZ.com")
+                            }
                             // Email Links Renderer
-                            if header == "EMAIL" && !val.isEmpty {
+                            else if header == "EMAIL" && !val.isEmpty {
                                 Text(val)
                                     .font(.system(size: 11, design: .monospaced))
                                     .foregroundColor(.blue)
@@ -510,14 +584,33 @@ struct LogTableView: View {
                 .border(Color.gray.opacity(0.2), width: 0.5)
                 .contentShape(Rectangle())
                 .onTapGesture {
-                    // Prevent normal editing mode if it's an email link
-                    if header != "EMAIL" {
+                    // Prevent normal editing mode if it's an email link or URL link
+                    if header != "EMAIL" && header != "QRZ_URL" && header != "QRZ" {
                         editingCellID = record.id
                         editingHeader = header
                         editingText = val
                     }
                 }
                 .contextMenu {
+                    // Selection Options
+                    Button(isSelected ? "Deselect Row #\(record.index)" : "Select Row #\(record.index)") {
+                        appState.toggleRecordSelection(record.id)
+                    }
+                    
+                    if !call.isEmpty {
+                        Button("🪄 Enrich Callsign '\(call)'") {
+                            appState.enrichLogData(targetCallsigns: [call])
+                        }
+                    }
+                    
+                    if !appState.selectedRecordIDs.isEmpty {
+                        Button("🪄 Enrich Selected (\(appState.selectedRecordIDs.count) Rows)") {
+                            appState.enrichSelectedRecords()
+                        }
+                    }
+                    
+                    Divider()
+                    
                     Button("Delete Record #\(record.index)") {
                         appState.deleteRecord(id: record.id)
                     }
@@ -532,6 +625,7 @@ struct LogTableView: View {
     private func defaultColumnWidth(for header: String) -> CGFloat {
         switch header {
         case "EMAIL": return 150
+        case "QRZ_URL", "QRZ": return 180
         case "RANK_QSO", "RANK_BAND", "RANK_DXCC": return 90
         case "QSO_DATE": return 90
         case "TIME_ON", "TIME_OFF": return 75

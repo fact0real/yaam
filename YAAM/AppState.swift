@@ -75,7 +75,7 @@ func countryToFlag(_ country: String) -> String {
     case "france": return "🇫🇷"
     case "italy": return "🇮🇹"
     case "spain": return "🇪🇸"
-    case "portugal": return "🇵TOG"
+    case "portugal": return "🇵🇹"
     case "greece": return "🇬🇷"
     case "netherlands": return "🇳🇱"
     case "belgium": return "🇧🇪"
@@ -165,7 +165,7 @@ struct FilterCriteria {
     }
 }
 
-// MARK: - QSO Record Model
+// MARK: - Enhanced QSO Record Model (With Composite Unique Key)
 struct QSORecordModel: Identifiable {
     let id = UUID()
     var index: Int
@@ -175,7 +175,17 @@ struct QSORecordModel: Identifiable {
         let lotw = fields["LOTW_QSL_RCVD"]?.uppercased() ?? ""
         let qrz = fields["QRZLOG_QSL_RCVD"]?.uppercased() ?? ""
         let qsl = fields["QSL_RCVD"]?.uppercased() ?? ""
-        return lotw == "Y" || lotw == "V" || qrz == "Y" || qsl == "Y"
+        return lotw == "Y" || lotw == "V" || qrz == "Y" || qsl == "Y" || qrz == "CONFIRMED" || qrz == "C"
+    }
+    
+    // SMART DEDUPLICATION KEY: Call + Date + Time + Band + Mode
+    var uniqueKey: String {
+        let call = fields["CALL"]?.uppercased().trimmingCharacters(in: .whitespaces) ?? ""
+        let date = fields["QSO_DATE"] ?? ""
+        let time = fields["TIME_ON"] ?? fields["TIME_OFF"] ?? ""
+        let band = fields["BAND"]?.uppercased().trimmingCharacters(in: .whitespaces) ?? ""
+        let mode = fields["MODE"]?.uppercased().trimmingCharacters(in: .whitespaces) ?? ""
+        return "\(call)_\(date)_\(time)_\(band)_\(mode)"
     }
     
     subscript(key: String) -> String {
@@ -213,30 +223,25 @@ class QRZWebKitScraper: NSObject, WKNavigationDelegate {
     
     // MARK: - WKNavigationDelegate
     nonisolated func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        // Wait 0.8s for QRZ JS environment to settle, then simulate showqem() trigger
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
             let jsScript = """
             (function() {
                 var qemSpan = document.getElementById('qem');
                 if (qemSpan) {
-                    // 1. Directly invoke QRZ's showqem() function if available
                     if (typeof showqem === 'function') {
                         try { showqem(); } catch(e) {}
                     } else {
-                        // 2. Fallback: Dispatch mouseover & click events programmatically
                         var evt = new MouseEvent('mouseover', { bubbles: true, cancelable: true, view: window });
                         qemSpan.dispatchEvent(evt);
                         qemSpan.click();
                     }
                     
-                    // Extract decoded text inside #qem span
                     var text = (qemSpan.innerText || qemSpan.textContent || "").trim();
                     if (text && text.includes('@') && text.includes('.')) {
                         return text;
                     }
                 }
                 
-                // Fallback: Look for mailto links anywhere in DOM
                 var mailtoAnchor = document.querySelector('a[href^="mailto:"]');
                 if (mailtoAnchor) {
                     var href = mailtoAnchor.getAttribute('href').replace('mailto:', '').split('?')[0].trim();
@@ -279,20 +284,25 @@ class QRZWebKitScraper: NSObject, WKNavigationDelegate {
     }
 }
 
-// MARK: - Global Application State Manager
+// MARK: - Global Application State Manager (Workspace Architecture)
 class AppState: NSObject, ObservableObject {
     var currentVersion: String {
-        return Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.1.2"
+        return Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.2.0"
     }
     
     // UI & Status States
-    @Published var logText: String = "Welcome to YAAM v1.1.2.\nPlease import an ADIF log file.\n"
+    @Published var logText: String = "YAAM Master Logbook Engine Initialized.\n"
     @Published var isCheckingUpdates: Bool = false
     @Published var isLoading: Bool = false
     @Published var isSyncingAPI: Bool = false
     
+    // Row Selection State (Supports Max 19 Selection Limit)
+    @Published var selectedRecordIDs: Set<UUID> = []
+    
     // Email, SMTP & Enrichment States
     @Published var isEnriching: Bool = false
+    private var enrichmentTask: Task<Void, Never>? = nil
+    
     @Published var showEmailComposer: Bool = false
     @Published var showSMTPSettings: Bool = false
     @Published var selectedEmailCallsign: String = ""
@@ -313,9 +323,11 @@ class AppState: NSObject, ObservableObject {
     @Published var sortHeader: String? = nil
     @Published var sortAscending: Bool = true
     
-    // Loaded Log Data & Database Tracking
+    // Workspace File Tracking
     @Published var loadedFileURL: URL? = nil
     @Published var loadedFileName: String = ""
+    @Published var isMasterMode: Bool = true
+    
     @Published var tableHeaders: [String] = []
     @Published var qsoRecords: [QSORecordModel] = []
     @Published var recentLogFiles: [URL] = []
@@ -339,6 +351,8 @@ class AppState: NSObject, ObservableObject {
     override init() {
         super.init()
         loadPersistentConfirmationCache()
+        loadMasterLogbook()
+        loadRecentLogsFromDatabase()
     }
 
     var availableCountries: [String] {
@@ -494,6 +508,46 @@ class AppState: NSObject, ObservableObject {
         return records
     }
 
+    // MARK: - Row Selection Engine (19 Rows Limit Guard)
+    func toggleRecordSelection(_ id: UUID) {
+        if selectedRecordIDs.contains(id) {
+            selectedRecordIDs.remove(id)
+        } else {
+            if selectedRecordIDs.count >= 19 {
+                showNativeAlert(
+                    title: "Selection Limit Reached ⚠️",
+                    message: "You cannot select or enrich more than 19 rows at a time."
+                )
+                return
+            }
+            selectedRecordIDs.insert(id)
+        }
+    }
+    
+    func clearSelection() {
+        selectedRecordIDs.removeAll()
+    }
+    
+    func enrichSelectedRecords() {
+        guard !selectedRecordIDs.isEmpty else { return }
+        
+        if selectedRecordIDs.count > 19 {
+            showNativeAlert(
+                title: "Selection Limit Exceeded ⚠️",
+                message: "You cannot select or enrich more than 19 rows at a time."
+            )
+            return
+        }
+        
+        let selectedCallsigns = Set(qsoRecords.filter { selectedRecordIDs.contains($0.id) }
+            .compactMap { $0["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased() }
+            .filter { !$0.isEmpty })
+        
+        if !selectedCallsigns.isEmpty {
+            enrichLogData(targetCallsigns: selectedCallsigns)
+        }
+    }
+
     func toggleSort(for header: String) {
         if sortHeader == header {
             if sortAscending {
@@ -514,9 +568,9 @@ class AppState: NSObject, ObservableObject {
         }
     }
     
-    // MARK: - LIVE QRZ LEADERBOARD ENGINE (WITH EXPLICIT TYPE ANNOTATION)
+    // MARK: - LIVE QRZ LEADERBOARD ENGINE
     func fetchQRZLeaderboard(for searchedCallsign: String) {
-        let ownerCall = (UserDefaults.standard.string(forKey: "stationCallsign") ?? "EP2AES").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let ownerCall = currentStationCallsign
         let targetCall = searchedCallsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         
         guard !targetCall.isEmpty else { return }
@@ -566,268 +620,746 @@ class AppState: NSObject, ObservableObject {
             completion(decoded)
         }.resume()
     }
-
-    // MARK: - STANDALONE CLOUD LOGBOOK ENGINE
-    private var cloudLogbookFileURL: URL? {
+    
+    // MARK: - Internal Database Recent Files Operations
+    private var internalDatabaseURL: URL? {
         let fm = FileManager.default
         guard let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return nil }
-        let dir = appSupport.appendingPathComponent("YAAM/CloudLog")
-        if !fm.fileExists(atPath: dir.path) {
-            try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        let dbURL = appSupport.appendingPathComponent("YAAM/Logs")
+        if !fm.fileExists(atPath: dbURL.path) {
+            try? fm.createDirectory(at: dbURL, withIntermediateDirectories: true)
         }
-        return dir.appendingPathComponent("MyCloudLogbook.adi")
+        return dbURL
+    }
+    
+    func loadRecentLogsFromDatabase() {
+        guard let dbURL = internalDatabaseURL else { return }
+        let fm = FileManager.default
+        if let files = try? fm.contentsOfDirectory(at: dbURL, includingPropertiesForKeys: [.creationDateKey]) {
+            let sortedFiles = files.filter { $0.pathExtension == "adi" || $0.pathExtension == "adif" }
+                .sorted {
+                    let d1 = (try? $0.resourceValues(forKeys: [.creationDateKey]))?.creationDate ?? Date.distantPast
+                    let d2 = (try? $1.resourceValues(forKeys: [.creationDateKey]))?.creationDate ?? Date.distantPast
+                    return d1 > d2
+                }
+            DispatchQueue.main.async {
+                self.recentLogFiles = sortedFiles
+            }
+        }
+    }
+    
+    private func archiveLogToDatabase(originalURL: URL) {
+        guard let dbURL = internalDatabaseURL else { return }
+        if originalURL.deletingLastPathComponent().path == dbURL.path {
+            loadRecentLogsFromDatabase()
+            return
+        }
+        let fm = FileManager.default
+        let destination = dbURL.appendingPathComponent(originalURL.lastPathComponent)
+        do {
+            if fm.fileExists(atPath: destination.path) {
+                try fm.removeItem(at: destination)
+            }
+            try fm.copyItem(at: originalURL, to: destination)
+            loadRecentLogsFromDatabase()
+        } catch {
+            print("Database archiving failed: \(error)")
+        }
+    }
+    
+    // MARK: - Workspace DB Logic (Multi-Profile)
+    var currentStationCallsign: String {
+        let call = UserDefaults.standard.string(forKey: "stationCallsign")?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
+        return call.isEmpty ? "DEFAULT" : call
+    }
+    
+    private var masterLogbookURL: URL? {
+        let fm = FileManager.default
+        guard let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return nil }
+        let dir = appSupport.appendingPathComponent("YAAM/MasterLogs")
+        if !fm.fileExists(atPath: dir.path) { try? fm.createDirectory(at: dir, withIntermediateDirectories: true) }
+        return dir.appendingPathComponent("MasterLogbook_\(currentStationCallsign).adi")
+    }
+    
+    func loadMasterLogbook() {
+        guard let url = masterLogbookURL else { return }
+        self.isMasterMode = true
+        self.loadedFileURL = url
+        self.loadedFileName = "Master Log (\(currentStationCallsign))"
+        self.selectedRecordIDs.removeAll()
+        
+        if FileManager.default.fileExists(atPath: url.path) {
+            appendLog("Loading Master Logbook for \(currentStationCallsign)...")
+            guard let content = try? String(contentsOfFile: url.path, encoding: .utf8) ?? String(contentsOfFile: url.path, encoding: .isoLatin1) else { return }
+            let (headers, records) = parseADIF(content: content)
+            self.tableHeaders = headers
+            self.qsoRecords = records.enumerated().map { QSORecordModel(index: $0 + 1, fields: $1) }
+            self.appendLog("Master Logbook loaded successfully: \(self.qsoRecords.count) QSOs.")
+        } else {
+            self.qsoRecords = []
+            self.tableHeaders = ["QSO_DATE", "TIME_ON", "CALL", "BAND", "MODE", "FREQ", "RST_SENT", "RST_RCVD", "COUNTRY", "COMMENT"]
+            self.appendLog("Created new empty Master Logbook for \(currentStationCallsign).")
+        }
+    }
+    
+    private func autoSaveActiveWorkspace() {
+        guard let url = loadedFileURL, !qsoRecords.isEmpty else { return }
+        DispatchQueue.global(qos: .background).async { [weak self] in
+            guard let self = self else { return }
+            let recordsDicts = self.qsoRecords.map { $0.fields }
+            let adifOutput = generateADIF(originalContent: "", records: recordsDicts)
+            try? adifOutput.write(to: url, atomically: true, encoding: .utf8)
+        }
     }
 
-    func fetchAndManageCloudLogbook() {
-        let lotwUser = UserDefaults.standard.string(forKey: "lotwUsername") ?? ""
-        let lotwPass = UserDefaults.standard.string(forKey: "lotwPassword") ?? ""
+    // MARK: - Smart Dialog: Open vs Merge
+    func importADIFDialog() {
+        let panel = NSOpenPanel()
+        var types: [UTType] = [.plainText]
+        if let adiType = UTType(filenameExtension: "adi") { types.append(adiType) }
+        if let adifType = UTType(filenameExtension: "adif") { types.append(adifType) }
         
-        if lotwUser.isEmpty {
-            self.alertTitle = "Credentials Required"
-            self.alertMessage = "Enter LoTW credentials in Preferences (Cmd+,) to fetch your Cloud Logbook."
+        panel.allowedContentTypes = types
+        panel.allowsMultipleSelection = false
+        
+        if panel.runModal() == .OK, let url = panel.url {
+            let alert = NSAlert()
+            alert.messageText = "How would you like to handle this log?"
+            alert.informativeText = "You can merge these new QSOs into your Master Logbook (\(currentStationCallsign)), or simply open the file as a Guest Logbook to view and enrich it separately."
+            alert.alertStyle = .informational
+            alert.addButton(withTitle: "Merge into Master Log")
+            alert.addButton(withTitle: "Open as Guest Log")
+            alert.addButton(withTitle: "Cancel")
+            
+            let response = alert.runModal()
+            
+            if response == .alertFirstButtonReturn {
+                mergeADIFIntoMaster(from: url)
+            } else if response == .alertSecondButtonReturn {
+                loadGuestLog(from: url)
+            }
+        }
+    }
+    
+    // 1. GUEST MODE: Just view & edit the external file
+    func loadGuestLog(from url: URL) {
+        isLoading = true
+        isMasterMode = false
+        loadedFileURL = url
+        loadedFileName = "Guest: " + url.lastPathComponent
+        selectedRecordIDs.removeAll()
+        archiveLogToDatabase(originalURL: url)
+        appendLog("Opening Guest Log: \(url.lastPathComponent)...")
+        
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+            guard let content = try? String(contentsOfFile: url.path, encoding: .utf8) ?? String(contentsOfFile: url.path, encoding: .isoLatin1) else {
+                DispatchQueue.main.async { self.isLoading = false; self.appendLog("Error: Unable to read guest file.") }
+                return
+            }
+            let (headers, records) = parseADIF(content: content)
+            var qsoModels = records.enumerated().map { QSORecordModel(index: $0 + 1, fields: $1) }
+            let offlineMatched = self.applyPersistentConfirmationCache(to: &qsoModels)
+            
+            DispatchQueue.main.async {
+                self.tableHeaders = headers
+                self.qsoRecords = qsoModels
+                self.isLoading = false
+                self.appendLog("Successfully loaded \(records.count) QSOs in Guest Mode.")
+                if offlineMatched > 0 {
+                    self.appendLog("Offline Database Engine: Matched \(offlineMatched) confirmations instantly from local storage.")
+                }
+            }
+        }
+    }
+    
+    // 2. MASTER MODE: Smart deduplication and merge
+    private func mergeADIFIntoMaster(from url: URL) {
+        isLoading = true
+        appendLog("Analyzing & Merging '\(url.lastPathComponent)' into Master Logbook...")
+        archiveLogToDatabase(originalURL: url)
+        
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+            
+            DispatchQueue.main.sync {
+                if !self.isMasterMode { self.loadMasterLogbook() }
+            }
+            
+            guard let content = try? String(contentsOfFile: url.path, encoding: .utf8) ?? String(contentsOfFile: url.path, encoding: .isoLatin1) else {
+                DispatchQueue.main.async { self.isLoading = false; self.appendLog("Error reading file encoding.") }
+                return
+            }
+            
+            let (newHeaders, newRecordsDicts) = parseADIF(content: content)
+            
+            DispatchQueue.main.async {
+                for header in newHeaders {
+                    if !self.tableHeaders.contains(header) { self.tableHeaders.append(header) }
+                }
+                
+                var existingKeys = Set(self.qsoRecords.map { $0.uniqueKey })
+                var addedCount = 0
+                var updatedCount = 0
+                
+                for dict in newRecordsDicts {
+                    let tempModel = QSORecordModel(index: 0, fields: dict)
+                    let key = tempModel.uniqueKey
+                    
+                    if !existingKeys.contains(key) {
+                        self.qsoRecords.append(tempModel) // Brand new QSO
+                        existingKeys.insert(key)
+                        addedCount += 1
+                    } else {
+                        // Duplicate found! Update QSL status if new file has confirmations
+                        if let idx = self.qsoRecords.firstIndex(where: { $0.uniqueKey == key }) {
+                            var updated = false
+                            if tempModel.isConfirmed && !self.qsoRecords[idx].isConfirmed {
+                                if let lotw = tempModel.fields["LOTW_QSL_RCVD"], !lotw.isEmpty { self.qsoRecords[idx].fields["LOTW_QSL_RCVD"] = lotw; updated = true }
+                                if let qsl = tempModel.fields["QSL_RCVD"], !qsl.isEmpty { self.qsoRecords[idx].fields["QSL_RCVD"] = qsl; updated = true }
+                            }
+                            if updated { updatedCount += 1 }
+                        }
+                    }
+                }
+                
+                for i in 0..<self.qsoRecords.count { self.qsoRecords[i].index = i + 1 }
+                self.autoSaveActiveWorkspace()
+                self.isLoading = false
+                self.appendLog("Merge Complete: \(addedCount) New QSOs added, \(updatedCount) Confirmations updated.")
+            }
+        }
+    }
+    
+    // BACKWARD COMPATIBILITY
+    func loadADIFFile(from url: URL) {
+        loadGuestLog(from: url)
+    }
+
+    // MARK: - STANDALONE CLOUD LOGBOOK ENGINE (FULL HISTORICAL DOWNLOAD)
+        private var cloudLogbookFileURL: URL? {
+            let fm = FileManager.default
+            guard let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return nil }
+            let dir = appSupport.appendingPathComponent("YAAM/CloudLog")
+            if !fm.fileExists(atPath: dir.path) {
+                try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+            }
+            return dir.appendingPathComponent("MyCloudLogbook.adi")
+        }
+
+        /// Triggers user confirmation modal before launching full LoTW history download
+        func confirmAndFetchCloudLogbook() {
+            let lotwUser = UserDefaults.standard.string(forKey: "lotwUsername")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let lotwPass = UserDefaults.standard.string(forKey: "lotwPassword")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            
+            if lotwUser.isEmpty || lotwPass.isEmpty {
+                self.alertTitle = "Credentials Required 🔑"
+                self.alertMessage = "Please enter your LoTW Username and Password in Preferences (Cmd+,) to fetch your Cloud Logbook."
+                self.showAlert = true
+                return
+            }
+            
+            // Native macOS Confirmation Alert
+            DispatchQueue.main.async {
+                let alert = NSAlert()
+                alert.messageText = "Download Entire LoTW Cloud Logbook? ☁️"
+                alert.informativeText = "This action will download your COMPLETE historical logbook (all QSOs ever uploaded, both confirmed and unconfirmed) directly from ARRL LoTW servers.\n\nAfter downloading, new QSOs will be safely merged into your active Master Logbook (\(self.currentStationCallsign)) without creating duplicates."
+                alert.alertStyle = .informational
+                alert.addButton(withTitle: "Download & Merge All")
+                alert.addButton(withTitle: "Cancel")
+                
+                let response = alert.runModal()
+                if response == .alertFirstButtonReturn {
+                    self.fetchAndManageCloudLogbook()
+                }
+            }
+        }
+
+        private func fetchAndManageCloudLogbook() {
+            let lotwUser = UserDefaults.standard.string(forKey: "lotwUsername")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let lotwPass = UserDefaults.standard.string(forKey: "lotwPassword")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            
+            isLoading = true
+            appendLog("☁️ Connecting to ARRL LoTW servers for Full Historical Cloud Download...")
+            
+            guard let encodedUser = lotwUser.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+                  let encodedPass = lotwPass.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+                  // qso_qsosince=1900-01-01 fetches ALL historical QSOs uploaded by user!
+                  let endpoint = URL(string: "https://lotw.arrl.org/lotwuser/lotwreport.adi?login=\(encodedUser)&password=\(encodedPass)&qso_query=1&qso_qsosince=1900-01-01") else {
+                self.isLoading = false
+                self.appendLog("Error: Invalid LoTW query URL.")
+                return
+            }
+            
+            var request = URLRequest(url: endpoint, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: 60)
+            request.setValue("YAAM-macOS/\(currentVersion)", forHTTPHeaderField: "User-Agent")
+            
+            URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+                guard let self = self else { return }
+                
+                if let error = error {
+                    DispatchQueue.main.async {
+                        self.isLoading = false
+                        self.alertTitle = "Cloud Fetch Failed 🔴"
+                        self.alertMessage = error.localizedDescription
+                        self.showAlert = true
+                    }
+                    return
+                }
+                
+                guard let data = data, let fetchedADIF = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) else {
+                    DispatchQueue.main.async { self.isLoading = false }
+                    return
+                }
+                
+                if fetchedADIF.lowercased().contains("invalid password") || fetchedADIF.lowercased().contains("access denied") {
+                    DispatchQueue.main.async {
+                        self.isLoading = false
+                        self.alertTitle = "Authentication Failed 🔴"
+                        self.alertMessage = "LoTW rejected credentials. Please check your Username and Password in Preferences (Cmd+,)."
+                        self.showAlert = true
+                    }
+                    return
+                }
+                
+                DispatchQueue.global(qos: .userInitiated).async {
+                    guard let cloudFileURL = self.cloudLogbookFileURL else { return }
+                    do {
+                        try fetchedADIF.write(to: cloudFileURL, atomically: true, encoding: .utf8)
+                        DispatchQueue.main.async {
+                            UserDefaults.standard.set(Date(), forKey: "lastCloudLogbookFetch")
+                            self.appendLog("☁️ Cloud Logbook downloaded successfully. Merging into Master Logbook...")
+                            // Automatically merges all cloud records into active Master Logbook
+                            self.mergeADIFIntoMaster(from: cloudFileURL)
+                        }
+                    } catch {
+                        DispatchQueue.main.async { self.isLoading = false }
+                    }
+                }
+            }.resume()
+        }
+    
+    // MARK: - Targeted / Delta Enrichment Engine (Supports Cancellation, QRZ_URL & Auto-Deselect)
+    func stopEnrichment() {
+        enrichmentTask?.cancel()
+        enrichmentTask = nil
+        isEnriching = false
+        appendLog("🛑 Enrichment process stopped by user.")
+    }
+
+    func enrichLogData(targetCallsigns: Set<String>? = nil) {
+        guard !qsoRecords.isEmpty else { return }
+        
+        // Strict 19 rows check if target is provided
+        if let targets = targetCallsigns, targets.count > 19 {
+            showNativeAlert(
+                title: "Selection Limit Exceeded ⚠️",
+                message: "You cannot select or enrich more than 19 rows at a time."
+            )
+            return
+        }
+        
+        let newHeaders = ["RANK_QSO", "RANK_BAND", "RANK_DXCC", "EMAIL", "QRZ_URL", "APP_YAAM_ENRICHED"]
+        for header in newHeaders {
+            if !tableHeaders.contains(header) {
+                tableHeaders.append(header)
+            }
+        }
+        self.objectWillChange.send()
+        
+        var callsignsToEnrich = Set<String>()
+        if let targets = targetCallsigns {
+            callsignsToEnrich = targets
+        } else {
+            for record in qsoRecords {
+                if record.fields["APP_YAAM_ENRICHED"] != "Y" {
+                    let c = record["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+                    if !c.isEmpty { callsignsToEnrich.insert(c) }
+                }
+            }
+        }
+        
+        let uniqueCallsigns = Array(callsignsToEnrich)
+        guard !uniqueCallsigns.isEmpty else {
+            appendLog("✅ All target records in this workspace are already enriched!")
+            selectedRecordIDs.removeAll()
+            return
+        }
+        
+        isEnriching = true
+        appendLog("🚀 Enrichment: Processing \(uniqueCallsigns.count) callsign(s)...")
+        
+        enrichmentTask = Task { @MainActor in
+            for (idx, callsign) in uniqueCallsigns.enumerated() {
+                if Task.isCancelled { break }
+                
+                self.appendLog("[\(idx + 1)/\(uniqueCallsigns.count)] Step 1/2: Fetching Ranks for \(callsign)...")
+                let (rankQSO, rankBand, rankDXCC) = await self.asyncFetchRank(for: callsign)
+                
+                if Task.isCancelled { break }
+                
+                self.appendLog("[\(idx + 1)/\(uniqueCallsigns.count)] Step 2/2: Extracting Email for \(callsign)...")
+                let fetchedEmail = await QRZWebKitScraper.shared.fetchEmail(for: callsign)
+                
+                if Task.isCancelled { break }
+                
+                for i in 0..<self.qsoRecords.count {
+                    if self.qsoRecords[i]["CALL"].uppercased() == callsign {
+                        if !rankQSO.isEmpty { self.qsoRecords[i].fields["RANK_QSO"] = rankQSO }
+                        if !rankBand.isEmpty { self.qsoRecords[i].fields["RANK_BAND"] = rankBand }
+                        if !rankDXCC.isEmpty { self.qsoRecords[i].fields["RANK_DXCC"] = rankDXCC }
+                        
+                        if let email = fetchedEmail, !email.isEmpty {
+                            self.qsoRecords[i].fields["EMAIL"] = email
+                        }
+                        
+                        // Populate QRZ Direct Profile URL
+                        self.qsoRecords[i].fields["QRZ_URL"] = "https://www.qrz.com/db/\(callsign)"
+                        
+                        // FLAG as enriched
+                        self.qsoRecords[i].fields["APP_YAAM_ENRICHED"] = "Y"
+                    }
+                }
+                self.objectWillChange.send()
+                self.autoSaveActiveWorkspace()
+            }
+            
+            let wasCancelled = Task.isCancelled
+            self.isEnriching = false
+            self.enrichmentTask = nil
+            
+            // Clear selections automatically when finished
+            self.selectedRecordIDs.removeAll()
+            self.objectWillChange.send()
+            
+            if wasCancelled {
+                self.appendLog("🛑 Enrichment stopped.")
+            } else {
+                self.appendLog("✅ Enrichment complete & Workspace Auto-Saved!")
+            }
+        }
+    }
+    
+    // MARK: - Helper Async Rank Fetcher
+    private func asyncFetchRank(for callsign: String) async -> (String, String, String) {
+        guard let url = URL(string: "https://qrz-rank.asis.sh/api/rank/\(callsign)") else {
+            return ("", "", "")
+        }
+        var req = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 8)
+        req.setValue("session=\(qrzSecureSessionToken)", forHTTPHeaderField: "Cookie")
+        req.setValue("YAAM-macOS/\(currentVersion)", forHTTPHeaderField: "User-Agent")
+        
+        do {
+            let (data, _) = try await URLSession.shared.data(for: req)
+            if let decoded = try? JSONDecoder().decode(QRZRankResponse.self, from: data) {
+                return (decoded.rank_qso ?? "", decoded.rank_band ?? "", decoded.rank_countries ?? "")
+            }
+        } catch {}
+        return ("", "", "")
+    }
+
+    // MARK: - Bulletproof Native SMTP Engine
+    func sendEmail(to recipient: String, subject: String, body: String, completion: @escaping (Bool, String) -> Void) {
+        
+        let host = UserDefaults.standard.string(forKey: "smtpHost")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let port = UserDefaults.standard.string(forKey: "smtpPort")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "465"
+        let user = UserDefaults.standard.string(forKey: "smtpUser")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let rawPass = UserDefaults.standard.string(forKey: "smtpPass")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        
+        // Auto-remove spaces from Google App Passwords
+        let pass = rawPass.replacingOccurrences(of: " ", with: "")
+        
+        guard !host.isEmpty, !user.isEmpty, !pass.isEmpty else {
+            completion(false, "SMTP MISSING: Check Preferences for Host, User, and Pass.")
+            return
+        }
+        
+        DispatchQueue.global(qos: .userInitiated).async {
+            let dateFormatter = DateFormatter()
+            dateFormatter.locale = Locale(identifier: "en_US_POSIX")
+            dateFormatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss Z"
+            let dateStr = dateFormatter.string(from: Date())
+            let messageID = "<\(UUID().uuidString)@\(host)>"
+            
+            // Format full RFC 5322 EML Header
+            let emailContent = """
+            From: \(user)
+            To: \(recipient)
+            Subject: \(subject)
+            Date: \(dateStr)
+            Message-ID: \(messageID)
+            Content-Type: text/plain; charset=UTF-8
+            
+            \(body)
+            """
+            
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/curl")
+            
+            // Fix for Error 6: Inject system environment variables to allow DNS resolution inside macOS Sandbox
+            process.environment = ProcessInfo.processInfo.environment
+            
+            let isPort465 = (port == "465")
+            let urlScheme = isPort465 ? "smtps" : "smtp"
+            
+            var arguments = [
+                "--url", "\(urlScheme)://\(host):\(port)",
+                "--user", "\(user):\(pass)",
+                "--mail-from", user,
+                "--mail-rcpt", recipient,
+                "--upload-file", "-",
+                "--verbose",
+                "--insecure",
+                "--ipv4"
+            ]
+            
+            if !isPort465 {
+                arguments.append("--ssl-reqd")
+            }
+            
+            process.arguments = arguments
+            
+            let stdinPipe = Pipe()
+            let outputPipe = Pipe()
+            
+            process.standardInput = stdinPipe
+            process.standardOutput = outputPipe
+            process.standardError = outputPipe
+            
+            do {
+                try process.run()
+                
+                if let data = emailContent.data(using: .utf8) {
+                    stdinPipe.fileHandleForWriting.write(data)
+                }
+                stdinPipe.fileHandleForWriting.closeFile()
+                
+                process.waitUntilExit()
+                
+                let errData = outputPipe.fileHandleForReading.readDataToEndOfFile()
+                let outputLog = String(data: errData, encoding: .utf8) ?? "EMPTY LOG"
+                
+                if process.terminationStatus == 0 {
+                    completion(true, "Email successfully sent to \(recipient)!")
+                } else {
+                    completion(false, "ERROR \(process.terminationStatus):\n\n" + outputLog)
+                }
+            } catch {
+                completion(false, "Process Failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    // MARK: - Smart Dual Cloud QSL Sync Engine (Full History & Incremental)
+    func syncConfirmations(forceFullSync: Bool = false) {
+        guard !qsoRecords.isEmpty else {
+            appendLog("Error: No log loaded to sync.")
+            return
+        }
+        
+        let lotwUser = UserDefaults.standard.string(forKey: "lotwUsername")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let lotwPass = UserDefaults.standard.string(forKey: "lotwPassword")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let qrzKey = UserDefaults.standard.string(forKey: "qrzApiKey")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        
+        if lotwUser.isEmpty && qrzKey.isEmpty {
+            self.alertTitle = "Credentials Required 🔑"
+            self.alertMessage = "Please enter your LoTW or QRZ Logbook API credentials in Preferences (Cmd+,) to sync online QSL confirmations."
             self.showAlert = true
             return
         }
         
-        isLoading = true
-        appendLog("Connecting to Cloud Logbook servers...")
+        // Ensure confirmation headers exist
+        let confirmationHeaders = ["LOTW_QSL_RCVD", "QRZLOG_QSL_RCVD", "QSL_RCVD"]
+        for h in confirmationHeaders {
+            if !tableHeaders.contains(h) {
+                tableHeaders.append(h)
+            }
+        }
         
-        let lastCloudFetch = UserDefaults.standard.object(forKey: "lastCloudLogbookFetch") as? Date
+        isSyncingAPI = true
+        
+        // LOGIC: If forced or no previous confirmations, fetch full history from 1900-01-01
+        let isFirstFullSync = forceFullSync || (totalConfirmedCount < 50 && qsoRecords.count > 1000)
+        let lastSyncDate = isFirstFullSync ? nil : (UserDefaults.standard.object(forKey: "lastLoTWSyncDate") as? Date)
+        
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "yyyy-MM-dd"
         dateFormatter.timeZone = TimeZone(secondsFromGMT: 0)
         
-        let sinceDateString = lastCloudFetch != nil ? dateFormatter.string(from: lastCloudFetch!) : "1900-01-01"
-        let isIncremental = lastCloudFetch != nil
+        let sinceDateString = lastSyncDate != nil ? dateFormatter.string(from: lastSyncDate!) : "1900-01-01"
         
-        guard let encodedUser = lotwUser.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
-              let encodedPass = lotwPass.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
-              let endpoint = URL(string: "https://lotw.arrl.org/lotwuser/lotwreport.adi?login=\(encodedUser)&password=\(encodedPass)&qso_query=1&qso_qslsince=\(sinceDateString)") else {
-            self.isLoading = false
-            return
+        if isFirstFullSync {
+            appendLog("🚀 Launching FULL Historical QSL Sync (Fetching all confirmations since 1900)...")
+        } else {
+            appendLog("🔄 Launching Incremental QSL Sync (Fetching changes since \(sinceDateString))...")
         }
         
-        var request = URLRequest(url: endpoint)
-        request.setValue("YAAM-macOS/\(currentVersion)", forHTTPHeaderField: "User-Agent")
-        
-        URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
             
-            if let error = error {
-                DispatchQueue.main.async {
-                    self.isLoading = false
-                    self.alertTitle = "Cloud Fetch Failed"
-                    self.alertMessage = error.localizedDescription
-                    self.showAlert = true
-                }
-                return
-            }
+            var newlyConfirmedCount = 0
+            var fetchedRecordsCount = 0
+            var syncLogs: [String] = []
             
-            guard let data = data, let newADIF = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) else {
-                DispatchQueue.main.async { self.isLoading = false }
-                return
-            }
+            let group = DispatchGroup()
             
-            DispatchQueue.global(qos: .userInitiated).async {
-                guard let cloudFileURL = self.cloudLogbookFileURL else { return }
-                let fm = FileManager.default
-                var finalADIF = newADIF
-                
-                if isIncremental && fm.fileExists(atPath: cloudFileURL.path) {
-                    if let existingADIF = try? String(contentsOfFile: cloudFileURL.path, encoding: .utf8) {
-                        if let eohrRange = newADIF.range(of: "<eohr>", options: .caseInsensitive) {
-                            let onlyNewRecords = String(newADIF[eohrRange.upperBound...])
-                            finalADIF = existingADIF + "\n" + onlyNewRecords
-                        }
-                    }
-                }
-                
-                do {
-                    try finalADIF.write(to: cloudFileURL, atomically: true, encoding: .utf8)
-                    DispatchQueue.main.async {
-                        UserDefaults.standard.set(Date(), forKey: "lastCloudLogbookFetch")
-                        self.loadADIFFile(from: cloudFileURL)
-                        self.appendLog("Cloud Logbook updated and saved offline.")
-                    }
-                } catch {
-                    DispatchQueue.main.async { self.isLoading = false }
-                }
-            }
-        }.resume()
-    }
-
-    // MARK: - Bulk Enrichment Engine (Sequential Async/Await Architecture)
-        func enrichLogData() {
-            guard !qsoRecords.isEmpty else { return }
-            
-            let newHeaders = ["RANK_QSO", "RANK_BAND", "RANK_DXCC", "EMAIL"]
-            for header in newHeaders {
-                if !tableHeaders.contains(header) {
-                    tableHeaders.append(header)
-                }
-            }
-            self.objectWillChange.send()
-            isEnriching = true
-            
-            let uniqueCallsigns = Array(Set(qsoRecords.compactMap {
-                let c = $0["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-                return c.isEmpty ? nil : c
-            }))
-            
-            appendLog("🚀 Starting Sequential Enrichment for \(uniqueCallsigns.count) unique callsigns...")
-            
-            Task { @MainActor in
-                for (idx, callsign) in uniqueCallsigns.enumerated() {
-                    self.appendLog("[\(idx + 1)/\(uniqueCallsigns.count)] Step 1/2: Fetching Ranks for \(callsign)...")
+            // --- 1. LoTW Sync Engine ---
+            if !lotwUser.isEmpty && !lotwPass.isEmpty {
+                group.enter()
+                if let encodedUser = lotwUser.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+                   let encodedPass = lotwPass.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+                   let lotwEndpoint = URL(string: "https://lotw.arrl.org/lotwuser/lotwreport.adi?login=\(encodedUser)&password=\(encodedPass)&qso_query=1&qso_qslsince=\(sinceDateString)") {
                     
-                    // Step 1: Async Rank Fetching
-                    let (rankQSO, rankBand, rankDXCC) = await self.asyncFetchRank(for: callsign)
+                    var request = URLRequest(url: lotwEndpoint, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: 45)
+                    request.setValue("YAAM-macOS/\(self.currentVersion)", forHTTPHeaderField: "User-Agent")
                     
-                    self.appendLog("[\(idx + 1)/\(uniqueCallsigns.count)] Step 2/2: Rendering WebKit DOM & Extracting Email for \(callsign)...")
-                    
-                    // Step 2: Async WebKit Email Extraction with JS Rendering Wait
-                    let fetchedEmail = await QRZWebKitScraper.shared.fetchEmail(for: callsign)
-                    
-                    // Step 3: Update Table Model
-                    for i in 0..<self.qsoRecords.count {
-                        if self.qsoRecords[i]["CALL"].uppercased() == callsign {
-                            if !rankQSO.isEmpty { self.qsoRecords[i].fields["RANK_QSO"] = rankQSO }
-                            if !rankBand.isEmpty { self.qsoRecords[i].fields["RANK_BAND"] = rankBand }
-                            if !rankDXCC.isEmpty { self.qsoRecords[i].fields["RANK_DXCC"] = rankDXCC }
-                            
-                            if let email = fetchedEmail, !email.isEmpty {
-                                self.qsoRecords[i].fields["EMAIL"] = email
+                    URLSession.shared.dataTask(with: request) { data, response, error in
+                        defer { group.leave() }
+                        
+                        if let data = data, let reportADIF = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) {
+                            if !reportADIF.lowercased().contains("invalid password") && !reportADIF.lowercased().contains("access denied") {
+                                let (_, serverRecords) = parseADIF(content: reportADIF)
+                                fetchedRecordsCount += serverRecords.count
+                                syncLogs.append("LoTW: Server returned \(serverRecords.count) confirmed QSL records.")
+                                
+                                DispatchQueue.main.async {
+                                    for rec in serverRecords {
+                                        let call = self.normalizeCallsign(rec["CALL"] ?? "")
+                                        let date = self.cleanDate(rec["QSO_DATE"] ?? "")
+                                        let band = self.cleanBand(rec["BAND"] ?? "")
+                                        
+                                        let lotwRcvd = (rec["LOTW_QSL_RCVD"] ?? rec["QSL_RCVD"] ?? "").uppercased()
+                                        
+                                        if lotwRcvd == "Y" || lotwRcvd == "V" {
+                                            for i in 0..<self.qsoRecords.count {
+                                                // Only check records that are NOT confirmed yet
+                                                if !self.qsoRecords[i].isConfirmed || self.qsoRecords[i].fields["LOTW_QSL_RCVD"] != "Y" {
+                                                    let qCall = self.normalizeCallsign(self.qsoRecords[i]["CALL"])
+                                                    let qDate = self.cleanDate(self.qsoRecords[i]["QSO_DATE"])
+                                                    let qBand = self.cleanBand(self.qsoRecords[i]["BAND"])
+                                                    
+                                                    // Flexible matching: Call + Date (and Band if available)
+                                                    if qCall == call && qDate == date && (qBand.isEmpty || band.isEmpty || qBand == band) {
+                                                        self.qsoRecords[i].fields["LOTW_QSL_RCVD"] = "Y"
+                                                        self.qsoRecords[i].fields["QSL_RCVD"] = "Y"
+                                                        newlyConfirmedCount += 1
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                syncLogs.append("LoTW Error: Invalid credentials.")
                             }
                         }
-                    }
-                    self.objectWillChange.send()
+                    }.resume()
+                } else {
+                    group.leave()
+                }
+            }
+            
+            // --- 2. QRZ Logbook Sync Engine ---
+            if !qrzKey.isEmpty {
+                group.enter()
+                let qrzEndpointStr = "https://logbook.qrz.com/api?KEY=\(qrzKey)&ACTION=FETCH&OPTION=TYPE:ADIF&MODIFIEDSINCE=\(sinceDateString)"
+                if let qrzEndpoint = URL(string: qrzEndpointStr) {
+                    var request = URLRequest(url: qrzEndpoint, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: 45)
+                    request.setValue("YAAM-macOS/\(self.currentVersion)", forHTTPHeaderField: "User-Agent")
+                    
+                    URLSession.shared.dataTask(with: request) { data, response, error in
+                        defer { group.leave() }
+                        
+                        if let data = data, let reportADIF = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) {
+                            if reportADIF.contains("<") && reportADIF.contains(">") {
+                                let (_, serverRecords) = parseADIF(content: reportADIF)
+                                fetchedRecordsCount += serverRecords.count
+                                syncLogs.append("QRZ: Server returned \(serverRecords.count) logbook records.")
+                                
+                                DispatchQueue.main.async {
+                                    for rec in serverRecords {
+                                        let call = self.normalizeCallsign(rec["CALL"] ?? "")
+                                        let date = self.cleanDate(rec["QSO_DATE"] ?? "")
+                                        let band = self.cleanBand(rec["BAND"] ?? "")
+                                        let qrzRcvd = (rec["QRZLOG_QSL_RCVD"] ?? rec["APP_QRZLOG_STATUS"] ?? rec["QSL_RCVD"] ?? "").uppercased()
+                                        
+                                        if qrzRcvd == "Y" || qrzRcvd == "CONFIRMED" || qrzRcvd == "C" {
+                                            for i in 0..<self.qsoRecords.count {
+                                                if !self.qsoRecords[i].isConfirmed || self.qsoRecords[i].fields["QRZLOG_QSL_RCVD"] != "Y" {
+                                                    let qCall = self.normalizeCallsign(self.qsoRecords[i]["CALL"])
+                                                    let qDate = self.cleanDate(self.qsoRecords[i]["QSO_DATE"])
+                                                    let qBand = self.cleanBand(self.qsoRecords[i]["BAND"])
+                                                    
+                                                    if qCall == call && qDate == date && (qBand.isEmpty || band.isEmpty || qBand == band) {
+                                                        self.qsoRecords[i].fields["QRZLOG_QSL_RCVD"] = "Y"
+                                                        self.qsoRecords[i].fields["QSL_RCVD"] = "Y"
+                                                        newlyConfirmedCount += 1
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }.resume()
+                } else {
+                    group.leave()
+                }
+            }
+            
+            group.notify(queue: .main) {
+                self.isSyncingAPI = false
+                UserDefaults.standard.set(Date(), forKey: "lastLoTWSyncDate")
+                
+                for log in syncLogs {
+                    self.appendLog(log)
                 }
                 
-                self.isEnriching = false
                 self.objectWillChange.send()
-                self.appendLog("✅ Bulk Enrichment completed! All Ranks and WebKit Emails updated.")
-            }
-        }
-        
-        // MARK: - Helper Async Rank Fetcher
-        private func asyncFetchRank(for callsign: String) async -> (String, String, String) {
-            guard let url = URL(string: "https://qrz-rank.asis.sh/api/rank/\(callsign)") else {
-                return ("", "", "")
-            }
-            var req = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 8)
-            req.setValue("session=\(qrzSecureSessionToken)", forHTTPHeaderField: "Cookie")
-            req.setValue("YAAM-macOS/\(currentVersion)", forHTTPHeaderField: "User-Agent")
-            
-            do {
-                let (data, _) = try await URLSession.shared.data(for: req)
-                if let decoded = try? JSONDecoder().decode(QRZRankResponse.self, from: data) {
-                    return (decoded.rank_qso ?? "", decoded.rank_band ?? "", decoded.rank_countries ?? "")
+                self.autoSaveActiveWorkspace()
+                
+                if newlyConfirmedCount > 0 {
+                    self.appendLog("✅ Sync Complete: \(newlyConfirmedCount) new QSL confirmations matched!")
+                    self.alertTitle = "QSL Sync Complete 🟢"
+                    self.alertMessage = "Successfully updated \(newlyConfirmedCount) confirmations in your logbook!"
+                    self.showAlert = true
+                } else {
+                    self.appendLog("⚪ Sync Complete: All confirmations are up to date (\(fetchedRecordsCount) records checked).")
+                    self.alertTitle = "Log Up To Date ⚪"
+                    self.alertMessage = "Checked \(fetchedRecordsCount) cloud records. All confirmations in your log are up to date."
+                    self.showAlert = true
                 }
-            } catch {}
-            return ("", "", "")
+            }
         }
+    }
+    
+    // MARK: - Clean Helper Functions for Matching
+    private func cleanDate(_ dateStr: String) -> String {
+        return dateStr.replacingOccurrences(of: "-", with: "")
+                      .replacingOccurrences(of: "/", with: "")
+                      .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 
-    // MARK: - Bulletproof Native SMTP Engine (Production Mode with Sandbox Fixes)
-        func sendEmail(to recipient: String, subject: String, body: String, completion: @escaping (Bool, String) -> Void) {
-            
-            let host = UserDefaults.standard.string(forKey: "smtpHost")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            let port = UserDefaults.standard.string(forKey: "smtpPort")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "465"
-            let user = UserDefaults.standard.string(forKey: "smtpUser")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            let rawPass = UserDefaults.standard.string(forKey: "smtpPass")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            
-            // Auto-remove spaces from Google App Passwords
-            let pass = rawPass.replacingOccurrences(of: " ", with: "")
-            
-            guard !host.isEmpty, !user.isEmpty, !pass.isEmpty else {
-                completion(false, "SMTP MISSING: Check Preferences for Host, User, and Pass.")
-                return
-            }
-            
-            DispatchQueue.global(qos: .userInitiated).async {
-                let dateFormatter = DateFormatter()
-                dateFormatter.locale = Locale(identifier: "en_US_POSIX")
-                dateFormatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss Z"
-                let dateStr = dateFormatter.string(from: Date())
-                let messageID = "<\(UUID().uuidString)@\(host)>"
-                
-                // Format full RFC 5322 EML Header
-                let emailContent = """
-                From: \(user)
-                To: \(recipient)
-                Subject: \(subject)
-                Date: \(dateStr)
-                Message-ID: \(messageID)
-                Content-Type: text/plain; charset=UTF-8
-                
-                \(body)
-                """
-                
-                let process = Process()
-                process.executableURL = URL(fileURLWithPath: "/usr/bin/curl")
-                
-                // Fix for Error 6: Inject system environment variables to allow DNS resolution inside macOS Sandbox
-                process.environment = ProcessInfo.processInfo.environment
-                
-                let isPort465 = (port == "465")
-                let urlScheme = isPort465 ? "smtps" : "smtp"
-                
-                var arguments = [
-                    "--url", "\(urlScheme)://\(host):\(port)",
-                    "--user", "\(user):\(pass)",
-                    "--mail-from", user,
-                    "--mail-rcpt", recipient, // Reverted to the actual target recipient
-                    "--upload-file", "-",
-                    "--verbose",
-                    "--insecure", // Ignore localized Mac keychain SSL trust issues
-                    "--ipv4"      // Force IPv4 to prevent IPv6 routing failures in Sandbox
-                ]
-                
-                if !isPort465 {
-                    arguments.append("--ssl-reqd")
-                }
-                
-                process.arguments = arguments
-                
-                let stdinPipe = Pipe()
-                let outputPipe = Pipe()
-                
-                process.standardInput = stdinPipe
-                process.standardOutput = outputPipe
-                process.standardError = outputPipe
-                
-                do {
-                    try process.run()
-                    
-                    if let data = emailContent.data(using: .utf8) {
-                        stdinPipe.fileHandleForWriting.write(data)
-                    }
-                    stdinPipe.fileHandleForWriting.closeFile()
-                    
-                    process.waitUntilExit()
-                    
-                    let errData = outputPipe.fileHandleForReading.readDataToEndOfFile()
-                    let outputLog = String(data: errData, encoding: .utf8) ?? "EMPTY LOG"
-                    
-                    if process.terminationStatus == 0 {
-                        completion(true, "Email successfully sent to \(recipient)!")
-                    } else {
-                        completion(false, "ERROR \(process.terminationStatus):\n\n" + outputLog)
-                    }
-                } catch {
-                    completion(false, "Process Failed: \(error.localizedDescription)")
-                }
-            }
-        }
+    private func cleanBand(_ bandStr: String) -> String {
+        return bandStr.uppercased()
+                      .replacingOccurrences(of: "METER", with: "M")
+                      .replacingOccurrences(of: "METERS", with: "M")
+                      .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     func deleteRecord(id: UUID) {
         if let idx = qsoRecords.firstIndex(where: { $0.id == id }) {
             let recordNum = qsoRecords[idx].index
             let call = qsoRecords[idx]["CALL"]
             qsoRecords.remove(at: idx)
+            selectedRecordIDs.remove(id)
             
             for i in 0..<qsoRecords.count {
                 qsoRecords[i].index = i + 1
             }
             appendLog("Deleted QSO record #\(recordNum) (\(call)).")
+            autoSaveActiveWorkspace()
         }
     }
 
@@ -835,6 +1367,7 @@ class AppState: NSObject, ObservableObject {
         if let idx = qsoRecords.firstIndex(where: { $0.id == recordID }) {
             qsoRecords[idx].fields[header] = newValue
             appendLog("Updated record #\(qsoRecords[idx].index) [\(header)] ➔ '\(newValue)'")
+            autoSaveActiveWorkspace()
         }
     }
 
@@ -844,6 +1377,7 @@ class AppState: NSObject, ObservableObject {
             qsoRecords[i].fields.removeValue(forKey: header)
         }
         appendLog("Removed column '\(header)' from log structure.")
+        autoSaveActiveWorkspace()
     }
 
     // MARK: - Persistent Local Confirmation JSON Database Engine
@@ -905,104 +1439,6 @@ class AppState: NSObject, ObservableObject {
             savePersistentConfirmationCache()
         }
         return matchedCount
-    }
-
-    // MARK: - Internal Database Operations
-    private var internalDatabaseURL: URL? {
-        let fm = FileManager.default
-        guard let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return nil }
-        let dbURL = appSupport.appendingPathComponent("YAAM/Logs")
-        if !fm.fileExists(atPath: dbURL.path) {
-            try? fm.createDirectory(at: dbURL, withIntermediateDirectories: true)
-        }
-        return dbURL
-    }
-    
-    func loadRecentLogsFromDatabase() {
-        guard let dbURL = internalDatabaseURL else { return }
-        let fm = FileManager.default
-        if let files = try? fm.contentsOfDirectory(at: dbURL, includingPropertiesForKeys: [.creationDateKey]) {
-            let sortedFiles = files.filter { $0.pathExtension == "adi" || $0.pathExtension == "adif" }
-                .sorted {
-                    let d1 = (try? $0.resourceValues(forKeys: [.creationDateKey]))?.creationDate ?? Date.distantPast
-                    let d2 = (try? $1.resourceValues(forKeys: [.creationDateKey]))?.creationDate ?? Date.distantPast
-                    return d1 > d2
-                }
-            DispatchQueue.main.async {
-                self.recentLogFiles = sortedFiles
-            }
-        }
-    }
-    
-    private func archiveLogToDatabase(originalURL: URL) {
-        guard let dbURL = internalDatabaseURL else { return }
-        
-        if originalURL.deletingLastPathComponent().path == dbURL.path {
-            loadRecentLogsFromDatabase()
-            return
-        }
-        
-        let fm = FileManager.default
-        let destination = dbURL.appendingPathComponent(originalURL.lastPathComponent)
-        
-        do {
-            if fm.fileExists(atPath: destination.path) {
-                try fm.removeItem(at: destination)
-            }
-            try fm.copyItem(at: originalURL, to: destination)
-            loadRecentLogsFromDatabase()
-        } catch {
-            print("Database archiving failed: \(error)")
-        }
-    }
-
-    // MARK: - Asynchronous File Importer
-    func loadADIFFile(from url: URL) {
-        isLoading = true
-        appendLog("Loading file '\(url.lastPathComponent)' in background...")
-        archiveLogToDatabase(originalURL: url)
-        
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            guard let self = self else { return }
-            
-            var rawContent: String? = try? String(contentsOfFile: url.path, encoding: .utf8)
-            if rawContent == nil {
-                rawContent = try? String(contentsOfFile: url.path, encoding: .isoLatin1)
-            }
-            
-            guard let content = rawContent else {
-                DispatchQueue.main.async {
-                    self.isLoading = false
-                    self.appendLog("Error: Unable to read file encoding for \(url.lastPathComponent).")
-                }
-                return
-            }
-            
-            let (headers, records) = parseADIF(content: content)
-            var qsoModels = records.enumerated().map { (idx, dict) in
-                QSORecordModel(index: idx + 1, fields: dict)
-            }
-            
-            var finalHeaders = headers
-            if !finalHeaders.contains("LOTW_QSL_RCVD") { finalHeaders.append("LOTW_QSL_RCVD") }
-            if !finalHeaders.contains("QRZLOG_QSL_RCVD") { finalHeaders.append("QRZLOG_QSL_RCVD") }
-            if !finalHeaders.contains("QSL_RCVD") { finalHeaders.append("QSL_RCVD") }
-            
-            let offlineMatched = self.applyPersistentConfirmationCache(to: &qsoModels)
-            
-            DispatchQueue.main.async {
-                self.tableHeaders = finalHeaders
-                self.qsoRecords = qsoModels
-                self.loadedFileURL = url
-                self.loadedFileName = url.lastPathComponent
-                self.isLoading = false
-                
-                self.appendLog("Successfully loaded \(records.count) QSOs from \(url.lastPathComponent).")
-                if offlineMatched > 0 {
-                    self.appendLog("Offline Database Engine: Cross-referenced and matched \(offlineMatched) confirmations instantly from local storage.")
-                }
-            }
-        }
     }
 
     // MARK: - Save & Export Handlers
@@ -1087,165 +1523,11 @@ class AppState: NSObject, ObservableObject {
         }
     }
 
-    // MARK: - Offline-First Hybrid Cloud Sync Engine (LoTW & QRZ)
-    func syncConfirmations(forceFullSync: Bool = false) {
-        guard !qsoRecords.isEmpty else {
-            appendLog("Error: No log loaded to sync.")
-            return
-        }
-        
-        let offlineMatched = applyPersistentConfirmationCache(to: &qsoRecords)
-        if offlineMatched > 0 {
-            objectWillChange.send()
-            appendLog("Applied \(offlineMatched) confirmation matches from local database.")
-        }
-        
-        let lotwUser = UserDefaults.standard.string(forKey: "lotwUsername") ?? ""
-        let lotwPass = UserDefaults.standard.string(forKey: "lotwPassword") ?? ""
-        let qrzKey = UserDefaults.standard.string(forKey: "qrzApiKey") ?? ""
-        
-        if lotwUser.isEmpty && qrzKey.isEmpty {
-            self.alertTitle = "Offline Database Applied 🟢"
-            self.alertMessage = "Applied \(offlineMatched) matches from local database.\nTo fetch new online confirmations from the server, please enter your LoTW/QRZ credentials in Preferences (Cmd+,)."
-            self.showAlert = true
-            return
-        }
-        
-        isSyncingAPI = true
-        
-        let lastSyncDate = forceFullSync ? nil : (UserDefaults.standard.object(forKey: "lastLoTWSyncDate") as? Date)
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "yyyy-MM-dd"
-        dateFormatter.timeZone = TimeZone(secondsFromGMT: 0)
-        
-        let sinceDateString = lastSyncDate != nil ? dateFormatter.string(from: lastSyncDate!) : "1900-01-01"
-        appendLog("Connecting to LoTW server (Since: \(sinceDateString))...")
-        
-        guard let encodedUser = lotwUser.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
-              let encodedPass = lotwPass.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
-              let lotwEndpoint = URL(string: "https://lotw.arrl.org/lotwuser/lotwreport.adi?login=\(encodedUser)&password=\(encodedPass)&qso_query=1&qso_qslsince=\(sinceDateString)") else {
-            self.isSyncingAPI = false
-            self.appendLog("Error: Invalid LoTW query URL encoding.")
-            return
-        }
-        
-        var request = URLRequest(url: lotwEndpoint, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: 30)
-        request.setValue("YAAM-macOS/\(currentVersion)", forHTTPHeaderField: "User-Agent")
-        
-        URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
-            guard let self = self else { return }
-            
-            if let error = error {
-                DispatchQueue.main.async {
-                    self.isSyncingAPI = false
-                    self.appendLog("Network Offline/Error: \(error.localizedDescription)")
-                    self.alertTitle = "Network Error (Offline Cache Retained) 🟠"
-                    self.alertMessage = "Unable to connect to LoTW server (\(error.localizedDescription)).\n\nYour local persistent database was applied successfully! Check internet or enable 'Outgoing Connections (Client)' in Xcode Sandbox settings."
-                    self.showAlert = true
-                }
-                return
-            }
-            
-            if let httpResponse = response as? HTTPURLResponse {
-                if httpResponse.statusCode == 401 || httpResponse.statusCode == 403 {
-                    DispatchQueue.main.async {
-                        self.isSyncingAPI = false
-                        self.appendLog("LoTW Error: Authentication failed (HTTP \(httpResponse.statusCode)).")
-                        self.alertTitle = "Authentication Failed 🔴"
-                        self.alertMessage = "Invalid LoTW Username or Password. Please check your credentials in Preferences (Cmd+,)."
-                        self.showAlert = true
-                    }
-                    return
-                }
-            }
-            
-            guard let data = data, let reportADIF = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) else {
-                DispatchQueue.main.async {
-                    self.isSyncingAPI = false
-                    self.appendLog("Error: Received empty response from LoTW server.")
-                }
-                return
-            }
-            
-            if reportADIF.lowercased().contains("invalid password") || reportADIF.lowercased().contains("access denied") || reportADIF.lowercased().contains("<html") {
-                DispatchQueue.main.async {
-                    self.isSyncingAPI = false
-                    self.appendLog("LoTW Authentication Failure: Server returned login error page.")
-                    self.alertTitle = "LoTW Login Failed 🔴"
-                    self.alertMessage = "LoTW rejected the credentials provided. Please verify your Username and Password in Preferences (Cmd+,)."
-                    self.showAlert = true
-                }
-                return
-            }
-            
-            let (_, serverRecords) = parseADIF(content: reportADIF)
-            
-            if serverRecords.isEmpty && !forceFullSync && lastSyncDate != nil {
-                DispatchQueue.main.async {
-                    self.appendLog("Incremental sync returned 0 records. Retrying full historical sync...")
-                    self.syncConfirmations(forceFullSync: true)
-                }
-                return
-            }
-            
-            for rec in serverRecords {
-                let call = self.normalizeCallsign(rec["CALL"] ?? "")
-                let date = rec["QSO_DATE"] ?? ""
-                let band = (rec["BAND"] ?? "").uppercased().trimmingCharacters(in: .whitespaces)
-                
-                let lotwRcvd = (rec["LOTW_QSL_RCVD"] ?? "").uppercased()
-                let qslRcvd = (rec["QSL_RCVD"] ?? "").uppercased()
-                
-                if lotwRcvd == "Y" || lotwRcvd == "V" || qslRcvd == "Y" {
-                    self.localConfirmedKeys.insert("\(call)_\(date)_\(band)")
-                    self.localConfirmedKeys.insert("\(call)_\(date)")
-                }
-            }
-            self.savePersistentConfirmationCache()
-            
-            DispatchQueue.main.async {
-                let totalUpdated = self.applyPersistentConfirmationCache(to: &self.qsoRecords)
-                self.isSyncingAPI = false
-                UserDefaults.standard.set(Date(), forKey: "lastLoTWSyncDate")
-                
-                self.appendLog("LoTW Server returned \(serverRecords.count) confirmed records. \(totalUpdated) new matches updated in local log.")
-                
-                if totalUpdated > 0 {
-                    self.objectWillChange.send()
-                    self.alertTitle = "Cloud Sync Complete 🟢"
-                    self.alertMessage = "Successfully fetched and saved new confirmations to persistent local database!\nUpdated \(totalUpdated) QSO(s) in active view."
-                    self.showAlert = true
-                    self.saveCurrentLog()
-                } else {
-                    self.alertTitle = "Log Up To Date ⚪"
-                    self.alertMessage = "Server report processed. All matches are already up to date in your local database."
-                    self.showAlert = true
-                }
-            }
-        }.resume()
-    }
-
-    // MARK: - Dialogs & Updates
-    func importADIFDialog() {
-        let panel = NSOpenPanel()
-        var types: [UTType] = [.plainText]
-        if let adiType = UTType(filenameExtension: "adi") { types.append(adiType) }
-        if let adifType = UTType(filenameExtension: "adif") { types.append(adifType) }
-        
-        panel.allowedContentTypes = types
-        panel.allowsMultipleSelection = false
-        panel.canChooseDirectories = false
-        
-        if panel.runModal() == .OK, let url = panel.url {
-            loadADIFFile(from: url)
-        }
-    }
-
     func showAboutDialog() {
         showAboutSheet = true
     }
 
-    // MARK: - GITHUB AUTO UPDATER (Open Source Linked)
+    // MARK: - GITHUB AUTO UPDATER
     func checkForUpdates() {
         appendLog("Checking GitHub repository for updates...")
         isCheckingUpdates = true
