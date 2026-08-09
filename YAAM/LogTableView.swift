@@ -72,6 +72,35 @@ struct LogTableView: View {
                 
                 Divider().frame(height: 14)
 
+                // NEW: Enrich Log Data Button (Ranks & Emails)
+                Button(action: { appState.enrichLogData() }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "wand.and.stars")
+                            .foregroundColor(.purple)
+                        Text("Enrich Data")
+                            .font(.caption)
+                            .fontWeight(.bold)
+                    }
+                }
+                .buttonStyle(.plain)
+                .disabled(appState.isEnriching || appState.qsoRecords.isEmpty)
+                
+                Divider().frame(height: 14)
+                
+                // NEW: SMTP Settings Button
+                Button(action: { appState.showSMTPSettings = true }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "gearshape.fill")
+                            .foregroundColor(.gray)
+                        Text("SMTP")
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                    }
+                }
+                .buttonStyle(.plain)
+                
+                Divider().frame(height: 14)
+
                 // 2. Toolbar Global Search Input Field
                 HStack(spacing: 4) {
                     Image(systemName: "magnifyingglass")
@@ -129,7 +158,7 @@ struct LogTableView: View {
                 // 4. Cloud QSL Sync Button (QRZ & LoTW)
                 Button(action: { appState.syncConfirmations() }) {
                     HStack(spacing: 4) {
-                        Image(systemName: "arrow.triangle.2.circlepath.cloud")
+                        Image(systemName: "arrow.clockwise.icloud")
                             .foregroundColor(appState.isSyncingAPI ? .gray : .cyan)
                         Text("Sync QSLs")
                             .font(.caption)
@@ -174,7 +203,7 @@ struct LogTableView: View {
                 
                 Spacer()
                 
-                if appState.isLoading || appState.isSyncingAPI {
+                if appState.isLoading || appState.isSyncingAPI || appState.isEnriching {
                     ProgressView()
                         .scaleEffect(0.6)
                         .padding(.trailing, 4)
@@ -272,6 +301,17 @@ struct LogTableView: View {
         }
         .sheet(isPresented: $appState.showStatsSheet) {
             StatisticsView().environmentObject(appState)
+        }
+        // Link to Email & SMTP Settings Sheets
+        .sheet(isPresented: $appState.showEmailComposer) {
+            EmailComposerView().environmentObject(appState)
+        }
+        .sheet(isPresented: $appState.showSMTPSettings) {
+            SMTPSettingsView()
+        }
+        // Link to Native WKWebView QRZ Authenticator Sheet
+        .sheet(isPresented: $appState.showQRZLoginSheet) {
+            QRZLoginView().environmentObject(appState)
         }
     }
 
@@ -407,9 +447,10 @@ struct LogTableView: View {
             .frame(width: 70, height: 28)
             .zIndex(10)
             
-            // 2. Scrollable Data Cells
+            // 2. Scrollable Data Cells with Enrichment Formatting
             ForEach(appState.tableHeaders, id: \.self) { header in
                 let w = columnWidths[header] ?? defaultColumnWidth(for: header)
+                let val = record[header]
                 
                 ZStack {
                     if editingCellID == record.id && editingHeader == header {
@@ -424,15 +465,41 @@ struct LogTableView: View {
                         .background(Color(NSColor.selectedControlColor).opacity(0.3))
                     } else {
                         HStack(spacing: 4) {
-                            if header == "COUNTRY" && !record[header].isEmpty {
-                                Text(countryToFlag(record[header]))
+                            // Country Flag Renderer
+                            if header == "COUNTRY" && !val.isEmpty {
+                                Text(countryToFlag(val))
                                     .font(.system(size: 10))
                             }
                             
-                            Text(record[header])
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundColor(.primary)
-                                .lineLimit(1)
+                            // Email Links Renderer
+                            if header == "EMAIL" && !val.isEmpty {
+                                Text(val)
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundColor(.blue)
+                                    .underline()
+                                    .onTapGesture {
+                                        appState.selectedEmailCallsign = record["CALL"]
+                                        appState.selectedEmailAddress = val
+                                        appState.showEmailComposer = true
+                                    }
+                                    .help("Click to send an email")
+                            }
+                            // QRZ Ranks Renderer
+                            else if header.hasPrefix("RANK_") && !val.isEmpty {
+                                Text(val)
+                                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                    .foregroundColor(header == "RANK_QSO" ? .blue : (header == "RANK_BAND" ? .orange : .green))
+                                    .padding(.horizontal, 4)
+                                    .background(Color.black.opacity(0.05))
+                                    .cornerRadius(4)
+                            }
+                            // Standard Text Renderer
+                            else {
+                                Text(val)
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundColor(.primary)
+                                    .lineLimit(1)
+                            }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
@@ -443,9 +510,12 @@ struct LogTableView: View {
                 .border(Color.gray.opacity(0.2), width: 0.5)
                 .contentShape(Rectangle())
                 .onTapGesture {
-                    editingCellID = record.id
-                    editingHeader = header
-                    editingText = record[header]
+                    // Prevent normal editing mode if it's an email link
+                    if header != "EMAIL" {
+                        editingCellID = record.id
+                        editingHeader = header
+                        editingText = val
+                    }
                 }
                 .contextMenu {
                     Button("Delete Record #\(record.index)") {
@@ -461,6 +531,8 @@ struct LogTableView: View {
 
     private func defaultColumnWidth(for header: String) -> CGFloat {
         switch header {
+        case "EMAIL": return 150
+        case "RANK_QSO", "RANK_BAND", "RANK_DXCC": return 90
         case "QSO_DATE": return 90
         case "TIME_ON", "TIME_OFF": return 75
         case "CALL": return 90

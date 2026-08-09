@@ -7,20 +7,6 @@
 
 import SwiftUI
 
-// MARK: - API Response Model
-struct QRZRankResponse: Codable {
-    let bid: String?
-    let callsign: String?
-    let country_iso: String?
-    let country_name: String?
-    let rank_band: String?
-    let rank_countries: String?
-    let rank_qso: String?
-    let score_band: String?
-    let score_countries: String?
-    let score_qso: String?
-}
-
 // MARK: - Helper to parse rank strings like "#16,278" into Int
 func parseRankInt(_ rankStr: String?) -> Int? {
     guard let str = rankStr else { return nil }
@@ -40,7 +26,7 @@ struct LeaderboardView: View {
                     .font(.title3)
                     .foregroundColor(.secondary)
                 
-                TextField("Search rival callsign (e.g. W1AW, K1JT)...", text: $appState.leaderboardSearchCallsign, onCommit: {
+                TextField("Search rival callsign (e.g. AA3B, YB5QZ, EA1DR)...", text: $appState.leaderboardSearchCallsign, onCommit: {
                     appState.fetchQRZLeaderboard(for: appState.leaderboardSearchCallsign)
                 })
                 .textFieldStyle(.plain)
@@ -183,7 +169,7 @@ struct LeaderboardView: View {
         }
         .onAppear {
             if appState.leaderboardSearchCallsign.isEmpty {
-                appState.leaderboardSearchCallsign = "W1AW" // Example rival for fun
+                appState.leaderboardSearchCallsign = "AA3B" // Example rival for fun
             }
             if appState.qrzRankData == nil {
                 appState.fetchQRZLeaderboard(for: appState.leaderboardSearchCallsign)

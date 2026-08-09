@@ -1,6 +1,6 @@
 //
 //  AppState.swift
-//  ADIF to Excel
+//  YAAM
 //
 //  Created by factoreal on 7/30/26.
 //
@@ -9,6 +9,21 @@ import SwiftUI
 import Combine
 import AppKit
 import UniformTypeIdentifiers
+import WebKit
+
+// MARK: - API Response Models (Swift 6 Safe)
+nonisolated struct QRZRankResponse: Codable, Sendable {
+    let bid: String?
+    let callsign: String?
+    let country_iso: String?
+    let country_name: String?
+    let rank_band: String?
+    let rank_countries: String?
+    let rank_qso: String?
+    let score_band: String?
+    let score_countries: String?
+    let score_qso: String?
+}
 
 // MARK: - Band Statistics Model
 struct BandStatModel: Identifiable {
@@ -60,7 +75,7 @@ func countryToFlag(_ country: String) -> String {
     case "france": return "🇫🇷"
     case "italy": return "🇮🇹"
     case "spain": return "🇪🇸"
-    case "portugal": return "🇵🇹"
+    case "portugal": return "🇵TOG"
     case "greece": return "🇬🇷"
     case "netherlands": return "🇳🇱"
     case "belgium": return "🇧🇪"
@@ -169,19 +184,121 @@ struct QSORecordModel: Identifiable {
     }
 }
 
+// MARK: - Targeted QRZ #qem Event Trigger Scraper Engine
+@MainActor
+class QRZWebKitScraper: NSObject, WKNavigationDelegate {
+    static let shared = QRZWebKitScraper()
+    private var webView: WKWebView!
+    private var continuation: CheckedContinuation<String?, Never>?
+    
+    override init() {
+        super.init()
+        let config = WKWebViewConfiguration()
+        config.websiteDataStore = .default()
+        
+        self.webView = WKWebView(frame: CGRect(x: 0, y: 0, width: 1024, height: 768), configuration: config)
+        self.webView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
+        self.webView.navigationDelegate = self
+    }
+    
+    func fetchEmail(for callsign: String) async -> String? {
+        guard let url = URL(string: "https://www.qrz.com/db/\(callsign)") else { return nil }
+        
+        return await withCheckedContinuation { continuation in
+            self.continuation = continuation
+            let request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: 15)
+            self.webView.load(request)
+        }
+    }
+    
+    // MARK: - WKNavigationDelegate
+    nonisolated func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        // Wait 0.8s for QRZ JS environment to settle, then simulate showqem() trigger
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+            let jsScript = """
+            (function() {
+                var qemSpan = document.getElementById('qem');
+                if (qemSpan) {
+                    // 1. Directly invoke QRZ's showqem() function if available
+                    if (typeof showqem === 'function') {
+                        try { showqem(); } catch(e) {}
+                    } else {
+                        // 2. Fallback: Dispatch mouseover & click events programmatically
+                        var evt = new MouseEvent('mouseover', { bubbles: true, cancelable: true, view: window });
+                        qemSpan.dispatchEvent(evt);
+                        qemSpan.click();
+                    }
+                    
+                    // Extract decoded text inside #qem span
+                    var text = (qemSpan.innerText || qemSpan.textContent || "").trim();
+                    if (text && text.includes('@') && text.includes('.')) {
+                        return text;
+                    }
+                }
+                
+                // Fallback: Look for mailto links anywhere in DOM
+                var mailtoAnchor = document.querySelector('a[href^="mailto:"]');
+                if (mailtoAnchor) {
+                    var href = mailtoAnchor.getAttribute('href').replace('mailto:', '').split('?')[0].trim();
+                    if (href && !href.includes('qrz.com') && !href.includes('support')) {
+                        return href;
+                    }
+                }
+                
+                return "";
+            })();
+            """
+            
+            webView.evaluateJavaScript(jsScript) { [weak self] result, _ in
+                let extracted = result as? String
+                let email = (extracted?.isEmpty == false) ? extracted : nil
+                
+                Task { @MainActor in
+                    let cont = self?.continuation
+                    self?.continuation = nil
+                    cont?.resume(returning: email)
+                }
+            }
+        }
+    }
+    
+    nonisolated func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        Task { @MainActor in
+            let cont = self.continuation
+            self.continuation = nil
+            cont?.resume(returning: nil)
+        }
+    }
+    
+    nonisolated func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        Task { @MainActor in
+            let cont = self.continuation
+            self.continuation = nil
+            cont?.resume(returning: nil)
+        }
+    }
+}
+
 // MARK: - Global Application State Manager
 class AppState: NSObject, ObservableObject {
     var currentVersion: String {
-        return Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "3.7.0"
+        return Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.1.2"
     }
     
-    @Published var logText: String = "Welcome to ADIF Log Processor & Master.\nPlease import an ADIF log file.\n"
+    // UI & Status States
+    @Published var logText: String = "Welcome to YAAM v1.1.2.\nPlease import an ADIF log file.\n"
     @Published var isCheckingUpdates: Bool = false
     @Published var isLoading: Bool = false
     @Published var isSyncingAPI: Bool = false
     
-     
-    // QRZ rank
+    // Email, SMTP & Enrichment States
+    @Published var isEnriching: Bool = false
+    @Published var showEmailComposer: Bool = false
+    @Published var showSMTPSettings: Bool = false
+    @Published var selectedEmailCallsign: String = ""
+    @Published var selectedEmailAddress: String = ""
+    
+    // QRZ Rank & Login States
     @Published var isFetchingRank: Bool = false
     @Published var qrzRankData: QRZRankResponse? = nil
     @Published var leaderboardSearchCallsign: String = ""
@@ -189,6 +306,7 @@ class AppState: NSObject, ObservableObject {
 
     private let qrzSecureSessionToken = "eyJ1c2VybmFtZSI6ImZhY3RvcmVhbCJ9.amtpHA.AzDgCiVIUz64RzWEOtlXb_DENnI"
 
+    @Published var showQRZLoginSheet: Bool = false
     
     // Search & Smart Sorting States
     @Published var searchText: String = ""
@@ -216,8 +334,6 @@ class AppState: NSObject, ObservableObject {
     @Published var alertTitle: String = ""
     @Published var alertMessage: String = ""
 
-    
-    //
     @Published var showAboutSheet: Bool = false
 
     override init() {
@@ -393,10 +509,12 @@ class AppState: NSObject, ObservableObject {
     }
 
     func appendLog(_ text: String) {
-        logText += "\(text)\n"
+        DispatchQueue.main.async {
+            self.logText += "\(text)\n"
+        }
     }
     
-        // MARK: - LIVE QRZ LEADERBOARD ENGINE (WITH VS COMPARISON)
+    // MARK: - LIVE QRZ LEADERBOARD ENGINE (WITH EXPLICIT TYPE ANNOTATION)
     func fetchQRZLeaderboard(for searchedCallsign: String) {
         let ownerCall = (UserDefaults.standard.string(forKey: "stationCallsign") ?? "EP2AES").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         let targetCall = searchedCallsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
@@ -408,18 +526,16 @@ class AppState: NSObject, ObservableObject {
         
         let group = DispatchGroup()
         
-        // 1. Fetch Owner Rank (if not fetched yet)
         if ownerRankData == nil || ownerRankData?.callsign?.uppercased() != ownerCall {
             group.enter()
-            fetchSingleRank(callsign: ownerCall) { [weak self] result in
+            fetchSingleRank(callsign: ownerCall) { [weak self] (result: QRZRankResponse?) in
                 self?.ownerRankData = result
                 group.leave()
             }
         }
         
-        // 2. Fetch Searched Callsign Rank
         group.enter()
-        fetchSingleRank(callsign: targetCall) { [weak self] result in
+        fetchSingleRank(callsign: targetCall) { [weak self] (result: QRZRankResponse?) in
             self?.qrzRankData = result
             group.leave()
         }
@@ -440,7 +556,7 @@ class AppState: NSObject, ObservableObject {
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
         request.setValue("session=\(qrzSecureSessionToken)", forHTTPHeaderField: "Cookie")
-        request.setValue("YAAM-macOS/1.1.0", forHTTPHeaderField: "User-Agent")
+        request.setValue("YAAM-macOS/\(currentVersion)", forHTTPHeaderField: "User-Agent")
         
         URLSession.shared.dataTask(with: request) { data, _, _ in
             guard let data = data, let decoded = try? JSONDecoder().decode(QRZRankResponse.self, from: data) else {
@@ -450,7 +566,6 @@ class AppState: NSObject, ObservableObject {
             completion(decoded)
         }.resume()
     }
-
 
     // MARK: - STANDALONE CLOUD LOGBOOK ENGINE
     private var cloudLogbookFileURL: URL? {
@@ -493,7 +608,7 @@ class AppState: NSObject, ObservableObject {
         }
         
         var request = URLRequest(url: endpoint)
-        request.setValue("YAAM-macOS/1.1.0", forHTTPHeaderField: "User-Agent")
+        request.setValue("YAAM-macOS/\(currentVersion)", forHTTPHeaderField: "User-Agent")
         
         URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
             guard let self = self else { return }
@@ -540,7 +655,140 @@ class AppState: NSObject, ObservableObject {
             }
         }.resume()
     }
-    
+
+    // MARK: - Bulk Enrichment Engine (Sequential Async/Await Architecture)
+        func enrichLogData() {
+            guard !qsoRecords.isEmpty else { return }
+            
+            let newHeaders = ["RANK_QSO", "RANK_BAND", "RANK_DXCC", "EMAIL"]
+            for header in newHeaders {
+                if !tableHeaders.contains(header) {
+                    tableHeaders.append(header)
+                }
+            }
+            self.objectWillChange.send()
+            isEnriching = true
+            
+            let uniqueCallsigns = Array(Set(qsoRecords.compactMap {
+                let c = $0["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+                return c.isEmpty ? nil : c
+            }))
+            
+            appendLog("🚀 Starting Sequential Enrichment for \(uniqueCallsigns.count) unique callsigns...")
+            
+            Task { @MainActor in
+                for (idx, callsign) in uniqueCallsigns.enumerated() {
+                    self.appendLog("[\(idx + 1)/\(uniqueCallsigns.count)] Step 1/2: Fetching Ranks for \(callsign)...")
+                    
+                    // Step 1: Async Rank Fetching
+                    let (rankQSO, rankBand, rankDXCC) = await self.asyncFetchRank(for: callsign)
+                    
+                    self.appendLog("[\(idx + 1)/\(uniqueCallsigns.count)] Step 2/2: Rendering WebKit DOM & Extracting Email for \(callsign)...")
+                    
+                    // Step 2: Async WebKit Email Extraction with JS Rendering Wait
+                    let fetchedEmail = await QRZWebKitScraper.shared.fetchEmail(for: callsign)
+                    
+                    // Step 3: Update Table Model
+                    for i in 0..<self.qsoRecords.count {
+                        if self.qsoRecords[i]["CALL"].uppercased() == callsign {
+                            if !rankQSO.isEmpty { self.qsoRecords[i].fields["RANK_QSO"] = rankQSO }
+                            if !rankBand.isEmpty { self.qsoRecords[i].fields["RANK_BAND"] = rankBand }
+                            if !rankDXCC.isEmpty { self.qsoRecords[i].fields["RANK_DXCC"] = rankDXCC }
+                            
+                            if let email = fetchedEmail, !email.isEmpty {
+                                self.qsoRecords[i].fields["EMAIL"] = email
+                            }
+                        }
+                    }
+                    self.objectWillChange.send()
+                }
+                
+                self.isEnriching = false
+                self.objectWillChange.send()
+                self.appendLog("✅ Bulk Enrichment completed! All Ranks and WebKit Emails updated.")
+            }
+        }
+        
+        // MARK: - Helper Async Rank Fetcher
+        private func asyncFetchRank(for callsign: String) async -> (String, String, String) {
+            guard let url = URL(string: "https://qrz-rank.asis.sh/api/rank/\(callsign)") else {
+                return ("", "", "")
+            }
+            var req = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 8)
+            req.setValue("session=\(qrzSecureSessionToken)", forHTTPHeaderField: "Cookie")
+            req.setValue("YAAM-macOS/\(currentVersion)", forHTTPHeaderField: "User-Agent")
+            
+            do {
+                let (data, _) = try await URLSession.shared.data(for: req)
+                if let decoded = try? JSONDecoder().decode(QRZRankResponse.self, from: data) {
+                    return (decoded.rank_qso ?? "", decoded.rank_band ?? "", decoded.rank_countries ?? "")
+                }
+            } catch {}
+            return ("", "", "")
+        }
+
+    // MARK: - Native SMTP Sender Engine via macOS curl
+    func sendEmail(to recipient: String, subject: String, body: String, completion: @escaping (Bool, String) -> Void) {
+        let host = UserDefaults.standard.string(forKey: "smtpHost") ?? ""
+        let port = UserDefaults.standard.string(forKey: "smtpPort") ?? "465"
+        let user = UserDefaults.standard.string(forKey: "smtpUser") ?? ""
+        let pass = UserDefaults.standard.string(forKey: "smtpPass") ?? ""
+        
+        guard !host.isEmpty, !user.isEmpty, !pass.isEmpty else {
+            completion(false, "SMTP configuration missing. Please setup via SMTP settings.")
+            return
+        }
+        
+        DispatchQueue.global(qos: .userInitiated).async {
+            let tempDir = FileManager.default.temporaryDirectory
+            let fileURL = tempDir.appendingPathComponent("\(UUID().uuidString).eml")
+            
+            let emailContent = """
+            From: \(user)
+            To: \(recipient)
+            Subject: \(subject)
+            
+            \(body)
+            """
+            
+            do {
+                try emailContent.write(to: fileURL, atomically: true, encoding: .utf8)
+                
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: "/usr/bin/curl")
+                let protocolPrefix = (port == "465") ? "smtps" : "smtp"
+                
+                process.arguments = [
+                    "--ssl-reqd",
+                    "--url", "\(protocolPrefix)://\(host):\(port)",
+                    "--user", "\(user):\(pass)",
+                    "--mail-from", user,
+                    "--mail-rcpt", recipient,
+                    "--upload-file", fileURL.path
+                ]
+                
+                let pipe = Pipe()
+                process.standardError = pipe
+                
+                try process.run()
+                process.waitUntilExit()
+                
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                let output = String(data: data, encoding: .utf8) ?? ""
+                
+                try? FileManager.default.removeItem(at: fileURL)
+                
+                if process.terminationStatus == 0 {
+                    completion(true, "Sent successfully via SMTP.")
+                } else {
+                    completion(false, "SMTP Error: \(output)")
+                }
+            } catch {
+                completion(false, "System Command Error: \(error.localizedDescription)")
+            }
+        }
+    }
+
     func deleteRecord(id: UUID) {
         if let idx = qsoRecords.firstIndex(where: { $0.id == id }) {
             let recordNum = qsoRecords[idx].index
@@ -570,11 +818,10 @@ class AppState: NSObject, ObservableObject {
     }
 
     // MARK: - Persistent Local Confirmation JSON Database Engine
-    
     private var confirmationCacheFileURL: URL? {
         let fm = FileManager.default
         guard let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return nil }
-        let dir = appSupport.appendingPathComponent("ADIFMaster")
+        let dir = appSupport.appendingPathComponent("YAAM")
         if !fm.fileExists(atPath: dir.path) {
             try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
         }
@@ -632,7 +879,6 @@ class AppState: NSObject, ObservableObject {
     }
 
     // MARK: - Internal Database Operations
-    
     private var internalDatabaseURL: URL? {
         let fm = FileManager.default
         guard let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return nil }
@@ -682,7 +928,6 @@ class AppState: NSObject, ObservableObject {
     }
 
     // MARK: - Asynchronous File Importer
-    
     func loadADIFFile(from url: URL) {
         isLoading = true
         appendLog("Loading file '\(url.lastPathComponent)' in background...")
@@ -732,7 +977,6 @@ class AppState: NSObject, ObservableObject {
     }
 
     // MARK: - Save & Export Handlers
-    
     func saveCurrentLog() {
         guard let url = loadedFileURL else {
             saveAsCurrentLog()
@@ -815,7 +1059,6 @@ class AppState: NSObject, ObservableObject {
     }
 
     // MARK: - Offline-First Hybrid Cloud Sync Engine (LoTW & QRZ)
-    
     func syncConfirmations(forceFullSync: Bool = false) {
         guard !qsoRecords.isEmpty else {
             appendLog("Error: No log loaded to sync.")
@@ -858,7 +1101,7 @@ class AppState: NSObject, ObservableObject {
         }
         
         var request = URLRequest(url: lotwEndpoint, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: 30)
-        request.setValue("YAAM-macOS/1.1.0", forHTTPHeaderField: "User-Agent")
+        request.setValue("YAAM-macOS/\(currentVersion)", forHTTPHeaderField: "User-Agent")
         
         URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
             guard let self = self else { return }
@@ -954,7 +1197,6 @@ class AppState: NSObject, ObservableObject {
     }
 
     // MARK: - Dialogs & Updates
-    
     func importADIFDialog() {
         let panel = NSOpenPanel()
         var types: [UTType] = [.plainText]
@@ -1029,6 +1271,7 @@ class AppState: NSObject, ObservableObject {
             }
         }.resume()
     }
+    
     // MARK: - Bulletproof Native macOS Alert Engine (AppKit Bridge)
     func showNativeAlert(title: String, message: String, actionURL: URL? = nil) {
         DispatchQueue.main.async {
