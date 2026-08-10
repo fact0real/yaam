@@ -46,31 +46,135 @@ struct CountryStatModel: Identifiable {
     let unconfirmedCount: Int
 }
 
-// MARK: - Comprehensive DXCC & Country Flag Lookup Engine
+// MARK: - Comprehensive DXCC & Country/Territory Flag Lookup Engine
 func countryToFlag(_ country: String) -> String {
     let clean = country.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     if clean.isEmpty { return "🌐" }
     
     switch clean {
-    case "republic of korea", "korea, republic of", "korea (republic of)", "south korea", "korea", "rok": return "🇰🇷"
-    case "democratic people's republic of korea", "dprk", "korea, d.p.r. of", "north korea": return "🇰🇵"
-    case "japan": return "🇯🇵"
-    case "china", "people's republic of china", "prc": return "🇨🇳"
-    case "asiatic russia", "russia": return "🇷🇺"
-    case "taiwan", "republic of china": return "🇹🇼"
-    case "hong kong": return "🇭🇰"
-    case "macao", "macau": return "🇲🇴"
-    case "iran", "islamic republic of iran": return "🇮🇷"
-    case "saudi arabia": return "🇸🇦"
-    case "india": return "🇮🇳"
-    case "pakistan": return "🇵🇰"
-    case "turkey", "turkiye": return "🇹🇷"
-    case "israel": return "🇮🇱"
+    // MARK: - Special DXCC Island Entities, UN & Territories
+    case "rodriguez is.", "rodrigues is.", "rodrigues island", "rodrigues": return "🇲🇺"
+    case "dodecanese": return "🇬🇷"
+    case "montserrat": return "🇲🇸"
+    case "western sahara": return "🇪🇭"
+    case "central kiribati", "kiribati": return "🇰🇮"
+    case "united nations hq", "un hq", "united nations": return "🇺🇳"
+    case "fiji islands", "fiji": return "🇫🇯"
+    case "canary is.", "canary islands", "canary island", "canary": return "🇮🇨"
+    case "sardinia": return "🇮🇹"
+    case "crete": return "🇬🇷"
+    case "azores", "azores is.": return "🇵🇹"
+    case "balearic is.", "balearic islands": return "🇪🇸"
+    case "bonaire": return "🇧🇶"
+    case "corsica": return "🇫🇷"
+    case "madeira is.", "madeira": return "🇵🇹"
+    case "ceuta & melilla", "ceuta and melilla", "ceuta": return "🇪🇸"
+    case "curacao": return "🇨🇼"
+    case "aruba": return "🇦🇼"
+    case "sint maarten": return "🇸🇽"
+    case "st. martin", "saint martin": return "🇲🇫"
+    case "svalbard": return "🇸🇯"
+    case "jan mayen": return "🇸🇯"
+    case "faroe is.", "faroe islands", "faroe": return "🇫🇴"
+    case "greenland": return "🇬🇱"
+    case "aland is.", "aland islands", "aland": return "🇦🇽"
+    case "market reef": return "🇫🇮"
+    case "mount athos": return "🇬🇷"
+    case "isle of man": return "🇮🇲"
+    case "jersey": return "🇯🇪"
+    case "guernsey": return "🇬🇬"
+    case "gibraltar": return "🇬🇮"
+    case "hawaii": return "🇺🇸"
+    case "alaska": return "🇺🇸"
+    case "puerto rico": return "🇵🇷"
+    case "virgin is.", "us virgin is.", "u.s. virgin islands", "virgin islands": return "🇻🇮"
+    case "british virgin is.", "british virgin islands": return "🇻🇬"
+    case "guam": return "🇬🇺"
+    case "northern mariana is.": return "🇲🇵"
+    case "american samoa": return "🇦🇸"
+    case "martinique": return "🇲🇶"
+    case "guadeloupe": return "🇬🇵"
+    case "reunion", "reunion is.": return "🇷🇪"
+    case "mayotte": return "🇾🇹"
+    case "french guiana": return "🇬🇫"
+    case "bermuda": return "🇧🇲"
+    case "cayman is.", "cayman islands": return "🇰🇾"
+    case "falkland is.", "falkland islands": return "🇫🇰"
+    case "saint helena": return "🇸🇭"
+    case "tristan da cunha": return "🇸🇭"
+    case "ascension is.": return "🇸🇭"
+    case "galapagos is.", "galapagos": return "🇪🇨"
+    case "easter is.", "easter island": return "🇨🇱"
+    case "lord howe is.": return "🇦🇺"
+    case "norfolk is.": return "🇳🇫"
+    case "christmas is.": return "🇨🇽"
+    case "cocos (keeling) is.": return "🇨🇨"
 
+    // MARK: - Americas & Caribbean
+    case "belize": return "🇧🇿"
+    case "united states", "united states of america", "usa", "u.s.a.": return "🇺🇸"
+    case "canada": return "🇨🇦"
+    case "mexico": return "🇲🇽"
+    case "brazil": return "🇧🇷"
+    case "argentina": return "🇦🇷"
+    case "chile": return "🇨🇱"
+    case "colombia": return "🇨🇴"
+    case "peru": return "🇵🇪"
+    case "venezuela": return "🇻🇪"
+    case "ecuador": return "🇪🇨"
+    case "bolivia": return "🇧🇴"
+    case "paraguay": return "🇵🇾"
+    case "uruguay": return "🇺🇾"
+    case "guyana": return "🇬🇾"
+    case "suriname": return "🇸🇷"
+    case "cuba": return "🇨🇺"
+    case "dominican republic": return "🇩🇴"
+    case "jamaica": return "🇯🇲"
+    case "haiti": return "🇭🇹"
+    case "costa rica": return "🇨🇷"
+    case "panama": return "🇵🇦"
+    case "guatemala": return "🇬🇹"
+    case "honduras": return "🇭🇳"
+    case "el salvador": return "🇸🇻"
+    case "nicaragua": return "🇳🇮"
+    case "bahamas": return "🇧🇸"
+    case "trinidad & tobago", "trinidad and tobago": return "🇹🇹"
+    case "barbados": return "🇧🇧"
+
+    // MARK: - Africa
+    case "chad": return "🇹🇩"
+    case "cameroon": return "🇨🇲"
+    case "congo", "republic of congo", "democratic republic of congo", "dr congo", "dr congo / zaire": return "🇨🇬"
+    case "malawi": return "🇲🇼"
+    case "benin": return "🇧🇯"
+    case "south africa": return "🇿🇦"
+    case "egypt": return "🇪🇬"
+    case "nigeria": return "🇳🇬"
+    case "kenya": return "🇰🇪"
+    case "morocco": return "🇲🇦"
+    case "algeria": return "🇩🇿"
+    case "tunisia": return "🇹🇳"
+    case "ethiopia": return "🇪🇹"
+    case "ghana": return "🇬🇭"
+    case "senegal": return "🇸🇳"
+    case "cote d'ivoire", "ivory coast": return "🇨🇮"
+    case "tanzania": return "🇹ℤ"
+    case "uganda": return "🇺🇬"
+    case "zimbabwe": return "🇿🇼"
+    case "zambia": return "🇿🇲"
+    case "namibia": return "🇳🇦"
+    case "angola": return "🇦🇴"
+    case "madagascar": return "🇲🇬"
+    case "mauritius": return "🇲🇺"
+
+    // MARK: - Europe
+    case "republic of kosovo", "kosovo": return "🇽🇰"
+    case "armenia", "republic of armenia": return "🇦🇲"
     case "england", "uk", "united kingdom", "great britain": return "🇬🇧"
     case "scotland": return "🏴󠁧󠁢󠁳󠁣󠁴󠁿"
     case "wales": return "🏴󠁧󠁢󠁷󠁬󠁳󠁿"
-    case "european russia", "kaliningrad": return "🇷🇺"
+    case "northern ireland": return "🇬🇧"
+    case "european russia", "kaliningrad", "russia": return "🇷🇺"
     case "germany", "fed. rep. of germany", "federal republic of germany": return "🇩🇪"
     case "france": return "🇫🇷"
     case "italy": return "🇮🇹"
@@ -87,24 +191,139 @@ func countryToFlag(_ country: String) -> String {
     case "finland": return "🇫🇮"
     case "denmark": return "🇩🇰"
     case "ukraine": return "🇺🇦"
-    case "armenia": return "🇦🇲"
+    case "belarus": return "🇧🇾"
+    case "czech republic", "czechia": return "🇨🇿"
+    case "slovak republic", "slovakia": return "🇸🇰"
+    case "hungary": return "🇭🇺"
+    case "romania": return "🇷🇴"
+    case "bulgaria": return "🇧🇬"
+    case "croatia": return "🇭🇷"
+    case "serbia": return "🇷🇸"
+    case "slovenia": return "🇸🇮"
+    case "bosnia-herzegovina", "bosnia & herzegovina", "bosnia": return "🇧🇦"
+    case "north macedonia", "macedonia": return "🇲🇰"
+    case "albania": return "🇦🇱"
+    case "montenegro": return "🇲🇪"
+    case "ireland", "republic of ireland": return "🇮🇪"
+    case "iceland": return "🇮🇸"
+    case "estonia": return "🇪🇪"
+    case "latvia": return "🇱🇻"
+    case "lithuania": return "🇱🇹"
+    case "moldova", "republic of moldova": return "🇲🇩"
+    case "cyprus": return "🇨🇾"
+    case "malta": return "🇲🇹"
+    case "luxembourg": return "🇱🇺"
+    case "monaco": return "🇲🇨"
+    case "andorra": return "🇦🇩"
+    case "san marino": return "🇸🇲"
+    case "vatican", "vatican city": return "🇻🇦"
+    case "liechtenstein": return "🇱🇮"
 
-    case "united states", "united states of america", "usa", "u.s.a.": return "🇺🇸"
-    case "canada": return "🇨🇦"
-    case "mexico": return "🇲🇽"
-    case "brazil": return "🇧🇷"
+    // MARK: - Asia & Middle East
+    case "iran", "islamic republic of iran": return "🇮🇷"
+    case "republic of korea", "korea, republic of", "korea (republic of)", "south korea", "korea", "rok": return "🇰🇷"
+    case "democratic people's republic of korea", "dprk", "korea, d.p.r. of", "north korea": return "🇰🇵"
+    case "japan": return "🇯🇵"
+    case "china", "people's republic of china", "prc": return "🇨🇳"
+    case "asiatic russia": return "🇷🇺"
+    case "taiwan", "republic of china": return "🇹🇼"
+    case "hong kong": return "🇭🇰"
+    case "macao", "macau": return "🇲🇴"
+    case "saudi arabia": return "🇸🇦"
+    case "india": return "🇮🇳"
+    case "pakistan": return "🇵🇰"
+    case "turkey", "turkiye": return "🇹🇷"
+    case "israel": return "🇮🇱"
+    case "indonesia": return "🇮🇩"
+    case "philippines": return "🇵🇭"
+    case "thailand": return "🇹🇭"
+    case "vietnam", "viet nam": return "🇻🇳"
+    case "malaysia", "east malaysia", "west malaysia": return "🇲🇾"
+    case "singapore": return "🇸🇬"
+    case "united arab emirates", "uae": return "🇦🇪"
+    case "kuwait": return "🇰🇼"
+    case "qatar": return "🇶🇦"
+    case "oman": return "🇴🇲"
+    case "bahrain": return "🇧🇭"
+    case "iraq": return "🇮🇶"
+    case "jordan": return "🇯🇴"
+    case "lebanon": return "🇱🇧"
+    case "syria", "syrian arab republic": return "🇸🇾"
+    case "mongolia": return "🇲🇳"
+    case "kazakhstan": return "🇰🇿"
+    case "uzbekistan": return "🇺🇿"
+    case "turkmenistan": return "🇹🇲"
+    case "kyrgyzstan": return "🇰🇬"
+    case "tajikistan": return "🇹🇯"
+    case "azerbaijan": return "🇦🇿"
+    case "georgia": return "🇬🇪"
+    case "sri lanka": return "🇱🇰"
+    case "bangladesh": return "🇧🇩"
+    case "nepal": return "🇳🇵"
+    case "myanmar", "burma": return "🇲🇲"
+    case "cambodia": return "🇰🇭"
+    case "laos", "lao pdr": return "🇱🇦"
+    case "brunei", "brunei darussalam": return "🇧🇳"
+    case "maldives": return "🇲🇻"
+    case "afghanistan": return "🇦🇫"
+
+    // MARK: - Oceania & Pacific
     case "australia": return "🇦🇺"
     case "new zealand": return "🇳🇿"
+    case "papua new guinea": return "🇵🇬"
+    case "new caledonia": return "🇳🇨"
+    case "french polynesia": return "🇵🇫"
+    case "samoa": return "🇼🇸"
+    case "vanuatu": return "🇻🇺"
+    case "solomon is.", "solomon islands": return "🇸🇧"
+    case "palau": return "🇵🇼"
+    case "micronesia": return "🇫🇲"
+    case "marshall is.", "marshall islands": return "🇲🇭"
+    case "tuvalu": return "🇹🇻"
+    case "nauru": return "🇳🇷"
+    case "tonga": return "🇹🇴"
+
     default: break
     }
     
+    // Smart Fallback Keyword Search
+    if clean.contains("rodriguez") || clean.contains("rodrigues") { return "🇲🇺" }
+    if clean.contains("dodecanese") { return "🇬🇷" }
+    if clean.contains("montserrat") { return "🇲🇸" }
+    if clean.contains("sahara") { return "🇪🇭" }
+    if clean.contains("kiribati") { return "🇰🇮" }
+    if clean.contains("united nations") || clean.contains("4u1un") { return "🇺🇳" }
+    if clean.contains("fiji") { return "🇫🇯" }
+    if clean.contains("chad") { return "🇹🇩" }
+    if clean.contains("cameroon") { return "🇨🇲" }
+    if clean.contains("congo") { return "🇨🇬" }
+    if clean.contains("kosovo") { return "🇽🇰" }
+    if clean.contains("armenia") { return "🇦🇲" }
+    if clean.contains("malawi") { return "🇲🇼" }
+    if clean.contains("canary") { return "🇮🇨" }
+    if clean.contains("sardinia") { return "🇮🇹" }
+    if clean.contains("crete") { return "🇬🇷" }
+    if clean.contains("azores") { return "🇵🇹" }
+    if clean.contains("balearic") { return "🇪🇸" }
+    if clean.contains("bonaire") { return "🇧🇶" }
+    if clean.contains("belize") { return "🇧🇿" }
+    if clean.contains("benin") { return "🇧🇯" }
+    if clean.contains("curacao") { return "🇨🇼" }
+    if clean.contains("galapagos") { return "🇪🇨" }
+    if clean.contains("faroe") { return "🇫🇴" }
+    if clean.contains("greenland") { return "🇬🇱" }
+    if clean.contains("corsica") { return "🇫🇷" }
+    if clean.contains("madeira") { return "🇵🇹" }
     if clean.contains("korea") { return "🇰🇷" }
     if clean.contains("russia") { return "🇷🇺" }
     if clean.contains("germany") { return "🇩🇪" }
     if clean.contains("japan") { return "🇯🇵" }
     if clean.contains("china") { return "🇨🇳" }
     if clean.contains("united states") || clean.contains("u.s.a") { return "🇺🇸" }
+    if clean.contains("czech") { return "🇨🇿" }
+    if clean.contains("slovak") { return "🇸🇰" }
     
+    // Dynamic ISO 2-letter Country Code Emoji Builder
     if clean.count == 2 {
         let base: UInt32 = 127397
         var unicodeScalars = String.UnicodeScalarView()
@@ -218,7 +437,6 @@ class QRZWebKitScraper: NSObject, WKNavigationDelegate {
             self.continuation = continuation
             var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: 15)
             
-            // Inject Captured QRZ Session Cookie into WebKit Headers
             if let savedCookie = UserDefaults.standard.string(forKey: "qrzSessionCookie"), !savedCookie.isEmpty {
                 request.setValue(savedCookie, forHTTPHeaderField: "Cookie")
             }
@@ -313,6 +531,7 @@ class AppState: NSObject, ObservableObject {
     @Published var showSMTPSettings: Bool = false
     @Published var selectedEmailCallsign: String = ""
     @Published var selectedEmailAddress: String = ""
+    @Published var selectedEmailQSO: QSORecordModel? = nil // ⭐️ FIX: Stores exact clicked row
     
     // QRZ Rank & Login States
     @Published var isFetchingRank: Bool = false
@@ -1076,11 +1295,15 @@ class AppState: NSObject, ObservableObject {
         return ("", "", "")
     }
 
-    // MARK: - Bulletproof Native SMTP Engine
+    // MARK: - Bulletproof Native SMTP Engine (Fixed Default Fallbacks)
     func sendEmail(to recipient: String, subject: String, body: String, completion: @escaping (Bool, String) -> Void) {
         
-        let host = UserDefaults.standard.string(forKey: "smtpHost")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let port = UserDefaults.standard.string(forKey: "smtpPort")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "465"
+        let rawHost = UserDefaults.standard.string(forKey: "smtpHost")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let host = rawHost.isEmpty ? "smtp.gmail.com" : rawHost
+        
+        let rawPort = UserDefaults.standard.string(forKey: "smtpPort")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let port = rawPort.isEmpty ? "465" : rawPort
+        
         let user = UserDefaults.standard.string(forKey: "smtpUser")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let rawPass = UserDefaults.standard.string(forKey: "smtpPass")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         
@@ -1216,7 +1439,6 @@ class AppState: NSObject, ObservableObject {
             
             let group = DispatchGroup()
             
-            // --- 1. LoTW Sync Engine ---
             if !lotwUser.isEmpty && !lotwPass.isEmpty {
                 group.enter()
                 if let encodedUser = lotwUser.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
@@ -1269,7 +1491,6 @@ class AppState: NSObject, ObservableObject {
                 }
             }
             
-            // --- 2. QRZ Logbook Sync Engine ---
             if !qrzKey.isEmpty {
                 group.enter()
                 let qrzEndpointStr = "https://logbook.qrz.com/api?KEY=\(qrzKey)&ACTION=FETCH&OPTION=TYPE:ADIF&MODIFIEDSINCE=\(sinceDateString)"
@@ -1376,7 +1597,6 @@ class AppState: NSObject, ObservableObject {
         autoSaveActiveWorkspace()
     }
 
-    // MARK: - Persistent Local Confirmation JSON Database Engine
     private var confirmationCacheFileURL: URL? {
         let fm = FileManager.default
         guard let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return nil }
@@ -1450,7 +1670,6 @@ class AppState: NSObject, ObservableObject {
         return matchedCount
     }
 
-    // MARK: - Save & Export Handlers
     func saveCurrentLog() {
         guard let url = loadedFileURL else {
             saveAsCurrentLog()
@@ -1536,7 +1755,6 @@ class AppState: NSObject, ObservableObject {
         showAboutSheet = true
     }
 
-    // MARK: - GITHUB AUTO UPDATER
     func checkForUpdates() {
         appendLog("Checking GitHub repository for updates...")
         isCheckingUpdates = true
@@ -1592,7 +1810,6 @@ class AppState: NSObject, ObservableObject {
         }.resume()
     }
     
-    // MARK: - Bulletproof Native macOS Alert Engine (AppKit Bridge)
     func showNativeAlert(title: String, message: String, actionURL: URL? = nil) {
         DispatchQueue.main.async {
             let alert = NSAlert()

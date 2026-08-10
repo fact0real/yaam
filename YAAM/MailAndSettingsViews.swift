@@ -16,7 +16,7 @@ struct EmailComposerView: View {
     @AppStorage("qrzUsername") private var qrzUser: String = ""
     @AppStorage("lotwUsername") private var lotwUser: String = ""
     
-    @State private var selectedTemplate: String = "QSL Request"
+    @State private var selectedTemplate: String = "QSL Card Request"
     @State private var emailSubject: String = ""
     @State private var emailBody: String = ""
     @State private var isSending: Bool = false
@@ -25,10 +25,14 @@ struct EmailComposerView: View {
     @State private var showDebugLog: Bool = false
     @State private var smtpDebugOutput: String = ""
     
-    let templates = ["QSL Request", "Sked Request", "LoTW Confirmation"]
+    let templates = ["QSL Card Request", "Sked Request", "LoTW/QRZ Confirmation"]
     
-    // Auto-detect the specific QSO record for this target callsign
-    private var selectedQSO: QSORecordModel? {
+    // DIRECT RESOLVER: Always prioritize the exact clicked row record!
+    private var currentQSO: QSORecordModel? {
+        if let exactQSO = appState.selectedEmailQSO {
+            return exactQSO
+        }
+        
         let targetCall = appState.selectedEmailCallsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         guard !targetCall.isEmpty else { return nil }
         
@@ -79,8 +83,8 @@ struct EmailComposerView: View {
                 Text(appState.selectedEmailAddress)
                     .foregroundColor(.secondary)
                 
-                // Show a quick badge if QSO details were detected
-                if let qso = selectedQSO {
+                // Show exact clicked QSO details badge
+                if let qso = currentQSO {
                     HStack(spacing: 4) {
                         Image(systemName: "antenna.radiowaves.left.and.right")
                             .font(.caption2)
@@ -103,7 +107,7 @@ struct EmailComposerView: View {
                     }
                 }
                 .pickerStyle(.menu)
-                .frame(width: 180)
+                .frame(width: 250) // ⭐️ FIX: Expanded width to fit long template names
                 .onChange(of: selectedTemplate) { _, newValue in
                     loadTemplate(newValue)
                 }
@@ -115,7 +119,6 @@ struct EmailComposerView: View {
                 .textFieldStyle(.roundedBorder)
             
             if showDebugLog {
-                // MARK: - Debug Terminal Console
                 VStack(alignment: .leading) {
                     Text("SMTP Connection Log:")
                         .font(.caption)
@@ -146,8 +149,11 @@ struct EmailComposerView: View {
                 
                 Spacer()
                 
-                Button("Cancel") { dismiss() }
-                    .disabled(isSending)
+                Button("Cancel") {
+                    appState.selectedEmailQSO = nil
+                    dismiss()
+                }
+                .disabled(isSending)
                 
                 Button(action: sendMail) {
                     HStack {
@@ -165,28 +171,32 @@ struct EmailComposerView: View {
         .onAppear {
             loadTemplate(selectedTemplate)
         }
+        .onChange(of: appState.selectedEmailCallsign) { _, _ in
+            loadTemplate(selectedTemplate)
+        }
     }
     
-    // MARK: - Template Engine with QSO Details Extractor
+    // MARK: - Template Engine with Exact QSO Details Extractor
     private func loadTemplate(_ template: String) {
         let myCall = resolvedMyCallsign
         let targetCall = appState.selectedEmailCallsign
         
-        let qsoBand = selectedQSO?["BAND"].trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let rawDate = selectedQSO?["QSO_DATE"].trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let qsoTime = selectedQSO?["TIME_ON"].trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let qsoFreq = selectedQSO?["FREQ"].trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let qso = currentQSO
+        let qsoBand = qso?["BAND"].trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let qsoMode = qso?["MODE"].trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let rawDate = qso?["QSO_DATE"].trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let qsoTime = qso?["TIME_ON"].trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let qsoFreq = qso?["FREQ"].trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         
         let formattedDate = formatDate(rawDate)
         
-        // Build detailed QSO block
         var qsoDetailsBlock = ""
-        if let qso = selectedQSO {
+        if qso != nil {
             var items: [String] = []
             if !formattedDate.isEmpty { items.append("- Date: \(formattedDate)") }
             if !qsoTime.isEmpty { items.append("- Time: \(qsoTime) UTC") }
-            if !qso["BAND"].isEmpty { items.append("- Band: \(qso["BAND"])") }
-            if !qso["MODE"].isEmpty { items.append("- Mode: \(qso["MODE"])") }
+            if !qsoBand.isEmpty { items.append("- Band: \(qsoBand)") }
+            if !qsoMode.isEmpty { items.append("- Mode: \(qsoMode)") }
             if !qsoFreq.isEmpty { items.append("- Freq: \(qsoFreq) MHz") }
             
             if !items.isEmpty {
@@ -198,8 +208,8 @@ struct EmailComposerView: View {
         let bandTag = !qsoBand.isEmpty ? " (\(qsoBand))" : ""
         
         switch template {
-        case "QSL Request":
-            emailSubject = "QSL Request for our QSO\(bandMention) - \(myCall)"
+        case "QSL Card Request":
+            emailSubject = "QSL Card Request for our QSO\(bandMention) - \(myCall)"
             emailBody = """
             Hello \(targetCall),
 
@@ -221,8 +231,8 @@ struct EmailComposerView: View {
             \(myCall)
             """
             
-        case "LoTW Confirmation":
-            emailSubject = "LoTW Confirmation Reminder\(bandTag) - \(myCall)"
+        case "LoTW/QRZ Confirmation":
+            emailSubject = "LoTW/QRZ Confirmation Reminder\(bandTag) - \(myCall)"
             emailBody = """
             Hello \(targetCall),
 
@@ -257,6 +267,7 @@ struct EmailComposerView: View {
                     self.appState.alertTitle = "Email Sent Successfully 🚀"
                     self.appState.alertMessage = "Your email has been dispatched via SMTP."
                     self.appState.showAlert = true
+                    self.appState.selectedEmailQSO = nil
                     self.dismiss()
                 } else {
                     self.smtpDebugOutput = log
@@ -301,8 +312,16 @@ struct SMTPSettingsView: View {
             
             HStack {
                 Spacer()
-                Button("Save & Close") { dismiss() }
-                    .buttonStyle(.borderedProminent)
+                Button("Save & Close") {
+                    UserDefaults.standard.set(stationCallsign, forKey: "stationCallsign")
+                    UserDefaults.standard.set(smtpHost.isEmpty ? "smtp.gmail.com" : smtpHost, forKey: "smtpHost")
+                    UserDefaults.standard.set(smtpPort.isEmpty ? "465" : smtpPort, forKey: "smtpPort")
+                    UserDefaults.standard.set(smtpUser, forKey: "smtpUser")
+                    UserDefaults.standard.set(smtpPass, forKey: "smtpPass")
+                    
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
             }
         }
         .padding(20)

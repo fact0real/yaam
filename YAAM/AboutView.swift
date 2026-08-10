@@ -11,6 +11,11 @@ struct AboutView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var appState: AppState
 
+    // Helper property to fetch Build Number from Info.plist
+    private var buildNumber: String {
+        Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
+    }
+
     var body: some View {
         VStack(spacing: 10) {
             // 1. App Icon with macOS Shadow
@@ -32,8 +37,8 @@ struct AboutView: View {
                 .font(.system(size: 22, weight: .bold))
                 .padding(.top, 2)
 
-            // 3. Version String
-            Text("Version \(appState.currentVersion)")
+            // 3. Version & Build String
+            Text("Version \(appState.currentVersion) (Build \(buildNumber))")
                 .font(.system(size: 12))
                 .foregroundColor(.secondary)
 

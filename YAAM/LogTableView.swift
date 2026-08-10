@@ -11,12 +11,10 @@ import SwiftUI
 struct LogTableView: View {
     @EnvironmentObject var appState: AppState
     
-    // Cell Editing Inline State Tracks
     @State private var editingCellID: UUID? = nil
     @State private var editingHeader: String? = nil
     @State private var editingText: String = ""
     
-    // Resizable Columns State
     @State private var columnWidths: [String: CGFloat] = [:]
     @State private var dragStartWidths: [String: CGFloat] = [:]
 
@@ -25,7 +23,6 @@ struct LogTableView: View {
             // MARK: - Toolbar & Quick Actions Summary Bar
             HStack(spacing: 10) {
                 
-                // 1. Internal Database Recent Files Dropdown Menu
                 Menu {
                     if appState.recentLogFiles.isEmpty {
                         Text("No recent logs found in database")
@@ -58,7 +55,6 @@ struct LogTableView: View {
                 
                 Divider().frame(height: 14)
                 
-                // Standalone Cloud Logbook Fetcher (With Native Confirmation Dialog)
                 Button(action: { appState.confirmAndFetchCloudLogbook() }) {
                     HStack(spacing: 4) {
                         Image(systemName: "icloud.and.arrow.down.fill")
@@ -72,7 +68,6 @@ struct LogTableView: View {
                 
                 Divider().frame(height: 14)
 
-                // ENRICH DATA / STOP ENRICHING TOGGLE BUTTON
                 if appState.isEnriching {
                     Button(action: { appState.stopEnrichment() }) {
                         HStack(spacing: 4) {
@@ -86,7 +81,6 @@ struct LogTableView: View {
                     }
                     .buttonStyle(.plain)
                 } else if !appState.selectedRecordIDs.isEmpty {
-                    // Enrich Selected Rows Button (Max 19)
                     Button(action: { appState.enrichSelectedRecords() }) {
                         HStack(spacing: 4) {
                             Image(systemName: "wand.and.stars.inverse")
@@ -122,7 +116,6 @@ struct LogTableView: View {
                 
                 Divider().frame(height: 14)
                 
-                // QRZ Re-Authentication Button
                 Button(action: { appState.forceQRZReLogin() }) {
                     HStack(spacing: 4) {
                         Image(systemName: "key.fill")
@@ -137,7 +130,6 @@ struct LogTableView: View {
                 
                 Divider().frame(height: 14)
                 
-                // SMTP Settings Button
                 Button(action: { appState.showSMTPSettings = true }) {
                     HStack(spacing: 4) {
                         Image(systemName: "gearshape.fill")
@@ -151,7 +143,6 @@ struct LogTableView: View {
                 
                 Divider().frame(height: 14)
 
-                // 2. Toolbar Global Search Input Field
                 HStack(spacing: 4) {
                     Image(systemName: "magnifyingglass")
                         .foregroundColor(.secondary)
@@ -177,7 +168,6 @@ struct LogTableView: View {
                 
                 Divider().frame(height: 14)
                 
-                // 3. Filters Sheet Trigger
                 Button(action: { appState.showFilterSheet = true }) {
                     HStack(spacing: 6) {
                         Image(systemName: appState.filterCriteria.isActive ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
@@ -205,7 +195,6 @@ struct LogTableView: View {
                 
                 Divider().frame(height: 14)
                 
-                // 4. Cloud QSL Sync Button (QRZ & LoTW)
                 Button(action: { appState.syncConfirmations() }) {
                     HStack(spacing: 4) {
                         Image(systemName: "arrow.clockwise.icloud")
@@ -217,7 +206,6 @@ struct LogTableView: View {
                 }
                 .disabled(appState.isSyncingAPI || appState.qsoRecords.isEmpty)
                 
-                // 5. Statistics Dashboard Sheet Trigger
                 Button(action: { appState.showStatsSheet = true }) {
                     HStack(spacing: 4) {
                         Image(systemName: "chart.bar.fill")
@@ -230,7 +218,6 @@ struct LogTableView: View {
                 
                 Divider().frame(height: 14)
                 
-                // 6. Analytics Quick Summary
                 HStack(spacing: 12) {
                     HStack(spacing: 4) {
                         Text("📻 QSOs:")
@@ -269,7 +256,6 @@ struct LogTableView: View {
             
             Divider()
 
-            // MARK: - Table View Content Rendering
             if appState.isLoading {
                 VStack(spacing: 16) {
                     ProgressView("Processing Log File...")
@@ -300,13 +286,10 @@ struct LogTableView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color(NSColor.textBackgroundColor))
             } else {
-                // MARK: - Strict Top-Anchored Scrollable View
                 ScrollView(.horizontal, showsIndicators: true) {
                     VStack(alignment: .leading, spacing: 0) {
-                        // Fixed Top Header Row
                         headerRowView
                         
-                        // Vertical Scrollable Log Rows Area
                         ScrollView(.vertical, showsIndicators: true) {
                             LazyVStack(alignment: .leading, spacing: 0) {
                                 ForEach(appState.filteredRecords) { record in
@@ -323,7 +306,6 @@ struct LogTableView: View {
             
             Divider()
             
-            // MARK: - Bottom Status Bar
             HStack {
                 Text(appState.loadedFileName.isEmpty ? "Ready" : "File: \(appState.loadedFileName)")
                     .font(.caption)
@@ -371,11 +353,8 @@ struct LogTableView: View {
         }
     }
 
-    // MARK: - Subviews & Layout Elements
-
     private var headerRowView: some View {
         HStack(spacing: 0) {
-            // 1. Sticky Index Header
             GeometryReader { geo in
                 let minX = geo.frame(in: .named("TableScroll")).minX
                 let isPinned = minX < 0
@@ -395,7 +374,6 @@ struct LogTableView: View {
             .frame(width: 80, height: 28)
             .zIndex(10)
             
-            // 2. Click-to-Sort & Resizable Scrollable Headers
             ForEach(appState.tableHeaders, id: \.self) { header in
                 let w = columnWidths[header] ?? defaultColumnWidth(for: header)
                 let isSorted = appState.sortHeader == header
@@ -478,14 +456,12 @@ struct LogTableView: View {
         let call = record["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         
         return HStack(spacing: 0) {
-            // 1. Sticky Index Cell (With Checkbox Selection + Delete Button)
             GeometryReader { geo in
                 let minX = geo.frame(in: .named("TableScroll")).minX
                 let isPinned = minX < 0
                 let offset = isPinned ? -minX : 0
                 
                 HStack(spacing: 4) {
-                    // Checkbox Button
                     Button(action: { appState.toggleRecordSelection(record.id) }) {
                         Image(systemName: isSelected ? "checkmark.square.fill" : "square")
                             .font(.system(size: 11))
@@ -493,7 +469,6 @@ struct LogTableView: View {
                     }
                     .buttonStyle(.plain)
                     
-                    // Delete Button
                     Button(action: { appState.deleteRecord(id: record.id) }) {
                         Image(systemName: "trash.fill")
                             .font(.system(size: 8))
@@ -516,7 +491,6 @@ struct LogTableView: View {
             .frame(width: 80, height: 28)
             .zIndex(10)
             
-            // 2. Scrollable Data Cells with Enrichment Formatting
             ForEach(appState.tableHeaders, id: \.self) { header in
                 let w = columnWidths[header] ?? defaultColumnWidth(for: header)
                 let val = record[header]
@@ -534,13 +508,11 @@ struct LogTableView: View {
                         .background(Color(NSColor.selectedControlColor).opacity(0.3))
                     } else {
                         HStack(spacing: 4) {
-                            // Country Flag Renderer
                             if header == "COUNTRY" && !val.isEmpty {
                                 Text(countryToFlag(val))
                                     .font(.system(size: 10))
                             }
                             
-                            // Interactive QRZ Profile URL Renderer
                             if header == "QRZ_URL" || header == "QRZ" {
                                 let targetUrlStr = val.isEmpty ? "https://www.qrz.com/db/\(call)" : val
                                 HStack(spacing: 4) {
@@ -560,7 +532,6 @@ struct LogTableView: View {
                                 }
                                 .help("Click to open \(call) profile on QRZ.com")
                             }
-                            // Email Links Renderer
                             else if header == "EMAIL" && !val.isEmpty {
                                 Text(val)
                                     .font(.system(size: 11, design: .monospaced))
@@ -569,11 +540,11 @@ struct LogTableView: View {
                                     .onTapGesture {
                                         appState.selectedEmailCallsign = record["CALL"]
                                         appState.selectedEmailAddress = val
+                                        appState.selectedEmailQSO = record // ⭐️ FIX: Pass exact clicked record!
                                         appState.showEmailComposer = true
                                     }
                                     .help("Click to send an email")
                             }
-                            // QRZ Ranks Renderer
                             else if header.hasPrefix("RANK_") && !val.isEmpty {
                                 Text(val)
                                     .font(.system(size: 11, weight: .bold, design: .monospaced))
@@ -582,7 +553,6 @@ struct LogTableView: View {
                                     .background(Color.black.opacity(0.05))
                                     .cornerRadius(4)
                             }
-                            // Standard Text Renderer
                             else {
                                 Text(val)
                                     .font(.system(size: 11, design: .monospaced))
@@ -599,7 +569,6 @@ struct LogTableView: View {
                 .border(Color.gray.opacity(0.2), width: 0.5)
                 .contentShape(Rectangle())
                 .onTapGesture {
-                    // Prevent normal editing mode if it's an email link or URL link
                     if header != "EMAIL" && header != "QRZ_URL" && header != "QRZ" {
                         editingCellID = record.id
                         editingHeader = header
@@ -607,7 +576,6 @@ struct LogTableView: View {
                     }
                 }
                 .contextMenu {
-                    // Selection Options
                     Button(isSelected ? "Deselect Row #\(record.index)" : "Select Row #\(record.index)") {
                         appState.toggleRecordSelection(record.id)
                     }
