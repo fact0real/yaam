@@ -27,7 +27,20 @@ struct EmailComposerView: View {
     
     let templates = ["QSL Request", "Sked Request", "LoTW Confirmation"]
     
-    // Strict Callsign Resolver
+    // Auto-detect the specific QSO record for this target callsign
+    private var selectedQSO: QSORecordModel? {
+        let targetCall = appState.selectedEmailCallsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard !targetCall.isEmpty else { return nil }
+        
+        return appState.qsoRecords.first(where: {
+            $0["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == targetCall &&
+            (appState.selectedEmailAddress.isEmpty || $0["EMAIL"] == appState.selectedEmailAddress)
+        }) ?? appState.qsoRecords.first(where: {
+            $0["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == targetCall
+        })
+    }
+    
+    // Strict Callsign Resolver for My Station
     private var resolvedMyCallsign: String {
         let saved = savedStationCallsign.trimmingCharacters(in: .whitespacesAndNewlines)
         if !saved.isEmpty && !saved.contains("@") { return saved.uppercased() }
@@ -65,6 +78,22 @@ struct EmailComposerView: View {
                     .fontWeight(.bold)
                 Text(appState.selectedEmailAddress)
                     .foregroundColor(.secondary)
+                
+                // Show a quick badge if QSO details were detected
+                if let qso = selectedQSO {
+                    HStack(spacing: 4) {
+                        Image(systemName: "antenna.radiowaves.left.and.right")
+                            .font(.caption2)
+                        Text("\(qso["BAND"]) / \(qso["MODE"])")
+                            .font(.caption2)
+                            .fontWeight(.bold)
+                    }
+                    .foregroundColor(.blue)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.blue.opacity(0.12))
+                    .cornerRadius(4)
+                }
                 
                 Spacer()
                 
@@ -132,29 +161,90 @@ struct EmailComposerView: View {
             }
         }
         .padding(20)
-        .frame(width: 580, height: showDebugLog ? 500 : 430)
+        .frame(width: 580, height: showDebugLog ? 500 : 450)
         .onAppear {
             loadTemplate(selectedTemplate)
         }
     }
     
+    // MARK: - Template Engine with QSO Details Extractor
     private func loadTemplate(_ template: String) {
         let myCall = resolvedMyCallsign
         let targetCall = appState.selectedEmailCallsign
         
+        let qsoBand = selectedQSO?["BAND"].trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let qsoMode = selectedQSO?["MODE"].trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let rawDate = selectedQSO?["QSO_DATE"].trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let qsoTime = selectedQSO?["TIME_ON"].trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let qsoFreq = selectedQSO?["FREQ"].trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        
+        let formattedDate = formatDate(rawDate)
+        
+        // Build detailed QSO block
+        var qsoDetailsBlock = ""
+        if let qso = selectedQSO {
+            var items: [String] = []
+            if !formattedDate.isEmpty { items.append("- Date: \(formattedDate)") }
+            if !qsoTime.isEmpty { items.append("- Time: \(qsoTime) UTC") }
+            if !qso["BAND"].isEmpty { items.append("- Band: \(qso["BAND"])") }
+            if !qso["MODE"].isEmpty { items.append("- Mode: \(qso["MODE"])") }
+            if !qsoFreq.isEmpty { items.append("- Freq: \(qsoFreq) MHz") }
+            
+            if !items.isEmpty {
+                qsoDetailsBlock = "\n\nQSO Details:\n" + items.joined(separator: "\n")
+            }
+        }
+        
+        let bandMention = !qsoBand.isEmpty ? " on \(qsoBand)" : ""
+        let bandTag = !qsoBand.isEmpty ? " (\(qsoBand))" : ""
+        
         switch template {
         case "QSL Request":
-            emailSubject = "QSL Request for our QSO - \(myCall)"
-            emailBody = "Hello \(targetCall),\n\nThanks for the nice QSO. I would love to exchange QSL cards with you. Please let me know if you prefer direct or via bureau.\n\n73,\n\(myCall)"
+            emailSubject = "QSL Request for our QSO\(bandMention) - \(myCall)"
+            emailBody = """
+            Hello \(targetCall),
+
+            Thanks for the nice QSO\(bandMention). I would love to exchange QSL cards with you. Please let me know if you prefer direct or via bureau.\(qsoDetailsBlock)
+
+            73,
+            \(myCall)
+            """
+            
         case "Sked Request":
+            let skedBands = !qsoBand.isEmpty ? qsoBand : "20m or 15m"
             emailSubject = "Sked Request - \(myCall)"
-            emailBody = "Hi \(targetCall),\n\nI am trying to work your DXCC. Are you available for a sked on 20m or 15m sometime this week?\n\nBest 73,\n\(myCall)"
+            emailBody = """
+            Hi \(targetCall),
+
+            I am trying to work your DXCC. Are you available for a sked on \(skedBands) sometime this week?
+
+            Best 73,
+            \(myCall)
+            """
+            
         case "LoTW Confirmation":
-            emailSubject = "LoTW Confirmation Reminder - \(myCall)"
-            emailBody = "Hello \(targetCall),\n\nJust a quick reminder: could you please upload our recent QSO to LoTW? It would help me a lot with my DXCC award.\n\nThank you & 73,\n\(myCall)"
+            emailSubject = "LoTW Confirmation Reminder\(bandTag) - \(myCall)"
+            emailBody = """
+            Hello \(targetCall),
+
+            Just a quick reminder regarding our QSO\(bandMention):
+            Could you please upload our QSO to LoTW or QRZ? It would help me a lot with my DXCC and Band awards.\(qsoDetailsBlock)
+
+            Thank you & 73,
+            \(myCall)
+            """
+            
         default:
             break
         }
+    }
+    
+    private func formatDate(_ rawDate: String) -> String {
+        guard rawDate.count == 8 else { return rawDate }
+        let y = rawDate.prefix(4)
+        let m = rawDate.dropFirst(4).prefix(2)
+        let d = rawDate.suffix(2)
+        return "\(y)-\(m)-\(d)"
     }
     
     private func sendMail() {
@@ -170,7 +260,6 @@ struct EmailComposerView: View {
                     self.appState.showAlert = true
                     self.dismiss()
                 } else {
-                    // Show raw debug terminal inline!
                     self.smtpDebugOutput = log
                     self.showDebugLog = true
                 }
