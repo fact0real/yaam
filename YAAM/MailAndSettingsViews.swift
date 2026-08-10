@@ -173,7 +173,6 @@ struct EmailComposerView: View {
         let targetCall = appState.selectedEmailCallsign
         
         let qsoBand = selectedQSO?["BAND"].trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let qsoMode = selectedQSO?["MODE"].trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let rawDate = selectedQSO?["QSO_DATE"].trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let qsoTime = selectedQSO?["TIME_ON"].trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let qsoFreq = selectedQSO?["FREQ"].trimmingCharacters(in: .whitespacesAndNewlines) ?? ""

@@ -690,7 +690,7 @@ class AppState: NSObject, ObservableObject {
         
         if FileManager.default.fileExists(atPath: url.path) {
             appendLog("Loading Master Logbook for \(currentStationCallsign)...")
-            guard let content = try? String(contentsOfFile: url.path, encoding: .utf8) ?? String(contentsOfFile: url.path, encoding: .isoLatin1) else { return }
+            guard let content = (try? String(contentsOfFile: url.path, encoding: .utf8)) ?? (try? String(contentsOfFile: url.path, encoding: .isoLatin1)) else { return }
             let (headers, records) = parseADIF(content: content)
             self.tableHeaders = headers
             self.qsoRecords = records.enumerated().map { QSORecordModel(index: $0 + 1, fields: $1) }
@@ -753,7 +753,7 @@ class AppState: NSObject, ObservableObject {
         
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
-            guard let content = try? String(contentsOfFile: url.path, encoding: .utf8) ?? String(contentsOfFile: url.path, encoding: .isoLatin1) else {
+            guard let content = (try? String(contentsOfFile: url.path, encoding: .utf8)) ?? (try? String(contentsOfFile: url.path, encoding: .isoLatin1)) else {
                 DispatchQueue.main.async { self.isLoading = false; self.appendLog("Error: Unable to read guest file.") }
                 return
             }
@@ -786,7 +786,7 @@ class AppState: NSObject, ObservableObject {
                 if !self.isMasterMode { self.loadMasterLogbook() }
             }
             
-            guard let content = try? String(contentsOfFile: url.path, encoding: .utf8) ?? String(contentsOfFile: url.path, encoding: .isoLatin1) else {
+            guard let content = (try? String(contentsOfFile: url.path, encoding: .utf8)) ?? (try? String(contentsOfFile: url.path, encoding: .isoLatin1)) else {
                 DispatchQueue.main.async { self.isLoading = false; self.appendLog("Error reading file encoding.") }
                 return
             }
