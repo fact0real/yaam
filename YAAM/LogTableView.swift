@@ -122,6 +122,21 @@ struct LogTableView: View {
                 
                 Divider().frame(height: 14)
                 
+                // QRZ Re-Authentication Button
+                Button(action: { appState.forceQRZReLogin() }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "key.fill")
+                            .foregroundColor(.green)
+                        Text("QRZ Login")
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                    }
+                }
+                .buttonStyle(.plain)
+                .help("Re-authenticate with QRZ.com to refresh expired session cookies")
+                
+                Divider().frame(height: 14)
+                
                 // SMTP Settings Button
                 Button(action: { appState.showSMTPSettings = true }) {
                     HStack(spacing: 4) {
