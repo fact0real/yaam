@@ -111,7 +111,7 @@ func countryToFlag(_ country: String) -> String {
     case "cocos (keeling) is.": return "🇨🇨"
 
     // MARK: - Americas & Caribbean
-    case "belize": return "🇧🇿"
+    case "belize": return "🇧ℤ"
     case "united states", "united states of america", "usa", "u.s.a.": return "🇺🇸"
     case "canada": return "🇨🇦"
     case "mexico": return "🇲🇽"
@@ -158,7 +158,7 @@ func countryToFlag(_ country: String) -> String {
     case "ghana": return "🇬🇭"
     case "senegal": return "🇸🇳"
     case "cote d'ivoire", "ivory coast": return "🇨🇮"
-    case "tanzania": return "🇹ℤ"
+    case "tanzania": return "🇹🇿"
     case "uganda": return "🇺🇬"
     case "zimbabwe": return "🇿🇼"
     case "zambia": return "🇿🇲"
@@ -269,7 +269,7 @@ func countryToFlag(_ country: String) -> String {
 
     // MARK: - Oceania & Pacific
     case "australia": return "🇦🇺"
-    case "new zealand": return "🇳🇿"
+    case "new zealand": return "🇳ℤ"
     case "papua new guinea": return "🇵🇬"
     case "new caledonia": return "🇳🇨"
     case "french polynesia": return "🇵🇫"
@@ -306,7 +306,7 @@ func countryToFlag(_ country: String) -> String {
     if clean.contains("azores") { return "🇵🇹" }
     if clean.contains("balearic") { return "🇪🇸" }
     if clean.contains("bonaire") { return "🇧🇶" }
-    if clean.contains("belize") { return "🇧🇿" }
+    if clean.contains("belize") { return "🇧ℤ" }
     if clean.contains("benin") { return "🇧🇯" }
     if clean.contains("curacao") { return "🇨🇼" }
     if clean.contains("galapagos") { return "🇪🇨" }
@@ -413,38 +413,34 @@ struct QSORecordModel: Identifiable {
     }
 }
 
-// MARK: - Targeted QRZ #qem Event Trigger Scraper Engine (With Session Cookie Injection)
+// MARK: - Proven Native QRZ Scraper Engine (Simple & Reliable)
 @MainActor
 class QRZWebKitScraper: NSObject, WKNavigationDelegate {
     static let shared = QRZWebKitScraper()
     private var webView: WKWebView!
     private var continuation: CheckedContinuation<String?, Never>?
-    
+
     override init() {
         super.init()
         let config = WKWebViewConfiguration()
+        // Shares WebKit cookie store naturally with QRZLoginView!
         config.websiteDataStore = .default()
-        
+
         self.webView = WKWebView(frame: CGRect(x: 0, y: 0, width: 1024, height: 768), configuration: config)
         self.webView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
         self.webView.navigationDelegate = self
     }
-    
+
     func fetchEmail(for callsign: String) async -> String? {
         guard let url = URL(string: "https://www.qrz.com/db/\(callsign)") else { return nil }
-        
+
         return await withCheckedContinuation { continuation in
             self.continuation = continuation
-            var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: 15)
-            
-            if let savedCookie = UserDefaults.standard.string(forKey: "qrzSessionCookie"), !savedCookie.isEmpty {
-                request.setValue(savedCookie, forHTTPHeaderField: "Cookie")
-            }
-            
+            let request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: 15)
             self.webView.load(request)
         }
     }
-    
+
     // MARK: - WKNavigationDelegate
     nonisolated func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
@@ -459,13 +455,13 @@ class QRZWebKitScraper: NSObject, WKNavigationDelegate {
                         qemSpan.dispatchEvent(evt);
                         qemSpan.click();
                     }
-                    
+
                     var text = (qemSpan.innerText || qemSpan.textContent || "").trim();
                     if (text && text.includes('@') && text.includes('.')) {
                         return text;
                     }
                 }
-                
+
                 var mailtoAnchor = document.querySelector('a[href^="mailto:"]');
                 if (mailtoAnchor) {
                     var href = mailtoAnchor.getAttribute('href').replace('mailto:', '').split('?')[0].trim();
@@ -473,15 +469,15 @@ class QRZWebKitScraper: NSObject, WKNavigationDelegate {
                         return href;
                     }
                 }
-                
+
                 return "";
             })();
             """
-            
+
             webView.evaluateJavaScript(jsScript) { [weak self] result, _ in
                 let extracted = result as? String
                 let email = (extracted?.isEmpty == false) ? extracted : nil
-                
+
                 Task { @MainActor in
                     let cont = self?.continuation
                     self?.continuation = nil
@@ -490,7 +486,7 @@ class QRZWebKitScraper: NSObject, WKNavigationDelegate {
             }
         }
     }
-    
+
     nonisolated func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         Task { @MainActor in
             let cont = self.continuation
@@ -498,7 +494,7 @@ class QRZWebKitScraper: NSObject, WKNavigationDelegate {
             cont?.resume(returning: nil)
         }
     }
-    
+
     nonisolated func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         Task { @MainActor in
             let cont = self.continuation
@@ -531,7 +527,7 @@ class AppState: NSObject, ObservableObject {
     @Published var showSMTPSettings: Bool = false
     @Published var selectedEmailCallsign: String = ""
     @Published var selectedEmailAddress: String = ""
-    @Published var selectedEmailQSO: QSORecordModel? = nil // ⭐️ FIX: Stores exact clicked row
+    @Published var selectedEmailQSO: QSORecordModel? = nil
     
     // QRZ Rank & Login States
     @Published var isFetchingRank: Bool = false
@@ -733,7 +729,6 @@ class AppState: NSObject, ObservableObject {
         return records
     }
 
-    // MARK: - Row Selection Engine (19 Rows Limit Guard)
     func toggleRecordSelection(_ id: UUID) {
         if selectedRecordIDs.contains(id) {
             selectedRecordIDs.remove(id)
@@ -793,29 +788,19 @@ class AppState: NSObject, ObservableObject {
         }
     }
     
-    // MARK: - Force QRZ Re-Authentication Engine
     func forceQRZReLogin() {
-        appendLog("🔑 Clearing expired QRZ cookies and launching Authenticator...")
-        
-        UserDefaults.standard.removeObject(forKey: "qrzSessionCookie")
-        
-        let store = WKWebsiteDataStore.default().httpCookieStore
-        store.getAllCookies { cookies in
-            let group = DispatchGroup()
-            for cookie in cookies where cookie.domain.contains("qrz.com") {
-                group.enter()
-                store.delete(cookie) {
-                    group.leave()
-                }
-            }
-            group.notify(queue: .main) {
-                self.showQRZLoginSheet = true
-            }
-        }
+        appendLog("🔑 Opening QRZ.com Authenticator...")
+        self.showQRZLoginSheet = true
     }
     
-    // MARK: - LIVE QRZ LEADERBOARD ENGINE
     func fetchQRZLeaderboard(for searchedCallsign: String) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in
+                self?.fetchQRZLeaderboard(for: searchedCallsign)
+            }
+            return
+        }
+
         let ownerCall = currentStationCallsign
         let targetCall = searchedCallsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         
@@ -829,15 +814,19 @@ class AppState: NSObject, ObservableObject {
         if ownerRankData == nil || ownerRankData?.callsign?.uppercased() != ownerCall {
             group.enter()
             fetchSingleRank(callsign: ownerCall) { [weak self] (result: QRZRankResponse?) in
-                self?.ownerRankData = result
-                group.leave()
+                Task { @MainActor in
+                    self?.ownerRankData = result
+                    group.leave()
+                }
             }
         }
         
         group.enter()
         fetchSingleRank(callsign: targetCall) { [weak self] (result: QRZRankResponse?) in
-            self?.qrzRankData = result
-            group.leave()
+            Task { @MainActor in
+                self?.qrzRankData = result
+                group.leave()
+            }
         }
         
         group.notify(queue: .main) { [weak self] in
@@ -867,7 +856,6 @@ class AppState: NSObject, ObservableObject {
         }.resume()
     }
     
-    // MARK: - Internal Database Recent Files Operations
     private var internalDatabaseURL: URL? {
         let fm = FileManager.default
         guard let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return nil }
@@ -913,7 +901,6 @@ class AppState: NSObject, ObservableObject {
         }
     }
     
-    // MARK: - Workspace DB Logic (Multi-Profile)
     var currentStationCallsign: String {
         let call = UserDefaults.standard.string(forKey: "stationCallsign")?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
         return call.isEmpty ? "DEFAULT" : call
@@ -958,7 +945,6 @@ class AppState: NSObject, ObservableObject {
         }
     }
 
-    // MARK: - Smart Dialog: Open vs Merge
     func importADIFDialog() {
         let panel = NSOpenPanel()
         var types: [UTType] = [.plainText]
@@ -987,7 +973,6 @@ class AppState: NSObject, ObservableObject {
         }
     }
     
-    // 1. GUEST MODE: Just view & edit the external file
     func loadGuestLog(from url: URL) {
         isLoading = true
         isMasterMode = false
@@ -1019,7 +1004,6 @@ class AppState: NSObject, ObservableObject {
         }
     }
     
-    // 2. MASTER MODE: Smart deduplication and merge
     private func mergeADIFIntoMaster(from url: URL) {
         isLoading = true
         appendLog("Analyzing & Merging '\(url.lastPathComponent)' into Master Logbook...")
@@ -1053,11 +1037,10 @@ class AppState: NSObject, ObservableObject {
                     let key = tempModel.uniqueKey
                     
                     if !existingKeys.contains(key) {
-                        self.qsoRecords.append(tempModel) // Brand new QSO
+                        self.qsoRecords.append(tempModel)
                         existingKeys.insert(key)
                         addedCount += 1
                     } else {
-                        // Duplicate found! Update QSL status if new file has confirmations
                         if let idx = self.qsoRecords.firstIndex(where: { $0.uniqueKey == key }) {
                             var updated = false
                             if tempModel.isConfirmed && !self.qsoRecords[idx].isConfirmed {
@@ -1077,12 +1060,10 @@ class AppState: NSObject, ObservableObject {
         }
     }
     
-    // BACKWARD COMPATIBILITY
     func loadADIFFile(from url: URL) {
         loadGuestLog(from: url)
     }
 
-    // MARK: - STANDALONE CLOUD LOGBOOK ENGINE (FULL HISTORICAL DOWNLOAD)
     private var cloudLogbookFileURL: URL? {
         let fm = FileManager.default
         guard let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return nil }
@@ -1181,7 +1162,6 @@ class AppState: NSObject, ObservableObject {
         }.resume()
     }
 
-    // MARK: - Targeted / Delta Enrichment Engine (Supports Cancellation, QRZ_URL & Auto-Deselect)
     func stopEnrichment() {
         enrichmentTask?.cancel()
         enrichmentTask = nil
@@ -1277,7 +1257,6 @@ class AppState: NSObject, ObservableObject {
         }
     }
     
-    // MARK: - Helper Async Rank Fetcher
     private func asyncFetchRank(for callsign: String) async -> (String, String, String) {
         guard let url = URL(string: "https://qrz-rank.asis.sh/api/rank/\(callsign)") else {
             return ("", "", "")
@@ -1295,7 +1274,6 @@ class AppState: NSObject, ObservableObject {
         return ("", "", "")
     }
 
-    // MARK: - Bulletproof Native SMTP Engine (Fixed Default Fallbacks)
     func sendEmail(to recipient: String, subject: String, body: String, completion: @escaping (Bool, String) -> Void) {
         
         let rawHost = UserDefaults.standard.string(forKey: "smtpHost")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -1388,7 +1366,6 @@ class AppState: NSObject, ObservableObject {
         }
     }
 
-    // MARK: - Smart Dual Cloud QSL Sync Engine (Full History & Incremental)
     func syncConfirmations(forceFullSync: Bool = false) {
         guard !qsoRecords.isEmpty else {
             appendLog("Error: No log loaded to sync.")
