@@ -1319,6 +1319,9 @@ class AppState: NSObject, ObservableObject {
     private var enrichmentTask: Task<Void, Never>? = nil
     private var sdrControlSyncTimer: Timer?
     private var externalADIFSyncTimer: Timer?
+    private var qrzEmailBackfillTimer: Timer?
+    private var qrzEmailBackfillBatchNumber = 0
+    private var isQRZEmailBackfillRunning = false
     
     @Published var showEmailComposer: Bool = false
     @Published var showSMTPSettings: Bool = false
@@ -1341,8 +1344,8 @@ class AppState: NSObject, ObservableObject {
     
     // Search & Smart Sorting States
     @Published var searchText: String = ""
-    @Published var sortHeader: String? = nil
-    @Published var sortAscending: Bool = true
+    @Published var sortHeader: String? = "QSO_DATE"
+    @Published var sortAscending: Bool = false
     
     // Workspace File Tracking
     @Published var loadedFileURL: URL? = nil
@@ -1377,6 +1380,7 @@ class AppState: NSObject, ObservableObject {
         loadEmailHistory()
         configureExternalADIFAutoSync()
         configureSDRControlPeriodicSync()
+        configureQRZEmailBackfillTimer()
     }
 
     func playActivitySound(_ sound: ActivitySound) {
@@ -1614,7 +1618,11 @@ class AppState: NSObject, ObservableObject {
                 let v2 = r2[sortKey].trimmingCharacters(in: .whitespaces)
                 
                 let isAscending: Bool
-                if let d1 = Double(v1), let d2 = Double(v2) {
+                if sortKey == "QSO_DATE" {
+                    let t1 = r1["TIME_ON"].trimmingCharacters(in: .whitespaces)
+                    let t2 = r2["TIME_ON"].trimmingCharacters(in: .whitespaces)
+                    isAscending = "\(v1)\(t1)" < "\(v2)\(t2)"
+                } else if let d1 = Double(v1), let d2 = Double(v2) {
                     isAscending = d1 < d2
                 } else if sortKey == "QSO_DATE" || sortKey == "TIME_ON" || sortKey == "TIME_OFF" {
                     isAscending = v1 < v2
@@ -1670,6 +1678,11 @@ class AppState: NSObject, ObservableObject {
     func appendLog(_ text: String) {
         DispatchQueue.main.async {
             self.logText += "\(text)\n"
+            let maxLogLines = 800
+            let lines = self.logText.split(separator: "\n", omittingEmptySubsequences: false)
+            if lines.count > maxLogLines {
+                self.logText = lines.suffix(maxLogLines).joined(separator: "\n") + "\n"
+            }
         }
     }
     
@@ -1773,6 +1786,25 @@ class AppState: NSObject, ObservableObject {
             self?.qrzRankData = self?.qrzComparisonRankData.first
             self?.isFetchingRank = false
             self?.appendLog("Leaderboard multi comparison loaded for \(results.count) callsigns.")
+        }
+    }
+
+    func refreshOwnerQRZRankIfNeeded() {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in
+                self?.refreshOwnerQRZRankIfNeeded()
+            }
+            return
+        }
+
+        let ownerCall = currentStationCallsign
+        guard !ownerCall.isEmpty else { return }
+        guard ownerRankData == nil || ownerRankData?.callsign?.uppercased() != ownerCall else { return }
+
+        fetchSingleRank(callsign: ownerCall) { [weak self] result in
+            Task { @MainActor in
+                self?.ownerRankData = result
+            }
         }
     }
 
@@ -2697,7 +2729,7 @@ class AppState: NSObject, ObservableObject {
     func enrichLogData(targetCallsigns: Set<String>? = nil) {
         guard !qsoRecords.isEmpty else { return }
 
-        let newHeaders = ["RANK_QSO", "RANK_BAND", "RANK_DXCC", "EMAIL", "QRZ_URL", "APP_YAAM_ENRICHED"]
+        let newHeaders = ["RANK_QSO", "RANK_BAND", "RANK_DXCC", "EMAIL", "QRZ_URL", "APP_YAAM_ENRICHED", "APP_YAAM_EMAIL_CHECKED"]
         for header in newHeaders {
             if !tableHeaders.contains(header) {
                 tableHeaders.append(header)
@@ -2764,6 +2796,7 @@ class AppState: NSObject, ObservableObject {
 
                         self.qsoRecords[i].fields["QRZ_URL"] = "https://www.qrz.com/db/\(callsign)"
                         self.qsoRecords[i].fields["APP_YAAM_ENRICHED"] = "Y"
+                        self.qsoRecords[i].fields["APP_YAAM_EMAIL_CHECKED"] = Self.adifDateFormatter.string(from: Date())
                     }
                 }
                 self.objectWillChange.send()
@@ -2783,6 +2816,128 @@ class AppState: NSObject, ObservableObject {
                 self.appendLog("✅ Enrichment complete & Workspace Auto-Saved!")
             }
         }
+    }
+
+    private func configureQRZEmailBackfillTimer() {
+        qrzEmailBackfillTimer?.invalidate()
+        let timer = Timer(timeInterval: 300, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                await self?.backfillMissingQRZEmailsBatch()
+            }
+        }
+        timer.tolerance = 30
+        RunLoop.main.add(timer, forMode: .common)
+        qrzEmailBackfillTimer = timer
+
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 8_000_000_000)
+            await self.backfillMissingQRZEmailsBatch()
+        }
+    }
+
+    func backfillMissingQRZEmailsNow() {
+        Task { @MainActor in
+            await backfillMissingQRZEmailsBatch()
+        }
+    }
+
+    @MainActor
+    private func backfillMissingQRZEmailsBatch() async {
+        guard !qsoRecords.isEmpty, !isEnriching else { return }
+        guard !isQRZEmailBackfillRunning else {
+            appendLog("QRZ email backfill skipped: previous batch is still running.")
+            return
+        }
+        guard await QRZWebKitScraper.shared.hasQRZCookies() else {
+            appendLog("QRZ email backfill skipped: no saved QRZ.com session cookies. Open QRZ Login, sign in, then click Done / Save Session.")
+            return
+        }
+        isQRZEmailBackfillRunning = true
+        defer { isQRZEmailBackfillRunning = false }
+
+        for header in ["EMAIL", "QRZ_URL", "APP_YAAM_ENRICHED", "APP_YAAM_EMAIL_CHECKED"] where !tableHeaders.contains(header) {
+            tableHeaders.append(header)
+        }
+
+        let callsigns = missingEmailCallsignBatch(limit: 40)
+        guard !callsigns.isEmpty else {
+            appendLog("QRZ email backfill: no unchecked callsigns without email remain.")
+            return
+        }
+
+        qrzEmailBackfillBatchNumber += 1
+        let batchNumber = qrzEmailBackfillBatchNumber
+        appendLog("QRZ email backfill batch #\(batchNumber): checking \(callsigns.count) callsign(s), starting at \(callsigns.first ?? "-") and ending at \(callsigns.last ?? "-").")
+        var updatedEmailCount = 0
+        var checkedWithoutEmailCount = 0
+        var savedEmails: [String] = []
+        var noEmailCallsigns: [String] = []
+        var detailLines: [String] = []
+
+        for (offset, callsign) in callsigns.enumerated() {
+            if Task.isCancelled { break }
+
+            detailLines.append("[\(offset + 1)/\(callsigns.count)] \(callsign): checking")
+            let email = await fetchQRZEmail(for: callsign)
+            let checkedMarker = Self.adifDateFormatter.string(from: Date())
+
+            for index in qsoRecords.indices {
+                let rowCallsign = qsoRecords[index]["CALL"]
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .uppercased()
+                guard rowCallsign == callsign else { continue }
+
+                qsoRecords[index].fields["QRZ_URL"] = "https://www.qrz.com/db/\(callsign)"
+                qsoRecords[index].fields["APP_YAAM_EMAIL_CHECKED"] = checkedMarker
+                if let email, !email.isEmpty {
+                    qsoRecords[index].fields["EMAIL"] = email
+                    qsoRecords[index].fields["APP_YAAM_ENRICHED"] = "Y"
+                }
+            }
+
+            if let email, !email.isEmpty {
+                updatedEmailCount += 1
+                savedEmails.append("\(callsign)=\(email)")
+                detailLines.append("[\(offset + 1)/\(callsigns.count)] \(callsign): saved \(email)")
+            } else {
+                checkedWithoutEmailCount += 1
+                noEmailCallsigns.append(callsign)
+                detailLines.append("[\(offset + 1)/\(callsigns.count)] \(callsign): no public email; marked checked")
+            }
+
+            try? await Task.sleep(nanoseconds: 450_000_000)
+        }
+
+        objectWillChange.send()
+        autoSaveActiveWorkspace()
+        let savedSummary = savedEmails.isEmpty ? "none" : savedEmails.joined(separator: ", ")
+        let noEmailSummary = noEmailCallsigns.isEmpty ? "none" : noEmailCallsigns.joined(separator: ", ")
+        appendLog("""
+        QRZ email backfill batch #\(batchNumber) details:
+        \(detailLines.joined(separator: "\n"))
+        QRZ email backfill batch #\(batchNumber) complete: \(updatedEmailCount) email(s) saved [\(savedSummary)]; \(checkedWithoutEmailCount) checked/no email [\(noEmailSummary)].
+        """)
+    }
+
+    private func missingEmailCallsignBatch(limit: Int) -> [String] {
+        var seen = Set<String>()
+        var callsigns: [String] = []
+
+        for record in qsoRecords {
+            let callsign = record["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            guard !callsign.isEmpty, !seen.contains(callsign) else { continue }
+            guard record["EMAIL"].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+            guard record["APP_YAAM_EMAIL_CHECKED"].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+
+            seen.insert(callsign)
+            callsigns.append(callsign)
+
+            if callsigns.count >= limit {
+                break
+            }
+        }
+
+        return callsigns
     }
     
     private func asyncFetchRank(for callsign: String) async -> (String, String, String) {
@@ -2823,7 +2978,7 @@ class AppState: NSObject, ObservableObject {
             return nil
         }
 
-        for header in ["EMAIL", "QRZ_URL", "APP_YAAM_ENRICHED"] where !tableHeaders.contains(header) {
+        for header in ["EMAIL", "QRZ_URL", "APP_YAAM_ENRICHED", "APP_YAAM_EMAIL_CHECKED"] where !tableHeaders.contains(header) {
             tableHeaders.append(header)
         }
 
@@ -2837,6 +2992,7 @@ class AppState: NSObject, ObservableObject {
             qsoRecords[index].fields["EMAIL"] = email
             qsoRecords[index].fields["QRZ_URL"] = "https://www.qrz.com/db/\(normalizedCallsign)"
             qsoRecords[index].fields["APP_YAAM_ENRICHED"] = "Y"
+            qsoRecords[index].fields["APP_YAAM_EMAIL_CHECKED"] = Self.adifDateFormatter.string(from: Date())
             updatedRows += 1
         }
 
@@ -2962,7 +3118,7 @@ class AppState: NSObject, ObservableObject {
             return
         }
 
-        for header in ["EMAIL", "QRZ_URL", "APP_YAAM_ENRICHED"] where !tableHeaders.contains(header) {
+        for header in ["EMAIL", "QRZ_URL", "APP_YAAM_ENRICHED", "APP_YAAM_EMAIL_CHECKED"] where !tableHeaders.contains(header) {
             tableHeaders.append(header)
         }
 
@@ -2977,6 +3133,7 @@ class AppState: NSObject, ObservableObject {
             qsoRecords[index].fields["EMAIL"] = email
             qsoRecords[index].fields["QRZ_URL"] = "https://www.qrz.com/db/\(normalizedCallsign)"
             qsoRecords[index].fields["APP_YAAM_ENRICHED"] = "Y"
+            qsoRecords[index].fields["APP_YAAM_EMAIL_CHECKED"] = Self.adifDateFormatter.string(from: Date())
             updatedRows += 1
         }
 
@@ -3675,15 +3832,25 @@ class AppState: NSObject, ObservableObject {
                                         let date = self.cleanDate(rec["QSO_DATE"] ?? "")
                                         let band = self.cleanBand(rec["BAND"] ?? "")
                                         let lotwRcvd = (rec["LOTW_QSL_RCVD"] ?? rec["QSL_RCVD"] ?? "").uppercased()
+                                        let lotwConfirmedDate = self.cleanDate(
+                                            rec["LOTW_QSLRDATE"] ??
+                                            rec["APP_LOTW_QSLRDATE"] ??
+                                            rec["QSLRDATE"] ??
+                                            ""
+                                        )
                                         
                                         if lotwRcvd == "Y" || lotwRcvd == "V" {
                                             for i in 0..<self.qsoRecords.count {
-                                                if !self.qsoRecords[i].isConfirmed || self.qsoRecords[i].fields["LOTW_QSL_RCVD"] != "Y" {
-                                                    let qCall = self.normalizeCallsign(self.qsoRecords[i]["CALL"])
-                                                    let qDate = self.cleanDate(self.qsoRecords[i]["QSO_DATE"])
-                                                    let qBand = self.cleanBand(self.qsoRecords[i]["BAND"])
-                                                    
-                                                    if qCall == call && qDate == date && (qBand.isEmpty || band.isEmpty || qBand == band) {
+                                                let qCall = self.normalizeCallsign(self.qsoRecords[i]["CALL"])
+                                                let qDate = self.cleanDate(self.qsoRecords[i]["QSO_DATE"])
+                                                let qBand = self.cleanBand(self.qsoRecords[i]["BAND"])
+                                                
+                                                if qCall == call && qDate == date && (qBand.isEmpty || band.isEmpty || qBand == band) {
+                                                    if !lotwConfirmedDate.isEmpty {
+                                                        self.qsoRecords[i].fields["LOTW_QSLRDATE"] = lotwConfirmedDate
+                                                    }
+
+                                                    if !self.qsoRecords[i].isConfirmed || self.qsoRecords[i].fields["LOTW_QSL_RCVD"] != "Y" {
                                                         self.qsoRecords[i].fields["LOTW_QSL_RCVD"] = "Y"
                                                         self.qsoRecords[i].fields["QSL_RCVD"] = "Y"
                                                         self.rememberConfirmedRecord(self.qsoRecords[i])
@@ -3716,16 +3883,28 @@ class AppState: NSObject, ObservableObject {
                         DispatchQueue.main.async {
                             for rec in serverRecords {
                                 guard self.isQRZConfirmedRecord(rec) else { continue }
+                                let qrzConfirmedDate = self.cleanDate(
+                                    rec["APP_QRZLOG_QSLDATE"] ??
+                                    rec["QRZLOG_QSLRDATE"] ??
+                                    rec["APP_QRZLOG_QSLRDATE"] ??
+                                    rec["QSLRDATE"] ??
+                                    ""
+                                )
 
                                 for i in 0..<self.qsoRecords.count {
                                     guard self.qrzRecord(rec, matches: self.qsoRecords[i]) else { continue }
-                                    guard self.qsoRecords[i]["QRZLOG_QSL_RCVD"].uppercased() != "Y" else { continue }
 
-                                    self.qsoRecords[i].fields["QRZLOG_QSL_RCVD"] = "Y"
-                                    self.qsoRecords[i].fields["QSL_RCVD"] = "Y"
-                                    self.qsoRecords[i].fields["APP_QRZLOG_STATUS"] = "CONFIRMED"
-                                    self.rememberConfirmedRecord(self.qsoRecords[i])
-                                    newlyConfirmedCount += 1
+                                    if !qrzConfirmedDate.isEmpty {
+                                        self.qsoRecords[i].fields["APP_QRZLOG_QSLDATE"] = qrzConfirmedDate
+                                    }
+
+                                    if self.qsoRecords[i]["QRZLOG_QSL_RCVD"].uppercased() != "Y" {
+                                        self.qsoRecords[i].fields["QRZLOG_QSL_RCVD"] = "Y"
+                                        self.qsoRecords[i].fields["QSL_RCVD"] = "Y"
+                                        self.qsoRecords[i].fields["APP_QRZLOG_STATUS"] = "CONFIRMED"
+                                        self.rememberConfirmedRecord(self.qsoRecords[i])
+                                        newlyConfirmedCount += 1
+                                    }
                                 }
                             }
                         }
@@ -3744,16 +3923,28 @@ class AppState: NSObject, ObservableObject {
                                     DispatchQueue.main.async {
                                         for rec in serverRecords {
                                             guard self.isQRZConfirmedRecord(rec) else { continue }
+                                            let qrzConfirmedDate = self.cleanDate(
+                                                rec["APP_QRZLOG_QSLDATE"] ??
+                                                rec["QRZLOG_QSLRDATE"] ??
+                                                rec["APP_QRZLOG_QSLRDATE"] ??
+                                                rec["QSLRDATE"] ??
+                                                ""
+                                            )
 
                                             for i in 0..<self.qsoRecords.count {
                                                 guard self.qrzRecord(rec, matches: self.qsoRecords[i]) else { continue }
-                                                guard self.qsoRecords[i]["QRZLOG_QSL_RCVD"].uppercased() != "Y" else { continue }
 
-                                                self.qsoRecords[i].fields["QRZLOG_QSL_RCVD"] = "Y"
-                                                self.qsoRecords[i].fields["QSL_RCVD"] = "Y"
-                                                self.qsoRecords[i].fields["APP_QRZLOG_STATUS"] = "CONFIRMED"
-                                                self.rememberConfirmedRecord(self.qsoRecords[i])
-                                                newlyConfirmedCount += 1
+                                                if !qrzConfirmedDate.isEmpty {
+                                                    self.qsoRecords[i].fields["APP_QRZLOG_QSLDATE"] = qrzConfirmedDate
+                                                }
+
+                                                if self.qsoRecords[i]["QRZLOG_QSL_RCVD"].uppercased() != "Y" {
+                                                    self.qsoRecords[i].fields["QRZLOG_QSL_RCVD"] = "Y"
+                                                    self.qsoRecords[i].fields["QSL_RCVD"] = "Y"
+                                                    self.qsoRecords[i].fields["APP_QRZLOG_STATUS"] = "CONFIRMED"
+                                                    self.rememberConfirmedRecord(self.qsoRecords[i])
+                                                    newlyConfirmedCount += 1
+                                                }
                                             }
                                         }
                                     }

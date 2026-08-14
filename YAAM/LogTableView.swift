@@ -21,11 +21,13 @@ struct LogTableView: View {
 
     private let preferredColumnOrder = [
         "QSO_DATE", "TIME_ON", "CALL", "FREQ", "BAND", "MODE", "RST_SENT", "RST_RCVD",
-        "NAME", "QTH", "COMMENT", "CONT", "COUNTRY", "DXCC", "CQZ", "ITUZ",
-        "LOTW_QSL_RCVD", "QSL_RCVD", "QRZLOG_QSL_RCVD", "EMAIL", "APP_YAAM_LAST_EMAIL"
+        "NAME", "QTH", "CONT", "COUNTRY", "DXCC", "CQZ", "ITUZ",
+        "LOTW_QSL_RCVD", "QSL_RCVD", "QRZLOG_QSL_RCVD", "EMAIL", "QRZ_URL"
     ]
 
     var body: some View {
+        let visibleRecords = appState.filteredRecords
+
         VStack(spacing: 0) {
             // MARK: - Toolbar & Quick Actions Summary Bar
             HStack(spacing: 10) {
@@ -108,7 +110,14 @@ struct LogTableView: View {
                     .buttonStyle(.plain)
                     .help("Clear row selections")
                 } else {
-                    Button(action: { appState.enrichLogData() }) {
+                    Menu {
+                        Button("Enrich Today's QSOs") {
+                            appState.enrichLogData()
+                        }
+                        Button("Backfill Missing QRZ Emails Now") {
+                            appState.backfillMissingQRZEmailsNow()
+                        }
+                    } label: {
                         HStack(spacing: 4) {
                             Image(systemName: "wand.and.stars")
                                 .foregroundColor(.purple)
@@ -117,6 +126,7 @@ struct LogTableView: View {
                                 .fontWeight(.bold)
                         }
                     }
+                    .help("With no selected rows, Enrich Data processes today's QSOs. Use the menu to manually backfill missing QRZ emails.")
                     .buttonStyle(.plain)
                     .disabled(appState.qsoRecords.isEmpty)
                 }
@@ -333,7 +343,7 @@ struct LogTableView: View {
                         
                         ScrollView(.vertical, showsIndicators: true) {
                             LazyVStack(alignment: .leading, spacing: 0) {
-                                ForEach(appState.filteredRecords) { record in
+                                ForEach(visibleRecords) { record in
                                     rowView(for: record)
                                 }
                             }
@@ -363,7 +373,7 @@ struct LogTableView: View {
                 }
                 
                 if appState.filterCriteria.isActive || !appState.searchText.isEmpty {
-                    Text("Filtered: \(appState.filteredRecords.count) / Total: \(appState.qsoRecords.count)")
+                    Text("Filtered: \(visibleRecords.count) / Total: \(appState.qsoRecords.count)")
                         .font(.system(.caption, design: .monospaced))
                         .bold()
                         .foregroundColor(.orange)
@@ -550,18 +560,12 @@ struct LogTableView: View {
                             
                             if header == "QRZ_URL" || header == "QRZ" {
                                 let targetUrlStr = val.isEmpty ? "https://www.qrz.com/db/\(call)" : val
-                                HStack(spacing: 4) {
-                                    Image(systemName: "safari.fill")
-                                        .font(.system(size: 10))
-                                        .foregroundColor(.blue)
-                                    Text(targetUrlStr)
-                                        .font(.system(size: 10, design: .monospaced))
-                                        .foregroundColor(.blue)
-                                        .underline()
-                                        .lineLimit(1)
-                                }
+                                Image(systemName: "safari.fill")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(.blue)
+                                    .frame(maxWidth: .infinity, alignment: .center)
                                 .onTapGesture {
-                                    if let url = URL(string: "https://www.qrz.com/db/\(call)"), !call.isEmpty {
+                                    if let url = URL(string: targetUrlStr), !call.isEmpty {
                                         NSWorkspace.shared.open(url)
                                     }
                                 }
@@ -572,6 +576,9 @@ struct LogTableView: View {
                                     .font(.system(size: 11, design: .monospaced))
                                     .foregroundColor(.blue)
                                     .underline()
+                                    .onTapGesture(count: 2) {
+                                        startEditing(record: record, header: header, value: val)
+                                    }
                                     .onTapGesture {
                                         appState.selectedEmailCallsign = record["CALL"]
                                         appState.selectedEmailAddress = val
@@ -579,7 +586,7 @@ struct LogTableView: View {
                                         appState.selectedEmailUnconfirmedQSOs = []
                                         appState.showEmailComposer = true
                                     }
-                                    .help("Click to send an email")
+                                    .help("Click to send an email. Double-click or right-click to edit.")
                             }
                             else if header.hasPrefix("RANK_") && !val.isEmpty {
                                 Text(val)
@@ -605,13 +612,20 @@ struct LogTableView: View {
                 .border(Color.gray.opacity(0.2), width: 0.5)
                 .contentShape(Rectangle())
                 .onTapGesture {
-                    if header != "EMAIL" && header != "QRZ_URL" && header != "QRZ" {
-                        editingCellID = record.id
-                        editingHeader = header
-                        editingText = val
+                    if header == "EMAIL" && val.isEmpty {
+                        startEditing(record: record, header: header, value: val)
+                    } else if header != "EMAIL" && header != "QRZ_URL" && header != "QRZ" {
+                        startEditing(record: record, header: header, value: val)
                     }
                 }
                 .contextMenu {
+                    if header != "QRZ_URL" && header != "QRZ" {
+                        Button("Edit \(header)") {
+                            startEditing(record: record, header: header, value: val)
+                        }
+                        Divider()
+                    }
+
                     Button(isSelected ? "Deselect Row #\(record.index)" : "Select Row #\(record.index)") {
                         appState.toggleRecordSelection(record.id)
                     }
@@ -641,11 +655,17 @@ struct LogTableView: View {
         }
     }
 
+    private func startEditing(record: QSORecordModel, header: String, value: String) {
+        editingCellID = record.id
+        editingHeader = header
+        editingText = value
+    }
+
     private func defaultColumnWidth(for header: String) -> CGFloat {
         switch header {
         case "EMAIL": return 150
         case "APP_YAAM_LAST_EMAIL": return 260
-        case "QRZ_URL", "QRZ": return 180
+        case "QRZ_URL", "QRZ": return 34
         case "RANK_QSO", "RANK_BAND", "RANK_DXCC": return 90
         case "QSO_DATE": return 90
         case "TIME_ON", "TIME_OFF": return 75
@@ -706,7 +726,17 @@ struct LogTableView: View {
     }
 
     private func isHiddenByDefault(_ header: String) -> Bool {
-        header.hasPrefix("MY_") || header.hasPrefix("APP_LOTW_") || isMostlyEmpty(header)
+        header.hasPrefix("MY_") ||
+        header.hasPrefix("APP_LOTW_") ||
+        header.hasPrefix("APP_SDR_") ||
+        header == "COMMENT" ||
+        header == "QTH" ||
+        header == "IOTA" ||
+        header == "STATE" ||
+        header == "TX_POWER" ||
+        header == "APP_YAAM_LAST_EMAIL" ||
+        header == "APP_YAAM_EMAIL_CHECKED" ||
+        isMostlyEmpty(header)
     }
 
     private func isLowValueTrailingColumn(_ header: String) -> Bool {
