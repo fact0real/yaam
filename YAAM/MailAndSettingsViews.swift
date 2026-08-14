@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import AppKit
 
 // MARK: - Email Composer Sheet
 struct EmailComposerView: View {
@@ -42,6 +43,20 @@ struct EmailComposerView: View {
         }) ?? appState.qsoRecords.first(where: {
             $0["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == targetCall
         })
+    }
+
+    private var unconfirmedQSOsForRequest: [QSORecordModel] {
+        if !appState.selectedEmailUnconfirmedQSOs.isEmpty {
+            return appState.selectedEmailUnconfirmedQSOs
+        }
+
+        let targetCall = appState.selectedEmailCallsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard !targetCall.isEmpty else { return [] }
+
+        return appState.qsoRecords.filter {
+            $0["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == targetCall &&
+            !$0.isConfirmed
+        }
     }
     
     // Strict Callsign Resolver for My Station
@@ -151,6 +166,7 @@ struct EmailComposerView: View {
                 
                 Button("Cancel") {
                     appState.selectedEmailQSO = nil
+                    appState.selectedEmailUnconfirmedQSOs = []
                     dismiss()
                 }
                 .disabled(isSending)
@@ -180,6 +196,14 @@ struct EmailComposerView: View {
     private func loadTemplate(_ template: String) {
         let myCall = resolvedMyCallsign
         let targetCall = appState.selectedEmailCallsign
+        let requestQSOs = unconfirmedQSOsForRequest
+
+        if !requestQSOs.isEmpty && (template == "QSL Card Request" || template == "LoTW/QRZ Confirmation") {
+            let message = appState.confirmationRequestMessage(callsign: targetCall, templateName: template, qsos: requestQSOs)
+            emailSubject = message.subject
+            emailBody = message.body
+            return
+        }
         
         let qso = currentQSO
         let qsoBand = qso?["BAND"].trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -257,6 +281,28 @@ struct EmailComposerView: View {
     }
     
     private func sendMail() {
+        if let previous = appState.latestEmailHistory(for: appState.selectedEmailCallsign) {
+            let alert = NSAlert()
+            alert.messageText = "Email Already Sent"
+            alert.informativeText = """
+            You already emailed \(appState.selectedEmailCallsign) on \(appState.formattedEmailHistoryDate(previous.date)).
+
+            Previous subject:
+            \(previous.subject)
+
+            Do you still want to send another email?
+            """
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "Send Again")
+            alert.addButton(withTitle: "Cancel")
+
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+        }
+
+        performSendMail()
+    }
+
+    private func performSendMail() {
         isSending = true
         showDebugLog = false
         
@@ -268,6 +314,7 @@ struct EmailComposerView: View {
                     self.appState.alertMessage = "Your email has been dispatched via SMTP."
                     self.appState.showAlert = true
                     self.appState.selectedEmailQSO = nil
+                    self.appState.selectedEmailUnconfirmedQSOs = []
                     self.dismiss()
                 } else {
                     self.smtpDebugOutput = log
@@ -281,6 +328,7 @@ struct EmailComposerView: View {
 // MARK: - SMTP & Station Settings Sheet
 struct SMTPSettingsView: View {
     @Environment(\.dismiss) private var dismiss
+    var embeddedInSettings = false
     @AppStorage("stationCallsign") private var stationCallsign = "EP2AES"
     @AppStorage("smtpHost") private var smtpHost = "smtp.gmail.com"
     @AppStorage("smtpPort") private var smtpPort = "465"
@@ -310,21 +358,27 @@ struct SMTPSettingsView: View {
             }
             .padding(.vertical, 8)
             
-            HStack {
-                Spacer()
-                Button("Save & Close") {
-                    UserDefaults.standard.set(stationCallsign, forKey: "stationCallsign")
-                    UserDefaults.standard.set(smtpHost.isEmpty ? "smtp.gmail.com" : smtpHost, forKey: "smtpHost")
-                    UserDefaults.standard.set(smtpPort.isEmpty ? "465" : smtpPort, forKey: "smtpPort")
-                    UserDefaults.standard.set(smtpUser, forKey: "smtpUser")
-                    UserDefaults.standard.set(smtpPass, forKey: "smtpPass")
-                    
-                    dismiss()
+            if embeddedInSettings {
+                Text("Settings are saved automatically and used by single and bulk QSL email requests.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            } else {
+                HStack {
+                    Spacer()
+                    Button("Save & Close") {
+                        UserDefaults.standard.set(stationCallsign, forKey: "stationCallsign")
+                        UserDefaults.standard.set(smtpHost.isEmpty ? "smtp.gmail.com" : smtpHost, forKey: "smtpHost")
+                        UserDefaults.standard.set(smtpPort.isEmpty ? "465" : smtpPort, forKey: "smtpPort")
+                        UserDefaults.standard.set(smtpUser, forKey: "smtpUser")
+                        UserDefaults.standard.set(smtpPass, forKey: "smtpPass")
+
+                        dismiss()
+                    }
+                    .buttonStyle(.borderedProminent)
                 }
-                .buttonStyle(.borderedProminent)
             }
         }
         .padding(20)
-        .frame(width: 480)
+        .frame(width: embeddedInSettings ? nil : 480)
     }
 }

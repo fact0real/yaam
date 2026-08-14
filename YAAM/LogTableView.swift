@@ -17,6 +17,13 @@ struct LogTableView: View {
     
     @State private var columnWidths: [String: CGFloat] = [:]
     @State private var dragStartWidths: [String: CGFloat] = [:]
+    @State private var explicitlyShownColumns: Set<String> = []
+
+    private let preferredColumnOrder = [
+        "QSO_DATE", "TIME_ON", "CALL", "FREQ", "BAND", "MODE", "RST_SENT", "RST_RCVD",
+        "NAME", "QTH", "COMMENT", "CONT", "COUNTRY", "DXCC", "CQZ", "ITUZ",
+        "LOTW_QSL_RCVD", "QSL_RCVD", "QRZLOG_QSL_RCVD", "EMAIL", "APP_YAAM_LAST_EMAIL"
+    ]
 
     var body: some View {
         VStack(spacing: 0) {
@@ -65,7 +72,7 @@ struct LogTableView: View {
                     }
                 }
                 .buttonStyle(.plain)
-                
+
                 Divider().frame(height: 14)
 
                 if appState.isEnriching {
@@ -130,19 +137,6 @@ struct LogTableView: View {
                 
                 Divider().frame(height: 14)
                 
-                Button(action: { appState.showSMTPSettings = true }) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "gearshape.fill")
-                            .foregroundColor(.gray)
-                        Text("SMTP")
-                            .font(.caption)
-                            .fontWeight(.semibold)
-                    }
-                }
-                .buttonStyle(.plain)
-                
-                Divider().frame(height: 14)
-
                 HStack(spacing: 4) {
                     Image(systemName: "magnifyingglass")
                         .foregroundColor(.secondary)
@@ -166,6 +160,53 @@ struct LogTableView: View {
                 .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.gray.opacity(0.3), lineWidth: 1))
                 .frame(width: 170)
                 
+                Divider().frame(height: 14)
+
+                Menu {
+                    Section("Hidden by default") {
+                        let hiddenCandidates = appState.tableHeaders.filter { isHiddenByDefault($0) }
+                        if hiddenCandidates.isEmpty {
+                            Text("No hidden columns")
+                        } else {
+                            ForEach(hiddenCandidates, id: \.self) { header in
+                                Toggle(header, isOn: Binding(
+                                    get: { explicitlyShownColumns.contains(header) },
+                                    set: { isOn in
+                                        if isOn {
+                                            explicitlyShownColumns.insert(header)
+                                        } else {
+                                            explicitlyShownColumns.remove(header)
+                                        }
+                                    }
+                                ))
+                            }
+                        }
+                    }
+
+                    Divider()
+
+                    Button("Show All Columns") {
+                        explicitlyShownColumns = Set(appState.tableHeaders.filter { isHiddenByDefault($0) })
+                    }
+
+                    Button("Reset Default Columns") {
+                        explicitlyShownColumns.removeAll()
+                    }
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "tablecolumns")
+                        Text("Columns")
+                            .font(.caption)
+                        if hiddenColumnCount > 0 {
+                            Text("\(hiddenColumnCount)")
+                                .font(.caption2)
+                                .fontWeight(.bold)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+                .menuStyle(.borderlessButton)
+
                 Divider().frame(height: 14)
                 
                 Button(action: { appState.showFilterSheet = true }) {
@@ -246,7 +287,7 @@ struct LogTableView: View {
                         .padding(.trailing, 4)
                 }
                 
-                Text("Tip: Click checkbox to select up to 19 rows")
+                Text("Tip: Select rows to enrich specific QSOs; with no selection, Enrich Data processes today's QSOs.")
                     .font(.caption2)
                     .foregroundColor(.secondary)
             }
@@ -314,7 +355,7 @@ struct LogTableView: View {
                 Spacer()
                 
                 if !appState.selectedRecordIDs.isEmpty {
-                    Text("Selected: \(appState.selectedRecordIDs.count) / 19 Max")
+                    Text("Selected: \(appState.selectedRecordIDs.count)")
                         .font(.system(.caption, design: .monospaced))
                         .bold()
                         .foregroundColor(.blue)
@@ -342,12 +383,6 @@ struct LogTableView: View {
         .sheet(isPresented: $appState.showStatsSheet) {
             StatisticsView().environmentObject(appState)
         }
-        .sheet(isPresented: $appState.showEmailComposer) {
-            EmailComposerView().environmentObject(appState)
-        }
-        .sheet(isPresented: $appState.showSMTPSettings) {
-            SMTPSettingsView()
-        }
         .sheet(isPresented: $appState.showQRZLoginSheet) {
             QRZLoginView().environmentObject(appState)
         }
@@ -374,7 +409,7 @@ struct LogTableView: View {
             .frame(width: 80, height: 28)
             .zIndex(10)
             
-            ForEach(appState.tableHeaders, id: \.self) { header in
+            ForEach(displayedHeaders, id: \.self) { header in
                 let w = columnWidths[header] ?? defaultColumnWidth(for: header)
                 let isSorted = appState.sortHeader == header
                 
@@ -491,7 +526,7 @@ struct LogTableView: View {
             .frame(width: 80, height: 28)
             .zIndex(10)
             
-            ForEach(appState.tableHeaders, id: \.self) { header in
+            ForEach(displayedHeaders, id: \.self) { header in
                 let w = columnWidths[header] ?? defaultColumnWidth(for: header)
                 let val = record[header]
                 
@@ -541,6 +576,7 @@ struct LogTableView: View {
                                         appState.selectedEmailCallsign = record["CALL"]
                                         appState.selectedEmailAddress = val
                                         appState.selectedEmailQSO = record // ⭐️ FIX: Pass exact clicked record!
+                                        appState.selectedEmailUnconfirmedQSOs = []
                                         appState.showEmailComposer = true
                                     }
                                     .help("Click to send an email")
@@ -608,6 +644,7 @@ struct LogTableView: View {
     private func defaultColumnWidth(for header: String) -> CGFloat {
         switch header {
         case "EMAIL": return 150
+        case "APP_YAAM_LAST_EMAIL": return 260
         case "QRZ_URL", "QRZ": return 180
         case "RANK_QSO", "RANK_BAND", "RANK_DXCC": return 90
         case "QSO_DATE": return 90
@@ -621,5 +658,76 @@ struct LogTableView: View {
         case "COMMENT": return 180
         default: return 85
         }
+    }
+
+    private var hiddenColumnCount: Int {
+        appState.tableHeaders.filter { isHiddenByDefault($0) && !explicitlyShownColumns.contains($0) }.count
+    }
+
+    private var displayedHeaders: [String] {
+        orderedHeaders(appState.tableHeaders).filter { header in
+            !isHiddenByDefault(header) || explicitlyShownColumns.contains(header)
+        }
+    }
+
+    private func orderedHeaders(_ headers: [String]) -> [String] {
+        headers.sorted { lhs, rhs in
+            let lhsPriority = columnPriority(lhs)
+            let rhsPriority = columnPriority(rhs)
+
+            if lhsPriority != rhsPriority {
+                return lhsPriority < rhsPriority
+            }
+
+            let lhsPreferred = preferredColumnOrder.firstIndex(of: lhs) ?? Int.max
+            let rhsPreferred = preferredColumnOrder.firstIndex(of: rhs) ?? Int.max
+            if lhsPreferred != rhsPreferred {
+                return lhsPreferred < rhsPreferred
+            }
+
+            return lhs.localizedStandardCompare(rhs) == .orderedAscending
+        }
+    }
+
+    private func columnPriority(_ header: String) -> Int {
+        if let preferredIndex = preferredColumnOrder.firstIndex(of: header) {
+            return preferredIndex
+        }
+
+        if isMostlyEmpty(header) {
+            return 9_000
+        }
+
+        if header.hasPrefix("APP_") || header.hasPrefix("MY_") || isLowValueTrailingColumn(header) {
+            return 10_000
+        }
+
+        return 1_000
+    }
+
+    private func isHiddenByDefault(_ header: String) -> Bool {
+        header.hasPrefix("MY_") || header.hasPrefix("APP_LOTW_") || isMostlyEmpty(header)
+    }
+
+    private func isLowValueTrailingColumn(_ header: String) -> Bool {
+        header.hasPrefix("APP_") ||
+        header == "QRZ_URL" ||
+        header == "QRZ" ||
+        header == "RANK_QSO" ||
+        header == "RANK_BAND" ||
+        header == "RANK_DXCC"
+    }
+
+    private func isMostlyEmpty(_ header: String) -> Bool {
+        guard !appState.qsoRecords.isEmpty else { return false }
+        guard !preferredColumnOrder.contains(header) else { return false }
+        guard !isLowValueTrailingColumn(header) else { return false }
+        guard !header.hasPrefix("APP_") else { return false }
+
+        let nonEmptyCount = appState.qsoRecords.prefix(200).reduce(0) { count, record in
+            record[header].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? count : count + 1
+        }
+
+        return nonEmptyCount == 0
     }
 }

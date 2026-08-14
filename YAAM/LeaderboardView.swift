@@ -18,6 +18,24 @@ func parseRankInt(_ rankStr: String?) -> Int? {
 struct LeaderboardView: View {
     @EnvironmentObject var appState: AppState
 
+    private let randomComparisonPool = [
+        "AA3B", "K1LZ", "N2NT", "W3LPL", "K3LR", "EA8RM", "S50A", "DL7ON",
+        "YB5QZ", "JA1YPA", "PY5EG", "LU7HN", "VK2IM", "ZL3IO", "9A1A", "LZ9W"
+    ]
+
+    private var parsedLeaderboardTargets: [String] {
+        appState.leaderboardSearchCallsign
+            .split { $0 == "," || $0 == " " || $0 == ";" }
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines).uppercased() }
+            .filter { !$0.isEmpty }
+    }
+
+    private func randomizeComparisons() {
+        let selected = Array(randomComparisonPool.shuffled().prefix(3))
+        appState.leaderboardSearchCallsign = selected.joined(separator: ", ")
+        appState.fetchQRZLeaderboardComparisons(for: selected)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             // 1. Search Bar Area
@@ -26,18 +44,29 @@ struct LeaderboardView: View {
                     .font(.title3)
                     .foregroundColor(.secondary)
                 
-                TextField("Search rival callsign (e.g. AA3B, YB5QZ, EA1DR)...", text: $appState.leaderboardSearchCallsign, onCommit: {
-                    appState.fetchQRZLeaderboard(for: appState.leaderboardSearchCallsign)
+                TextField("Compare callsigns (e.g. AA3B, YB5QZ, EA1DR)...", text: $appState.leaderboardSearchCallsign, onCommit: {
+                    appState.fetchQRZLeaderboardComparisons(for: parsedLeaderboardTargets)
                 })
                 .textFieldStyle(.plain)
                 .font(.system(size: 18, weight: .bold, design: .monospaced))
+
+                Button(action: randomizeComparisons) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "shuffle")
+                        Text("Random 3")
+                            .fontWeight(.bold)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                }
+                .buttonStyle(.bordered)
                 
                 Button(action: {
-                    appState.fetchQRZLeaderboard(for: appState.leaderboardSearchCallsign)
+                    appState.fetchQRZLeaderboardComparisons(for: parsedLeaderboardTargets)
                 }) {
                     HStack(spacing: 4) {
                         Image(systemName: "swords")
-                        Text("Compare VS")
+                        Text("Compare")
                             .fontWeight(.bold)
                     }
                     .padding(.horizontal, 10)
@@ -62,6 +91,31 @@ struct LeaderboardView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color(NSColor.textBackgroundColor))
                 
+            } else if !appState.qrzComparisonRankData.isEmpty {
+                let owner = appState.ownerRankData
+
+                ScrollView {
+                    VStack(spacing: 18) {
+                        PlayerCard(
+                            title: "YOU (STATION)",
+                            callsign: owner?.callsign ?? "EP2AES",
+                            countryIso: owner?.country_iso,
+                            isOwner: true
+                        )
+                        .padding(.horizontal, 24)
+                        .padding(.top, 20)
+
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 340), spacing: 14)], spacing: 14) {
+                            ForEach(appState.qrzComparisonRankData, id: \.callsign) { rival in
+                                RivalComparisonPanel(owner: owner, rival: rival)
+                            }
+                        }
+                        .padding(.horizontal, 24)
+                        .padding(.bottom, 30)
+                    }
+                }
+                .background(Color(NSColor.textBackgroundColor))
+
             } else if let searched = appState.qrzRankData {
                 let owner = appState.ownerRankData
                 let isSelfSearch = (owner?.callsign?.uppercased() == searched.callsign?.uppercased())
@@ -169,10 +223,10 @@ struct LeaderboardView: View {
         }
         .onAppear {
             if appState.leaderboardSearchCallsign.isEmpty {
-                appState.leaderboardSearchCallsign = "AA3B" // Example rival for fun
+                appState.leaderboardSearchCallsign = Array(randomComparisonPool.shuffled().prefix(3)).joined(separator: ", ")
             }
-            if appState.qrzRankData == nil {
-                appState.fetchQRZLeaderboard(for: appState.leaderboardSearchCallsign)
+            if appState.qrzComparisonRankData.isEmpty && appState.qrzRankData == nil {
+                appState.fetchQRZLeaderboardComparisons(for: parsedLeaderboardTargets)
             }
         }
     }
@@ -212,6 +266,60 @@ struct PlayerCard: View {
         .background(isOwner ? Color.blue.opacity(0.1) : Color.purple.opacity(0.1))
         .cornerRadius(16)
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(isOwner ? Color.blue.opacity(0.3) : Color.purple.opacity(0.3), lineWidth: 1.5))
+    }
+}
+
+struct RivalComparisonPanel: View {
+    let owner: QRZRankResponse?
+    let rival: QRZRankResponse
+
+    private var isSelf: Bool {
+        owner?.callsign?.uppercased() == rival.callsign?.uppercased()
+    }
+
+    var body: some View {
+        VStack(spacing: 12) {
+            PlayerCard(
+                title: isSelf ? "TARGET" : "RIVAL OPERATOR",
+                callsign: rival.callsign ?? "UNKNOWN",
+                countryIso: rival.country_iso,
+                isOwner: false
+            )
+
+            ComparisonRow(
+                category: "QSO World Rank",
+                icon: "antenna.radiowaves.left.and.right",
+                ownerRank: owner?.rank_qso,
+                searchedRank: rival.rank_qso,
+                ownerScore: owner?.score_qso,
+                searchedScore: rival.score_qso,
+                isSelf: isSelf
+            )
+
+            ComparisonRow(
+                category: "Bands World Rank",
+                icon: "waveform.path.ecg",
+                ownerRank: owner?.rank_band,
+                searchedRank: rival.rank_band,
+                ownerScore: owner?.score_band,
+                searchedScore: rival.score_band,
+                isSelf: isSelf
+            )
+
+            ComparisonRow(
+                category: "DXCC World Rank",
+                icon: "globe.americas.fill",
+                ownerRank: owner?.rank_countries,
+                searchedRank: rival.rank_countries,
+                ownerScore: owner?.score_countries,
+                searchedScore: rival.score_countries,
+                isSelf: isSelf
+            )
+        }
+        .padding(12)
+        .background(Color(NSColor.controlBackgroundColor).opacity(0.55))
+        .cornerRadius(12)
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.purple.opacity(0.22), lineWidth: 1))
     }
 }
 

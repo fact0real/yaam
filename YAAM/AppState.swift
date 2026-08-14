@@ -33,7 +33,80 @@ struct BandStatModel: Identifiable {
     let confirmedCount: Int
     let unconfirmedCount: Int
     let dxccCount: Int
+    let confirmedDxccCount: Int
     let percentage: Double
+}
+
+// MARK: - Worked but Unconfirmed Country Statistics Model
+struct UnconfirmedBandCountryStatModel: Identifiable {
+    let id = UUID()
+    let band: String
+    let countries: [UnconfirmedCountryStatModel]
+}
+
+struct UnconfirmedCountryStatModel: Identifiable {
+    let id = UUID()
+    let country: String
+    let qsoCount: Int
+}
+
+struct UnconfirmedCallsignStatModel: Identifiable {
+    let id = UUID()
+    let callsign: String
+    let qsoCount: Int
+    let countries: String
+    let bands: String
+    let email: String
+}
+
+struct EmailHistoryEntry: Identifiable, Codable {
+    let id: UUID
+    let date: Date
+    let callsign: String
+    let email: String
+    let subject: String
+    let status: String
+}
+
+struct BulkEmailRecipient: Identifiable {
+    let id = UUID()
+    let callsign: String
+    let email: String
+    let qsoCount: Int
+    let bands: String
+    let countries: String
+    let qso: QSORecordModel?
+    let unconfirmedQSOs: [QSORecordModel]
+}
+
+enum ActivitySound {
+    case success
+    case failure
+    case notice
+}
+
+struct QRZEmailDebugReport {
+    let callsign: String
+    let email: String?
+    let directory: URL?
+    let files: [URL]
+    let notes: [String]
+}
+
+struct PropagationSnapshot {
+    var updatedAt: Date?
+    var solarFlux: String = "-"
+    var aIndex: String = "-"
+    var kIndex: String = "-"
+    var xray: String = "-"
+    var sunspots: String = "-"
+    var signalNoise: String = "-"
+    var geomagField: String = "-"
+    var aurora: String = "-"
+    var solarWind: String = "-"
+    var bz: String = "-"
+    var bands: [String: String] = [:]
+    var vhfConditions: [String: String] = [:]
 }
 
 // MARK: - Country Statistics Model
@@ -413,99 +486,819 @@ struct QSORecordModel: Identifiable {
     }
 }
 
+// MARK: - Shared QRZ WebKit Session
+enum QRZWebKitSession {
+    static let websiteDataStore = WKWebsiteDataStore.default()
+    static let userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Safari/605.1.15"
+    static let acceptLanguage = "en-US,en;q=0.9"
+    static let acceptHeader = "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8"
+
+    static func browserLikeConfiguration() -> WKWebViewConfiguration {
+        let config = WKWebViewConfiguration()
+        config.websiteDataStore = websiteDataStore
+        config.preferences.javaScriptCanOpenWindowsAutomatically = true
+        config.defaultWebpagePreferences.allowsContentJavaScript = true
+
+        let source = """
+        try {
+            Object.defineProperty(navigator, 'platform', { get: function() { return 'MacIntel'; } });
+            Object.defineProperty(navigator, 'vendor', { get: function() { return 'Apple Computer, Inc.'; } });
+            Object.defineProperty(navigator, 'languages', { get: function() { return ['en-US', 'en']; } });
+        } catch(e) {}
+        """
+        let script = WKUserScript(source: source, injectionTime: .atDocumentStart, forMainFrameOnly: false)
+        config.userContentController.addUserScript(script)
+        return config
+    }
+
+    static func browserLikeRequest(
+        url: URL,
+        cachePolicy: URLRequest.CachePolicy = .reloadIgnoringLocalAndRemoteCacheData,
+        timeoutInterval: TimeInterval = 20
+    ) -> URLRequest {
+        var request = URLRequest(url: url, cachePolicy: cachePolicy, timeoutInterval: timeoutInterval)
+        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        request.setValue(acceptHeader, forHTTPHeaderField: "Accept")
+        request.setValue(acceptLanguage, forHTTPHeaderField: "Accept-Language")
+        request.setValue("gzip, deflate, br", forHTTPHeaderField: "Accept-Encoding")
+        request.setValue("keep-alive", forHTTPHeaderField: "Connection")
+        request.setValue("1", forHTTPHeaderField: "Upgrade-Insecure-Requests")
+        request.setValue("document", forHTTPHeaderField: "Sec-Fetch-Dest")
+        request.setValue("navigate", forHTTPHeaderField: "Sec-Fetch-Mode")
+        request.setValue("none", forHTTPHeaderField: "Sec-Fetch-Site")
+        request.setValue("?1", forHTTPHeaderField: "Sec-Fetch-User")
+        return request
+    }
+}
+
 // MARK: - Proven Native QRZ Scraper Engine (Simple & Reliable)
+@MainActor
+struct QRZEmailFetchResult {
+    let email: String?
+    let qmailRaw: String
+    let qmailDecoded: String
+
+    init(email: String?, qmailRaw: String, qmailDecoded: String) {
+        self.email = email
+        self.qmailRaw = qmailRaw
+        self.qmailDecoded = qmailDecoded
+    }
+}
+
 @MainActor
 class QRZWebKitScraper: NSObject, WKNavigationDelegate {
     static let shared = QRZWebKitScraper()
     private var webView: WKWebView!
-    private var continuation: CheckedContinuation<String?, Never>?
+    private var continuation: CheckedContinuation<QRZEmailFetchResult, Never>?
+    private var debugContinuation: CheckedContinuation<QRZEmailDebugReport, Never>?
+    private var emailRequestID: UUID?
+    private var emailTimeoutTask: Task<Void, Never>?
+    private var activeCallsign: String = ""
+    private var isDebugFetch = false
+    private var debugDirectoryForScreenshot: URL?
 
     override init() {
         super.init()
-        let config = WKWebViewConfiguration()
-        // Shares WebKit cookie store naturally with QRZLoginView!
-        config.websiteDataStore = .default()
-
+        let config = QRZWebKitSession.browserLikeConfiguration()
         self.webView = WKWebView(frame: CGRect(x: 0, y: 0, width: 1024, height: 768), configuration: config)
-        self.webView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
+        self.webView.customUserAgent = QRZWebKitSession.userAgent
+        self.webView.allowsBackForwardNavigationGestures = false
         self.webView.navigationDelegate = self
     }
 
-    func fetchEmail(for callsign: String) async -> String? {
-        guard let url = URL(string: "https://www.qrz.com/db/\(callsign)") else { return nil }
+    func hasQRZCookies() async -> Bool {
+        await withCheckedContinuation { continuation in
+            QRZWebKitSession.websiteDataStore.httpCookieStore.getAllCookies { cookies in
+                let hasCookies = cookies.contains { cookie in
+                    cookie.domain.contains("qrz.com")
+                }
+                continuation.resume(returning: hasCookies)
+            }
+        }
+    }
+
+    func fetchEmail(for callsign: String) async -> QRZEmailFetchResult {
+        guard let url = URL(string: "https://www.qrz.com/db/\(callsign)") else {
+            return QRZEmailFetchResult(email: nil, qmailRaw: "", qmailDecoded: "")
+        }
 
         return await withCheckedContinuation { continuation in
+            let requestID = UUID()
+            finishEmailFetch(returning: QRZEmailFetchResult(email: nil, qmailRaw: "", qmailDecoded: ""))
+
             self.continuation = continuation
-            let request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: 15)
+            self.emailRequestID = requestID
+            self.activeCallsign = callsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            self.isDebugFetch = false
+            self.emailTimeoutTask = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 15_000_000_000)
+
+                guard !Task.isCancelled, self.emailRequestID == requestID else { return }
+                self.webView.stopLoading()
+                self.finishEmailFetch(returning: QRZEmailFetchResult(email: nil, qmailRaw: "", qmailDecoded: ""))
+            }
+
+            let request = QRZWebKitSession.browserLikeRequest(url: url, timeoutInterval: 15)
             self.webView.load(request)
         }
+    }
+
+    func debugFetchEmail(for callsign: String) async -> QRZEmailDebugReport {
+        guard let url = URL(string: "https://www.qrz.com/db/\(callsign)") else {
+            return QRZEmailDebugReport(callsign: callsign, email: nil, directory: nil, files: [], notes: ["Invalid QRZ URL"])
+        }
+
+        return await withCheckedContinuation { continuation in
+            let requestID = UUID()
+            finishEmailFetch(returning: QRZEmailFetchResult(email: nil, qmailRaw: "", qmailDecoded: ""))
+
+            self.debugContinuation = continuation
+            self.emailRequestID = requestID
+            self.activeCallsign = callsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            self.isDebugFetch = true
+            self.emailTimeoutTask = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 35_000_000_000)
+
+                guard !Task.isCancelled, self.emailRequestID == requestID else { return }
+                self.captureTimeoutDebugArtifacts(
+                    callsign: self.activeCallsign,
+                    url: self.webView.url?.absoluteString ?? url.absoluteString
+                ) { report in
+                    self.webView.stopLoading()
+                    self.finishDebugFetch(report: report)
+                }
+            }
+
+            let request = QRZWebKitSession.browserLikeRequest(url: url, timeoutInterval: 20)
+            self.webView.load(request)
+        }
+    }
+
+    private func finishEmailFetch(returning result: QRZEmailFetchResult) {
+        emailTimeoutTask?.cancel()
+        emailTimeoutTask = nil
+        emailRequestID = nil
+        isDebugFetch = false
+
+        let cont = continuation
+        continuation = nil
+        cont?.resume(returning: result)
+    }
+
+    private func finishDebugFetch(report: QRZEmailDebugReport) {
+        emailTimeoutTask?.cancel()
+        emailTimeoutTask = nil
+        emailRequestID = nil
+        isDebugFetch = false
+
+        let cont = debugContinuation
+        debugContinuation = nil
+        cont?.resume(returning: report)
     }
 
     // MARK: - WKNavigationDelegate
     nonisolated func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-            let jsScript = """
-            (function() {
-                var qemSpan = document.getElementById('qem');
-                if (qemSpan) {
-                    if (typeof showqem === 'function') {
-                        try { showqem(); } catch(e) {}
-                    } else {
-                        var evt = new MouseEvent('mouseover', { bubbles: true, cancelable: true, view: window });
-                        qemSpan.dispatchEvent(evt);
-                        qemSpan.click();
-                    }
+            if self.isDebugFetch {
+                self.runDebugEmailExtraction(in: webView)
+                return
+            }
 
-                    var text = (qemSpan.innerText || qemSpan.textContent || "").trim();
-                    if (text && text.includes('@') && text.includes('.')) {
-                        return text;
-                    }
-                }
-
-                var mailtoAnchor = document.querySelector('a[href^="mailto:"]');
-                if (mailtoAnchor) {
-                    var href = mailtoAnchor.getAttribute('href').replace('mailto:', '').split('?')[0].trim();
-                    if (href && !href.includes('qrz.com') && !href.includes('support')) {
-                        return href;
-                    }
-                }
-
-                return "";
-            })();
-            """
+            let jsScript = QRZWebKitScraper.emailRevealPromiseScript(debug: false)
 
             webView.evaluateJavaScript(jsScript) { [weak self] result, _ in
-                let extracted = result as? String
-                let email = (extracted?.isEmpty == false) ? extracted : nil
+                let payload = result as? [String: Any] ?? [:]
+                let extracted = payload["email"] as? String ?? ""
+                let email = extracted.isEmpty ? nil : extracted
+                let qmailRaw = payload["qmailRaw"] as? String ?? ""
+                let qmailDecoded = payload["qmailDecoded"] as? String ?? ""
 
                 Task { @MainActor in
-                    let cont = self?.continuation
-                    self?.continuation = nil
-                    cont?.resume(returning: email)
+                    self?.finishEmailFetch(
+                        returning: QRZEmailFetchResult(
+                            email: email,
+                            qmailRaw: qmailRaw,
+                            qmailDecoded: qmailDecoded
+                        )
+                    )
                 }
             }
         }
     }
 
+    private func runDebugEmailExtraction(in webView: WKWebView) {
+        let beforeScript = QRZWebKitScraper.debugSnapshotScript(label: "before")
+        webView.evaluateJavaScript(beforeScript) { [weak self] beforeResult, beforeError in
+            guard let self else { return }
+            let before = beforeResult as? [String: Any] ?? [:]
+
+            let revealScript = QRZWebKitScraper.debugRevealScript()
+            webView.evaluateJavaScript(revealScript) { [weak self] revealResult, revealError in
+                guard let self else { return }
+                let reveal = revealResult as? [String: Any] ?? [:]
+
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                    let afterScript = QRZWebKitScraper.debugSnapshotScript(label: "after")
+                    webView.evaluateJavaScript(afterScript) { [weak self] afterResult, afterError in
+                        guard let self else { return }
+                        let after = afterResult as? [String: Any] ?? [:]
+                        let report = self.writeDebugArtifacts(
+                            callsign: self.activeCallsign,
+                            before: before,
+                            reveal: reveal,
+                            after: after,
+                            errors: [
+                                beforeError.map { "Before snapshot error: \($0.localizedDescription)" },
+                                revealError.map { "Reveal script error: \($0.localizedDescription)" },
+                                afterError.map { "After snapshot error: \($0.localizedDescription)" }
+                            ].compactMap { $0 }
+                        )
+                        self.finishDebugFetch(report: report)
+                    }
+                }
+            }
+        }
+    }
+
+    private static func debugSnapshotScript(label: String) -> String {
+        """
+        (function() {
+            function cleanEmail(value) {
+                if (!value) { return ""; }
+                var decoded = String(value)
+                    .replace(/mailto:/ig, " ")
+                    .replace(/<[^>]+>/g, " ")
+                    .replace(/\\s+/g, " ")
+                    .trim();
+                var match = decoded.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}(?=\\b|\\s|<|&|$)/i);
+                if (!match) { return ""; }
+                return match[0].replace(/mailto$/i, "").replace(/[.,;:]+$/g, "");
+            }
+            var qem = document.getElementById("qem");
+            var rect = qem ? qem.getBoundingClientRect() : null;
+            var mailtos = Array.from(document.querySelectorAll('a[href^="mailto:"]')).map(function(a) {
+                return a.getAttribute("href") || "";
+            });
+            var html = document.documentElement ? document.documentElement.outerHTML : "";
+            return {
+                label: "\(label)",
+                url: window.location.href || "",
+                title: document.title || "",
+                bodyText: document.body ? document.body.innerText : "",
+                html: html,
+                qemExists: !!qem,
+                qemText: qem ? (qem.innerText || qem.textContent || "") : "",
+                qemHTML: qem ? (qem.outerHTML || "") : "",
+                qemRect: rect ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height, top: rect.top, left: rect.left } : null,
+                showqemType: typeof window.showqem,
+                showqemSource: (typeof window.showqem === "function") ? String(window.showqem).slice(0, 4000) : "",
+                userAgent: navigator.userAgent,
+                platform: navigator.platform,
+                webdriver: navigator.webdriver,
+                mailtos: mailtos,
+                extractedEmail: cleanEmail((qem ? (qem.innerText || qem.textContent || qem.innerHTML || "") : "") + " " + mailtos.join(" ") + " " + html)
+            };
+        })();
+        """
+    }
+
+    private static func debugRevealScript() -> String {
+        emailRevealPromiseScript(debug: true)
+    }
+
+    private static func emailRevealPromiseScript(debug: Bool) -> String {
+        """
+        new Promise(function(resolve) {
+            var steps = [];
+
+            function log(name, detail) {
+                steps.push(detail ? (name + ": " + detail) : name);
+            }
+
+            function cleanEmail(value) {
+                if (!value) { return ""; }
+                var decoded = String(value)
+                    .replace(/mailto:/ig, " ")
+                    .replace(/<[^>]+>/g, " ")
+                    .replace(/^mailto:/i, "")
+                    .split("?")[0]
+                    .replace(/\\s+/g, " ")
+                    .trim();
+                var match = decoded.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}(?=\\b|\\s|<|&|$)/i);
+                if (!match) { return ""; }
+                var email = match[0];
+                email = email.replace(/mailto$/i, "").replace(/[.,;:]+$/g, "");
+                if (/qrz\\.com|support|example/i.test(email)) { return ""; }
+                return email;
+            }
+
+            function qmailDetails(source) {
+                var encoded = "";
+                try {
+                    if (typeof window.qmail === "string") {
+                        encoded = window.qmail;
+                    }
+                } catch(e) {}
+
+                if (!encoded && source) {
+                    var match = String(source).match(/\\bqmail\\s*=\\s*['"]([^'"]+)['"]/);
+                    encoded = match ? match[1] : "";
+                }
+
+                if (!encoded) { return { raw: "", decoded: "", email: "" }; }
+
+                var countText = "";
+                var decoded = "";
+                var i = encoded.length - 1;
+
+                while (i > 0) {
+                    var c = encoded.charAt(i);
+                    if (c !== "!") {
+                        countText += c;
+                    } else {
+                        break;
+                    }
+                    i -= 1;
+                }
+
+                i -= 1;
+                var count = parseInt(countText, 10);
+                if (!isFinite(count) || count <= 0) {
+                    return { raw: encoded, decoded: "", email: "" };
+                }
+
+                for (var x = 0; x < count && i >= 0; x += 1) {
+                    decoded += encoded.charAt(i);
+                    i -= 2;
+                }
+
+                return { raw: encoded, decoded: decoded, email: cleanEmail(decoded) };
+            }
+
+            function decodeQmail(source) {
+                return qmailDetails(source).email;
+            }
+
+            function extractEmail() {
+                var html = document.documentElement ? document.documentElement.innerHTML : "";
+                var qmailEmail = decodeQmail(html);
+                if (qmailEmail) { return qmailEmail; }
+
+                var qem = document.getElementById("qem");
+                if (qem) {
+                    var qemEmail = cleanEmail(qem.innerText || qem.textContent || "");
+                    if (qemEmail) { return qemEmail; }
+                    qemEmail = cleanEmail(qem.innerHTML || "");
+                    if (qemEmail) { return qemEmail; }
+                }
+
+                var mailtoAnchor = document.querySelector('a[href^="mailto:"]');
+                if (mailtoAnchor) {
+                    var mailtoEmail = cleanEmail(mailtoAnchor.getAttribute("href"));
+                    if (mailtoEmail) { return mailtoEmail; }
+                }
+
+                return cleanEmail(html);
+            }
+
+            function eventInit(qem, rect) {
+                var x = Math.max(1, Math.floor((rect.left || 0) + Math.max(2, (rect.width || 10) / 2)));
+                var y = Math.max(1, Math.floor((rect.top || 0) + Math.max(2, (rect.height || 10) / 2)));
+                return {
+                    bubbles: true,
+                    cancelable: true,
+                    composed: true,
+                    view: window,
+                    detail: 1,
+                    screenX: x + 80,
+                    screenY: y + 120,
+                    clientX: x,
+                    clientY: y,
+                    pageX: x + window.scrollX,
+                    pageY: y + window.scrollY,
+                    button: 0,
+                    buttons: 1,
+                    relatedTarget: null,
+                    pointerId: 1,
+                    width: 1,
+                    height: 1,
+                    pressure: 0.5,
+                    pointerType: "mouse",
+                    isPrimary: true
+                };
+            }
+
+            function dispatch(qem, name, init) {
+                try {
+                    var event;
+                    if (name.indexOf("pointer") === 0 && typeof PointerEvent === "function") {
+                        event = new PointerEvent(name, init);
+                    } else {
+                        event = new MouseEvent(name, init);
+                    }
+                    qem.dispatchEvent(event);
+                    log("dispatch " + name, "ok");
+                } catch(e) {
+                    log("dispatch " + name, e.message);
+                }
+            }
+
+            function triggerReveal() {
+                var qem = document.getElementById("qem");
+                if (!qem) {
+                    log("span#qem", "not found");
+                    return false;
+                }
+
+                try {
+                    qem.scrollIntoView({ block: "center", inline: "center" });
+                    log("scrollIntoView", "ok");
+                } catch(e) {
+                    log("scrollIntoView", e.message);
+                }
+
+                var rect = qem.getBoundingClientRect();
+                var init = eventInit(qem, rect);
+                log("qemRect", JSON.stringify({ left: rect.left, top: rect.top, width: rect.width, height: rect.height }));
+
+                [
+                    "pointerover", "pointerenter", "mouseover", "mouseenter", "pointermove", "mousemove",
+                    "pointerdown", "mousedown", "pointerup", "mouseup", "click"
+                ].forEach(function(name) {
+                    dispatch(qem, name, init);
+                });
+
+                try {
+                    if (typeof qem.onmouseover === "function") {
+                        qem.onmouseover.call(qem, new MouseEvent("mouseover", init));
+                        log("qem.onmouseover", "ok");
+                    }
+                } catch(e) { log("qem.onmouseover", e.message); }
+
+                try {
+                    if (typeof qem.onclick === "function") {
+                        qem.onclick.call(qem, new MouseEvent("click", init));
+                        log("qem.onclick", "ok");
+                    }
+                } catch(e) { log("qem.onclick", e.message); }
+
+                try {
+                    if (typeof window.showqem === "function") {
+                        window.showqem.call(qem);
+                        log("window.showqem.call(qem)", "ok");
+                    }
+                } catch(e) { log("window.showqem.call(qem)", e.message); }
+
+                try {
+                    if (typeof showqem === "function") {
+                        showqem.call(qem);
+                        log("showqem.call(qem)", "ok");
+                    }
+                } catch(e) { log("showqem.call(qem)", e.message); }
+
+                try {
+                    qem.focus({ preventScroll: true });
+                    log("focus", "ok");
+                } catch(e) { log("focus", e.message); }
+
+                return true;
+            }
+
+            var firstEmail = extractEmail();
+            if (firstEmail) {
+                var firstDetails = qmailDetails(document.documentElement ? document.documentElement.innerHTML : "");
+                resolve(\(debug ? "{ email: firstEmail, qmailRaw: firstDetails.raw, qmailDecoded: firstDetails.decoded, steps: steps, immediate: true }" : "{ email: firstEmail, qmailRaw: firstDetails.raw, qmailDecoded: firstDetails.decoded }"));
+                return;
+            }
+
+            triggerReveal();
+
+            var attempts = 0;
+            var timer = setInterval(function() {
+                attempts += 1;
+                var email = extractEmail();
+                if (email || attempts >= 16) {
+                    clearInterval(timer);
+                    var qem = document.getElementById("qem");
+                    var payload = {
+                        email: email || "",
+                        qmailRaw: qmailDetails(document.documentElement ? document.documentElement.innerHTML : "").raw,
+                        qmailDecoded: qmailDetails(document.documentElement ? document.documentElement.innerHTML : "").decoded,
+                        steps: steps,
+                        attempts: attempts,
+                        qemExists: !!qem,
+                        qemTextAfterPolling: qem ? (qem.innerText || qem.textContent || "") : "",
+                        qemHTMLAfterPolling: qem ? (qem.outerHTML || "") : "",
+                        showqemType: typeof window.showqem,
+                        showqemSource: (typeof window.showqem === "function") ? String(window.showqem).slice(0, 4000) : ""
+                    };
+                    resolve(payload);
+                    return;
+                }
+                triggerReveal();
+            }, 250);
+        });
+        """
+    }
+
+    private func writeDebugArtifacts(
+        callsign: String,
+        before: [String: Any],
+        reveal: [String: Any],
+        after: [String: Any],
+        errors: [String]
+    ) -> QRZEmailDebugReport {
+        let fm = FileManager.default
+        let safeCallsign = callsign.isEmpty ? "UNKNOWN" : callsign
+        let timestamp = Int(Date().timeIntervalSince1970)
+        let baseURL = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("YAAM/QRZDebug/\(safeCallsign)-\(timestamp)")
+
+        guard let directory = baseURL else {
+            return QRZEmailDebugReport(callsign: safeCallsign, email: nil, directory: nil, files: [], notes: ["Unable to locate Application Support directory"] + errors)
+        }
+
+        try? fm.createDirectory(at: directory, withIntermediateDirectories: true)
+        debugDirectoryForScreenshot = directory
+        var files: [URL] = []
+        var notes = errors
+
+        func writeText(_ name: String, _ value: String) {
+            let url = directory.appendingPathComponent(name)
+            do {
+                try value.write(to: url, atomically: true, encoding: .utf8)
+                files.append(url)
+            } catch {
+                notes.append("Failed writing \(name): \(error.localizedDescription)")
+            }
+        }
+
+        func jsonString(_ object: Any) -> String {
+            guard JSONSerialization.isValidJSONObject(object),
+                  let data = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]),
+                  let string = String(data: data, encoding: .utf8) else {
+                return "\(object)"
+            }
+            return string
+        }
+
+        writeText("01-before.html", before["html"] as? String ?? "")
+        writeText("01-before-body.txt", before["bodyText"] as? String ?? "")
+        writeText("01-before-summary.json", jsonString(before.filter { $0.key != "html" && $0.key != "bodyText" }))
+        writeText("02-reveal-steps.json", jsonString(reveal))
+        writeText("03-after.html", after["html"] as? String ?? "")
+        writeText("03-after-body.txt", after["bodyText"] as? String ?? "")
+        writeText("03-after-summary.json", jsonString(after.filter { $0.key != "html" && $0.key != "bodyText" }))
+        captureDebugScreenshot(to: directory.appendingPathComponent("04-webview-screenshot.png"))
+
+        let email = (after["extractedEmail"] as? String).flatMap { $0.isEmpty ? nil : $0 } ??
+            (before["extractedEmail"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+
+        let summary = """
+        QRZ email debug for \(safeCallsign)
+        URL before: \(before["url"] as? String ?? "-")
+        URL after: \(after["url"] as? String ?? "-")
+        qem before: \(before["qemText"] as? String ?? "-")
+        qem after: \(after["qemText"] as? String ?? "-")
+        showqem type before: \(before["showqemType"] as? String ?? "-")
+        extracted email: \(email ?? "-")
+        notes:
+        \(notes.isEmpty ? "-" : notes.joined(separator: "\n"))
+        """
+        writeText("00-debug-summary.txt", summary)
+
+        return QRZEmailDebugReport(callsign: safeCallsign, email: email, directory: directory, files: files, notes: notes)
+    }
+
+    private func captureDebugScreenshot(to url: URL) {
+        let configuration = WKSnapshotConfiguration()
+        configuration.rect = CGRect(origin: .zero, size: webView.bounds.size)
+        webView.takeSnapshot(with: configuration) { image, _ in
+            guard let image,
+                  let tiff = image.tiffRepresentation,
+                  let bitmap = NSBitmapImageRep(data: tiff),
+                  let png = bitmap.representation(using: .png, properties: [:]) else { return }
+            try? png.write(to: url)
+        }
+    }
+
+    private func writeTimeoutDebugArtifacts(callsign: String, url: String) -> QRZEmailDebugReport {
+        let fm = FileManager.default
+        let safeCallsign = callsign.isEmpty ? "UNKNOWN" : callsign
+        let timestamp = Int(Date().timeIntervalSince1970)
+        guard let directory = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("YAAM/QRZDebug/\(safeCallsign)-\(timestamp)-timeout") else {
+            return QRZEmailDebugReport(callsign: safeCallsign, email: nil, directory: nil, files: [], notes: ["Timed out while loading QRZ page"])
+        }
+
+        try? fm.createDirectory(at: directory, withIntermediateDirectories: true)
+        let summaryURL = directory.appendingPathComponent("00-timeout.txt")
+        let cookieURL = directory.appendingPathComponent("01-cookie-summary.txt")
+        let summary = """
+        QRZ email debug timed out before the page finished loading.
+
+        Callsign: \(safeCallsign)
+        Last URL: \(url)
+        Timeout: 35 seconds
+
+        This means WKWebView did not reach didFinish, so YAAM could not save before/after DOM snapshots.
+        Likely causes: QRZ blocked/hung navigation, session challenge, network stall, or a WebKit load that never completes.
+        """
+
+        var files: [URL] = []
+        try? summary.write(to: summaryURL, atomically: true, encoding: .utf8)
+        if fm.fileExists(atPath: summaryURL.path) { files.append(summaryURL) }
+
+        QRZWebKitSession.websiteDataStore.httpCookieStore.getAllCookies { cookies in
+            let text = cookies
+                .filter { $0.domain.contains("qrz.com") }
+                .map { "\($0.name)=<redacted>; domain=\($0.domain); path=\($0.path); expires=\($0.expiresDate?.description ?? "session")" }
+                .joined(separator: "\n")
+            try? (text.isEmpty ? "No qrz.com cookies found." : text).write(to: cookieURL, atomically: true, encoding: .utf8)
+        }
+
+        files.append(cookieURL)
+        return QRZEmailDebugReport(callsign: safeCallsign, email: nil, directory: directory, files: files, notes: ["Timed out while loading QRZ page"])
+    }
+
+    private func captureTimeoutDebugArtifacts(
+        callsign: String,
+        url: String,
+        completion: @escaping (QRZEmailDebugReport) -> Void
+    ) {
+        let snapshotScript = QRZWebKitScraper.debugSnapshotScript(label: "timeout-partial")
+        webView.evaluateJavaScript(snapshotScript) { [weak self] snapshotResult, snapshotError in
+            guard let self else { return }
+            let snapshot = snapshotResult as? [String: Any] ?? [:]
+            self.fetchRawQRZHTML(callsign: callsign) { rawHTML, rawInfo in
+                let report = self.writeTimeoutDebugArtifacts(
+                    callsign: callsign,
+                    url: url,
+                    partialSnapshot: snapshot,
+                    rawHTML: rawHTML,
+                    rawInfo: rawInfo,
+                    errors: snapshotError.map { ["Partial DOM snapshot error: \($0.localizedDescription)"] } ?? []
+                )
+                completion(report)
+            }
+        }
+    }
+
+    private func writeTimeoutDebugArtifacts(
+        callsign: String,
+        url: String,
+        partialSnapshot: [String: Any],
+        rawHTML: String?,
+        rawInfo: String,
+        errors: [String]
+    ) -> QRZEmailDebugReport {
+        let fm = FileManager.default
+        let safeCallsign = callsign.isEmpty ? "UNKNOWN" : callsign
+        let timestamp = Int(Date().timeIntervalSince1970)
+        guard let directory = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("YAAM/QRZDebug/\(safeCallsign)-\(timestamp)-timeout") else {
+            return QRZEmailDebugReport(callsign: safeCallsign, email: nil, directory: nil, files: [], notes: ["Timed out while loading QRZ page"] + errors)
+        }
+
+        try? fm.createDirectory(at: directory, withIntermediateDirectories: true)
+        var files: [URL] = []
+        var notes = ["Timed out while loading QRZ page"] + errors
+
+        func writeText(_ name: String, _ value: String) {
+            let fileURL = directory.appendingPathComponent(name)
+            do {
+                try value.write(to: fileURL, atomically: true, encoding: .utf8)
+                files.append(fileURL)
+            } catch {
+                notes.append("Failed writing \(name): \(error.localizedDescription)")
+            }
+        }
+
+        func jsonString(_ object: Any) -> String {
+            guard JSONSerialization.isValidJSONObject(object),
+                  let data = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]),
+                  let string = String(data: data, encoding: .utf8) else {
+                return "\(object)"
+            }
+            return string
+        }
+
+        let partialHTML = partialSnapshot["html"] as? String ?? ""
+        let partialBody = partialSnapshot["bodyText"] as? String ?? ""
+        writeText("01-timeout-partial-dom.html", partialHTML)
+        writeText("01-timeout-partial-body.txt", partialBody)
+        writeText("01-timeout-partial-summary.json", jsonString(partialSnapshot.filter { $0.key != "html" && $0.key != "bodyText" }))
+        writeText("02-urlsession-raw.html", rawHTML ?? "")
+        writeText("02-urlsession-info.txt", rawInfo)
+
+        QRZWebKitSession.websiteDataStore.httpCookieStore.getAllCookies { cookies in
+            let text = cookies
+                .filter { $0.domain.contains("qrz.com") }
+                .map { "\($0.name)=<redacted>; domain=\($0.domain); path=\($0.path); expires=\($0.expiresDate?.description ?? "session")" }
+                .joined(separator: "\n")
+            try? (text.isEmpty ? "No qrz.com cookies found." : text).write(to: directory.appendingPathComponent("03-cookie-summary.txt"), atomically: true, encoding: .utf8)
+        }
+        files.append(directory.appendingPathComponent("03-cookie-summary.txt"))
+
+        let email = (partialSnapshot["extractedEmail"] as? String).flatMap { $0.isEmpty ? nil : $0 } ??
+            rawHTML.flatMap { html in
+                let normalized = html.replacingOccurrences(of: "mailto:", with: " ")
+                return normalized.range(of: #"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}(?=\b|\s|<|&|$)"#, options: [.regularExpression, .caseInsensitive]).map { String(normalized[$0]) }
+            }
+
+        let summary = """
+        QRZ email debug timed out before the page finished loading.
+
+        Callsign: \(safeCallsign)
+        Last URL: \(url)
+        Timeout: 35 seconds
+        Partial DOM bytes: \(partialHTML.utf8.count)
+        Raw URLSession HTML bytes: \(rawHTML?.utf8.count ?? 0)
+        Extracted email: \(email ?? "-")
+
+        Files:
+        01-timeout-partial-dom.html - DOM currently visible in WKWebView at timeout
+        02-urlsession-raw.html - raw HTML fetched with URLSession using QRZ cookies and Safari-like headers
+        03-cookie-summary.txt - qrz.com cookies present in WebKit
+
+        Notes:
+        \(notes.joined(separator: "\n"))
+        """
+        writeText("00-timeout-summary.txt", summary)
+
+        return QRZEmailDebugReport(callsign: safeCallsign, email: email, directory: directory, files: files, notes: notes)
+    }
+
+    private func fetchRawQRZHTML(callsign: String, completion: @escaping (String?, String) -> Void) {
+        guard let url = URL(string: "https://www.qrz.com/db/\(callsign)") else {
+            completion(nil, "Invalid raw fetch URL")
+            return
+        }
+
+        QRZWebKitSession.websiteDataStore.httpCookieStore.getAllCookies { cookies in
+            var request = QRZWebKitSession.browserLikeRequest(url: url, timeoutInterval: 20)
+            let cookieHeader = cookies
+                .filter { $0.domain.contains("qrz.com") }
+                .map { "\($0.name)=\($0.value)" }
+                .joined(separator: "; ")
+            if !cookieHeader.isEmpty {
+                request.setValue(cookieHeader, forHTTPHeaderField: "Cookie")
+            }
+
+            URLSession.shared.dataTask(with: request) { data, response, error in
+                let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+                let finalURL = response?.url?.absoluteString ?? url.absoluteString
+                let mime = response?.mimeType ?? "-"
+                let encoding = response?.textEncodingName ?? "-"
+                let html = data.flatMap { String(data: $0, encoding: .utf8) } ??
+                    data.flatMap { String(data: $0, encoding: .isoLatin1) }
+                let info = """
+                Raw URLSession fetch
+                URL: \(url.absoluteString)
+                Final URL: \(finalURL)
+                HTTP status: \(status)
+                MIME: \(mime)
+                Encoding: \(encoding)
+                Data bytes: \(data?.count ?? 0)
+                Cookie header sent: \(cookieHeader.isEmpty ? "no" : "yes")
+                Error: \(error?.localizedDescription ?? "-")
+                """
+                DispatchQueue.main.async {
+                    completion(html, info)
+                }
+            }.resume()
+        }
+    }
+
     nonisolated func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         Task { @MainActor in
-            let cont = self.continuation
-            self.continuation = nil
-            cont?.resume(returning: nil)
+            if self.isDebugFetch {
+                self.finishDebugFetch(report: QRZEmailDebugReport(callsign: self.activeCallsign, email: nil, directory: nil, files: [], notes: ["Navigation failed: \(error.localizedDescription)"]))
+            } else {
+                self.finishEmailFetch(returning: QRZEmailFetchResult(email: nil, qmailRaw: "", qmailDecoded: ""))
+            }
         }
     }
 
     nonisolated func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         Task { @MainActor in
-            let cont = self.continuation
-            self.continuation = nil
-            cont?.resume(returning: nil)
+            if self.isDebugFetch {
+                self.finishDebugFetch(report: QRZEmailDebugReport(callsign: self.activeCallsign, email: nil, directory: nil, files: [], notes: ["Provisional navigation failed: \(error.localizedDescription)"]))
+            } else {
+                self.finishEmailFetch(returning: QRZEmailFetchResult(email: nil, qmailRaw: "", qmailDecoded: ""))
+            }
         }
     }
 }
 
 // MARK: - Global Application State Manager (Workspace Architecture)
 class AppState: NSObject, ObservableObject {
+    private static let adifDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyyMMdd"
+        return formatter
+    }()
+
     var currentVersion: String {
         return Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.2.0"
     }
@@ -515,23 +1308,30 @@ class AppState: NSObject, ObservableObject {
     @Published var isCheckingUpdates: Bool = false
     @Published var isLoading: Bool = false
     @Published var isSyncingAPI: Bool = false
+    @Published var propagationSnapshot = PropagationSnapshot()
+    @Published var isFetchingPropagation: Bool = false
     
-    // Row Selection State (Supports Max 19 Selection Limit)
+    // Row Selection State
     @Published var selectedRecordIDs: Set<UUID> = []
     
     // Email, SMTP & Enrichment States
     @Published var isEnriching: Bool = false
     private var enrichmentTask: Task<Void, Never>? = nil
+    private var sdrControlSyncTimer: Timer?
+    private var externalADIFSyncTimer: Timer?
     
     @Published var showEmailComposer: Bool = false
     @Published var showSMTPSettings: Bool = false
     @Published var selectedEmailCallsign: String = ""
     @Published var selectedEmailAddress: String = ""
     @Published var selectedEmailQSO: QSORecordModel? = nil
+    @Published var selectedEmailUnconfirmedQSOs: [QSORecordModel] = []
+    @Published var emailHistory: [EmailHistoryEntry] = []
     
     // QRZ Rank & Login States
     @Published var isFetchingRank: Bool = false
     @Published var qrzRankData: QRZRankResponse? = nil
+    @Published var qrzComparisonRankData: [QRZRankResponse] = []
     @Published var leaderboardSearchCallsign: String = ""
     @Published var ownerRankData: QRZRankResponse? = nil
 
@@ -574,6 +1374,29 @@ class AppState: NSObject, ObservableObject {
         loadPersistentConfirmationCache()
         loadMasterLogbook()
         loadRecentLogsFromDatabase()
+        loadEmailHistory()
+        configureExternalADIFAutoSync()
+        configureSDRControlPeriodicSync()
+    }
+
+    func playActivitySound(_ sound: ActivitySound) {
+        DispatchQueue.main.async {
+            let soundNames: [NSSound.Name]
+            switch sound {
+            case .success:
+                soundNames = [NSSound.Name("Glass"), NSSound.Name("Ping"), NSSound.Name("Hero")]
+            case .failure:
+                soundNames = [NSSound.Name("Basso"), NSSound.Name("Funk"), NSSound.Name("Sosumi")]
+            case .notice:
+                soundNames = [NSSound.Name("Pop"), NSSound.Name("Tink"), NSSound.Name("Submarine")]
+            }
+
+            if let systemSound = soundNames.compactMap({ NSSound(named: $0) }).first {
+                systemSound.play()
+            } else {
+                NSSound.beep()
+            }
+        }
     }
 
     var availableCountries: [String] {
@@ -600,7 +1423,7 @@ class AppState: NSObject, ObservableObject {
     var bandStatistics: [BandStatModel] {
         guard !qsoRecords.isEmpty else { return [] }
         
-        var bandMap: [String: (total: Int, confirmed: Int, countries: Set<String>)] = [:]
+        var bandMap: [String: (total: Int, confirmed: Int, countries: Set<String>, confirmedCountries: Set<String>)] = [:]
         let total = Double(qsoRecords.count)
         
         for record in qsoRecords {
@@ -609,17 +1432,26 @@ class AppState: NSObject, ObservableObject {
             let confirmed = record.isConfirmed
             
             if bandMap[band] == nil {
-                bandMap[band] = (total: 0, confirmed: 0, countries: Set<String>())
+                bandMap[band] = (total: 0, confirmed: 0, countries: Set<String>(), confirmedCountries: Set<String>())
             }
             bandMap[band]?.total += 1
             if confirmed { bandMap[band]?.confirmed += 1 }
             if !country.isEmpty { bandMap[band]?.countries.insert(country) }
+            if confirmed && !country.isEmpty { bandMap[band]?.confirmedCountries.insert(country) }
         }
         
         return bandMap.map { (bandKey, data) in
             let pct = (Double(data.total) / total) * 100.0
             let unconf = data.total - data.confirmed
-            return BandStatModel(band: bandKey, qsoCount: data.total, confirmedCount: data.confirmed, unconfirmedCount: unconf, dxccCount: data.countries.count, percentage: pct)
+            return BandStatModel(
+                band: bandKey,
+                qsoCount: data.total,
+                confirmedCount: data.confirmed,
+                unconfirmedCount: unconf,
+                dxccCount: data.countries.count,
+                confirmedDxccCount: data.confirmedCountries.count,
+                percentage: pct
+            )
         }.sorted { $0.qsoCount > $1.qsoCount }
     }
 
@@ -639,6 +1471,74 @@ class AppState: NSObject, ObservableObject {
             let unconf = data.total - data.confirmed
             return CountryStatModel(country: cName, flag: countryToFlag(cName), qsoCount: data.total, confirmedCount: data.confirmed, unconfirmedCount: unconf)
         }.sorted { $0.qsoCount > $1.qsoCount }
+    }
+
+    var unconfirmedBandCountryStatistics: [UnconfirmedBandCountryStatModel] {
+        guard !qsoRecords.isEmpty else { return [] }
+
+        var bandCountryMap: [String: [String: (total: Int, confirmed: Int)]] = [:]
+
+        for record in qsoRecords {
+            let band = record["BAND"].isEmpty ? "UNKNOWN" : record["BAND"].uppercased()
+            let country = record["COUNTRY"].isEmpty ? "Unknown" : record["COUNTRY"]
+
+            if bandCountryMap[band] == nil {
+                bandCountryMap[band] = [:]
+            }
+            if bandCountryMap[band]?[country] == nil {
+                bandCountryMap[band]?[country] = (total: 0, confirmed: 0)
+            }
+
+            bandCountryMap[band]?[country]?.total += 1
+            if record.isConfirmed {
+                bandCountryMap[band]?[country]?.confirmed += 1
+            }
+        }
+
+        return bandCountryMap.compactMap { band, countryMap in
+            let countries = countryMap.compactMap { country, data -> UnconfirmedCountryStatModel? in
+                guard data.total > 0, data.confirmed == 0 else { return nil }
+                return UnconfirmedCountryStatModel(country: country, qsoCount: data.total)
+            }
+            .sorted {
+                if $0.qsoCount == $1.qsoCount {
+                    return $0.country < $1.country
+                }
+                return $0.qsoCount > $1.qsoCount
+            }
+
+            guard !countries.isEmpty else { return nil }
+            return UnconfirmedBandCountryStatModel(band: band, countries: countries)
+        }
+        .sorted { $0.band.localizedStandardCompare($1.band) == .orderedAscending }
+    }
+
+    var callsignsWithNoConfirmedQSOs: [UnconfirmedCallsignStatModel] {
+        let grouped = Dictionary(grouping: qsoRecords) { record in
+            record["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        }
+
+        return grouped.compactMap { callsign, records in
+            guard !callsign.isEmpty, !records.contains(where: { $0.isConfirmed }) else { return nil }
+
+            let countries = Set(records.map { $0["COUNTRY"] }.filter { !$0.isEmpty }).sorted().joined(separator: ", ")
+            let bands = Set(records.map { $0["BAND"].uppercased() }.filter { !$0.isEmpty }).sorted().joined(separator: ", ")
+            let email = records.first { !$0["EMAIL"].isEmpty }?["EMAIL"] ?? ""
+
+            return UnconfirmedCallsignStatModel(
+                callsign: callsign,
+                qsoCount: records.count,
+                countries: countries,
+                bands: bands,
+                email: email
+            )
+        }
+        .sorted {
+            if $0.qsoCount == $1.qsoCount {
+                return $0.callsign < $1.callsign
+            }
+            return $0.qsoCount > $1.qsoCount
+        }
     }
 
     var filteredRecords: [QSORecordModel] {
@@ -733,13 +1633,6 @@ class AppState: NSObject, ObservableObject {
         if selectedRecordIDs.contains(id) {
             selectedRecordIDs.remove(id)
         } else {
-            if selectedRecordIDs.count >= 19 {
-                showNativeAlert(
-                    title: "Selection Limit Reached ⚠️",
-                    message: "You cannot select or enrich more than 19 rows at a time."
-                )
-                return
-            }
             selectedRecordIDs.insert(id)
         }
     }
@@ -750,15 +1643,7 @@ class AppState: NSObject, ObservableObject {
     
     func enrichSelectedRecords() {
         guard !selectedRecordIDs.isEmpty else { return }
-        
-        if selectedRecordIDs.count > 19 {
-            showNativeAlert(
-                title: "Selection Limit Exceeded ⚠️",
-                message: "You cannot select or enrich more than 19 rows at a time."
-            )
-            return
-        }
-        
+
         let selectedCallsigns = Set(qsoRecords.filter { selectedRecordIDs.contains($0.id) }
             .compactMap { $0["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased() }
             .filter { !$0.isEmpty })
@@ -834,6 +1719,60 @@ class AppState: NSObject, ObservableObject {
             if let target = self?.qrzRankData?.callsign {
                 self?.appendLog("Leaderboard Comparison loaded: \(ownerCall) VS \(target)")
             }
+        }
+    }
+
+    func fetchQRZLeaderboardComparisons(for callsigns: [String]) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in
+                self?.fetchQRZLeaderboardComparisons(for: callsigns)
+            }
+            return
+        }
+
+        let ownerCall = currentStationCallsign
+        let targets = Array(Set(callsigns.map {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        }.filter { !$0.isEmpty && $0 != ownerCall })).prefix(6)
+
+        guard !targets.isEmpty else { return }
+
+        isFetchingRank = true
+        qrzComparisonRankData = []
+
+        let group = DispatchGroup()
+        var results: [QRZRankResponse] = []
+        let lock = NSLock()
+
+        if ownerRankData == nil || ownerRankData?.callsign?.uppercased() != ownerCall {
+            group.enter()
+            fetchSingleRank(callsign: ownerCall) { [weak self] result in
+                Task { @MainActor in
+                    self?.ownerRankData = result
+                    group.leave()
+                }
+            }
+        }
+
+        for callsign in targets {
+            group.enter()
+            fetchSingleRank(callsign: callsign) { result in
+                if let result {
+                    lock.lock()
+                    results.append(result)
+                    lock.unlock()
+                }
+                group.leave()
+            }
+        }
+
+        group.notify(queue: .main) { [weak self] in
+            self?.qrzComparisonRankData = results.sorted {
+                ($0.callsign ?? "") < ($1.callsign ?? "")
+            }
+            self?.qrzRankData = self?.qrzComparisonRankData.first
+            self?.isFetchingRank = false
+            self?.appendLog("Leaderboard multi comparison loaded for \(results.count) callsigns.")
         }
     }
 
@@ -927,10 +1866,12 @@ class AppState: NSObject, ObservableObject {
             let (headers, records) = parseADIF(content: content)
             self.tableHeaders = headers
             self.qsoRecords = records.enumerated().map { QSORecordModel(index: $0 + 1, fields: $1) }
+            self.refreshEmailHistoryColumns()
             self.appendLog("Master Logbook loaded successfully: \(self.qsoRecords.count) QSOs.")
         } else {
             self.qsoRecords = []
             self.tableHeaders = ["QSO_DATE", "TIME_ON", "CALL", "BAND", "MODE", "FREQ", "RST_SENT", "RST_RCVD", "COUNTRY", "COMMENT"]
+            self.refreshEmailHistoryColumns()
             self.appendLog("Created new empty Master Logbook for \(currentStationCallsign).")
         }
     }
@@ -972,6 +1913,333 @@ class AppState: NSObject, ObservableObject {
             }
         }
     }
+
+    func syncSDRControlLogbook() {
+        guard let source = sdrControlLogbookSource() ?? promptForSDRControlLogbookSource() else {
+            return
+        }
+
+        mergeSDRControlLogbook(from: source)
+    }
+
+    func chooseSDRControlLogbookFile() {
+        _ = promptForSDRControlLogbookSource()
+    }
+
+    func configureSDRControlPeriodicSync() {
+        sdrControlSyncTimer?.invalidate()
+        sdrControlSyncTimer = nil
+
+        guard UserDefaults.standard.bool(forKey: "sdrControlPeriodicSyncEnabled") else { return }
+
+        let storedIntervalMinutes = UserDefaults.standard.double(forKey: "sdrControlPeriodicSyncIntervalMinutes")
+        let intervalMinutes = storedIntervalMinutes > 0 ? storedIntervalMinutes : 15
+        let interval = max(intervalMinutes, 1) * 60
+
+        sdrControlSyncTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+            DispatchQueue.main.async {
+                self?.syncSDRControlLogbookIfNeeded(isAutomatic: true)
+            }
+        }
+    }
+
+    func syncSDRControlLogbookIfNeeded(isAutomatic: Bool = false) {
+        guard !isLoading else { return }
+        guard let source = sdrControlLogbookSource() ?? (isAutomatic ? nil : promptForSDRControlLogbookSource()) else {
+            return
+        }
+
+        let lastModified = (try? source.url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+        let lastSynced = UserDefaults.standard.object(forKey: "sdrControlLastSyncedModificationDate") as? Date
+        if isAutomatic, let lastModified, let lastSynced, lastModified <= lastSynced {
+            return
+        }
+
+        mergeSDRControlLogbook(from: source, allowPermissionPrompt: !isAutomatic)
+        if let lastModified {
+            UserDefaults.standard.set(lastModified, forKey: "sdrControlLastSyncedModificationDate")
+        }
+        UserDefaults.standard.set(Date(), forKey: "sdrControlLastSyncRunDate")
+    }
+
+    private struct SDRControlLogbookSource {
+        let url: URL
+        let securityScoped: Bool
+    }
+
+    private func sdrControlLogbookSource() -> SDRControlLogbookSource? {
+        if let bookmarkData = UserDefaults.standard.data(forKey: "sdrControlLogbookBookmark") {
+            do {
+                var isStale = false
+                let url = try URL(
+                    resolvingBookmarkData: bookmarkData,
+                    options: [.withSecurityScope],
+                    relativeTo: nil,
+                    bookmarkDataIsStale: &isStale
+                )
+                if FileManager.default.fileExists(atPath: url.path) {
+                    if isStale {
+                        saveSDRControlSecurityBookmark(for: url)
+                    }
+                    return SDRControlLogbookSource(url: url, securityScoped: true)
+                }
+            } catch {
+                UserDefaults.standard.removeObject(forKey: "sdrControlLogbookBookmark")
+            }
+        }
+
+        guard let url = defaultSDRControlLogbookURL() else {
+            return nil
+        }
+
+        return SDRControlLogbookSource(url: url, securityScoped: false)
+    }
+
+    private func defaultSDRControlLogbookURL() -> URL? {
+        let fileManager = FileManager.default
+        if let savedPath = UserDefaults.standard.string(forKey: "sdrControlLogbookPath") {
+            let savedURL = URL(fileURLWithPath: savedPath)
+            if fileManager.fileExists(atPath: savedURL.path) {
+                return savedURL
+            }
+        }
+
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let realHome = URL(fileURLWithPath: "/Users/\(NSUserName())")
+        let mobileDocumentRoots = [
+            home.appendingPathComponent("Library/Mobile Documents"),
+            realHome.appendingPathComponent("Library/Mobile Documents")
+        ]
+
+        let candidates = mobileDocumentRoots.flatMap { mobileDocuments in
+            [
+                mobileDocuments.appendingPathComponent("iCloud~de~roskosch~RadioApp~SmartSDR/Documents/SmartSDR.smartsdrlog"),
+                mobileDocuments.appendingPathComponent("com~apple~CloudDocs/SmartSDR/SmartSDR.smartsdrlog"),
+                mobileDocuments.appendingPathComponent("SmartSDR/SmartSDR.smartsdrlog")
+            ]
+        }
+
+        if let existing = candidates.first(where: { fileManager.fileExists(atPath: $0.path) }) {
+            return existing
+        }
+
+        guard let mobileDocuments = mobileDocumentRoots.first(where: { fileManager.fileExists(atPath: $0.path) }) else {
+            return nil
+        }
+
+        guard let enumerator = fileManager.enumerator(
+            at: mobileDocuments,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+        ) else {
+            return nil
+        }
+
+        for case let url as URL in enumerator {
+            guard url.lastPathComponent == "SmartSDR.smartsdrlog" else { continue }
+            let pathComponents = url.pathComponents
+            if pathComponents.contains("SmartSDR") || url.path.contains("RadioApp~SmartSDR") {
+                return url
+            }
+        }
+
+        return nil
+    }
+
+    private func promptForSDRControlLogbookSource() -> SDRControlLogbookSource? {
+        let panel = NSOpenPanel()
+        panel.title = "Select SmartSDR.smartsdrlog"
+        panel.message = "Select SmartSDR.smartsdrlog from iCloud Drive > SmartSDR so YAAM can read it."
+        panel.prompt = "Import SDR-Control Log"
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        if let plistType = UTType(filenameExtension: "smartsdrlog") {
+            panel.allowedContentTypes = [plistType]
+        }
+
+        let realHome = URL(fileURLWithPath: "/Users/\(NSUserName())")
+        let suggestedURL = realHome
+            .appendingPathComponent("Library/Mobile Documents/iCloud~de~roskosch~RadioApp~SmartSDR/Documents")
+        if FileManager.default.fileExists(atPath: suggestedURL.path) {
+            panel.directoryURL = suggestedURL
+        }
+
+        guard panel.runModal() == .OK, let url = panel.url else {
+            return nil
+        }
+
+        UserDefaults.standard.set(url.path, forKey: "sdrControlLogbookPath")
+        saveSDRControlSecurityBookmark(for: url)
+        return SDRControlLogbookSource(url: url, securityScoped: true)
+    }
+
+    private func saveSDRControlSecurityBookmark(for url: URL) {
+        do {
+            let bookmark = try url.bookmarkData(
+                options: [.withSecurityScope],
+                includingResourceValuesForKeys: nil,
+                relativeTo: nil
+            )
+            UserDefaults.standard.set(bookmark, forKey: "sdrControlLogbookBookmark")
+            UserDefaults.standard.set(url.path, forKey: "sdrControlLogbookPath")
+        } catch {
+            appendLog("Unable to save SDR-Control file permission bookmark: \(error.localizedDescription)")
+        }
+    }
+
+    private func mergeSDRControlLogbook(from source: SDRControlLogbookSource, allowPermissionPrompt: Bool = true) {
+        isLoading = true
+        let url = source.url
+        appendLog("Reading SDR-Control logbook: \(url.path)")
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
+            let didStartAccess = source.securityScoped ? url.startAccessingSecurityScopedResource() : false
+            defer {
+                if didStartAccess {
+                    url.stopAccessingSecurityScopedResource()
+                }
+            }
+
+            do {
+                let records = try self.parseSDRControlLogbook(url: url)
+
+                DispatchQueue.main.async {
+                    if !self.isMasterMode {
+                        self.loadMasterLogbook()
+                    }
+
+                    let headers = self.sdrControlHeaders(from: records)
+                    for header in headers where !self.tableHeaders.contains(header) {
+                        self.tableHeaders.append(header)
+                    }
+
+                    var existingKeys = Set(self.qsoRecords.map { $0.uniqueKey })
+                    var addedCount = 0
+                    var skippedCount = 0
+
+                    for record in records {
+                        let model = QSORecordModel(index: self.qsoRecords.count + 1, fields: record)
+                        guard !existingKeys.contains(model.uniqueKey) else {
+                            skippedCount += 1
+                            continue
+                        }
+
+                        self.qsoRecords.append(model)
+                        existingKeys.insert(model.uniqueKey)
+                        addedCount += 1
+                    }
+
+                    for index in self.qsoRecords.indices {
+                        self.qsoRecords[index].index = index + 1
+                    }
+
+                    self.autoSaveActiveWorkspace()
+                    self.isLoading = false
+                    self.appendLog("SDR-Control sync complete: \(addedCount) new QSOs added, \(skippedCount) duplicates skipped.")
+                    self.playActivitySound(.success)
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.isLoading = false
+                    if allowPermissionPrompt, self.isFilePermissionError(error), !source.securityScoped {
+                        UserDefaults.standard.removeObject(forKey: "sdrControlLogbookPath")
+                        if let selectedSource = self.promptForSDRControlLogbookSource() {
+                            self.mergeSDRControlLogbook(from: selectedSource)
+                        }
+                        return
+                    }
+
+                    self.showNativeAlert(
+                        title: "SDR-Control Sync Failed",
+                        message: error.localizedDescription
+                    )
+                    self.playActivitySound(.failure)
+                }
+            }
+        }
+    }
+
+    private func isFilePermissionError(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        return nsError.domain == NSCocoaErrorDomain &&
+            (nsError.code == NSFileReadNoPermissionError || nsError.code == NSFileReadNoSuchFileError)
+    }
+
+    private func parseSDRControlLogbook(url: URL) throws -> [[String: String]] {
+        let data = try Data(contentsOf: url)
+        let plist = try PropertyListSerialization.propertyList(from: data, options: [], format: nil)
+        guard let entries = plist as? [[String: Any]] else {
+            throw NSError(
+                domain: "YAAM.SDRControl",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "SmartSDR.smartsdrlog does not contain the expected array of QSO records."]
+            )
+        }
+
+        return entries.compactMap { entry in
+            let deleted = stringValue(entry["Deleted"]).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard deleted != "1" else { return nil }
+
+            var record: [String: String] = [:]
+            for (key, value) in entry {
+                guard key != "Deleted" else { continue }
+                let normalizedKey = normalizedSDRControlKey(key)
+                let normalizedValue = normalizedSDRControlValue(value, key: normalizedKey)
+                if !normalizedValue.isEmpty {
+                    record[normalizedKey] = normalizedValue
+                }
+            }
+
+            record["APP_SDR_CONTROL_ID"] = stringValue(entry["UniqueId"])
+            record["APP_SDR_CONTROL_IMPORTED"] = "Y"
+            return record["CALL", default: ""].isEmpty ? nil : record
+        }
+    }
+
+    private func normalizedSDRControlKey(_ key: String) -> String {
+        switch key {
+        case "Name": return "NAME"
+        case "UniqueId": return "APP_SDR_CONTROL_ID"
+        default: return key.uppercased()
+        }
+    }
+
+    private func normalizedSDRControlValue(_ value: Any, key: String) -> String {
+        let rawValue = stringValue(value)
+        switch key {
+        case "QSO_DATE":
+            return rawValue.replacingOccurrences(of: "-", with: "")
+        case "TIME_ON", "TIME_OFF":
+            return rawValue.replacingOccurrences(of: ":", with: "")
+        default:
+            return rawValue
+        }
+    }
+
+    private func sdrControlHeaders(from records: [[String: String]]) -> [String] {
+        let preferred = [
+            "QSO_DATE", "TIME_ON", "TIME_OFF", "CALL", "FREQ", "FREQ_RX", "BAND", "BAND_RX",
+            "MODE", "SUBMODE", "RST_SENT", "RST_RCVD", "NAME", "QTH", "COUNTRY", "CONT",
+            "DXCC", "CQZ", "ITUZ", "GRIDSQUARE", "LAT", "LON", "COMMENT", "OPERATOR",
+            "STATION_CALLSIGN", "APP_SDR_CONTROL_ID", "APP_SDR_CONTROL_IMPORTED"
+        ]
+        let allHeaders = Set(records.flatMap { $0.keys })
+        return preferred.filter { allHeaders.contains($0) } +
+            allHeaders.subtracting(preferred).sorted()
+    }
+
+    private func stringValue(_ value: Any?) -> String {
+        switch value {
+        case let string as String:
+            return string.trimmingCharacters(in: .whitespacesAndNewlines)
+        case let number as NSNumber:
+            return number.stringValue
+        default:
+            return ""
+        }
+    }
     
     func loadGuestLog(from url: URL) {
         isLoading = true
@@ -995,6 +2263,7 @@ class AppState: NSObject, ObservableObject {
             DispatchQueue.main.async {
                 self.tableHeaders = headers
                 self.qsoRecords = qsoModels
+                self.refreshEmailHistoryColumns()
                 self.isLoading = false
                 self.appendLog("Successfully loaded \(records.count) QSOs in Guest Mode.")
                 if offlineMatched > 0 {
@@ -1056,7 +2325,255 @@ class AppState: NSObject, ObservableObject {
                 self.autoSaveActiveWorkspace()
                 self.isLoading = false
                 self.appendLog("Merge Complete: \(addedCount) New QSOs added, \(updatedCount) Confirmations updated.")
+                self.playActivitySound(.success)
             }
+        }
+    }
+
+    func selectExternalADIFLogFile() {
+        let panel = NSOpenPanel()
+        var types: [UTType] = []
+        if let adiType = UTType(filenameExtension: "adi") { types.append(adiType) }
+        if let adifType = UTType(filenameExtension: "adif") { types.append(adifType) }
+
+        panel.allowedContentTypes = types
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.title = "Select External ADIF Log"
+        panel.message = "Choose a .adi or .adif file from WSJT-X, JTDX, GridTracker, Log4OM, N1MM, SDR-Control export, or another logger."
+
+        if panel.runModal() == .OK, let url = panel.url {
+            guard isADIFFile(url) else {
+                showNativeAlert(
+                    title: "ADIF Export Required",
+                    message: "YAAM can sync external logs only from .adi or .adif files."
+                )
+                return
+            }
+
+            UserDefaults.standard.set(url.path, forKey: "externalADIFLogPath")
+            UserDefaults.standard.set(url.path, forKey: "sdrControlLogPath")
+            appendLog("External ADIF log selected: \(url.lastPathComponent)")
+            configureExternalADIFAutoSync()
+        }
+    }
+
+    func selectSDRControlLogFile() {
+        selectExternalADIFLogFile()
+    }
+
+    private func isADIFFile(_ url: URL) -> Bool {
+        let ext = url.pathExtension.lowercased()
+        return ext == "adi" || ext == "adif"
+    }
+
+    func configureExternalADIFAutoSync() {
+        externalADIFSyncTimer?.invalidate()
+        externalADIFSyncTimer = nil
+
+        let isEnabled = UserDefaults.standard.bool(forKey: "externalADIFAutoSyncEnabled") ||
+            UserDefaults.standard.bool(forKey: "sdrControlAutoSyncEnabled")
+        guard isEnabled else { return }
+
+        let newInterval = UserDefaults.standard.double(forKey: "externalADIFSyncIntervalMinutes")
+        let oldInterval = UserDefaults.standard.double(forKey: "sdrControlSyncIntervalMinutes")
+        let storedIntervalMinutes = newInterval > 0 ? newInterval : oldInterval
+        let intervalMinutes = storedIntervalMinutes > 0 ? storedIntervalMinutes : 15
+        let interval = max(intervalMinutes, 1) * 60
+
+        externalADIFSyncTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+            DispatchQueue.main.async {
+                self?.syncExternalADIFLogIfNeeded(isAutomatic: true)
+            }
+        }
+    }
+
+    func configureSDRControlAutoSync() {
+        configureExternalADIFAutoSync()
+    }
+
+    func syncExternalADIFLogIfNeeded(isAutomatic: Bool = false) {
+        guard !isLoading else { return }
+
+        let path = (
+            UserDefaults.standard.string(forKey: "externalADIFLogPath") ??
+            UserDefaults.standard.string(forKey: "sdrControlLogPath") ??
+            ""
+        ).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !path.isEmpty else {
+            if !isAutomatic {
+                showNativeAlert(
+                    title: "External ADIF Log Not Selected",
+                    message: "Please select a .adi/.adif log file from Preferences first."
+                )
+                playActivitySound(.failure)
+            }
+            return
+        }
+
+        let url = URL(fileURLWithPath: path)
+        guard isADIFFile(url) else {
+            appendLog("External ADIF sync skipped: select a .adi or .adif file.")
+            if !isAutomatic {
+                showNativeAlert(
+                    title: "ADIF Export Required",
+                    message: "The saved external log path is not an ADIF file. Select a .adi or .adif file in Preferences."
+                )
+                playActivitySound(.failure)
+            }
+            return
+        }
+
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            appendLog("External ADIF sync skipped: file not found at saved path.")
+            if !isAutomatic { playActivitySound(.failure) }
+            return
+        }
+
+        let lastModified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+        let lastSynced = UserDefaults.standard.object(forKey: "externalADIFLastSyncedModificationDate") as? Date ??
+            UserDefaults.standard.object(forKey: "sdrControlLastSyncedModificationDate") as? Date
+        if isAutomatic, let lastModified, let lastSynced, lastModified <= lastSynced {
+            return
+        }
+
+        appendLog("External ADIF sync started...")
+        mergeADIFIntoMaster(from: url)
+        if let lastModified {
+            UserDefaults.standard.set(lastModified, forKey: "externalADIFLastSyncedModificationDate")
+        }
+        UserDefaults.standard.set(Date(), forKey: "externalADIFLastSyncRunDate")
+    }
+
+    func syncSDRControlLogIfNeeded(isAutomatic: Bool = false) {
+        syncExternalADIFLogIfNeeded(isAutomatic: isAutomatic)
+    }
+
+    func fetchPropagationSnapshot() {
+        guard !isFetchingPropagation else { return }
+
+        isFetchingPropagation = true
+        guard let url = URL(string: "https://www.hamqsl.com/solarxml.php") else {
+            isFetchingPropagation = false
+            return
+        }
+
+        URLSession.shared.dataTask(with: URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 15)) { [weak self] data, _, _ in
+            guard let self else { return }
+
+            var snapshot = PropagationSnapshot(updatedAt: Date())
+            if let data, let xml = String(data: data, encoding: .utf8) {
+                snapshot.solarFlux = self.xmlValue("solarflux", in: xml) ?? "-"
+                snapshot.aIndex = self.xmlValue("aindex", in: xml) ?? "-"
+                snapshot.kIndex = self.xmlValue("kindex", in: xml) ?? "-"
+                snapshot.xray = self.xmlValue("xray", in: xml) ?? "-"
+                snapshot.sunspots = self.xmlValue("sunspots", in: xml) ?? "-"
+                snapshot.signalNoise = self.xmlValue("signalnoise", in: xml) ?? "-"
+                snapshot.geomagField = self.xmlValue("geomagfield", in: xml) ?? "-"
+                snapshot.aurora = self.xmlValue("aurora", in: xml) ?? "-"
+                snapshot.solarWind = self.xmlValue("solarwind", in: xml) ?? "-"
+                snapshot.bz = self.xmlValue("bfield", in: xml) ?? self.xmlValue("bz", in: xml) ?? "-"
+                snapshot.bands = self.parseBandConditions(from: xml)
+                snapshot.vhfConditions = self.parseVHFConditions(from: xml)
+            }
+
+            DispatchQueue.main.async {
+                self.propagationSnapshot = snapshot
+                self.isFetchingPropagation = false
+            }
+        }.resume()
+    }
+
+    private func xmlValue(_ tag: String, in xml: String) -> String? {
+        let pattern = "<\(tag)>(.*?)</\(tag)>"
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive, .dotMatchesLineSeparators]) else {
+            return nil
+        }
+
+        let range = NSRange(xml.startIndex..<xml.endIndex, in: xml)
+        guard let match = regex.firstMatch(in: xml, range: range),
+              match.numberOfRanges > 1,
+              let capture = Range(match.range(at: 1), in: xml) else {
+            return nil
+        }
+
+        return String(xml[capture]).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func parseBandConditions(from xml: String) -> [String: String] {
+        let pattern = #"<band[^>]*name="([^"]+)"[^>]*time="([^"]+)"[^>]*>(.*?)</band>"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive, .dotMatchesLineSeparators]) else {
+            return [:]
+        }
+
+        let range = NSRange(xml.startIndex..<xml.endIndex, in: xml)
+        let matches = regex.matches(in: xml, range: range)
+
+        var conditions: [String: String] = [:]
+        for match in matches where match.numberOfRanges > 3 {
+            guard let nameRange = Range(match.range(at: 1), in: xml),
+                  let timeRange = Range(match.range(at: 2), in: xml),
+                  let valueRange = Range(match.range(at: 3), in: xml) else { continue }
+
+            let name = String(xml[nameRange]).uppercased()
+            let time = String(xml[timeRange]).lowercased()
+            let value = String(xml[valueRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+            conditions["\(name)_\(time)"] = value
+        }
+
+        return conditions
+    }
+
+    private func parseVHFConditions(from xml: String) -> [String: String] {
+        let pattern = #"<phenomenon[^>]*name="([^"]+)"[^>]*location="([^"]+)"[^>]*>(.*?)</phenomenon>"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive, .dotMatchesLineSeparators]) else {
+            return [:]
+        }
+
+        let range = NSRange(xml.startIndex..<xml.endIndex, in: xml)
+        let matches = regex.matches(in: xml, range: range)
+
+        var conditions: [String: String] = [:]
+        for match in matches where match.numberOfRanges > 3 {
+            guard let nameRange = Range(match.range(at: 1), in: xml),
+                  let locationRange = Range(match.range(at: 2), in: xml),
+                  let valueRange = Range(match.range(at: 3), in: xml) else { continue }
+
+            let name = String(xml[nameRange])
+            let location = String(xml[locationRange])
+            let value = String(xml[valueRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+            conditions["\(name)|\(location)"] = value
+            conditions["\(normalizedVHFName(name))|\(normalizedVHFLocation(location))"] = value
+        }
+
+        return conditions
+    }
+
+    private func normalizedVHFName(_ rawName: String) -> String {
+        switch rawName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "vhf-aurora", "vhf aurora":
+            return "VHF Aurora"
+        case "e-skip", "eskip":
+            return "E-Skip"
+        default:
+            return rawName
+        }
+    }
+
+    private func normalizedVHFLocation(_ rawLocation: String) -> String {
+        switch rawLocation.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "northern_hemi", "northern hemisphere":
+            return "Northern Hemisphere"
+        case "north_america", "north america":
+            return "North America"
+        case "europe_6m", "europe 6m":
+            return "Europe 6m"
+        case "europe_4m", "europe 4m":
+            return "Europe 4m"
+        case "europe":
+            return "Europe"
+        default:
+            return rawLocation
         }
     }
     
@@ -1082,6 +2599,7 @@ class AppState: NSObject, ObservableObject {
             self.alertTitle = "Credentials Required 🔑"
             self.alertMessage = "Please enter your LoTW Username and Password in Preferences (Cmd+,) to fetch your Cloud Logbook."
             self.showAlert = true
+            self.playActivitySound(.failure)
             return
         }
         
@@ -1112,6 +2630,7 @@ class AppState: NSObject, ObservableObject {
               let endpoint = URL(string: "https://lotw.arrl.org/lotwuser/lotwreport.adi?login=\(encodedUser)&password=\(encodedPass)&qso_query=1&qso_qsosince=1900-01-01") else {
             self.isLoading = false
             self.appendLog("Error: Invalid LoTW query URL.")
+            self.playActivitySound(.failure)
             return
         }
         
@@ -1127,6 +2646,7 @@ class AppState: NSObject, ObservableObject {
                     self.alertTitle = "Cloud Fetch Failed 🔴"
                     self.alertMessage = error.localizedDescription
                     self.showAlert = true
+                    self.playActivitySound(.failure)
                 }
                 return
             }
@@ -1142,6 +2662,7 @@ class AppState: NSObject, ObservableObject {
                     self.alertTitle = "Authentication Failed 🔴"
                     self.alertMessage = "LoTW rejected credentials. Please check your Username and Password in Preferences (Cmd+,)."
                     self.showAlert = true
+                    self.playActivitySound(.failure)
                 }
                 return
             }
@@ -1153,10 +2674,14 @@ class AppState: NSObject, ObservableObject {
                     DispatchQueue.main.async {
                         UserDefaults.standard.set(Date(), forKey: "lastCloudLogbookFetch")
                         self.appendLog("☁️ Cloud Logbook downloaded successfully. Merging into Master Logbook...")
+                        self.playActivitySound(.success)
                         self.mergeADIFIntoMaster(from: cloudFileURL)
                     }
                 } catch {
-                    DispatchQueue.main.async { self.isLoading = false }
+                    DispatchQueue.main.async {
+                        self.isLoading = false
+                        self.playActivitySound(.failure)
+                    }
                 }
             }
         }.resume()
@@ -1171,15 +2696,7 @@ class AppState: NSObject, ObservableObject {
 
     func enrichLogData(targetCallsigns: Set<String>? = nil) {
         guard !qsoRecords.isEmpty else { return }
-        
-        if let targets = targetCallsigns, targets.count > 19 {
-            showNativeAlert(
-                title: "Selection Limit Exceeded ⚠️",
-                message: "You cannot select or enrich more than 19 rows at a time."
-            )
-            return
-        }
-        
+
         let newHeaders = ["RANK_QSO", "RANK_BAND", "RANK_DXCC", "EMAIL", "QRZ_URL", "APP_YAAM_ENRICHED"]
         for header in newHeaders {
             if !tableHeaders.contains(header) {
@@ -1192,17 +2709,21 @@ class AppState: NSObject, ObservableObject {
         if let targets = targetCallsigns {
             callsignsToEnrich = targets
         } else {
+            let today = Self.adifDateFormatter.string(from: Date())
             for record in qsoRecords {
-                if record.fields["APP_YAAM_ENRICHED"] != "Y" {
-                    let c = record["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-                    if !c.isEmpty { callsignsToEnrich.insert(c) }
-                }
+                guard record["QSO_DATE"].trimmingCharacters(in: .whitespacesAndNewlines) == today else { continue }
+                let c = record["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+                if !c.isEmpty { callsignsToEnrich.insert(c) }
             }
         }
         
         let uniqueCallsigns = Array(callsignsToEnrich)
         guard !uniqueCallsigns.isEmpty else {
-            appendLog("✅ All target records in this workspace are already enriched!")
+            if targetCallsigns == nil {
+                appendLog("ℹ️ No QSOs found for today to enrich.")
+            } else {
+                appendLog("✅ All target records in this workspace are already enriched!")
+            }
             selectedRecordIDs.removeAll()
             return
         }
@@ -1214,26 +2735,33 @@ class AppState: NSObject, ObservableObject {
             for (idx, callsign) in uniqueCallsigns.enumerated() {
                 if Task.isCancelled { break }
                 
-                self.appendLog("[\(idx + 1)/\(uniqueCallsigns.count)] Step 1/2: Fetching Ranks for \(callsign)...")
+                self.appendLog("[\(idx + 1)/\(uniqueCallsigns.count)] Step 1/2: Fetching ranks for \(callsign)...")
                 let (rankQSO, rankBand, rankDXCC) = await self.asyncFetchRank(for: callsign)
+                if rankQSO.isEmpty && rankBand.isEmpty && rankDXCC.isEmpty {
+                    self.appendLog("⚠️ No rank data returned for \(callsign).")
+                }
                 
                 if Task.isCancelled { break }
-                
-                self.appendLog("[\(idx + 1)/\(uniqueCallsigns.count)] Step 2/2: Extracting Email for \(callsign)...")
-                let fetchedEmail = await QRZWebKitScraper.shared.fetchEmail(for: callsign)
-                
+
+                self.appendLog("[\(idx + 1)/\(uniqueCallsigns.count)] Step 2/2: Fetching QRZ email for \(callsign)...")
+                let fetchedEmail = await self.fetchQRZEmail(for: callsign)
+                if fetchedEmail == nil {
+                    self.appendLog("⚠️ No QRZ email found for \(callsign).")
+                }
+
+                if idx < uniqueCallsigns.count - 1 {
+                    try? await Task.sleep(nanoseconds: 450_000_000)
+                }
+
                 if Task.isCancelled { break }
-                
+
                 for i in 0..<self.qsoRecords.count {
                     if self.qsoRecords[i]["CALL"].uppercased() == callsign {
                         if !rankQSO.isEmpty { self.qsoRecords[i].fields["RANK_QSO"] = rankQSO }
                         if !rankBand.isEmpty { self.qsoRecords[i].fields["RANK_BAND"] = rankBand }
                         if !rankDXCC.isEmpty { self.qsoRecords[i].fields["RANK_DXCC"] = rankDXCC }
-                        
-                        if let email = fetchedEmail, !email.isEmpty {
-                            self.qsoRecords[i].fields["EMAIL"] = email
-                        }
-                        
+                        if let email = fetchedEmail, !email.isEmpty { self.qsoRecords[i].fields["EMAIL"] = email }
+
                         self.qsoRecords[i].fields["QRZ_URL"] = "https://www.qrz.com/db/\(callsign)"
                         self.qsoRecords[i].fields["APP_YAAM_ENRICHED"] = "Y"
                     }
@@ -1274,7 +2802,233 @@ class AppState: NSObject, ObservableObject {
         return ("", "", "")
     }
 
-    func sendEmail(to recipient: String, subject: String, body: String, completion: @escaping (Bool, String) -> Void) {
+    private func fetchQRZEmail(for callsign: String) async -> String? {
+        if await !QRZWebKitScraper.shared.hasQRZCookies() {
+            appendLog("⚠️ No QRZ.com cookies found. Open QRZ Login, sign in, then click Done / Save Session.")
+        }
+
+        let result = await fetchQRZEmailFromRawHTML(for: callsign)
+        return result.email
+    }
+
+    @MainActor
+    func fetchAndStoreQRZEmail(for callsign: String) async -> String? {
+        let normalizedCallsign = callsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard !normalizedCallsign.isEmpty else { return nil }
+
+        appendLog("Fetching QRZ email for \(normalizedCallsign)...")
+        guard let email = await fetchQRZEmail(for: normalizedCallsign), !email.isEmpty else {
+            appendLog("⚠️ No QRZ email found for \(normalizedCallsign).")
+            playActivitySound(.failure)
+            return nil
+        }
+
+        for header in ["EMAIL", "QRZ_URL", "APP_YAAM_ENRICHED"] where !tableHeaders.contains(header) {
+            tableHeaders.append(header)
+        }
+
+        var updatedRows = 0
+        for index in qsoRecords.indices {
+            let rowCallsign = qsoRecords[index]["CALL"]
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .uppercased()
+            guard rowCallsign == normalizedCallsign else { continue }
+
+            qsoRecords[index].fields["EMAIL"] = email
+            qsoRecords[index].fields["QRZ_URL"] = "https://www.qrz.com/db/\(normalizedCallsign)"
+            qsoRecords[index].fields["APP_YAAM_ENRICHED"] = "Y"
+            updatedRows += 1
+        }
+
+        selectedEmailCallsign = normalizedCallsign
+        selectedEmailAddress = email
+        objectWillChange.send()
+        autoSaveActiveWorkspace()
+        appendLog("✅ QRZ email saved to \(updatedRows) table row(s) for \(normalizedCallsign).")
+        playActivitySound(.success)
+        return email
+    }
+
+    private func fetchQRZEmailFromRawHTML(for callsign: String) async -> QRZEmailFetchResult {
+        let normalizedCallsign = callsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard let url = URL(string: "https://www.qrz.com/db/\(normalizedCallsign)") else {
+            return QRZEmailFetchResult(email: nil, qmailRaw: "", qmailDecoded: "")
+        }
+
+        var request = QRZWebKitSession.browserLikeRequest(url: url, timeoutInterval: 12)
+        request.setValue("gzip, deflate", forHTTPHeaderField: "Accept-Encoding")
+
+        let cookieHeader = await qrzCookieHeader()
+        if !cookieHeader.isEmpty {
+            request.setValue(cookieHeader, forHTTPHeaderField: "Cookie")
+        }
+
+        for attempt in 1...3 {
+            do {
+                if attempt > 1 {
+                    try? await Task.sleep(nanoseconds: UInt64(attempt) * 700_000_000)
+                }
+
+                let configuration = URLSessionConfiguration.ephemeral
+                configuration.timeoutIntervalForRequest = 12
+                configuration.timeoutIntervalForResource = 20
+                configuration.waitsForConnectivity = true
+                configuration.httpCookieAcceptPolicy = .always
+                configuration.httpShouldSetCookies = false
+                let session = URLSession(configuration: configuration)
+                let (data, response) = try await session.data(for: request)
+
+                if let httpResponse = response as? HTTPURLResponse, !(200..<400).contains(httpResponse.statusCode) {
+                    return QRZEmailFetchResult(email: nil, qmailRaw: "", qmailDecoded: "")
+                }
+
+                let html = String(data: data, encoding: .utf8) ??
+                    String(data: data, encoding: .isoLatin1) ??
+                    ""
+                return decodeQRZQmail(from: html)
+            } catch {}
+        }
+
+        return QRZEmailFetchResult(email: nil, qmailRaw: "", qmailDecoded: "")
+    }
+
+    private func qrzCookieHeader() async -> String {
+        await withCheckedContinuation { continuation in
+            QRZWebKitSession.websiteDataStore.httpCookieStore.getAllCookies { cookies in
+                let qrzCookies = cookies
+                    .filter { $0.domain.contains("qrz.com") }
+                    .map { "\($0.name)=\($0.value)" }
+                    .joined(separator: "; ")
+                continuation.resume(returning: qrzCookies)
+            }
+        }
+    }
+
+    private func decodeQRZQmail(from html: String) -> QRZEmailFetchResult {
+        guard let regex = try? NSRegularExpression(
+            pattern: "\\bqmail\\s*=\\s*['\"]([^'\"]+)['\"]",
+            options: []
+        ) else {
+            return QRZEmailFetchResult(email: nil, qmailRaw: "", qmailDecoded: "")
+        }
+
+        let searchRange = NSRange(html.startIndex..<html.endIndex, in: html)
+        guard let match = regex.firstMatch(in: html, range: searchRange),
+              let qmailRange = Range(match.range(at: 1), in: html) else {
+            return QRZEmailFetchResult(email: nil, qmailRaw: "", qmailDecoded: "")
+        }
+
+        let qmail = String(html[qmailRange])
+        let chars = Array(qmail)
+        var countText = ""
+        var index = chars.count - 1
+
+        while index > 0 {
+            let character = chars[index]
+            if character == "!" {
+                break
+            }
+
+            countText.append(character)
+            index -= 1
+        }
+
+        index -= 1
+        guard let count = Int(countText), count > 0 else {
+            return QRZEmailFetchResult(email: nil, qmailRaw: qmail, qmailDecoded: "")
+        }
+
+        var decoded = ""
+        for _ in 0..<count {
+            guard index >= 0 else { break }
+            decoded.append(chars[index])
+            index -= 2
+        }
+
+        let email = cleanedEmailAddress(decoded)
+        return QRZEmailFetchResult(email: email.isEmpty ? nil : email, qmailRaw: qmail, qmailDecoded: decoded)
+    }
+
+    func applyCapturedQRZEmail(callsign: String, email rawEmail: String) {
+        let normalizedCallsign = callsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let email = cleanedEmailAddress(rawEmail)
+
+        guard !normalizedCallsign.isEmpty, !email.isEmpty else {
+            showNativeAlert(
+                title: "QRZ Email Not Saved",
+                message: "No valid callsign or email address was available to save into the log table."
+            )
+            playActivitySound(.failure)
+            return
+        }
+
+        for header in ["EMAIL", "QRZ_URL", "APP_YAAM_ENRICHED"] where !tableHeaders.contains(header) {
+            tableHeaders.append(header)
+        }
+
+        var updatedRows = 0
+        for index in qsoRecords.indices {
+            let rowCallsign = qsoRecords[index]["CALL"]
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .uppercased()
+
+            guard rowCallsign == normalizedCallsign else { continue }
+
+            qsoRecords[index].fields["EMAIL"] = email
+            qsoRecords[index].fields["QRZ_URL"] = "https://www.qrz.com/db/\(normalizedCallsign)"
+            qsoRecords[index].fields["APP_YAAM_ENRICHED"] = "Y"
+            updatedRows += 1
+        }
+
+        selectedEmailCallsign = normalizedCallsign
+        selectedEmailAddress = email
+
+        guard updatedRows > 0 else {
+            showNativeAlert(
+                title: "QRZ Email Captured",
+                message: "\(normalizedCallsign): \(email)\n\nNo matching CALL rows were found in the current log table."
+            )
+            playActivitySound(.notice)
+            return
+        }
+
+        objectWillChange.send()
+        autoSaveActiveWorkspace()
+        appendLog("✅ QRZ email saved to \(updatedRows) table row(s) for \(normalizedCallsign): \(email)")
+        playActivitySound(.success)
+        showNativeAlert(
+            title: "QRZ Email Saved",
+            message: "\(email) was saved to \(updatedRows) row(s) for \(normalizedCallsign)."
+        )
+    }
+
+    private func cleanedEmailAddress(_ rawValue: String) -> String {
+        let separators = CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "<>\"'()[]{}"))
+        let normalized = rawValue
+            .replacingOccurrences(of: "mailto:", with: " ", options: .caseInsensitive)
+            .replacingOccurrences(of: "mailto", with: " ", options: .caseInsensitive)
+            .replacingOccurrences(of: "&nbsp;", with: " ", options: .caseInsensitive)
+            .trimmingCharacters(in: separators)
+
+        guard let regex = try? NSRegularExpression(
+            pattern: "[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}(?=\\b|\\s|$)",
+            options: [.caseInsensitive]
+        ) else {
+            return ""
+        }
+
+        let range = NSRange(normalized.startIndex..<normalized.endIndex, in: normalized)
+        guard let match = regex.firstMatch(in: normalized, range: range),
+              let emailRange = Range(match.range, in: normalized) else {
+            return ""
+        }
+
+        return String(normalized[emailRange])
+            .trimmingCharacters(in: separators.union(CharacterSet(charactersIn: ".,;:")))
+    }
+
+    func sendEmail(to recipient: String, subject: String, body: String, playSound: Bool = true, completion: @escaping (Bool, String) -> Void) {
+        let targetCallsign = selectedEmailCallsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         
         let rawHost = UserDefaults.standard.string(forKey: "smtpHost")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let host = rawHost.isEmpty ? "smtp.gmail.com" : rawHost
@@ -1288,6 +3042,7 @@ class AppState: NSObject, ObservableObject {
         let pass = rawPass.replacingOccurrences(of: " ", with: "")
         
         guard !host.isEmpty, !user.isEmpty, !pass.isEmpty else {
+            if playSound { playActivitySound(.failure) }
             completion(false, "SMTP MISSING: Check Preferences for Host, User, and Pass.")
             return
         }
@@ -1356,14 +3111,491 @@ class AppState: NSObject, ObservableObject {
                 let outputLog = String(data: errData, encoding: .utf8) ?? "EMPTY LOG"
                 
                 if process.terminationStatus == 0 {
+                    DispatchQueue.main.async {
+                        self.recordEmailHistory(callsign: targetCallsign, email: recipient, subject: subject, status: "Sent")
+                        if playSound { self.playActivitySound(.success) }
+                    }
                     completion(true, "Email successfully sent to \(recipient)!")
                 } else {
+                    DispatchQueue.main.async {
+                        self.recordEmailHistory(callsign: targetCallsign, email: recipient, subject: subject, status: "Failed")
+                        if playSound { self.playActivitySound(.failure) }
+                    }
                     completion(false, "ERROR \(process.terminationStatus):\n\n" + outputLog)
                 }
             } catch {
+                DispatchQueue.main.async {
+                    self.recordEmailHistory(callsign: targetCallsign, email: recipient, subject: subject, status: "Failed")
+                    if playSound { self.playActivitySound(.failure) }
+                }
                 completion(false, "Process Failed: \(error.localizedDescription)")
             }
         }
+    }
+
+    func bulkEmailRecipients(limit: Int = 50) -> [BulkEmailRecipient] {
+        callsignsWithNoConfirmedQSOs
+            .filter { !$0.email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .prefix(limit)
+            .map { item in
+                let normalizedCall = item.callsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+                let unconfirmedQSOs = qsoRecords.filter { record in
+                    record["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == normalizedCall &&
+                    !record.isConfirmed
+                }
+                return BulkEmailRecipient(
+                    callsign: item.callsign,
+                    email: item.email,
+                    qsoCount: item.qsoCount,
+                    bands: item.bands,
+                    countries: item.countries,
+                    qso: unconfirmedQSOs.first,
+                    unconfirmedQSOs: unconfirmedQSOs
+                )
+            }
+    }
+
+    func sendBulkConfirmationEmails(
+        recipients: [BulkEmailRecipient],
+        templateName: String,
+        completion: @escaping (Int, Int) -> Void
+    ) {
+        let selectedRecipients = Array(recipients.prefix(25))
+        guard !selectedRecipients.isEmpty else {
+            completion(0, 0)
+            return
+        }
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            var sentCount = 0
+            var failedCount = 0
+            let semaphore = DispatchSemaphore(value: 0)
+
+            for recipient in selectedRecipients {
+                DispatchQueue.main.async {
+                    self.selectedEmailCallsign = recipient.callsign
+                    self.selectedEmailAddress = recipient.email
+                    self.selectedEmailQSO = recipient.qso
+                    self.selectedEmailUnconfirmedQSOs = recipient.unconfirmedQSOs
+
+                    let message = self.bulkEmailMessage(for: recipient, templateName: templateName)
+                    self.sendEmail(to: recipient.email, subject: message.subject, body: message.body, playSound: false) { success, _ in
+                        if success {
+                            sentCount += 1
+                        } else {
+                            failedCount += 1
+                        }
+                        semaphore.signal()
+                    }
+                }
+
+                semaphore.wait()
+                Thread.sleep(forTimeInterval: 1.0)
+            }
+
+            DispatchQueue.main.async {
+                self.selectedEmailQSO = nil
+                self.selectedEmailUnconfirmedQSOs = []
+                self.playActivitySound(failedCount == 0 ? .success : .failure)
+                completion(sentCount, failedCount)
+            }
+        }
+    }
+
+    private func bulkEmailMessage(for recipient: BulkEmailRecipient, templateName: String) -> (subject: String, body: String) {
+        let myCall = currentStationCallsign
+        let qsos = recipient.unconfirmedQSOs.isEmpty ? recipient.qso.map { [$0] } ?? [] : recipient.unconfirmedQSOs
+        let bandCount = uniqueBandCount(in: qsos)
+        let details = confirmationRequestDetailsBlock(for: qsos)
+        let qsoText = qsos.count == 1 ? "1 unconfirmed QSO" : "\(qsos.count) unconfirmed QSOs"
+        let bandText = bandCount == 1 ? "1 band" : "\(bandCount) bands"
+
+        switch templateName {
+        case "QSL Card Request":
+            return (
+                "QSL request for \(qsoText) on \(bandText) - \(myCall)",
+                """
+                Hello \(recipient.callsign),
+
+                Thank you for our QSOs. I currently have \(qsoText) with you across \(bandText) that are still not confirmed in my log.
+
+                \(details)
+
+                I am following up on these confirmations for award tracking and to keep my logbook accurate. I would appreciate a QSL confirmation when convenient.
+
+                73,
+                \(myCall)
+                """
+            )
+        default:
+            return (
+                "LoTW/QRZ confirmation request for \(qsoText) on \(bandText) - \(myCall)",
+                """
+                Hello \(recipient.callsign),
+
+                Could you please upload or confirm our QSOs on LoTW or QRZ? I currently have \(qsoText) with you across \(bandText) that are still not confirmed.
+
+                \(details)
+
+                I am following up on these confirmations for award tracking and to keep my logbook accurate and organized.
+
+                Thank you and 73,
+                \(myCall)
+                """
+            )
+        }
+    }
+
+    func confirmationRequestMessage(
+        callsign: String,
+        templateName: String,
+        qsos: [QSORecordModel]
+    ) -> (subject: String, body: String) {
+        let myCall = currentStationCallsign
+        let normalizedCall = callsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let bandCount = uniqueBandCount(in: qsos)
+        let qsoText = qsos.count == 1 ? "1 unconfirmed QSO" : "\(qsos.count) unconfirmed QSOs"
+        let bandText = bandCount == 1 ? "1 band" : "\(bandCount) bands"
+        let details = confirmationRequestDetailsBlock(for: qsos)
+
+        switch templateName {
+        case "QSL Card Request":
+            return (
+                "QSL request for \(qsoText) on \(bandText) - \(myCall)",
+                """
+                Hello \(normalizedCall),
+
+                Thank you for our QSOs. I currently have \(qsoText) with you across \(bandText) that are still not confirmed in my log.
+
+                \(details)
+
+                I am following up on these confirmations for award tracking and to keep my logbook accurate. I would appreciate a QSL confirmation when convenient.
+
+                73,
+                \(myCall)
+                """
+            )
+        default:
+            return (
+                "LoTW/QRZ confirmation request for \(qsoText) on \(bandText) - \(myCall)",
+                """
+                Hello \(normalizedCall),
+
+                Could you please upload or confirm our QSOs on LoTW or QRZ? I currently have \(qsoText) with you across \(bandText) that are still not confirmed.
+
+                \(details)
+
+                I am following up on these confirmations for award tracking and to keep my logbook accurate and organized.
+
+                Thank you and 73,
+                \(myCall)
+                """
+            )
+        }
+    }
+
+    private func confirmationRequestDetailsBlock(for qsos: [QSORecordModel]) -> String {
+        guard !qsos.isEmpty else { return "QSO Details:\n- No unconfirmed QSO details found in the current log." }
+
+        let sortedQSOs = qsos.sorted { lhs, rhs in
+            let left = lhs["QSO_DATE"] + lhs["TIME_ON"]
+            let right = rhs["QSO_DATE"] + rhs["TIME_ON"]
+            return left < right
+        }
+
+        let lines = sortedQSOs.enumerated().map { index, qso in
+            let date = formattedADIFDate(qso["QSO_DATE"].trimmingCharacters(in: .whitespacesAndNewlines))
+            let time = formattedADIFTime(qso["TIME_ON"].trimmingCharacters(in: .whitespacesAndNewlines))
+            let band = qso["BAND"].trimmingCharacters(in: .whitespacesAndNewlines)
+            let mode = qso["MODE"].trimmingCharacters(in: .whitespacesAndNewlines)
+            let freq = qso["FREQ"].trimmingCharacters(in: .whitespacesAndNewlines)
+            let rstSent = qso["RST_SENT"].trimmingCharacters(in: .whitespacesAndNewlines)
+            let rstRcvd = qso["RST_RCVD"].trimmingCharacters(in: .whitespacesAndNewlines)
+
+            let parts = [
+                date.isEmpty ? nil : date,
+                time.isEmpty ? nil : "\(time) UTC",
+                band.isEmpty ? nil : band,
+                mode.isEmpty ? nil : mode,
+                freq.isEmpty ? nil : "\(freq) MHz",
+                rstSent.isEmpty ? nil : "RST sent \(rstSent)",
+                rstRcvd.isEmpty ? nil : "RST received \(rstRcvd)"
+            ].compactMap { $0 }
+
+            return "\(index + 1). " + (parts.isEmpty ? "QSO details unavailable" : parts.joined(separator: " | "))
+        }
+
+        return "QSO Details:\n" + lines.joined(separator: "\n")
+    }
+
+    private func uniqueBandCount(in qsos: [QSORecordModel]) -> Int {
+        let bands = Set(qsos.map { $0["BAND"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased() }.filter { !$0.isEmpty })
+        return max(bands.count, qsos.isEmpty ? 0 : 1)
+    }
+
+    private func formattedADIFDate(_ rawDate: String) -> String {
+        guard rawDate.count == 8 else { return rawDate }
+        let y = rawDate.prefix(4)
+        let m = rawDate.dropFirst(4).prefix(2)
+        let d = rawDate.suffix(2)
+        return "\(y)-\(m)-\(d)"
+    }
+
+    private func formattedADIFTime(_ rawTime: String) -> String {
+        guard rawTime.count >= 4 else { return rawTime }
+        let h = rawTime.prefix(2)
+        let m = rawTime.dropFirst(2).prefix(2)
+        let s = rawTime.count >= 6 ? ":\(rawTime.dropFirst(4).prefix(2))" : ""
+        return "\(h):\(m)\(s)"
+    }
+
+    private var emailHistoryURL: URL? {
+        let fm = FileManager.default
+        guard let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return nil }
+        let dir = appSupport.appendingPathComponent("YAAM")
+        if !fm.fileExists(atPath: dir.path) {
+            try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        }
+        return dir.appendingPathComponent("EmailHistory.json")
+    }
+
+    private func loadEmailHistory() {
+        guard let url = emailHistoryURL,
+              let data = try? Data(contentsOf: url),
+              let decoded = try? JSONDecoder().decode([EmailHistoryEntry].self, from: data) else {
+            return
+        }
+
+        emailHistory = decoded.sorted { $0.date > $1.date }
+        refreshEmailHistoryColumns()
+    }
+
+    private func recordEmailHistory(callsign: String, email: String, subject: String, status: String) {
+        let entry = EmailHistoryEntry(
+            id: UUID(),
+            date: Date(),
+            callsign: callsign,
+            email: email,
+            subject: subject,
+            status: status
+        )
+
+        emailHistory.insert(entry, at: 0)
+        emailHistory = Array(emailHistory.prefix(500))
+        saveEmailHistory()
+        updateEmailHistoryColumn(with: entry)
+    }
+
+    func latestEmailHistory(for callsign: String) -> EmailHistoryEntry? {
+        let normalizedCallsign = callsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard !normalizedCallsign.isEmpty else { return nil }
+
+        return emailHistory
+            .filter { $0.callsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == normalizedCallsign }
+            .sorted { $0.date > $1.date }
+            .first
+    }
+
+    func formattedEmailHistoryDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd HH:mm"
+        return formatter.string(from: date)
+    }
+
+    private func refreshEmailHistoryColumns() {
+        guard !emailHistory.isEmpty, !qsoRecords.isEmpty else { return }
+
+        for header in ["APP_YAAM_LAST_EMAIL"] where !tableHeaders.contains(header) {
+            tableHeaders.append(header)
+        }
+
+        let latestByCallsign = Dictionary(grouping: emailHistory, by: {
+            $0.callsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        }).compactMapValues { entries in
+            entries.sorted { $0.date > $1.date }.first
+        }
+
+        for index in qsoRecords.indices {
+            let callsign = qsoRecords[index]["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            guard let entry = latestByCallsign[callsign] else { continue }
+            qsoRecords[index].fields["APP_YAAM_LAST_EMAIL"] = emailHistorySummary(for: entry)
+        }
+    }
+
+    private func updateEmailHistoryColumn(with entry: EmailHistoryEntry) {
+        let normalizedCallsign = entry.callsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard !normalizedCallsign.isEmpty else { return }
+
+        if !tableHeaders.contains("APP_YAAM_LAST_EMAIL") {
+            tableHeaders.append("APP_YAAM_LAST_EMAIL")
+        }
+
+        let summary = emailHistorySummary(for: entry)
+        var updatedRows = 0
+        for index in qsoRecords.indices {
+            let rowCallsign = qsoRecords[index]["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            guard rowCallsign == normalizedCallsign else { continue }
+            qsoRecords[index].fields["APP_YAAM_LAST_EMAIL"] = summary
+            updatedRows += 1
+        }
+
+        if updatedRows > 0 {
+            objectWillChange.send()
+            autoSaveActiveWorkspace()
+        }
+    }
+
+    private func emailHistorySummary(for entry: EmailHistoryEntry) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd HH:mm"
+        return "\(formatter.string(from: entry.date)) | \(entry.status) | \(entry.subject)"
+    }
+
+    private func saveEmailHistory() {
+        guard let url = emailHistoryURL,
+              let data = try? JSONEncoder().encode(emailHistory) else { return }
+        try? data.write(to: url, options: .atomic)
+    }
+
+    private enum QRZConfirmedFetchResult {
+        case success([[String: String]])
+        case failure(String)
+    }
+
+    private func fetchQRZConfirmedRecords(
+        apiKey: String,
+        sinceDateString: String?,
+        completion: @escaping (QRZConfirmedFetchResult) -> Void
+    ) {
+        guard let endpoint = URL(string: "https://logbook.qrz.com/api") else {
+            completion(.failure("Invalid QRZ Logbook API endpoint."))
+            return
+        }
+
+        var options = ["TYPE:ADIF", "STATUS:CONFIRMED"]
+        if let sinceDateString, !sinceDateString.isEmpty {
+            options.append("MODSINCE:\(sinceDateString)")
+        }
+
+        let bodyItems = [
+            "KEY=\(apiKey)",
+            "ACTION=FETCH",
+            "OPTION=\(options.joined(separator: ","))"
+        ]
+
+        var request = URLRequest(url: endpoint, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: 45)
+        request.httpMethod = "POST"
+        request.setValue("YAAM-macOS/\(currentVersion)", forHTTPHeaderField: "User-Agent")
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        request.httpBody = bodyItems.joined(separator: "&").data(using: .utf8)
+
+        URLSession.shared.dataTask(with: request) { data, _, error in
+            if let error {
+                completion(.failure(error.localizedDescription))
+                return
+            }
+
+            guard let data,
+                  let responseText = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) else {
+                completion(.failure("QRZ returned an empty response."))
+                return
+            }
+
+            guard let qrzResponse = self.parseQRZLogbookResponse(responseText) else {
+                completion(.failure("QRZ returned an unreadable response."))
+                return
+            }
+
+            guard qrzResponse.result == "OK" else {
+                completion(.failure("RESULT=\(qrzResponse.result)&COUNT=\(qrzResponse.count)"))
+                return
+            }
+
+            guard qrzResponse.adif.localizedCaseInsensitiveContains("<eor>") else {
+                completion(.failure("QRZ returned no ADIF records. RESULT=\(qrzResponse.result)&COUNT=\(qrzResponse.count)"))
+                return
+            }
+
+            let (_, records) = parseADIF(content: qrzResponse.adif)
+            completion(.success(records))
+        }.resume()
+    }
+
+    private func parseQRZLogbookResponse(_ responseText: String) -> (result: String, count: String, adif: String)? {
+        let result = qrzResponseValue("RESULT", in: responseText)?.uppercased() ?? ""
+        let count = qrzResponseValue("COUNT", in: responseText) ?? "0"
+
+        guard let adifMarkerRange = responseText.range(of: "ADIF=", options: .caseInsensitive) else {
+            return (result: result, count: count, adif: "")
+        }
+
+        let rawADIF = String(responseText[adifMarkerRange.upperBound...])
+            .removingPercentEncoding?
+            .replacingOccurrences(of: "+", with: " ") ??
+            String(responseText[adifMarkerRange.upperBound...])
+
+        return (result: result, count: count, adif: decodeHTMLEntities(rawADIF))
+    }
+
+    private func qrzResponseValue(_ key: String, in responseText: String) -> String? {
+        let pattern = "(?:^|&)\(NSRegularExpression.escapedPattern(for: key))=([^&]*)"
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return nil }
+        let range = NSRange(responseText.startIndex..<responseText.endIndex, in: responseText)
+        guard let match = regex.firstMatch(in: responseText, range: range),
+              let valueRange = Range(match.range(at: 1), in: responseText) else { return nil }
+        return String(responseText[valueRange]).removingPercentEncoding ?? String(responseText[valueRange])
+    }
+
+    private func decodeHTMLEntities(_ text: String) -> String {
+        text
+            .replacingOccurrences(of: "&lt;", with: "<", options: .caseInsensitive)
+            .replacingOccurrences(of: "&gt;", with: ">", options: .caseInsensitive)
+            .replacingOccurrences(of: "&amp;", with: "&", options: .caseInsensitive)
+            .replacingOccurrences(of: "&quot;", with: "\"", options: .caseInsensitive)
+            .replacingOccurrences(of: "&#39;", with: "'", options: .caseInsensitive)
+    }
+
+    private func isQRZConfirmedRecord(_ record: [String: String]) -> Bool {
+        let status = (
+            record["APP_QRZLOG_STATUS"] ??
+            record["QRZLOG_QSL_RCVD"] ??
+            record["QSL_RCVD"] ??
+            ""
+        ).uppercased()
+
+        return status == "CONFIRMED" || status == "Y" || status == "C" || status == "V"
+    }
+
+    private func qrzRecord(_ serverRecord: [String: String], matches localRecord: QSORecordModel) -> Bool {
+        let serverCall = normalizeCallsign(serverRecord["CALL"] ?? "")
+        let localCall = normalizeCallsign(localRecord["CALL"])
+        guard !serverCall.isEmpty, serverCall == localCall else { return false }
+
+        let serverDate = cleanDate(serverRecord["QSO_DATE"] ?? "")
+        let localDate = cleanDate(localRecord["QSO_DATE"])
+        guard !serverDate.isEmpty, serverDate == localDate else { return false }
+
+        let serverTime = cleanTime(serverRecord["TIME_ON"] ?? serverRecord["TIME_OFF"] ?? "")
+        let localTime = cleanTime(localRecord["TIME_ON"].isEmpty ? localRecord["TIME_OFF"] : localRecord["TIME_ON"])
+        if !serverTime.isEmpty, !localTime.isEmpty, serverTime.prefix(4) != localTime.prefix(4) {
+            return false
+        }
+
+        let serverBand = cleanBand(serverRecord["BAND"] ?? "")
+        let localBand = cleanBand(localRecord["BAND"])
+        if !serverBand.isEmpty, !localBand.isEmpty, serverBand != localBand {
+            return false
+        }
+
+        let serverMode = cleanMode(serverRecord["MODE"] ?? "")
+        let localMode = cleanMode(localRecord["MODE"])
+        if !serverMode.isEmpty, !localMode.isEmpty, serverMode != localMode {
+            return false
+        }
+
+        return true
     }
 
     func syncConfirmations(forceFullSync: Bool = false) {
@@ -1380,6 +3612,7 @@ class AppState: NSObject, ObservableObject {
             self.alertTitle = "Credentials Required 🔑"
             self.alertMessage = "Please enter your LoTW or QRZ Logbook API credentials in Preferences (Cmd+,) to sync online QSL confirmations."
             self.showAlert = true
+            self.playActivitySound(.failure)
             return
         }
         
@@ -1393,18 +3626,20 @@ class AppState: NSObject, ObservableObject {
         isSyncingAPI = true
         
         let isFirstFullSync = forceFullSync || (totalConfirmedCount < 50 && qsoRecords.count > 1000)
-        let lastSyncDate = isFirstFullSync ? nil : (UserDefaults.standard.object(forKey: "lastLoTWSyncDate") as? Date)
+        let lastLoTWSyncDate = isFirstFullSync ? nil : (UserDefaults.standard.object(forKey: "lastLoTWSyncDate") as? Date)
+        let lastQRZSyncDate = forceFullSync ? nil : (UserDefaults.standard.object(forKey: "lastQRZSyncDate") as? Date)
         
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "yyyy-MM-dd"
         dateFormatter.timeZone = TimeZone(secondsFromGMT: 0)
         
-        let sinceDateString = lastSyncDate != nil ? dateFormatter.string(from: lastSyncDate!) : "1900-01-01"
+        let lotwSinceDateString = lastLoTWSyncDate != nil ? dateFormatter.string(from: lastLoTWSyncDate!) : "1900-01-01"
+        let qrzSinceDateString = lastQRZSyncDate.map { dateFormatter.string(from: $0) }
         
         if isFirstFullSync {
             appendLog("🚀 Launching FULL Historical QSL Sync (Fetching all confirmations since 1900)...")
         } else {
-            appendLog("🔄 Launching Incremental QSL Sync (Fetching changes since \(sinceDateString))...")
+            appendLog("🔄 Launching Incremental QSL Sync (LoTW since \(lotwSinceDateString), QRZ \(qrzSinceDateString.map { "since \($0)" } ?? "full confirmed sync"))...")
         }
         
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -1420,7 +3655,7 @@ class AppState: NSObject, ObservableObject {
                 group.enter()
                 if let encodedUser = lotwUser.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
                    let encodedPass = lotwPass.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
-                   let lotwEndpoint = URL(string: "https://lotw.arrl.org/lotwuser/lotwreport.adi?login=\(encodedUser)&password=\(encodedPass)&qso_query=1&qso_qslsince=\(sinceDateString)") {
+                   let lotwEndpoint = URL(string: "https://lotw.arrl.org/lotwuser/lotwreport.adi?login=\(encodedUser)&password=\(encodedPass)&qso_query=1&qso_qslsince=\(lotwSinceDateString)") {
                     
                     var request = URLRequest(url: lotwEndpoint, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: 45)
                     request.setValue("YAAM-macOS/\(self.currentVersion)", forHTTPHeaderField: "User-Agent")
@@ -1451,6 +3686,7 @@ class AppState: NSObject, ObservableObject {
                                                     if qCall == call && qDate == date && (qBand.isEmpty || band.isEmpty || qBand == band) {
                                                         self.qsoRecords[i].fields["LOTW_QSL_RCVD"] = "Y"
                                                         self.qsoRecords[i].fields["QSL_RCVD"] = "Y"
+                                                        self.rememberConfirmedRecord(self.qsoRecords[i])
                                                         newlyConfirmedCount += 1
                                                     }
                                                 }
@@ -1470,55 +3706,75 @@ class AppState: NSObject, ObservableObject {
             
             if !qrzKey.isEmpty {
                 group.enter()
-                let qrzEndpointStr = "https://logbook.qrz.com/api?KEY=\(qrzKey)&ACTION=FETCH&OPTION=TYPE:ADIF&MODIFIEDSINCE=\(sinceDateString)"
-                if let qrzEndpoint = URL(string: qrzEndpointStr) {
-                    var request = URLRequest(url: qrzEndpoint, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: 45)
-                    request.setValue("YAAM-macOS/\(self.currentVersion)", forHTTPHeaderField: "User-Agent")
-                    
-                    URLSession.shared.dataTask(with: request) { data, response, error in
-                        defer { group.leave() }
-                        
-                        if let data = data, let reportADIF = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) {
-                            if reportADIF.contains("<") && reportADIF.contains(">") {
-                                let (_, serverRecords) = parseADIF(content: reportADIF)
-                                fetchedRecordsCount += serverRecords.count
-                                syncLogs.append("QRZ: Server returned \(serverRecords.count) logbook records.")
-                                
-                                DispatchQueue.main.async {
-                                    for rec in serverRecords {
-                                        let call = self.normalizeCallsign(rec["CALL"] ?? "")
-                                        let date = self.cleanDate(rec["QSO_DATE"] ?? "")
-                                        let band = self.cleanBand(rec["BAND"] ?? "")
-                                        let qrzRcvd = (rec["QRZLOG_QSL_RCVD"] ?? rec["APP_QRZLOG_STATUS"] ?? rec["QSL_RCVD"] ?? "").uppercased()
-                                        
-                                        if qrzRcvd == "Y" || qrzRcvd == "CONFIRMED" || qrzRcvd == "C" {
-                                            for i in 0..<self.qsoRecords.count {
-                                                if !self.qsoRecords[i].isConfirmed || self.qsoRecords[i].fields["QRZLOG_QSL_RCVD"] != "Y" {
-                                                    let qCall = self.normalizeCallsign(self.qsoRecords[i]["CALL"])
-                                                    let qDate = self.cleanDate(self.qsoRecords[i]["QSO_DATE"])
-                                                    let qBand = self.cleanBand(self.qsoRecords[i]["BAND"])
-                                                    
-                                                    if qCall == call && qDate == date && (qBand.isEmpty || band.isEmpty || qBand == band) {
-                                                        self.qsoRecords[i].fields["QRZLOG_QSL_RCVD"] = "Y"
-                                                        self.qsoRecords[i].fields["QSL_RCVD"] = "Y"
-                                                        newlyConfirmedCount += 1
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
+                self.fetchQRZConfirmedRecords(apiKey: qrzKey, sinceDateString: qrzSinceDateString) { result in
+
+                    switch result {
+                    case .success(let serverRecords):
+                        fetchedRecordsCount += serverRecords.count
+                        syncLogs.append("QRZ: Server returned \(serverRecords.count) confirmed logbook records.")
+
+                        DispatchQueue.main.async {
+                            for rec in serverRecords {
+                                guard self.isQRZConfirmedRecord(rec) else { continue }
+
+                                for i in 0..<self.qsoRecords.count {
+                                    guard self.qrzRecord(rec, matches: self.qsoRecords[i]) else { continue }
+                                    guard self.qsoRecords[i]["QRZLOG_QSL_RCVD"].uppercased() != "Y" else { continue }
+
+                                    self.qsoRecords[i].fields["QRZLOG_QSL_RCVD"] = "Y"
+                                    self.qsoRecords[i].fields["QSL_RCVD"] = "Y"
+                                    self.qsoRecords[i].fields["APP_QRZLOG_STATUS"] = "CONFIRMED"
+                                    self.rememberConfirmedRecord(self.qsoRecords[i])
+                                    newlyConfirmedCount += 1
                                 }
                             }
                         }
-                    }.resume()
-                } else {
-                    group.leave()
+                        group.leave()
+                    case .failure(let message):
+                        if qrzSinceDateString != nil, message.uppercased().contains("RESULT=FAIL"), message.uppercased().contains("COUNT=0") {
+                            syncLogs.append("QRZ: Incremental confirmed sync returned no records, retrying full confirmed sync...")
+                            self.fetchQRZConfirmedRecords(apiKey: qrzKey, sinceDateString: nil) { fallbackResult in
+                                defer { group.leave() }
+
+                                switch fallbackResult {
+                                case .success(let serverRecords):
+                                    fetchedRecordsCount += serverRecords.count
+                                    syncLogs.append("QRZ: Full confirmed sync returned \(serverRecords.count) confirmed logbook records.")
+
+                                    DispatchQueue.main.async {
+                                        for rec in serverRecords {
+                                            guard self.isQRZConfirmedRecord(rec) else { continue }
+
+                                            for i in 0..<self.qsoRecords.count {
+                                                guard self.qrzRecord(rec, matches: self.qsoRecords[i]) else { continue }
+                                                guard self.qsoRecords[i]["QRZLOG_QSL_RCVD"].uppercased() != "Y" else { continue }
+
+                                                self.qsoRecords[i].fields["QRZLOG_QSL_RCVD"] = "Y"
+                                                self.qsoRecords[i].fields["QSL_RCVD"] = "Y"
+                                                self.qsoRecords[i].fields["APP_QRZLOG_STATUS"] = "CONFIRMED"
+                                                self.rememberConfirmedRecord(self.qsoRecords[i])
+                                                newlyConfirmedCount += 1
+                                            }
+                                        }
+                                    }
+                                case .failure(let fallbackMessage):
+                                    syncLogs.append("QRZ Error: \(fallbackMessage)")
+                                }
+                            }
+                        } else {
+                            syncLogs.append("QRZ Error: \(message)")
+                            group.leave()
+                        }
+                    }
                 }
             }
             
             group.notify(queue: .main) {
                 self.isSyncingAPI = false
                 UserDefaults.standard.set(Date(), forKey: "lastLoTWSyncDate")
+                if !qrzKey.isEmpty {
+                    UserDefaults.standard.set(Date(), forKey: "lastQRZSyncDate")
+                }
                 
                 for log in syncLogs {
                     self.appendLog(log)
@@ -1532,11 +3788,13 @@ class AppState: NSObject, ObservableObject {
                     self.alertTitle = "QSL Sync Complete 🟢"
                     self.alertMessage = "Successfully updated \(newlyConfirmedCount) confirmations in your logbook!"
                     self.showAlert = true
+                    self.playActivitySound(.success)
                 } else {
                     self.appendLog("⚪ Sync Complete: All confirmations are up to date (\(fetchedRecordsCount) records checked).")
                     self.alertTitle = "Log Up To Date ⚪"
                     self.alertMessage = "Checked \(fetchedRecordsCount) cloud records. All confirmations in your log are up to date."
                     self.showAlert = true
+                    self.playActivitySound(syncLogs.contains { $0.lowercased().contains("error") } ? .failure : .success)
                 }
             }
         }
@@ -1618,6 +3876,16 @@ class AppState: NSObject, ObservableObject {
                       .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    private func cleanTime(_ timeStr: String) -> String {
+        return timeStr
+            .replacingOccurrences(of: ":", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func cleanMode(_ modeStr: String) -> String {
+        return modeStr.uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     private func applyPersistentConfirmationCache(to records: inout [QSORecordModel]) -> Int {
         var matchedCount = 0
         for i in 0..<records.count {
@@ -1645,6 +3913,19 @@ class AppState: NSObject, ObservableObject {
             savePersistentConfirmationCache()
         }
         return matchedCount
+    }
+
+    private func rememberConfirmedRecord(_ record: QSORecordModel) {
+        let call = normalizeCallsign(record["CALL"])
+        let date = cleanDate(record["QSO_DATE"])
+        let band = cleanBand(record["BAND"])
+        guard !call.isEmpty, !date.isEmpty else { return }
+
+        localConfirmedKeys.insert("\(call)_\(date)")
+        if !band.isEmpty {
+            localConfirmedKeys.insert("\(call)_\(date)_\(band)")
+        }
+        savePersistentConfirmationCache()
     }
 
     func saveCurrentLog() {

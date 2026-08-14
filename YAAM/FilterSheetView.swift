@@ -12,10 +12,20 @@ struct FilterSheetView: View {
     @Environment(\.dismiss) private var dismiss
     
     @State private var tempCriteria = FilterCriteria()
+    @State private var countrySearchText = ""
 
     let availableBands = ["All", "160M", "80M", "60M", "40M", "30M", "20M", "17M", "15M", "12M", "10M", "6M", "4M", "2M", "1.25M", "70CM", "33CM", "23CM", "13CM", "9CM", "6CM", "3CM"]
     let availableModes = ["All", "FT8", "FT4", "CW", "SSB", "FM", "AM", "RTTY", "PSK31", "JS8", "DIGI", "VARAFM", "MSK144"]
     let continents = ["AF", "AN", "AS", "EU", "NA", "OC", "SA"]
+
+    private var filteredCountries: [String] {
+        let query = countrySearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return appState.availableCountries }
+
+        return appState.availableCountries.filter { country in
+            country.localizedCaseInsensitiveContains(query)
+        }
+    }
 
     var body: some View {
         VStack(spacing: 14) {
@@ -53,30 +63,61 @@ struct FilterSheetView: View {
                     
                     // Country Multi-Select Filter Card with Flags
                     VStack(alignment: .leading, spacing: 10) {
-                        Toggle("Filter by Countries", isOn: $tempCriteria.useCountry)
-                            .font(.headline)
+                        HStack {
+                            Toggle("Filter by Countries", isOn: $tempCriteria.useCountry)
+                                .font(.headline)
+
+                            Spacer()
+
+                            Text("\(tempCriteria.selectedCountries.count) selected")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
                         
                         if tempCriteria.useCountry {
+                            HStack(spacing: 8) {
+                                TextField("Search countries...", text: $countrySearchText)
+                                    .textFieldStyle(.roundedBorder)
+
+                                Button("Select Shown") {
+                                    tempCriteria.selectedCountries.formUnion(filteredCountries)
+                                }
+                                .disabled(filteredCountries.isEmpty)
+
+                                Button("Clear") {
+                                    tempCriteria.selectedCountries.removeAll()
+                                }
+                                .disabled(tempCriteria.selectedCountries.isEmpty)
+                            }
+
                             // Selected Countries Flags Preview Bar
                             if !tempCriteria.selectedCountries.isEmpty {
                                 HStack(spacing: 6) {
-                                    Text("Selected Flags:")
+                                    Text("Selected:")
                                         .font(.caption)
                                         .foregroundColor(.secondary)
                                     
                                     ScrollView(.horizontal, showsIndicators: false) {
                                         HStack(spacing: 6) {
                                             ForEach(Array(tempCriteria.selectedCountries).sorted(), id: \.self) { c in
-                                                HStack(spacing: 4) {
-                                                    Text(countryToFlag(c))
-                                                    Text(c)
-                                                        .font(.caption2)
-                                                        .fontWeight(.bold)
+                                                Button {
+                                                    tempCriteria.selectedCountries.remove(c)
+                                                } label: {
+                                                    HStack(spacing: 4) {
+                                                        Text(countryToFlag(c))
+                                                        Text(c)
+                                                            .font(.caption2)
+                                                            .fontWeight(.bold)
+                                                        Image(systemName: "xmark.circle.fill")
+                                                            .font(.caption2)
+                                                            .foregroundColor(.secondary)
+                                                    }
                                                 }
                                                 .padding(.horizontal, 8)
                                                 .padding(.vertical, 4)
                                                 .background(Color.accentColor.opacity(0.15))
                                                 .cornerRadius(6)
+                                                .buttonStyle(.plain)
                                             }
                                         }
                                     }
@@ -86,7 +127,7 @@ struct FilterSheetView: View {
                             // Countries Selector Dropdown Menu / Chips
                             ScrollView {
                                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 140))], spacing: 8) {
-                                    ForEach(appState.availableCountries, id: \.self) { country in
+                                    ForEach(filteredCountries, id: \.self) { country in
                                         let isSelected = tempCriteria.selectedCountries.contains(country)
                                         Button(action: {
                                             if isSelected { tempCriteria.selectedCountries.remove(country) }

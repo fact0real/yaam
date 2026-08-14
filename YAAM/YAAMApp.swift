@@ -68,7 +68,8 @@ struct YAAMApp: App {
         #if os(macOS)
         Settings {
             SettingsView()
-                .frame(width: 450, height: 350)
+                .environmentObject(appState)
+                .frame(width: 560, height: 460)
         }
         #endif
 

@@ -38,6 +38,7 @@ struct ContentView: View {
                 Text("Log Table Viewer").tag(0)
                 Text("Filter & Convert Tool").tag(1)
                 Text("Global Leaderboard").tag(2) // <--- NEW LEADERBOARD TAB
+                Text("DX Advisor").tag(3)
             }
             .pickerStyle(.segmented)
             .padding(12)
@@ -215,10 +216,16 @@ struct ContentView: View {
             } else if appState.selectedTab == 2 {
                 // Tab 2: NEW FULL-PAGE LEADERBOARD VIEW
                 LeaderboardView()
+            } else if appState.selectedTab == 3 {
+                DXAdvisorView()
             }
         }
         .sheet(isPresented: $appState.showAboutSheet) {
             AboutView()
+                .environmentObject(appState)
+        }
+        .sheet(isPresented: $appState.showEmailComposer) {
+            EmailComposerView()
                 .environmentObject(appState)
         }
     }

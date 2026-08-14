@@ -13,6 +13,19 @@ struct StatisticsView: View {
     @Environment(\.dismiss) private var dismiss
     
     @State private var selectedTab = 0
+    @State private var selectedUnconfirmedBand = "All Bands"
+
+    private var unconfirmedBandOptions: [String] {
+        ["All Bands"] + appState.unconfirmedBandCountryStatistics.map(\.band)
+    }
+
+    private var visibleUnconfirmedBandCountryStatistics: [UnconfirmedBandCountryStatModel] {
+        guard selectedUnconfirmedBand != "All Bands" else {
+            return appState.unconfirmedBandCountryStatistics
+        }
+
+        return appState.unconfirmedBandCountryStatistics.filter { $0.band == selectedUnconfirmedBand }
+    }
 
     var body: some View {
         VStack(spacing: 14) {
@@ -47,6 +60,7 @@ struct StatisticsView: View {
             Picker("", selection: $selectedTab) {
                 Text("Band Breakdown").tag(0)
                 Text("Country Breakdown").tag(1)
+                Text("Unconfirmed DXCC").tag(2)
             }
             .pickerStyle(.segmented)
             .padding(.vertical, 2)
@@ -60,27 +74,31 @@ struct StatisticsView: View {
                                 Text("BAND")
                                     .font(.system(size: 11, weight: .bold))
                                     .foregroundColor(.white)
-                                    .frame(width: 70, alignment: .leading)
+                                    .frame(width: 54, alignment: .leading)
                                 Text("QSOs")
                                     .font(.system(size: 11, weight: .bold))
                                     .foregroundColor(.white)
-                                    .frame(width: 60, alignment: .trailing)
+                                    .frame(width: 52, alignment: .trailing)
                                 Text("CONF")
                                     .font(.system(size: 11, weight: .bold))
                                     .foregroundColor(.white)
-                                    .frame(width: 60, alignment: .trailing)
+                                    .frame(width: 52, alignment: .trailing)
                                 Text("UNCONF")
                                     .font(.system(size: 11, weight: .bold))
                                     .foregroundColor(.white)
-                                    .frame(width: 65, alignment: .trailing)
+                                    .frame(width: 56, alignment: .trailing)
                                 Text("DXCC")
                                     .font(.system(size: 11, weight: .bold))
                                     .foregroundColor(.white)
-                                    .frame(width: 55, alignment: .trailing)
+                                    .frame(width: 44, alignment: .trailing)
+                                Text("CONF DXCC")
+                                    .font(.system(size: 11, weight: .bold))
+                                    .foregroundColor(.white)
+                                    .frame(width: 68, alignment: .trailing)
                                 Text("SHARE %")
                                     .font(.system(size: 11, weight: .bold))
                                     .foregroundColor(.white)
-                                    .frame(width: 65, alignment: .trailing)
+                                    .frame(width: 58, alignment: .trailing)
                                 Text("DISTRIBUTION")
                                     .font(.system(size: 11, weight: .bold))
                                     .foregroundColor(.white)
@@ -98,26 +116,31 @@ struct StatisticsView: View {
                                         .font(.system(.caption, design: .monospaced))
                                         .bold()
                                         .foregroundColor(.accentColor)
-                                        .frame(width: 70, alignment: .leading)
+                                        .frame(width: 54, alignment: .leading)
                                     Text("\(stat.qsoCount)")
                                         .font(.system(.caption, design: .monospaced))
-                                        .frame(width: 60, alignment: .trailing)
+                                        .frame(width: 52, alignment: .trailing)
                                     Text("\(stat.confirmedCount)")
                                         .font(.system(.caption, design: .monospaced))
                                         .foregroundColor(.green)
                                         .bold()
-                                        .frame(width: 60, alignment: .trailing)
+                                        .frame(width: 52, alignment: .trailing)
                                     Text("\(stat.unconfirmedCount)")
                                         .font(.system(.caption, design: .monospaced))
                                         .foregroundColor(.orange)
-                                        .frame(width: 65, alignment: .trailing)
+                                        .frame(width: 56, alignment: .trailing)
                                     Text("\(stat.dxccCount)")
                                         .font(.system(.caption, design: .monospaced))
-                                        .frame(width: 55, alignment: .trailing)
+                                        .frame(width: 44, alignment: .trailing)
+                                    Text("\(stat.confirmedDxccCount)")
+                                        .font(.system(.caption, design: .monospaced))
+                                        .foregroundColor(.green)
+                                        .bold()
+                                        .frame(width: 68, alignment: .trailing)
                                     Text(String(format: "%.1f%%", stat.percentage))
                                         .font(.system(.caption2, design: .monospaced))
                                         .foregroundColor(.secondary)
-                                        .frame(width: 65, alignment: .trailing)
+                                        .frame(width: 58, alignment: .trailing)
                                     
                                     GeometryReader { geo in
                                         ZStack(alignment: .leading) {
@@ -139,7 +162,7 @@ struct StatisticsView: View {
                     .cornerRadius(6)
                     .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.gray.opacity(0.3), lineWidth: 1))
                 }
-            } else {
+            } else if selectedTab == 1 {
                 // Tab 1: Country Breakdown Table
                 VStack(alignment: .leading, spacing: 6) {
                     ScrollView {
@@ -203,6 +226,76 @@ struct StatisticsView: View {
                     .cornerRadius(6)
                     .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.gray.opacity(0.3), lineWidth: 1))
                 }
+            } else {
+                // Tab 2: Worked countries that are not confirmed on each band
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("Band:")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+
+                        Picker("", selection: $selectedUnconfirmedBand) {
+                            ForEach(unconfirmedBandOptions, id: \.self) { band in
+                                Text(band).tag(band)
+                            }
+                        }
+                        .frame(width: 170)
+
+                        Spacer()
+                    }
+
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 10) {
+                            if visibleUnconfirmedBandCountryStatistics.isEmpty {
+                                VStack(spacing: 10) {
+                                    Image(systemName: "checkmark.seal.fill")
+                                        .font(.largeTitle)
+                                        .foregroundColor(.green)
+                                    Text("All worked countries are confirmed on their bands.")
+                                        .font(.headline)
+                                        .foregroundColor(.secondary)
+                                }
+                                .frame(maxWidth: .infinity, minHeight: 220)
+                            } else {
+                                ForEach(visibleUnconfirmedBandCountryStatistics) { bandStat in
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        HStack {
+                                            Text(bandStat.band)
+                                                .font(.system(.headline, design: .monospaced))
+                                                .foregroundColor(.accentColor)
+                                            Spacer()
+                                            Text("\(bandStat.countries.count) unconfirmed DXCC")
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
+                                        }
+
+                                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 145), spacing: 8)], alignment: .leading, spacing: 8) {
+                                            ForEach(bandStat.countries) { countryStat in
+                                                UnconfirmedCountryButton(
+                                                    band: bandStat.band,
+                                                    countryStat: countryStat
+                                                ) {
+                                                    showUnconfirmedQSOs(
+                                                        band: bandStat.band,
+                                                        country: countryStat.country
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                    .padding(10)
+                                    .background(Color(NSColor.controlBackgroundColor).opacity(0.4))
+                                    .cornerRadius(6)
+                                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.gray.opacity(0.2), lineWidth: 1))
+                                }
+                            }
+                        }
+                        .padding(8)
+                    }
+                    .background(Color(NSColor.textBackgroundColor))
+                    .cornerRadius(6)
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.gray.opacity(0.3), lineWidth: 1))
+                }
             }
             
             Spacer()
@@ -217,6 +310,55 @@ struct StatisticsView: View {
         }
         .padding(16)
         .frame(width: 620, height: 480)
+    }
+
+    private func showUnconfirmedQSOs(band: String, country: String) {
+        var criteria = FilterCriteria()
+        criteria.useBand = true
+        criteria.band = band
+        criteria.useCountry = true
+        criteria.selectedCountries = [country]
+        criteria.useConfirmation = true
+        criteria.confirmationState = "Unconfirmed (N/Blank)"
+
+        appState.filterCriteria = criteria
+        appState.searchText = ""
+        appState.clearSelection()
+        appState.selectedTab = 0
+        appState.appendLog("Showing unconfirmed QSOs for \(country) on \(band).")
+        dismiss()
+    }
+}
+
+struct UnconfirmedCountryButton: View {
+    let band: String
+    let countryStat: UnconfirmedCountryStatModel
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Text(countryToFlag(countryStat.country))
+                Text(countryStat.country)
+                    .font(.caption)
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                Text("\(countryStat.qsoCount)")
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundColor(.orange)
+                    .bold()
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(Color.orange.opacity(0.12))
+        .cornerRadius(6)
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(Color.orange.opacity(0.25), lineWidth: 1)
+        )
+        .buttonStyle(.plain)
+        .help("Show unconfirmed \(countryStat.country) QSOs on \(band)")
     }
 }
 

@@ -48,8 +48,8 @@ struct HelpView: View {
                     )
                     
                     FAQItem(
-                        question: "How do I export ADIF from SDR-Control for Mac?",
-                        answer: "In SDR-Control for Mac:\n1. Open the Logbook window.\n2. Click the 'Export' button or go to Menu -> Logbook -> Export ADIF.\n3. Choose your destination folder to save the .adi file, then select it in this app."
+                        question: "How do I sync an external ADIF log?",
+                        answer: "Open Settings -> External ADIF, choose a live .adi/.adif file, then click Sync Now or enable automatic sync. This works with WSJT-X, JTDX, GridTracker, Log4OM, N1MM, MacLoggerDX, SDR-Control ADIF exports, and other apps that write ADIF."
                     )
                     
                     FAQItem(
@@ -60,6 +60,31 @@ struct HelpView: View {
                     FAQItem(
                         question: "Can I clean up ADIF logs without converting to CSV?",
                         answer: "Yes! Uncheck 'Convert Output to CSV / Excel'. The application will process, clean, and filter your log while saving the result in clean ADIF (.adi) format without trailing spaces."
+                    )
+
+                    FAQItem(
+                        question: "How do I use DX Advisor?",
+                        answer: "Open DX Advisor to see live propagation, VOACAP-style path suggestions, band opportunities, unconfirmed DXCC targets, callsigns with no confirmed QSOs, bulk QSL email tools, and email history. Enter your Grid Locator, radio power, antenna and height in Settings -> General for better recommendations."
+                    )
+
+                    FAQItem(
+                        question: "What does the VOACAP-style planner calculate?",
+                        answer: "YAAM estimates path quality from your Grid Locator to worked countries in your log. It combines distance, bearing, current UTC hour, target day/night window, HamQSL propagation conditions, station power, antenna details, and whether a country still needs confirmation. It is a practical planner, not the original VOACAP engine."
+                    )
+
+                    FAQItem(
+                        question: "How do I compare multiple callsigns in Global Leaderboard?",
+                        answer: "Open Global Leaderboard and enter at least three callsigns separated by commas or spaces, then click Compare. Use Random 3 to automatically pick three comparison callsigns. YAAM shows your station against each rival for QSO rank, band rank, and DXCC rank."
+                    )
+
+                    FAQItem(
+                        question: "How do I send bulk confirmation request emails?",
+                        answer: "First enrich your log so EMAIL fields are available. Then open DX Advisor and use Bulk QSL Email. Choose a template and click Send Bulk. YAAM sends to callsigns that have no confirmed QSOs and have an email address, with a safety limit of 25 emails per run."
+                    )
+
+                    FAQItem(
+                        question: "How do I configure SMTP for email sending?",
+                        answer: "Open SMTP settings and enter your email address, SMTP host, port, and password. For Gmail or Google Workspace, use an App Password rather than your normal account password. Bulk email uses the same SMTP settings as single-recipient email."
                     )
                 }
                 .padding(.trailing, 8)
