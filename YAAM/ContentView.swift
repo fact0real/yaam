@@ -228,6 +228,10 @@ struct ContentView: View {
             EmailComposerView()
                 .environmentObject(appState)
         }
+        .sheet(isPresented: $appState.showQSLCardComposer) {
+            QSLCardComposerView()
+                .environmentObject(appState)
+        }
     }
 
     // MARK: - Helper Functions

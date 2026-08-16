@@ -1340,6 +1340,8 @@ class AppState: NSObject, ObservableObject {
     @Published var selectedEmailQSO: QSORecordModel? = nil
     @Published var selectedEmailUnconfirmedQSOs: [QSORecordModel] = []
     @Published var emailHistory: [EmailHistoryEntry] = []
+    @Published var showQSLCardComposer: Bool = false
+    @Published var selectedQSLCardQSO: QSORecordModel? = nil
     
     // QRZ Rank & Login States
     @Published var isFetchingRank: Bool = false

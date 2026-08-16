@@ -641,6 +641,13 @@ struct LogTableView: View {
                             appState.enrichSelectedRecords()
                         }
                     }
+
+                    if !call.isEmpty {
+                        Button("Generate QSL Card") {
+                            appState.selectedQSLCardQSO = record
+                            appState.showQSLCardComposer = true
+                        }
+                    }
                     
                     Divider()
                     

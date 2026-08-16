@@ -6,13 +6,8 @@
 	objectVersion = 77;
 	objects = {
 
-/* Begin PBXBuildFile section */
-		4C6A0B9F302D85910082E5D8 /* DXAdvisorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C6A0B9E302D85910082E5D8 /* DXAdvisorView.swift */; };
-/* End PBXBuildFile section */
-
 /* Begin PBXFileReference section */
 		4C688219301A0511009C4F92 /* YAAM.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = YAAM.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		4C6A0B9E302D85910082E5D8 /* DXAdvisorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DXAdvisorView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -39,7 +34,6 @@
 			children = (
 				4C68821B301A0511009C4F92 /* YAAM */,
 				4C68821A301A0511009C4F92 /* Products */,
-				4C6A0B9E302D85910082E5D8 /* DXAdvisorView.swift */,
 			);
 			sourceTree = "<group>";
 		};
@@ -125,7 +119,6 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				4C6A0B9F302D85910082E5D8 /* DXAdvisorView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
