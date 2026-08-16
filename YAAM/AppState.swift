@@ -107,6 +107,16 @@ struct PropagationSnapshot {
     var bz: String = "-"
     var bands: [String: String] = [:]
     var vhfConditions: [String: String] = [:]
+    var solarForecast: [SolarForecastPoint] = []
+}
+
+struct SolarForecastPoint: Identifiable {
+    var id: String { dateLabel }
+    let date: Date
+    let dateLabel: String
+    let solarFlux: Int
+    let aIndex: Int
+    let kpIndex: Int
 }
 
 // MARK: - Country Statistics Model
@@ -1607,7 +1617,16 @@ class AppState: NSObject, ObservableObject {
         if !searchText.isEmpty {
             let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
             records = records.filter { record in
-                record.fields.values.contains { $0.lowercased().contains(query) } ||
+                let country = record["COUNTRY"]
+                let searchableText = (record.fields.values + [
+                    country,
+                    countryToFlag(country),
+                    record["CONT"]
+                ])
+                .joined(separator: " ")
+                .lowercased()
+
+                return searchableText.contains(query) ||
                 tableHeaders.contains { $0.lowercased().contains(query) }
             }
         }
@@ -2485,16 +2504,18 @@ class AppState: NSObject, ObservableObject {
         guard !isFetchingPropagation else { return }
 
         isFetchingPropagation = true
-        guard let url = URL(string: "https://www.hamqsl.com/solarxml.php") else {
-            isFetchingPropagation = false
-            return
-        }
 
-        URLSession.shared.dataTask(with: URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 15)) { [weak self] data, _, _ in
-            guard let self else { return }
+        var snapshot = PropagationSnapshot(updatedAt: Date())
+        let group = DispatchGroup()
+        let lock = NSLock()
 
-            var snapshot = PropagationSnapshot(updatedAt: Date())
-            if let data, let xml = String(data: data, encoding: .utf8) {
+        if let hamQSLURL = URL(string: "https://www.hamqsl.com/solarxml.php") {
+            group.enter()
+            URLSession.shared.dataTask(with: URLRequest(url: hamQSLURL, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 15)) { [weak self] data, _, _ in
+                defer { group.leave() }
+                guard let self, let data, let xml = String(data: data, encoding: .utf8) else { return }
+
+                lock.lock()
                 snapshot.solarFlux = self.xmlValue("solarflux", in: xml) ?? "-"
                 snapshot.aIndex = self.xmlValue("aindex", in: xml) ?? "-"
                 snapshot.kIndex = self.xmlValue("kindex", in: xml) ?? "-"
@@ -2507,13 +2528,26 @@ class AppState: NSObject, ObservableObject {
                 snapshot.bz = self.xmlValue("bfield", in: xml) ?? self.xmlValue("bz", in: xml) ?? "-"
                 snapshot.bands = self.parseBandConditions(from: xml)
                 snapshot.vhfConditions = self.parseVHFConditions(from: xml)
-            }
+                lock.unlock()
+            }.resume()
+        }
 
-            DispatchQueue.main.async {
-                self.propagationSnapshot = snapshot
-                self.isFetchingPropagation = false
-            }
-        }.resume()
+        if let noaaURL = URL(string: "https://services.swpc.noaa.gov/text/27-day-outlook.txt") {
+            group.enter()
+            URLSession.shared.dataTask(with: URLRequest(url: noaaURL, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 15)) { [weak self] data, _, _ in
+                defer { group.leave() }
+                guard let self, let data, let text = String(data: data, encoding: .utf8) else { return }
+
+                lock.lock()
+                snapshot.solarForecast = self.parseNOAA27DayOutlook(from: text)
+                lock.unlock()
+            }.resume()
+        }
+
+        group.notify(queue: .main) {
+            self.propagationSnapshot = snapshot
+            self.isFetchingPropagation = false
+        }
     }
 
     private func xmlValue(_ tag: String, in xml: String) -> String? {
@@ -2579,6 +2613,39 @@ class AppState: NSObject, ObservableObject {
         }
 
         return conditions
+    }
+
+    private func parseNOAA27DayOutlook(from text: String) -> [SolarForecastPoint] {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy MMM dd"
+
+        let labelFormatter = DateFormatter()
+        labelFormatter.locale = Locale(identifier: "en_US_POSIX")
+        labelFormatter.timeZone = TimeZone(secondsFromGMT: 0)
+        labelFormatter.dateFormat = "MMM-dd"
+
+        return text
+            .split(separator: "\n")
+            .compactMap { line -> SolarForecastPoint? in
+                let parts = line.split(whereSeparator: { $0 == " " || $0 == "\t" }).map(String.init)
+                guard parts.count == 6,
+                      let solarFlux = Int(parts[3]),
+                      let aIndex = Int(parts[4]),
+                      let kpIndex = Int(parts[5]),
+                      let date = formatter.date(from: "\(parts[0]) \(parts[1]) \(parts[2])") else {
+                    return nil
+                }
+
+                return SolarForecastPoint(
+                    date: date,
+                    dateLabel: labelFormatter.string(from: date),
+                    solarFlux: solarFlux,
+                    aIndex: aIndex,
+                    kpIndex: kpIndex
+                )
+            }
     }
 
     private func normalizedVHFName(_ rawName: String) -> String {

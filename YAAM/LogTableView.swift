@@ -734,6 +734,9 @@ struct LogTableView: View {
         header == "IOTA" ||
         header == "STATE" ||
         header == "TX_POWER" ||
+        header == "CQZ" ||
+        header == "ITUZ" ||
+        header == "DXCC" ||
         header == "APP_YAAM_LAST_EMAIL" ||
         header == "APP_YAAM_EMAIL_CHECKED" ||
         isMostlyEmpty(header)

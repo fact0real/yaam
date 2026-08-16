@@ -240,36 +240,23 @@ struct DXAdvisorView: View {
                 Text("Propagation")
                     .font(.headline)
                 Spacer()
-                Text("Source: HamQSL / N0NBH")
+                Text("Sources: HamQSL / N0NBH, NOAA SWPC")
                     .font(.caption2)
                     .foregroundColor(.secondary)
             }
 
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)], alignment: .leading, spacing: 14) {
-                propagationCard(title: "HF Band Conditions", icon: "antenna.radiowaves.left.and.right") {
-                    VStack(spacing: 8) {
-                        hfConditionRow("80m-40m", group: "80M-40M")
-                        hfConditionRow("30m-20m", group: "30M-20M")
-                        hfConditionRow("17m-15m", group: "17M-15M")
-                        hfConditionRow("12m-10m", group: "12M-10M")
-                    }
-                }
+            solarForecastSection
 
+            hfBandInfoSection
+
+            vhfPropagationSection
+
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)], alignment: .leading, spacing: 14) {
                 propagationCard(title: "Solar Indices", icon: "sun.max") {
                     VStack(spacing: 8) {
                         metricRow("Solar Flux", value: "\(appState.propagationSnapshot.solarFlux) sfu", color: solarFluxColor)
                         metricRow("Sunspots", value: appState.propagationSnapshot.sunspots, color: .green)
                         metricRow("X-ray", value: appState.propagationSnapshot.xray, color: .green)
-                    }
-                }
-
-                propagationCard(title: "VHF Conditions", icon: "waveform.path.ecg") {
-                    VStack(spacing: 8) {
-                        vhfRow(name: "VHF Aurora", location: "Northern Hemisphere")
-                        vhfRow(name: "E-Skip", location: "Europe")
-                        vhfRow(name: "E-Skip", location: "North America")
-                        vhfRow(name: "E-Skip", location: "Europe 6m")
-                        vhfRow(name: "E-Skip", location: "Europe 4m")
                     }
                 }
 
@@ -287,6 +274,87 @@ struct DXAdvisorView: View {
             }
 
             stationSummary
+        }
+    }
+
+    private var solarForecastSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("27-Day Solar Forecast", systemImage: "chart.xyaxis.line")
+                .font(.headline)
+
+            if appState.propagationSnapshot.solarForecast.isEmpty {
+                emptyText("NOAA SWPC 27-day solar forecast is not available yet.")
+            } else {
+                SolarFluxForecastChart(points: appState.propagationSnapshot.solarForecast)
+                    .frame(height: 190)
+                    .padding(10)
+                    .background(Color(NSColor.controlBackgroundColor).opacity(0.30))
+                    .cornerRadius(8)
+            }
+        }
+    }
+
+    private var hfBandInfoSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("HF Band Info")
+                .font(.headline)
+                .foregroundColor(.red)
+
+            VStack(spacing: 0) {
+                HStack {
+                    Text("Band")
+                        .frame(width: 150, alignment: .leading)
+                    Spacer()
+                    VStack(spacing: 2) {
+                        Image(systemName: "sun.max.fill")
+                            .foregroundColor(.yellow)
+                        Text("Daytime Conditions")
+                    }
+                    .frame(maxWidth: .infinity)
+                    VStack(spacing: 2) {
+                        Image(systemName: "moon.stars.fill")
+                            .foregroundColor(.blue)
+                        Text("Nighttime Conditions")
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .padding(.vertical, 10)
+
+                Divider()
+                hfBandInfoRow(band: "80m-40m", range: "3.5 - 7.3 MHz", group: "80M-40M")
+                Divider()
+                hfBandInfoRow(band: "30m-20m", range: "10.1 - 14.35 MHz", group: "30M-20M")
+                Divider()
+                hfBandInfoRow(band: "17m-15m", range: "18.068 - 21.45 MHz", group: "17M-15M")
+                Divider()
+                hfBandInfoRow(band: "12m-10m", range: "24.89 - 29.7 MHz", group: "12M-10M")
+            }
+            .padding(.horizontal, 12)
+            .padding(.bottom, 8)
+            .background(Color(NSColor.controlBackgroundColor).opacity(0.22))
+            .cornerRadius(8)
+        }
+    }
+
+    private var vhfPropagationSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("VHF & E-Skip Propagation")
+                .font(.headline)
+                .foregroundColor(.red)
+
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 190), spacing: 10)], alignment: .leading, spacing: 10) {
+                vhfConditionCard(name: "VHF Aurora", location: "Northern Hemisphere")
+                vhfConditionCard(name: "E-Skip", location: "North America")
+                vhfConditionCard(name: "E-Skip", location: "Europe")
+                vhfConditionCard(name: "E-Skip", location: "Europe 6m")
+                vhfConditionCard(name: "E-Skip", location: "Europe 4m")
+            }
+
+            Text("HamQSL currently exposes VHF/E-Skip locations for Northern Hemisphere, North America and Europe. No Asia or Middle East VHF region is present in this feed.")
+                .font(.caption2)
+                .foregroundColor(.secondary)
         }
     }
 
@@ -850,6 +918,32 @@ struct DXAdvisorView: View {
         }
     }
 
+    private func hfBandInfoRow(band: String, range: String, group: String) -> some View {
+        let day = appState.propagationSnapshot.bands["\(group)_day"] ?? "-"
+        let night = appState.propagationSnapshot.bands["\(group)_night"] ?? "-"
+
+        return HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text(band)
+                    .font(.title2)
+                    .bold()
+                Text(range)
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+            }
+            .frame(width: 150, alignment: .leading)
+
+            Spacer(minLength: 0)
+
+            conditionBadge(day, icon: "sun.max.fill")
+                .frame(maxWidth: .infinity)
+
+            conditionBadge(night, icon: "moon.fill")
+                .frame(maxWidth: .infinity)
+        }
+        .padding(.vertical, 12)
+    }
+
     private func conditionBadge(_ condition: String, icon: String) -> some View {
         HStack(spacing: 5) {
             Image(systemName: icon)
@@ -911,6 +1005,38 @@ struct DXAdvisorView: View {
                 .background(conditionBadgeColor(value))
                 .cornerRadius(7)
         }
+    }
+
+    private func vhfConditionCard(name: String, location: String) -> some View {
+        let value = appState.propagationSnapshot.vhfConditions["\(name)|\(location)"] ?? "-"
+
+        return HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(name)
+                    .font(.subheadline)
+                    .bold()
+                Text(location)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            Spacer(minLength: 8)
+
+            Text(value)
+                .font(.system(.caption, design: .rounded))
+                .bold()
+                .foregroundColor(.black)
+                .lineLimit(1)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .frame(minWidth: 110, alignment: .center)
+                .background(conditionBadgeColor(value).opacity(value == "-" ? 1 : 0.75))
+                .cornerRadius(6)
+        }
+        .padding(10)
+        .background(Color(NSColor.controlBackgroundColor).opacity(0.25))
+        .cornerRadius(7)
+        .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.gray.opacity(0.18), lineWidth: 1))
     }
 
     private var solarFluxColor: Color {
@@ -1473,4 +1599,134 @@ struct DXAdvisorView: View {
             "zambia": DXCoordinate(latitude: -13.1, longitude: 27.8),
             "zimbabwe": DXCoordinate(latitude: -19.0, longitude: 29.2)
         ]
+}
+
+private struct SolarFluxForecastChart: View {
+    let points: [SolarForecastPoint]
+
+    private var solarRange: ClosedRange<Int> {
+        let values = points.map(\.solarFlux)
+        let minValue = max(0, (values.min() ?? 70) - 5)
+        let maxValue = (values.max() ?? 130) + 5
+        return minValue...max(maxValue, minValue + 10)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 16) {
+                legend(color: .red, title: "Predicted Solar Flux")
+                legend(color: .blue, title: "Kp-Index Predicted")
+                Spacer()
+                Text("NOAA SWPC 27-day outlook")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+
+            GeometryReader { geometry in
+                let plotWidth = max(1, geometry.size.width - 56)
+                let plotHeight = max(1, geometry.size.height - 34)
+                let origin = CGPoint(x: 36, y: plotHeight)
+                let step = points.count > 1 ? plotWidth / CGFloat(points.count - 1) : plotWidth
+                let solarMin = CGFloat(solarRange.lowerBound)
+                let solarSpan = CGFloat(max(1, solarRange.upperBound - solarRange.lowerBound))
+
+                let solarCoordinates = points.enumerated().map { index, point in
+                    CGPoint(
+                        x: origin.x + CGFloat(index) * step,
+                        y: plotHeight - ((CGFloat(point.solarFlux) - solarMin) / solarSpan) * (plotHeight - 12)
+                    )
+                }
+                let kpCoordinates = points.enumerated().map { index, point in
+                    CGPoint(
+                        x: origin.x + CGFloat(index) * step,
+                        y: plotHeight - (CGFloat(point.kpIndex) / 9.0) * (plotHeight - 12)
+                    )
+                }
+
+                ZStack(alignment: .topLeading) {
+                    grid(width: geometry.size.width, height: plotHeight, origin: origin)
+
+                    linePath(solarCoordinates)
+                        .stroke(Color.red, style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
+
+                    linePath(kpCoordinates)
+                        .stroke(Color.blue.opacity(0.75), style: StrokeStyle(lineWidth: 2.2, lineCap: .round, lineJoin: .round))
+
+                    ForEach(Array(points.enumerated()), id: \.element.id) { index, point in
+                        Circle()
+                            .fill(Color.red)
+                            .frame(width: 5, height: 5)
+                            .position(solarCoordinates[index])
+                            .help("\(point.dateLabel): SFI \(point.solarFlux), Kp \(point.kpIndex)")
+
+                        Circle()
+                            .fill(Color.blue.opacity(0.75))
+                            .frame(width: 5, height: 5)
+                            .position(kpCoordinates[index])
+                    }
+
+                    Text("\(solarRange.upperBound)")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .position(x: 14, y: 8)
+                    Text("\(solarRange.lowerBound)")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .position(x: 14, y: plotHeight - 2)
+                    Text("Kp 9")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .position(x: geometry.size.width - 18, y: 8)
+
+                    if let first = points.first {
+                        Text(first.dateLabel)
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                            .position(x: origin.x + 12, y: geometry.size.height - 8)
+                    }
+                    if let last = points.last {
+                        Text(last.dateLabel)
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                            .position(x: geometry.size.width - 28, y: geometry.size.height - 8)
+                    }
+                }
+            }
+        }
+    }
+
+    private func legend(color: Color, title: String) -> some View {
+        HStack(spacing: 5) {
+            Rectangle()
+                .fill(color)
+                .frame(width: 24, height: 5)
+            Text(title)
+                .font(.caption)
+        }
+    }
+
+    private func grid(width: CGFloat, height: CGFloat, origin: CGPoint) -> some View {
+        Path { path in
+            path.move(to: CGPoint(x: origin.x, y: 0))
+            path.addLine(to: origin)
+            path.addLine(to: CGPoint(x: width, y: origin.y))
+
+            for row in 0...4 {
+                let y = CGFloat(row) * height / 4
+                path.move(to: CGPoint(x: origin.x, y: y))
+                path.addLine(to: CGPoint(x: width, y: y))
+            }
+        }
+        .stroke(Color.gray.opacity(0.22), lineWidth: 1)
+    }
+
+    private func linePath(_ coordinates: [CGPoint]) -> Path {
+        Path { path in
+            guard let first = coordinates.first else { return }
+            path.move(to: first)
+            for point in coordinates.dropFirst() {
+                path.addLine(to: point)
+            }
+        }
+    }
 }
