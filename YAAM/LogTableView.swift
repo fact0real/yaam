@@ -583,6 +583,7 @@ struct LogTableView: View {
                                         appState.selectedEmailCallsign = record["CALL"]
                                         appState.selectedEmailAddress = val
                                         appState.selectedEmailQSO = record // ⭐️ FIX: Pass exact clicked record!
+                                        appState.selectedEmailTemplate = nil
                                         appState.selectedEmailUnconfirmedQSOs = []
                                         appState.showEmailComposer = true
                                     }
@@ -643,6 +644,11 @@ struct LogTableView: View {
                     }
 
                     if !call.isEmpty {
+                        Button("Email QSL Card") {
+                            appState.openQSLCardEmailComposer(for: record)
+                        }
+                        .disabled(!record.isConfirmed || record["EMAIL"].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
                         Button("Generate QSL Card") {
                             appState.selectedQSLCardQSO = record
                             appState.showQSLCardComposer = true

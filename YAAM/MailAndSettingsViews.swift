@@ -17,6 +17,12 @@ struct EmailComposerView: View {
     @AppStorage("qrzUsername") private var qrzUser: String = ""
     @AppStorage("lotwUsername") private var lotwUser: String = ""
     
+    @AppStorage("operatorCallsign") private var operatorCallsign = ""
+    @AppStorage("stationGrid") private var stationGrid = ""
+    @AppStorage("radioModel") private var radioModel = ""
+    @AppStorage("radioPowerWatts") private var radioPowerWatts = 100
+    @AppStorage("antennaDescription") private var antennaDescription = ""
+    
     @State private var selectedTemplate: String = "QSL Card Request"
     @State private var emailSubject: String = ""
     @State private var emailBody: String = ""
@@ -26,7 +32,7 @@ struct EmailComposerView: View {
     @State private var showDebugLog: Bool = false
     @State private var smtpDebugOutput: String = ""
     
-    let templates = ["QSL Card Request", "Sked Request", "LoTW/QRZ Confirmation"]
+    let templates = ["QSL Card Request", "Sked Request", "LoTW/QRZ Confirmation", "QSL Card Delivery"]
     
     // DIRECT RESOLVER: Always prioritize the exact clicked row record!
     private var currentQSO: QSORecordModel? {
@@ -166,6 +172,7 @@ struct EmailComposerView: View {
                 
                 Button("Cancel") {
                     appState.selectedEmailQSO = nil
+                    appState.selectedEmailTemplate = nil
                     appState.selectedEmailUnconfirmedQSOs = []
                     dismiss()
                 }
@@ -185,6 +192,11 @@ struct EmailComposerView: View {
         .padding(20)
         .frame(width: 580, height: showDebugLog ? 500 : 450)
         .onAppear {
+            if let requestedTemplate = appState.selectedEmailTemplate, templates.contains(requestedTemplate) {
+                selectedTemplate = requestedTemplate
+            } else if let qso = currentQSO, qso.isConfirmed {
+                selectedTemplate = "QSL Card Delivery"
+            }
             loadTemplate(selectedTemplate)
         }
         .onChange(of: appState.selectedEmailCallsign) { _, _ in
@@ -213,12 +225,13 @@ struct EmailComposerView: View {
         let qsoFreq = qso?["FREQ"].trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         
         let formattedDate = formatDate(rawDate)
+        let formattedTime = formatTime(qsoTime)
         
         var qsoDetailsBlock = ""
         if qso != nil {
             var items: [String] = []
             if !formattedDate.isEmpty { items.append("- Date: \(formattedDate)") }
-            if !qsoTime.isEmpty { items.append("- Time: \(qsoTime) UTC") }
+            if !formattedTime.isEmpty { items.append("- Time: \(formattedTime) UTC") }
             if !qsoBand.isEmpty { items.append("- Band: \(qsoBand)") }
             if !qsoMode.isEmpty { items.append("- Mode: \(qsoMode)") }
             if !qsoFreq.isEmpty { items.append("- Freq: \(qsoFreq) MHz") }
@@ -267,6 +280,45 @@ struct EmailComposerView: View {
             \(myCall)
             """
             
+        case "QSL Card Delivery":
+            emailSubject = "QSL Card for our QSO - \(targetCall) de \(myCall)"
+            let qsoName = qso?["NAME"].trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let greetingName = qsoName.isEmpty ? targetCall : qsoName
+            
+            let sentRst = qso?["RST_SENT"].trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let rcvdRst = qso?["RST_RCVD"].trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let qsoRst = [sentRst, rcvdRst].filter { !$0.isEmpty }.joined(separator: "/")
+            
+            var detailsBlock = ""
+            if qso != nil {
+                var items: [String] = []
+                if !formattedDate.isEmpty { items.append("- Date: \(formattedDate)") }
+                if !formattedTime.isEmpty { items.append("- Time: \(formattedTime) UTC") }
+                if !qsoBand.isEmpty { items.append("- Band: \(qsoBand)") }
+                if !qsoMode.isEmpty { items.append("- Mode: \(qsoMode)") }
+                if !qsoFreq.isEmpty { items.append("- Freq: \(qsoFreq) MHz") }
+                if !qsoRst.isEmpty { items.append("- RST (Sent/Rcvd): \(qsoRst)") }
+                
+                if !items.isEmpty {
+                    detailsBlock = "\n\nQSO Details:\n" + items.joined(separator: "\n")
+                }
+            }
+            
+            emailBody = """
+            Hello \(greetingName),
+            
+            I hope you are doing very well.
+            
+            It was a genuine pleasure to meet you on the air. Thank you for the nice QSO and for the friendly signal across the bands.
+            
+            I have attached my QSL card for our confirmed contact. I hope it reaches you well and brings back a good memory of our QSO.\(detailsBlock)
+            
+            Many thanks again, and I look forward to hearing you again soon.
+            
+            Warm 73,
+            \(myCall)
+            """
+            
         default:
             break
         }
@@ -278,6 +330,15 @@ struct EmailComposerView: View {
         let m = rawDate.dropFirst(4).prefix(2)
         let d = rawDate.suffix(2)
         return "\(y)-\(m)-\(d)"
+    }
+
+    private func formatTime(_ rawTime: String) -> String {
+        let clean = rawTime.trimmingCharacters(in: .whitespacesAndNewlines)
+        let digits = clean.filter { $0.isNumber }
+        guard digits.count >= 4 else { return clean }
+        let hours = digits.prefix(2)
+        let minutes = digits.dropFirst(2).prefix(2)
+        return "\(hours):\(minutes)"
     }
     
     private func sendMail() {
@@ -306,7 +367,52 @@ struct EmailComposerView: View {
         isSending = true
         showDebugLog = false
         
-        appState.sendEmail(to: appState.selectedEmailAddress, subject: emailSubject, body: emailBody) { success, log in
+        let shouldAttach = (selectedTemplate == "QSL Card Delivery" && currentQSO?.isConfirmed == true)
+        let targetQSO = currentQSO
+        let recipient = appState.selectedEmailAddress
+        let subject = emailSubject
+        let body = emailBody
+        
+        let myCall = resolvedMyCallsign
+        let resolvedStation = QSLCardStationInfo(
+            callsign: myCall,
+            grid: stationGrid.isEmpty ? "LM55" : stationGrid,
+            radio: radioModel,
+            antenna: antennaDescription,
+            powerWatts: radioPowerWatts
+        )
+        
+        var attachmentData: Data? = nil
+        var attachmentName: String? = nil
+        
+        if shouldAttach, let qso = targetQSO {
+            let tempURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent(UUID().uuidString)
+                .appendingPathExtension("pdf")
+            do {
+                try QSLCardRenderer.exportPDF(record: qso, station: resolvedStation, to: tempURL)
+                attachmentData = try Data(contentsOf: tempURL)
+                try? FileManager.default.removeItem(at: tempURL)
+                
+                let cleanCall = QSLCardRenderer.cleanFileComponent(qso["CALL"])
+                attachmentName = "\(myCall)_QSL_\(cleanCall).pdf"
+            } catch {
+                try? FileManager.default.removeItem(at: tempURL)
+                isSending = false
+                appState.alertTitle = "QSL Card Export Failed"
+                appState.alertMessage = "The QSL card PDF could not be generated, so the email was not sent.\n\n\(error.localizedDescription)"
+                appState.showAlert = true
+                return
+            }
+        }
+        
+        appState.sendEmail(
+            to: recipient,
+            subject: subject,
+            body: body,
+            attachmentData: attachmentData,
+            attachmentName: attachmentName
+        ) { success, log in
             DispatchQueue.main.async {
                 self.isSending = false
                 if success {
@@ -314,6 +420,7 @@ struct EmailComposerView: View {
                     self.appState.alertMessage = "Your email has been dispatched via SMTP."
                     self.appState.showAlert = true
                     self.appState.selectedEmailQSO = nil
+                    self.appState.selectedEmailTemplate = nil
                     self.appState.selectedEmailUnconfirmedQSOs = []
                     self.dismiss()
                 } else {

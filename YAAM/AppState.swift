@@ -127,6 +127,11 @@ struct CountryStatModel: Identifiable {
     let qsoCount: Int
     let confirmedCount: Int
     let unconfirmedCount: Int
+    
+    var unconfirmedPercentage: Double {
+        guard qsoCount > 0 else { return 0.0 }
+        return Double(unconfirmedCount) / Double(qsoCount) * 100.0
+    }
 }
 
 // MARK: - Comprehensive DXCC & Country/Territory Flag Lookup Engine
@@ -194,7 +199,7 @@ func countryToFlag(_ country: String) -> String {
     case "cocos (keeling) is.": return "🇨🇨"
 
     // MARK: - Americas & Caribbean
-    case "belize": return "🇧ℤ"
+    case "belize": return "🇧🇿"
     case "united states", "united states of america", "usa", "u.s.a.": return "🇺🇸"
     case "canada": return "🇨🇦"
     case "mexico": return "🇲🇽"
@@ -352,7 +357,7 @@ func countryToFlag(_ country: String) -> String {
 
     // MARK: - Oceania & Pacific
     case "australia": return "🇦🇺"
-    case "new zealand": return "🇳ℤ"
+    case "new zealand": return "🇳🇿"
     case "papua new guinea": return "🇵🇬"
     case "new caledonia": return "🇳🇨"
     case "french polynesia": return "🇵🇫"
@@ -389,7 +394,7 @@ func countryToFlag(_ country: String) -> String {
     if clean.contains("azores") { return "🇵🇹" }
     if clean.contains("balearic") { return "🇪🇸" }
     if clean.contains("bonaire") { return "🇧🇶" }
-    if clean.contains("belize") { return "🇧ℤ" }
+    if clean.contains("belize") { return "🇧🇿" }
     if clean.contains("benin") { return "🇧🇯" }
     if clean.contains("curacao") { return "🇨🇼" }
     if clean.contains("galapagos") { return "🇪🇨" }
@@ -1338,6 +1343,7 @@ class AppState: NSObject, ObservableObject {
     @Published var selectedEmailCallsign: String = ""
     @Published var selectedEmailAddress: String = ""
     @Published var selectedEmailQSO: QSORecordModel? = nil
+    @Published var selectedEmailTemplate: String? = nil
     @Published var selectedEmailUnconfirmedQSOs: [QSORecordModel] = []
     @Published var emailHistory: [EmailHistoryEntry] = []
     @Published var showQSLCardComposer: Bool = false
@@ -3067,11 +3073,44 @@ class AppState: NSObject, ObservableObject {
 
         selectedEmailCallsign = normalizedCallsign
         selectedEmailAddress = email
+        selectedEmailTemplate = nil
         objectWillChange.send()
         autoSaveActiveWorkspace()
         appendLog("✅ QRZ email saved to \(updatedRows) table row(s) for \(normalizedCallsign).")
         playActivitySound(.success)
         return email
+    }
+
+    @MainActor
+    func openQSLCardEmailComposer(for record: QSORecordModel) {
+        let callsign = record["CALL"]
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+        let email = record["EMAIL"]
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard record.isConfirmed else {
+            alertTitle = "QSO Not Confirmed"
+            alertMessage = "QSL card delivery is available after the QSO is confirmed."
+            showAlert = true
+            playActivitySound(.failure)
+            return
+        }
+
+        guard !callsign.isEmpty, !email.isEmpty else {
+            alertTitle = "Email Address Missing"
+            alertMessage = "This confirmed QSO does not have an email address yet. Enrich the callsign or add an EMAIL value first."
+            showAlert = true
+            playActivitySound(.failure)
+            return
+        }
+
+        selectedEmailCallsign = callsign
+        selectedEmailAddress = email
+        selectedEmailQSO = record
+        selectedEmailTemplate = "QSL Card Delivery"
+        selectedEmailUnconfirmedQSOs = []
+        showEmailComposer = true
     }
 
     private func fetchQRZEmailFromRawHTML(for callsign: String) async -> QRZEmailFetchResult {
@@ -3208,6 +3247,7 @@ class AppState: NSObject, ObservableObject {
 
         selectedEmailCallsign = normalizedCallsign
         selectedEmailAddress = email
+        selectedEmailTemplate = nil
 
         guard updatedRows > 0 else {
             showNativeAlert(
@@ -3253,7 +3293,15 @@ class AppState: NSObject, ObservableObject {
             .trimmingCharacters(in: separators.union(CharacterSet(charactersIn: ".,;:")))
     }
 
-    func sendEmail(to recipient: String, subject: String, body: String, playSound: Bool = true, completion: @escaping (Bool, String) -> Void) {
+    func sendEmail(
+        to recipient: String,
+        subject: String,
+        body: String,
+        attachmentData: Data? = nil,
+        attachmentName: String? = nil,
+        playSound: Bool = true,
+        completion: @escaping (Bool, String) -> Void
+    ) {
         let targetCallsign = selectedEmailCallsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         
         let rawHost = UserDefaults.standard.string(forKey: "smtpHost")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -3280,16 +3328,69 @@ class AppState: NSObject, ObservableObject {
             let dateStr = dateFormatter.string(from: Date())
             let messageID = "<\(UUID().uuidString)@\(host)>"
             
-            let emailContent = """
-            From: \(user)
-            To: \(recipient)
-            Subject: \(subject)
-            Date: \(dateStr)
-            Message-ID: \(messageID)
-            Content-Type: text/plain; charset=UTF-8
+            var emailContentData = Data()
             
-            \(body)
-            """
+            if let attachmentData = attachmentData, let attachmentName = attachmentName {
+                let boundary = "YAAM-Boundary-\(UUID().uuidString)"
+                
+                let headers = """
+                From: \(user)
+                To: \(recipient)
+                Subject: \(subject)
+                Date: \(dateStr)
+                Message-ID: \(messageID)
+                MIME-Version: 1.0
+                Content-Type: multipart/mixed; boundary="\(boundary)"
+                
+                
+                """.replacingOccurrences(of: "\n", with: "\r\n")
+                
+                emailContentData.append(headers.data(using: .utf8)!)
+                
+                let textPart = """
+                --\(boundary)
+                Content-Type: text/plain; charset=UTF-8
+                Content-Transfer-Encoding: 7bit
+                
+                \(body)
+                
+                
+                """.replacingOccurrences(of: "\n", with: "\r\n")
+                
+                emailContentData.append(textPart.data(using: .utf8)!)
+                
+                let attachmentHeader = """
+                --\(boundary)
+                Content-Type: application/pdf; name="\(attachmentName)"
+                Content-Transfer-Encoding: base64
+                Content-Disposition: attachment; filename="\(attachmentName)"
+                
+                
+                """.replacingOccurrences(of: "\n", with: "\r\n")
+                
+                emailContentData.append(attachmentHeader.data(using: .utf8)!)
+                
+                let base64String = attachmentData.base64EncodedString(options: [.lineLength64Characters, .endLineWithCarriageReturn])
+                emailContentData.append((base64String + "\r\n\r\n").data(using: .utf8)!)
+                
+                let endBoundary = "--\(boundary)--\r\n"
+                emailContentData.append(endBoundary.data(using: .utf8)!)
+            } else {
+                let emailContent = """
+                From: \(user)
+                To: \(recipient)
+                Subject: \(subject)
+                Date: \(dateStr)
+                Message-ID: \(messageID)
+                Content-Type: text/plain; charset=UTF-8
+                
+                \(body)
+                """
+                
+                if let data = emailContent.data(using: .utf8) {
+                    emailContentData.append(data)
+                }
+            }
             
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/curl")
@@ -3304,7 +3405,6 @@ class AppState: NSObject, ObservableObject {
                 "--user", "\(user):\(pass)",
                 "--mail-from", user,
                 "--mail-rcpt", recipient,
-                "--upload-file", "-",
                 "--verbose",
                 "--insecure",
                 "--ipv4"
@@ -3314,24 +3414,22 @@ class AppState: NSObject, ObservableObject {
                 arguments.append("--ssl-reqd")
             }
             
+            let tempEmailURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent(UUID().uuidString)
+                .appendingPathExtension("eml")
+            arguments.append(contentsOf: ["--upload-file", tempEmailURL.path])
             process.arguments = arguments
-            
-            let stdinPipe = Pipe()
+
             let outputPipe = Pipe()
             
-            process.standardInput = stdinPipe
             process.standardOutput = outputPipe
             process.standardError = outputPipe
             
             do {
+                try emailContentData.write(to: tempEmailURL, options: .atomic)
                 try process.run()
-                
-                if let data = emailContent.data(using: .utf8) {
-                    stdinPipe.fileHandleForWriting.write(data)
-                }
-                stdinPipe.fileHandleForWriting.closeFile()
-                
                 process.waitUntilExit()
+                try? FileManager.default.removeItem(at: tempEmailURL)
                 
                 let errData = outputPipe.fileHandleForReading.readDataToEndOfFile()
                 let outputLog = String(data: errData, encoding: .utf8) ?? "EMPTY LOG"
@@ -3350,6 +3448,7 @@ class AppState: NSObject, ObservableObject {
                     completion(false, "ERROR \(process.terminationStatus):\n\n" + outputLog)
                 }
             } catch {
+                try? FileManager.default.removeItem(at: tempEmailURL)
                 DispatchQueue.main.async {
                     self.recordEmailHistory(callsign: targetCallsign, email: recipient, subject: subject, status: "Failed")
                     if playSound { self.playActivitySound(.failure) }
@@ -3402,6 +3501,7 @@ class AppState: NSObject, ObservableObject {
                     self.selectedEmailCallsign = recipient.callsign
                     self.selectedEmailAddress = recipient.email
                     self.selectedEmailQSO = recipient.qso
+                    self.selectedEmailTemplate = nil
                     self.selectedEmailUnconfirmedQSOs = recipient.unconfirmedQSOs
 
                     let message = self.bulkEmailMessage(for: recipient, templateName: templateName)

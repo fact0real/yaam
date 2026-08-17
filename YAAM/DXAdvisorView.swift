@@ -1324,6 +1324,7 @@ struct DXAdvisorView: View {
         appState.selectedEmailCallsign = normalizedCall
         appState.selectedEmailAddress = email
         appState.selectedEmailQSO = matchingQSO
+        appState.selectedEmailTemplate = nil
         appState.selectedEmailUnconfirmedQSOs = unconfirmedQSOs
         appState.showEmailComposer = true
     }

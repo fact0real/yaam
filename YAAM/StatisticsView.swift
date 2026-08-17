@@ -196,6 +196,10 @@ struct StatisticsView: View {
                                     .font(.system(size: 11, weight: .bold))
                                     .foregroundColor(.white)
                                     .frame(width: 100, alignment: .trailing)
+                                Text("UNCONF %")
+                                    .font(.system(size: 11, weight: .bold))
+                                    .foregroundColor(.white)
+                                    .frame(width: 90, alignment: .trailing)
                             }
                             .padding(.horizontal, 10)
                             .padding(.vertical, 7)
@@ -208,6 +212,7 @@ struct StatisticsView: View {
                                         Text(cStat.flag)
                                         Text(cStat.country)
                                             .font(.system(.caption, design: .monospaced))
+                                            .foregroundColor(cStat.confirmedCount == 0 ? Color(red: 0.85, green: 0.2, blue: 0.2) : .primary)
                                             .bold()
                                     }
                                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -226,10 +231,19 @@ struct StatisticsView: View {
                                         .font(.system(.caption, design: .monospaced))
                                         .foregroundColor(.orange)
                                         .frame(width: 100, alignment: .trailing)
+                                    
+                                    Text(String(format: "%.1f%%", cStat.unconfirmedPercentage))
+                                        .font(.system(.caption, design: .monospaced))
+                                        .foregroundColor(.orange)
+                                        .frame(width: 90, alignment: .trailing)
                                 }
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 6)
-                                .background(Color(NSColor.controlBackgroundColor).opacity(0.4))
+                                .background(
+                                    cStat.confirmedCount == 0
+                                    ? Color(red: 0.45, green: 0.08, blue: 0.08).opacity(0.18)
+                                    : Color(NSColor.controlBackgroundColor).opacity(0.4)
+                                )
                                 .border(Color.gray.opacity(0.15), width: 0.5)
                             }
                         }
