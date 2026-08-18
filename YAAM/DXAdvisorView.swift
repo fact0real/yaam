@@ -36,6 +36,13 @@ private struct DXPathPrediction: Identifiable {
     }
 }
 
+private struct VHFConditionDisplayItem: Identifiable {
+    let id: String
+    let name: String
+    let location: String
+    let systemImage: String
+}
+
 struct DXAdvisorView: View {
     @EnvironmentObject var appState: AppState
     @AppStorage("stationGrid") private var stationGrid = ""
@@ -102,6 +109,16 @@ struct DXAdvisorView: View {
 
     private var amateurBands: [String] {
         ["160M", "80M", "40M", "30M", "20M", "17M", "15M", "12M", "10M"]
+    }
+
+    private var vhfConditionItems: [VHFConditionDisplayItem] {
+        [
+            VHFConditionDisplayItem(id: "vhf-aurora-north", name: "VHF Aurora", location: "Northern Hemisphere", systemImage: "sparkles"),
+            VHFConditionDisplayItem(id: "eskip-na", name: "E-Skip", location: "North America", systemImage: "wave.3.right"),
+            VHFConditionDisplayItem(id: "eskip-eu", name: "E-Skip", location: "Europe", systemImage: "wave.3.right"),
+            VHFConditionDisplayItem(id: "eskip-eu-6m", name: "E-Skip", location: "Europe 6m", systemImage: "dot.radiowaves.left.and.right"),
+            VHFConditionDisplayItem(id: "eskip-eu-4m", name: "E-Skip", location: "Europe 4m", systemImage: "dot.radiowaves.left.and.right")
+        ]
     }
 
     private var bulkEmailRecipients: [BulkEmailRecipient] {
@@ -339,22 +356,36 @@ struct DXAdvisorView: View {
     }
 
     private var vhfPropagationSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("VHF & E-Skip Propagation")
-                .font(.headline)
-                .foregroundColor(.red)
-
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 190), spacing: 10)], alignment: .leading, spacing: 10) {
-                vhfConditionCard(name: "VHF Aurora", location: "Northern Hemisphere")
-                vhfConditionCard(name: "E-Skip", location: "North America")
-                vhfConditionCard(name: "E-Skip", location: "Europe")
-                vhfConditionCard(name: "E-Skip", location: "Europe 6m")
-                vhfConditionCard(name: "E-Skip", location: "Europe 4m")
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Label("VHF & E-Skip Propagation", systemImage: "antenna.radiowaves.left.and.right")
+                    .font(.headline)
+                    .foregroundColor(.red)
+                Spacer()
+                Text("\(vhfConditionItems.count) monitored regions")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
             }
 
-            Text("HamQSL currently exposes VHF/E-Skip locations for Northern Hemisphere, North America and Europe. No Asia or Middle East VHF region is present in this feed.")
-                .font(.caption2)
-                .foregroundColor(.secondary)
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 220, maximum: 280), spacing: 12)], alignment: .leading, spacing: 12) {
+                ForEach(vhfConditionItems) { item in
+                    vhfConditionCard(item)
+                }
+            }
+
+            HStack(spacing: 8) {
+                Image(systemName: "info.circle")
+                    .foregroundColor(.secondary)
+                Text("HamQSL currently publishes VHF/E-Skip data for Northern Hemisphere, North America, and Europe. Asia and Middle East VHF regions are not present in this feed.")
+                    .lineLimit(2)
+                Spacer(minLength: 0)
+            }
+            .font(.caption2)
+            .foregroundColor(.secondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(Color(NSColor.controlBackgroundColor).opacity(0.24))
+            .cornerRadius(8)
         }
     }
 
@@ -1007,36 +1038,54 @@ struct DXAdvisorView: View {
         }
     }
 
-    private func vhfConditionCard(name: String, location: String) -> some View {
-        let value = appState.propagationSnapshot.vhfConditions["\(name)|\(location)"] ?? "-"
+    private func vhfConditionCard(_ item: VHFConditionDisplayItem) -> some View {
+        let value = appState.propagationSnapshot.vhfConditions["\(item.name)|\(item.location)"] ?? "-"
+        let color = conditionBadgeColor(value)
 
-        return HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(name)
-                    .font(.subheadline)
-                    .bold()
-                Text(location)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 9) {
+                Image(systemName: item.systemImage)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(color)
+                    .frame(width: 28, height: 28)
+                    .background(color.opacity(0.14))
+                    .cornerRadius(6)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(item.name)
+                        .font(.subheadline)
+                        .bold()
+                        .lineLimit(1)
+                    Text(item.location)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 0)
             }
 
-            Spacer(minLength: 8)
-
-            Text(value)
-                .font(.system(.caption, design: .rounded))
-                .bold()
-                .foregroundColor(.black)
-                .lineLimit(1)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 7)
-                .frame(minWidth: 110, alignment: .center)
-                .background(conditionBadgeColor(value).opacity(value == "-" ? 1 : 0.75))
-                .cornerRadius(6)
+            HStack(spacing: 6) {
+                Image(systemName: vhfStatusIcon(for: value))
+                    .imageScale(.small)
+                Text(value.isEmpty ? "-" : value)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            .font(.system(.caption, design: .rounded))
+            .bold()
+            .foregroundColor(.black)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .frame(maxWidth: .infinity, minHeight: 32, alignment: .center)
+            .background(color.opacity(value == "-" ? 1 : 0.78))
+            .cornerRadius(7)
         }
-        .padding(10)
-        .background(Color(NSColor.controlBackgroundColor).opacity(0.25))
-        .cornerRadius(7)
-        .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.gray.opacity(0.18), lineWidth: 1))
+        .padding(12)
+        .frame(maxWidth: .infinity, minHeight: 104, alignment: .topLeading)
+        .background(Color(NSColor.controlBackgroundColor).opacity(0.30))
+        .cornerRadius(8)
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(color.opacity(0.28), lineWidth: 1))
     }
 
     private var solarFluxColor: Color {
@@ -1079,6 +1128,20 @@ struct DXAdvisorView: View {
             return .gray.opacity(0.35)
         }
         return .orange
+    }
+
+    private func vhfStatusIcon(for condition: String) -> String {
+        let value = condition.lowercased()
+        if value.contains("excellent") || value.contains("good") {
+            return "checkmark.circle.fill"
+        }
+        if value.contains("fair") {
+            return "minus.circle.fill"
+        }
+        if value.contains("poor") || value.contains("closed") || value.contains("storm") {
+            return "xmark.circle.fill"
+        }
+        return "questionmark.circle.fill"
     }
 
     private func conditionText(for band: String) -> String {

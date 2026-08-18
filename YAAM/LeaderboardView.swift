@@ -17,6 +17,13 @@ func parseRankInt(_ rankStr: String?) -> Int? {
 // MARK: - Full Page Leaderboard View with VS Mode
 struct LeaderboardView: View {
     @EnvironmentObject var appState: AppState
+    @State private var selectedHistoryMetric: RankHistoryMetric = .qso
+    @State private var lastLeaderboardAction: LeaderboardAction? = nil
+
+    private enum LeaderboardAction {
+        case compare
+        case track
+    }
 
     private let randomComparisonPool = [
         "AA3B", "K1LZ", "N2NT", "W3LPL", "K3LR", "EA8RM", "S50A", "DL7ON",
@@ -30,8 +37,15 @@ struct LeaderboardView: View {
             .filter { !$0.isEmpty }
     }
 
+    private var allEnteredTargetsTracked: Bool {
+        guard !parsedLeaderboardTargets.isEmpty else { return false }
+        let tracked = Set(appState.trackedRankCallsigns.map { $0.uppercased() })
+        return parsedLeaderboardTargets.allSatisfy { tracked.contains($0) }
+    }
+
     private func randomizeComparisons() {
         let selected = Array(randomComparisonPool.shuffled().prefix(3))
+        lastLeaderboardAction = .compare
         appState.leaderboardSearchCallsign = selected.joined(separator: ", ")
         appState.fetchQRZLeaderboardComparisons(for: selected)
     }
@@ -44,9 +58,20 @@ struct LeaderboardView: View {
                     .font(.title3)
                     .foregroundColor(.secondary)
                 
-                TextField("Compare callsigns (e.g. AA3B, YB5QZ, EA1DR)...", text: $appState.leaderboardSearchCallsign, onCommit: {
-                    appState.fetchQRZLeaderboardComparisons(for: parsedLeaderboardTargets)
-                })
+                TextField(
+                    "Enter callsigns to compare or track (e.g. AA3B, YB5QZ, EA1DR)...",
+                    text: Binding(
+                        get: { appState.leaderboardSearchCallsign },
+                        set: {
+                            appState.leaderboardSearchCallsign = $0.uppercased()
+                            lastLeaderboardAction = nil
+                        }
+                    ),
+                    onCommit: {
+                        lastLeaderboardAction = .compare
+                        appState.fetchQRZLeaderboardComparisons(for: parsedLeaderboardTargets)
+                    }
+                )
                 .textFieldStyle(.plain)
                 .font(.system(size: 18, weight: .bold, design: .monospaced))
 
@@ -62,6 +87,7 @@ struct LeaderboardView: View {
                 .buttonStyle(.bordered)
                 
                 Button(action: {
+                    lastLeaderboardAction = .compare
                     appState.fetchQRZLeaderboardComparisons(for: parsedLeaderboardTargets)
                 }) {
                     HStack(spacing: 4) {
@@ -74,6 +100,23 @@ struct LeaderboardView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.orange)
+                .disabled(parsedLeaderboardTargets.isEmpty)
+
+                Button(action: {
+                    lastLeaderboardAction = .track
+                    appState.addTrackedRankCallsigns(parsedLeaderboardTargets)
+                }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: allEnteredTargetsTracked ? "checkmark.circle.fill" : "scope")
+                        Text(allEnteredTargetsTracked ? "Tracked" : "Track")
+                            .fontWeight(.bold)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(allEnteredTargetsTracked || lastLeaderboardAction == .track ? .green : .blue)
+                .disabled(parsedLeaderboardTargets.isEmpty)
             }
             .padding(16)
             .background(Color(NSColor.controlBackgroundColor))
@@ -104,6 +147,17 @@ struct LeaderboardView: View {
                         )
                         .padding(.horizontal, 24)
                         .padding(.top, 20)
+
+                        RankPerformanceMonitor(
+                            metric: $selectedHistoryMetric,
+                            series: appState.rankTrendSeries(metric: selectedHistoryMetric),
+                            trackedCallsigns: appState.trackedRankCallsigns,
+                            isRefreshing: appState.isRefreshingRankHistory,
+                            status: appState.rankHistoryStatus,
+                            refreshAction: { appState.refreshTrackedRankHistoryIfNeeded(force: true) },
+                            removeAction: { appState.removeTrackedRankCallsign($0) }
+                        )
+                        .padding(.horizontal, 24)
 
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 340), spacing: 14)], spacing: 14) {
                             ForEach(appState.qrzComparisonRankData, id: \.callsign) { rival in
@@ -162,6 +216,17 @@ struct LeaderboardView: View {
                         }
                         .padding(.horizontal, 24)
                         .padding(.top, 20)
+
+                        RankPerformanceMonitor(
+                            metric: $selectedHistoryMetric,
+                            series: appState.rankTrendSeries(metric: selectedHistoryMetric),
+                            trackedCallsigns: appState.trackedRankCallsigns,
+                            isRefreshing: appState.isRefreshingRankHistory,
+                            status: appState.rankHistoryStatus,
+                            refreshAction: { appState.refreshTrackedRankHistoryIfNeeded(force: true) },
+                            removeAction: { appState.removeTrackedRankCallsign($0) }
+                        )
+                        .padding(.horizontal, 24)
                         
                         // Comparison Categories
                         VStack(spacing: 16) {
@@ -222,13 +287,280 @@ struct LeaderboardView: View {
             }
         }
         .onAppear {
-            if appState.leaderboardSearchCallsign.isEmpty {
-                appState.leaderboardSearchCallsign = Array(randomComparisonPool.shuffled().prefix(3)).joined(separator: ", ")
-            }
-            if appState.qrzComparisonRankData.isEmpty && appState.qrzRankData == nil {
+            if !parsedLeaderboardTargets.isEmpty && appState.qrzComparisonRankData.isEmpty && appState.qrzRankData == nil {
                 appState.fetchQRZLeaderboardComparisons(for: parsedLeaderboardTargets)
             }
+            appState.refreshTrackedRankHistoryIfNeeded()
         }
+    }
+}
+
+struct RankPerformanceMonitor: View {
+    @Binding var metric: RankHistoryMetric
+    let series: [RankTrendSeries]
+    let trackedCallsigns: [String]
+    let isRefreshing: Bool
+    let status: String
+    let refreshAction: () -> Void
+    let removeAction: (String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
+                Label("Rival Performance Monitor", systemImage: "chart.line.uptrend.xyaxis")
+                    .font(.headline)
+
+                Picker("Metric", selection: $metric) {
+                    ForEach(RankHistoryMetric.allCases) { item in
+                        Label(item.title, systemImage: item.icon).tag(item)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 360)
+
+                Spacer()
+
+                if isRefreshing {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+
+                Button(action: refreshAction) {
+                    Label("Refresh", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.bordered)
+                .disabled(isRefreshing)
+            }
+
+            if trackedCallsigns.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "scope")
+                        .font(.largeTitle)
+                        .foregroundColor(.secondary)
+                    Text("Type rival callsigns above, then click Track to start daily QRZ rank history.")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+                .frame(maxWidth: .infinity, minHeight: 150)
+            } else {
+                HStack(alignment: .top, spacing: 14) {
+                    RankGapTrendChart(series: series)
+                        .frame(minHeight: 240)
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Tracked Rivals")
+                            .font(.caption)
+                            .fontWeight(.bold)
+                            .foregroundColor(.secondary)
+
+                        ForEach(trackedCallsigns, id: \.self) { callsign in
+                            let rivalSeries = series.first { $0.callsign == callsign }
+                            TrackedRivalRow(
+                                callsign: callsign,
+                                countryIso: rivalSeries?.countryIso,
+                                latestGap: rivalSeries?.latestGap,
+                                removeAction: { removeAction(callsign) }
+                            )
+                        }
+
+                        if !status.isEmpty {
+                            Text(status)
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                                .padding(.top, 4)
+                        }
+                    }
+                    .frame(width: 230, alignment: .topLeading)
+                }
+            }
+        }
+        .padding(14)
+        .background(Color(NSColor.controlBackgroundColor).opacity(0.65))
+        .cornerRadius(8)
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.blue.opacity(0.22), lineWidth: 1))
+    }
+}
+
+struct TrackedRivalRow: View {
+    let callsign: String
+    let countryIso: String?
+    let latestGap: Int?
+    let removeAction: () -> Void
+
+    private var gapText: String {
+        guard let latestGap else { return "No trend yet" }
+        let formatted = NumberFormatter.localizedString(from: NSNumber(value: abs(latestGap)), number: .decimal)
+        if latestGap > 0 { return "Lead \(formatted)" }
+        if latestGap < 0 { return "Behind \(formatted)" }
+        return "Tied"
+    }
+
+    private var gapColor: Color {
+        guard let latestGap else { return .secondary }
+        if latestGap > 0 { return .green }
+        if latestGap < 0 { return .red }
+        return .secondary
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(countryToFlag(countryIso ?? ""))
+                .font(.title3)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(callsign)
+                    .font(.system(.subheadline, design: .monospaced))
+                    .bold()
+                Text(gapText)
+                    .font(.caption2)
+                    .foregroundColor(gapColor)
+            }
+            Spacer()
+            Button(action: removeAction) {
+                Image(systemName: "xmark")
+            }
+            .buttonStyle(.plain)
+            .foregroundColor(.secondary)
+            .help("Stop tracking \(callsign)")
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(Color(NSColor.textBackgroundColor))
+        .cornerRadius(6)
+    }
+}
+
+struct RankGapTrendChart: View {
+    let series: [RankTrendSeries]
+
+    private let colors: [Color] = [.blue, .purple, .orange, .green, .pink, .cyan, .red, .indigo]
+
+    private var allPoints: [RankTrendPoint] {
+        series.flatMap(\.points)
+    }
+
+    private var maxAbsGap: Int {
+        max(allPoints.map { abs($0.gap) }.max() ?? 1, 1)
+    }
+
+    var body: some View {
+        GeometryReader { geometry in
+            if allPoints.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "chart.xyaxis.line")
+                        .font(.largeTitle)
+                        .foregroundColor(.secondary)
+                    Text("Refresh once today; tomorrow's snapshot will start the visible trend.")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                let plotWidth = max(1, geometry.size.width - 58)
+                let plotHeight = max(1, geometry.size.height - 42)
+                let origin = CGPoint(x: 44, y: 18 + plotHeight / 2)
+                let datedPoints = uniqueSortedDates()
+                let step = datedPoints.count > 1 ? plotWidth / CGFloat(datedPoints.count - 1) : plotWidth
+                let yScale = (plotHeight / 2 - 10) / CGFloat(maxAbsGap)
+
+                ZStack(alignment: .topLeading) {
+                    chartGrid(width: geometry.size.width, height: plotHeight, origin: origin)
+
+                    ForEach(Array(series.enumerated()), id: \.element.id) { index, item in
+                        let coordinates = coordinates(for: item.points, dates: datedPoints, origin: origin, step: step, yScale: yScale)
+                        linePath(coordinates)
+                            .stroke(colors[index % colors.count], style: StrokeStyle(lineWidth: 2.8, lineCap: .round, lineJoin: .round))
+
+                        ForEach(Array(coordinates.enumerated()), id: \.offset) { pointIndex, coordinate in
+                            Circle()
+                                .fill(colors[index % colors.count])
+                                .frame(width: 6, height: 6)
+                                .position(coordinate)
+                                .help("\(item.callsign) \(item.points[pointIndex].label): \(gapHelp(item.points[pointIndex].gap))")
+                        }
+                    }
+
+                    Text("+\(formattedNumber(maxAbsGap))")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .position(x: 20, y: 18)
+                    Text("-\(formattedNumber(maxAbsGap))")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .position(x: 20, y: plotHeight + 18)
+                    Text(datedPoints.first?.label ?? "")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .position(x: 54, y: geometry.size.height - 10)
+                    Text(datedPoints.last?.label ?? "")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .position(x: geometry.size.width - 28, y: geometry.size.height - 10)
+                }
+            }
+        }
+    }
+
+    private func uniqueSortedDates() -> [RankTrendPoint] {
+        let grouped = Dictionary(grouping: allPoints) { Calendar.current.startOfDay(for: $0.date) }
+        return grouped.keys.sorted().compactMap { key in
+            grouped[key]?.first
+        }
+    }
+
+    private func coordinates(
+        for points: [RankTrendPoint],
+        dates: [RankTrendPoint],
+        origin: CGPoint,
+        step: CGFloat,
+        yScale: CGFloat
+    ) -> [CGPoint] {
+        let indexByDay = Dictionary(uniqueKeysWithValues: dates.enumerated().map {
+            (Calendar.current.startOfDay(for: $0.element.date), $0.offset)
+        })
+
+        return points.compactMap { point in
+            let day = Calendar.current.startOfDay(for: point.date)
+            guard let index = indexByDay[day] else { return nil }
+            return CGPoint(
+                x: origin.x + CGFloat(index) * step,
+                y: origin.y - CGFloat(point.gap) * yScale
+            )
+        }
+    }
+
+    private func chartGrid(width: CGFloat, height: CGFloat, origin: CGPoint) -> some View {
+        Path { path in
+            for row in 0...4 {
+                let y = 18 + CGFloat(row) * height / 4
+                path.move(to: CGPoint(x: origin.x, y: y))
+                path.addLine(to: CGPoint(x: width, y: y))
+            }
+            path.move(to: CGPoint(x: origin.x, y: 18))
+            path.addLine(to: CGPoint(x: origin.x, y: 18 + height))
+            path.move(to: CGPoint(x: origin.x, y: origin.y))
+            path.addLine(to: CGPoint(x: width, y: origin.y))
+        }
+        .stroke(Color.gray.opacity(0.18), lineWidth: 1)
+    }
+
+    private func linePath(_ coordinates: [CGPoint]) -> Path {
+        Path { path in
+            guard let first = coordinates.first else { return }
+            path.move(to: first)
+            for point in coordinates.dropFirst() {
+                path.addLine(to: point)
+            }
+        }
+    }
+
+    private func gapHelp(_ gap: Int) -> String {
+        if gap > 0 { return "You lead by \(formattedNumber(gap)) ranks" }
+        if gap < 0 { return "You are behind by \(formattedNumber(abs(gap))) ranks" }
+        return "Tied"
+    }
+
+    private func formattedNumber(_ value: Int) -> String {
+        NumberFormatter.localizedString(from: NSNumber(value: value), number: .decimal)
     }
 }
 

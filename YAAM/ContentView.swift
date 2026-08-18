@@ -39,6 +39,7 @@ struct ContentView: View {
                 Text("Filter & Convert Tool").tag(1)
                 Text("Global Leaderboard").tag(2) // <--- NEW LEADERBOARD TAB
                 Text("DX Advisor").tag(3)
+                Text("QRZ Awards").tag(4)
             }
             .pickerStyle(.segmented)
             .padding(12)
@@ -218,6 +219,8 @@ struct ContentView: View {
                 LeaderboardView()
             } else if appState.selectedTab == 3 {
                 DXAdvisorView()
+            } else if appState.selectedTab == 4 {
+                QRZAwardsView()
             }
         }
         .sheet(isPresented: $appState.showAboutSheet) {

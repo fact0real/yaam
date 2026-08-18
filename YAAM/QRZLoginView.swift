@@ -6,30 +6,28 @@
 import SwiftUI
 import WebKit
 
+// MARK: - Native WebKit QRZ Login Window
 struct QRZLoginView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var appState: AppState
-    @State private var statusMessage: String = "Checking QRZ.com session status..."
-    @State private var isLoggedIn: Bool = false
+    @State private var statusText: String = "Please log in to QRZ.com (supports MFA/2FA)..."
+    @State private var saveRequestID = 0
 
     var body: some View {
         VStack(spacing: 0) {
             // Header Bar
             HStack {
-                Image(systemName: "shield.checkerboard")
+                Image(systemName: "lock.shield.fill")
                     .foregroundColor(.green)
-                    .font(.title3)
                 Text("QRZ.com Authenticator")
                     .font(.headline)
 
                 Spacer()
 
-                Button(action: finishLogin) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "checkmark.seal.fill")
-                        Text("Done / Save Session")
-                    }
-                    .fontWeight(.bold)
+                Button("Done / Save Session") {
+                    appState.appendLog("QRZ session save requested from authenticator.")
+                    statusText = "Checking QRZ session cookies..."
+                    saveRequestID += 1
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.green)
@@ -37,153 +35,152 @@ struct QRZLoginView: View {
                 Button("Cancel") {
                     dismiss()
                 }
-                .padding(.leading, 6)
             }
             .padding(12)
             .background(Color(NSColor.windowBackgroundColor))
 
             Divider()
 
-            QRZWebViewRepresentable(
-                statusMessage: $statusMessage,
-                isLoggedIn: $isLoggedIn
-            )
+            QRZWebViewStore(statusText: $statusText, saveRequestID: saveRequestID) { cookies in
+                appState.saveQRZSessionCookies(cookies)
+                appState.appendLog("✅ QRZ Session Cookie captured successfully via WKWebView!")
+                appState.showNativeAlert(
+                    title: "QRZ Authenticated! 🔐",
+                    message: "Session cookie saved successfully. You can now use Enrich Data to fetch hidden emails."
+                )
+                dismiss()
+            }
 
             Divider()
 
             HStack {
-                if isLoggedIn {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundColor(.green)
-                } else {
-                    ProgressView()
-                        .scaleEffect(0.5)
-                }
-
-                Text(statusMessage)
+                ProgressView()
+                    .scaleEffect(0.5)
+                Text(statusText)
                     .font(.caption)
-                    .fontWeight(isLoggedIn ? .bold : .regular)
-                    .foregroundColor(isLoggedIn ? .green : .secondary)
-
-                Spacer()
-
-                Text("Once logged in, click 'Done / Save Session' above.")
-                    .font(.caption2)
                     .foregroundColor(.secondary)
+                Spacer()
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            .padding(8)
             .background(Color(NSColor.controlBackgroundColor))
         }
-        .frame(width: 820, height: 620)
-    }
-
-    private func finishLogin() {
-        appState.appendLog("QRZ session saved to macOS WebKit persistent store.")
-        appState.alertTitle = "QRZ Session Active"
-        appState.alertMessage = "Your QRZ login session is saved. You can use Enrich Data to fetch emails."
-        appState.showAlert = true
-        dismiss()
+        .frame(width: 600, height: 650)
     }
 }
 
-struct QRZWebViewRepresentable: NSViewRepresentable {
-    @Binding var statusMessage: String
-    @Binding var isLoggedIn: Bool
+// MARK: - WKWebView Representable with Automatic Cookie Extractor
+struct QRZWebViewStore: NSViewRepresentable {
+    @Binding var statusText: String
+    let saveRequestID: Int
+    var onCookieCaptured: ([HTTPCookie]) -> Void
 
     func makeNSView(context: Context) -> WKWebView {
         let config = QRZWebKitSession.browserLikeConfiguration()
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.customUserAgent = QRZWebKitSession.userAgent
         webView.navigationDelegate = context.coordinator
-        context.coordinator.startStatusFallback()
 
-        if let url = URL(string: "https://www.qrz.com/login") {
-            let request = QRZWebKitSession.browserLikeRequest(url: url, timeoutInterval: 20)
-            webView.load(request)
-        }
-
+        context.coordinator.loadLoginPage(in: webView)
         return webView
     }
 
-    func updateNSView(_ nsView: WKWebView, context: Context) {}
+    func updateNSView(_ nsView: WKWebView, context: Context) {
+        guard context.coordinator.lastSaveRequestID != saveRequestID else { return }
+        context.coordinator.lastSaveRequestID = saveRequestID
+        context.coordinator.captureCookies(from: nsView, manual: true)
+    }
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
     }
 
     class Coordinator: NSObject, WKNavigationDelegate {
-        var parent: QRZWebViewRepresentable
-        private var statusTask: Task<Void, Never>?
+        var parent: QRZWebViewStore
+        var lastSaveRequestID = 0
+        private var loginRetryCount = 0
 
-        init(_ parent: QRZWebViewRepresentable) {
+        init(_ parent: QRZWebViewStore) {
             self.parent = parent
         }
 
-        func startStatusFallback() {
-            statusTask?.cancel()
-            statusTask = Task { @MainActor in
-                try? await Task.sleep(nanoseconds: 8_000_000_000)
+        func loadLoginPage(in webView: WKWebView) {
+            guard let url = URL(string: "https://www.qrz.com/login") else { return }
+            QRZSessionStore.restoreToWebKit()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                webView.load(QRZWebKitSession.browserLikeRequest(url: url))
+            }
+        }
 
-                guard !Task.isCancelled, !parent.isLoggedIn else { return }
-                parent.statusMessage = "QRZ loaded. If you see your account name, click Done / Save Session."
+        func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+            DispatchQueue.main.async {
+                self.parent.statusText = "Loading QRZ.com login page..."
+            }
+        }
+
+        func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+            loginRetryCount = 0
+            DispatchQueue.main.async {
+                self.parent.statusText = "QRZ page is rendering..."
             }
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            startStatusFallback()
-            let jsCheck = """
-            (function() {
-                var currentUrl = window.location.href || "";
-                var bodyText = document.body ? document.body.innerText : "";
-                var hasLogout = bodyText.includes('Log Out') || bodyText.includes('Logout') || bodyText.includes('Sign Out');
-                var hasLoginForm = document.querySelector('input[type="password"]') !== null ||
-                                   document.querySelector('form[action*="login"]') !== null ||
-                                   bodyText.includes('Sign in to QRZ');
-                var hasUserMenu = document.querySelector('a[href*="op=logout"]') !== null ||
-                                  document.querySelector('a[href*="logout"]') !== null ||
-                                  document.querySelector('a[href*="/db/"]') !== null ||
-                                  document.querySelector('#tquery') !== null ||
-                                  document.querySelector('input[name="callsign"]') !== null;
-                var looksLikeHome = currentUrl === "https://www.qrz.com/" ||
-                                    currentUrl === "https://www.qrz.com" ||
-                                    bodyText.includes('Database') ||
-                                    bodyText.includes('Lookup');
-                return !hasLoginForm && (hasLogout || hasUserMenu || looksLikeHome);
-            })();
-            """
+            loginRetryCount = 0
+            captureCookies(from: webView, manual: false)
+        }
 
-            webView.evaluateJavaScript(jsCheck) { result, _ in
-                let isAuthenticated = (result as? Bool) == true
+        func captureCookies(from webView: WKWebView, manual: Bool) {
+            let store = webView.configuration.websiteDataStore.httpCookieStore
+            store.getAllCookies { cookies in
+                var cookiePairs: [String] = []
+                var hasSessionCookie = false
+
+                for cookie in cookies where cookie.domain.contains("qrz.com") {
+                    cookiePairs.append("\(cookie.name)=\(cookie.value)")
+                    let cookieName = cookie.name.lowercased()
+                    if cookieName == "qrz_session" || cookieName.contains("session") || cookieName.contains("remember") || cookieName.contains("login") {
+                        hasSessionCookie = true
+                    }
+                }
+
                 DispatchQueue.main.async {
-                    if isAuthenticated {
-                        self.parent.isLoggedIn = true
-                        self.parent.statusMessage = "Authenticated. Session active on disk."
+                    if hasSessionCookie && !cookiePairs.isEmpty {
+                        self.parent.statusText = "Login detected! Capturing session cookie..."
+                        self.parent.onCookieCaptured(cookies.filter { $0.domain.contains("qrz.com") })
+                    } else if manual {
+                        self.parent.statusText = "No QRZ login session cookie found yet. Please sign in first."
                     } else {
-                        self.parent.isLoggedIn = false
-                        self.parent.statusMessage = "Please sign in to your QRZ account."
+                        self.parent.statusText = "Navigated to: \(webView.url?.absoluteString ?? "")"
                     }
                 }
             }
         }
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-            updateFailureStatus(error)
+            updateFailureStatus(error, webView: webView)
         }
 
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-            updateFailureStatus(error)
+            updateFailureStatus(error, webView: webView)
         }
 
-        private func updateFailureStatus(_ error: Error) {
-            DispatchQueue.main.async {
-                self.parent.isLoggedIn = false
-                self.parent.statusMessage = "QRZ page load failed: \(error.localizedDescription)"
+        private func updateFailureStatus(_ error: Error, webView: WKWebView? = nil) {
+            let nsError = error as NSError
+            if nsError.domain == NSURLErrorDomain,
+               nsError.code == NSURLErrorNetworkConnectionLost,
+               loginRetryCount < 2,
+               let webView {
+                loginRetryCount += 1
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                    self.parent.statusText = "QRZ connection dropped. Retrying login page..."
+                    self.loadLoginPage(in: webView)
+                }
+                return
             }
-        }
 
-        deinit {
-            statusTask?.cancel()
+            DispatchQueue.main.async {
+                self.parent.statusText = "QRZ page load failed: \(error.localizedDescription)"
+            }
         }
     }
 }

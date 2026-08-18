@@ -66,6 +66,7 @@ struct StatisticsView: View {
                 StatBadgeCard(title: "Confirmed", value: "\(stats.confirmedCount)", icon: "checkmark.seal.fill", color: .green)
                 StatBadgeCard(title: "Unconfirmed", value: "\(stats.unconfirmedCount)", icon: "clock.fill", color: .orange)
                 StatBadgeCard(title: "DXCC Countries", value: "\(stats.dxccCountryCount)", icon: "globe.americas.fill", color: .purple)
+                StatBadgeCard(title: "Confirmed DXCC", value: "\(stats.confirmedDxccCountryCount)", icon: "checkmark.circle.fill", color: .mint)
             }
             
             Picker("", selection: $selectedTab) {
@@ -546,17 +547,26 @@ struct StatisticsSnapshot {
     let confirmedCount: Int
     let unconfirmedCount: Int
     let dxccCountryCount: Int
+    let confirmedDxccCountryCount: Int
     let bandStatistics: [BandStatModel]
     let countryStatistics: [CountryStatModel]
     let unconfirmedBandCountryStatistics: [UnconfirmedBandCountryStatModel]
     let progressSummary: ConfirmedProgressSummary
 
     static func make(from appState: AppState) -> StatisticsSnapshot {
-        StatisticsSnapshot(
+        let confirmedDxccCountries = Set(
+            appState.qsoRecords.compactMap { record -> String? in
+                let country = record["COUNTRY"].trimmingCharacters(in: .whitespacesAndNewlines)
+                return record.isConfirmed && !country.isEmpty ? country : nil
+            }
+        )
+
+        return StatisticsSnapshot(
             totalQSOCount: appState.qsoRecords.count,
             confirmedCount: appState.totalConfirmedCount,
             unconfirmedCount: appState.totalUnconfirmedCount,
             dxccCountryCount: appState.availableCountries.count,
+            confirmedDxccCountryCount: confirmedDxccCountries.count,
             bandStatistics: appState.bandStatistics,
             countryStatistics: appState.countryStatistics,
             unconfirmedBandCountryStatistics: appState.unconfirmedBandCountryStatistics,
