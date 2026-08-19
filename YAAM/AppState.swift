@@ -216,38 +216,36 @@ nonisolated struct QRZStoredCookie: Codable {
 }
 
 enum QRZSessionStore {
-    private static let cookieHeaderKey = "qrzSessionCookie"
-    private static let cookieArchiveKey = "qrzSessionCookies"
-
     static func save(cookies: [HTTPCookie]) -> String {
         let qrzCookies = cookies.filter { $0.domain.contains("qrz.com") }
         let cookieHeader = qrzCookies
             .map { "\($0.name)=\($0.value)" }
             .joined(separator: "; ")
-        UserDefaults.standard.set(cookieHeader, forKey: cookieHeaderKey)
+        _ = CredentialVault.set(cookieHeader, for: .qrzCookieHeader)
 
         let storedCookies = qrzCookies.map(QRZStoredCookie.init(cookie:))
         if let data = try? JSONEncoder().encode(storedCookies) {
-            UserDefaults.standard.set(data, forKey: cookieArchiveKey)
+            _ = CredentialVault.set(data, for: .qrzCookieArchive)
         }
 
         return cookieHeader
     }
 
-    static func savedCookieHeader() -> String {
-        let structuredHeader = validStoredCookies()
+    static func savedCookieHeader(allowUserInteraction: Bool = true) -> String {
+        let structuredHeader = validStoredCookies(allowUserInteraction: allowUserInteraction)
             .map { "\($0.name)=\($0.value)" }
             .joined(separator: "; ")
         if !structuredHeader.isEmpty {
             return structuredHeader
         }
 
-        return UserDefaults.standard.string(forKey: cookieHeaderKey)?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return allowUserInteraction
+            ? CredentialVault.value(for: .qrzCookieHeader)
+            : CredentialVault.valueIfAvailableWithoutPrompt(for: .qrzCookieHeader)
     }
 
-    static func hasSavedSession() -> Bool {
-        !savedCookieHeader().isEmpty
+    static func hasSavedSession(allowUserInteraction: Bool = true) -> Bool {
+        !savedCookieHeader(allowUserInteraction: allowUserInteraction).isEmpty
     }
 
     static func restoreToWebKit(completion: (() -> Void)? = nil) {
@@ -271,12 +269,15 @@ enum QRZSessionStore {
     }
 
     static func clear() {
-        UserDefaults.standard.removeObject(forKey: cookieHeaderKey)
-        UserDefaults.standard.removeObject(forKey: cookieArchiveKey)
+        _ = CredentialVault.delete(.qrzCookieHeader)
+        _ = CredentialVault.delete(.qrzCookieArchive)
     }
 
-    private static func validStoredCookies() -> [QRZStoredCookie] {
-        guard let data = UserDefaults.standard.data(forKey: cookieArchiveKey),
+    private static func validStoredCookies(allowUserInteraction: Bool = true) -> [QRZStoredCookie] {
+        let archive = allowUserInteraction
+            ? CredentialVault.data(for: .qrzCookieArchive)
+            : CredentialVault.dataIfAvailableWithoutPrompt(for: .qrzCookieArchive)
+        guard let data = archive,
               let cookies = try? JSONDecoder().decode([QRZStoredCookie].self, from: data) else {
             return []
         }
@@ -287,12 +288,12 @@ enum QRZSessionStore {
             return expiresDate > now
         }
 
-        if validCookies.count != cookies.count {
+        if allowUserInteraction, validCookies.count != cookies.count {
             if let data = try? JSONEncoder().encode(validCookies) {
-                UserDefaults.standard.set(data, forKey: cookieArchiveKey)
+                _ = CredentialVault.set(data, for: .qrzCookieArchive)
             }
             if validCookies.isEmpty {
-                UserDefaults.standard.removeObject(forKey: cookieHeaderKey)
+                _ = CredentialVault.delete(.qrzCookieHeader)
             }
         }
 
@@ -680,16 +681,23 @@ struct FilterCriteria {
 }
 
 // MARK: - Enhanced QSO Record Model (With Composite Unique Key)
-struct QSORecordModel: Identifiable {
-    let id = UUID()
+nonisolated struct QSORecordModel: Identifiable, Sendable {
+    let id: UUID
     var index: Int
     var fields: [String: String]
+
+    init(id: UUID = UUID(), index: Int, fields: [String: String]) {
+        self.id = id
+        self.index = index
+        self.fields = fields
+    }
     
     var isConfirmed: Bool {
         let lotw = fields["LOTW_QSL_RCVD"]?.uppercased() ?? ""
         let qrz = fields["QRZLOG_QSL_RCVD"]?.uppercased() ?? ""
+        let eqsl = fields["EQSL_QSL_RCVD"]?.uppercased() ?? ""
         let qsl = fields["QSL_RCVD"]?.uppercased() ?? ""
-        return lotw == "Y" || lotw == "V" || qrz == "Y" || qsl == "Y" || qrz == "CONFIRMED" || qrz == "C"
+        return lotw == "Y" || lotw == "V" || qrz == "Y" || eqsl == "Y" || eqsl == "V" || qsl == "Y" || qrz == "CONFIRMED" || qrz == "C"
     }
     
     // SMART DEDUPLICATION KEY: Call + Date + Time + Band + Mode
@@ -792,13 +800,15 @@ class QRZWebKitScraper: NSObject, WKNavigationDelegate {
         self.webView.navigationDelegate = self
     }
 
-    func hasQRZCookies() async -> Bool {
+    func hasQRZCookies(allowCredentialPrompt: Bool = true) async -> Bool {
         await withCheckedContinuation { continuation in
             QRZWebKitSession.websiteDataStore.httpCookieStore.getAllCookies { cookies in
                 let hasWebKitCookies = cookies.contains { cookie in
                     cookie.domain.contains("qrz.com")
                 }
-                continuation.resume(returning: hasWebKitCookies || QRZSessionStore.hasSavedSession())
+                continuation.resume(
+                    returning: hasWebKitCookies || QRZSessionStore.hasSavedSession(allowUserInteraction: allowCredentialPrompt)
+                )
             }
         }
     }
@@ -1573,7 +1583,7 @@ class AppState: NSObject, ObservableObject {
     }()
 
     var currentVersion: String {
-        return Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.2.0"
+        return Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.14.1"
     }
     
     // UI & Status States
@@ -1620,12 +1630,12 @@ class AppState: NSObject, ObservableObject {
     @Published var rankHistorySnapshots: [QRZRankHistorySnapshot] = []
     @Published var isRefreshingRankHistory: Bool = false
     @Published var rankHistoryStatus: String = ""
+    @Published var rankServiceStatus: String = ""
     @Published var qrzAwardSummaries: [QRZAwardSummary] = []
     @Published var isFetchingQRZAwards: Bool = false
     @Published var qrzAwardsStatus: String = ""
     @Published var qrzAwardsLastUpdated: Date? = nil
 
-    private let qrzSecureSessionToken = "eyJ1c2VybmFtZSI6ImZhY3RvcmVhbCJ9.amtpHA.AzDgCiVIUz64RzWEOtlXb_DENnI"
     private let trackedRankCallsignsKey = "trackedRankCallsigns"
     private let qrzRankHistorySnapshotsKey = "qrzRankHistorySnapshots"
 
@@ -1640,11 +1650,64 @@ class AppState: NSObject, ObservableObject {
     @Published var loadedFileURL: URL? = nil
     @Published var loadedFileName: String = ""
     @Published var isMasterMode: Bool = true
+
+    var logbookDatabase: LogbookDatabase?
+    @Published var stationProfiles: [StationProfile] = []
+    @Published var activeStationProfileID: UUID?
+    @Published var backupSnapshots: [BackupSnapshot] = []
+    @Published var recentDatabaseAuditEvents: [DatabaseAuditEvent] = []
+    @Published var databaseStatus: String = "Preparing protected local logbook..."
+    @Published var pendingImportReview: PendingImportReview?
+    @Published var showImportReviewSheet: Bool = false
+    let workspaceSaveQueue = DispatchQueue(label: "app.yaam.workspace-save", qos: .utility)
+    var lastDestructiveCheckpointDate: Date?
+    var loadedWorkspaceProfileID: UUID?
+
+    // Operator Desk
+    @Published var operatorDeskSection = min(8, max(0, UserDefaults.standard.integer(forKey: "operatorDeskSection")))
+    @Published var quickLogDraft = QuickLogDraft()
+    @Published var quickLogLookup: CallsignLookupResult?
+    @Published var quickLogAssessment = QuickLogAssessment()
+    @Published var isLookingUpQuickLogCallsign = false
+    @Published var quickLogStatus = "Ready"
+    @Published var quickLogLastSaved: QSORecordModel?
+    @Published var wsjtxPendingQSOs: [WSJTXPendingQSO] = []
+    @Published var currentContestSession: ContestSession?
+    @Published var contestStatus = "No active contest session"
+    @Published var qslQueueJobs: [QSLQueueJob] = []
+    @Published var qslHubStatus = "QSL queue ready"
+    @Published var isProcessingQSLQueue = false
+    @Published var awardProgress: [AwardProgress] = []
+    @Published var awardClaims: [AwardClaim] = []
+    @Published var portableActivitySummaries: [PortableActivitySummary] = []
+    @Published var awardEngineStatus = "Local award engine ready"
+    @Published var cloudSyncStatus = "Cloud folder not configured"
+    @Published var cloudSyncLastRun: Date?
+    @Published var isCloudSyncRunning = false
+    @Published var mobileCompanionStatus = "Mobile companion is off"
+    @Published var mobileCompanionURL = ""
+    @Published var isMobileCompanionRunning = false
+    let callsignLookupService = CallsignLookupService()
+    let qslHubClient = QSLHubClient()
+    let cloudFileCoordinator = CloudFileCoordinator()
+    let mobileCompanionServer = MobileCompanionServer()
+    let dxClusterClient = DXClusterClient()
+    let rigControlClient = RigControlClient()
+    let wsjtxListener = WSJTXListener()
+    var operatorFeatureCancellables: Set<AnyCancellable> = []
+    var cloudSyncTimer: Timer?
+
+    // Unified synchronization health
+    @Published var syncServiceStatuses: [SyncServiceStatus] = SyncSource.allCases.map { SyncServiceStatus(source: $0) }
+    @Published var syncHistory: [SyncHistoryEntry] = []
+    @Published var isUnifiedSyncRunning = false
+    var unifiedSyncTimer: Timer?
+    var syncStartedAt: [SyncSource: Date] = [:]
     
     @Published var tableHeaders: [String] = []
     @Published var qsoRecords: [QSORecordModel] = []
     @Published var recentLogFiles: [URL] = []
-    @Published var selectedTab: Int = 0
+    @Published var selectedTab: Int = min(5, max(0, UserDefaults.standard.integer(forKey: "selectedTab")))
     
     // Persistent Local Confirmations Memory Database Cache
     private var localConfirmedKeys: Set<String> = []
@@ -1663,15 +1726,24 @@ class AppState: NSObject, ObservableObject {
 
     override init() {
         super.init()
-        restoreSavedQRZSessionCookies()
+        configurePersistentStorage()
+        loadMasterLogbook()
         loadRankHistory()
         loadPersistentConfirmationCache()
-        loadMasterLogbook()
         loadRecentLogsFromDatabase()
         loadEmailHistory()
         configureExternalADIFAutoSync()
         configureSDRControlPeriodicSync()
         configureQRZEmailBackfillTimer()
+        loadSyncCenterState()
+        configureUnifiedSyncSchedule()
+        loadContestSession()
+        loadQSLHubState()
+        loadConnectivityState()
+        configureOperatorFeatureBridges()
+        DispatchQueue.main.async {
+            CredentialVault.migrateLegacyCredentials()
+        }
     }
 
     func playActivitySound(_ sound: ActivitySound) {
@@ -2017,7 +2089,7 @@ class AppState: NSObject, ObservableObject {
         }
 
         let username = UserDefaults.standard.string(forKey: "qrzUsername")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let password = UserDefaults.standard.string(forKey: "qrzPassword")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let password = CredentialVault.value(for: .qrzPassword)
         guard !username.isEmpty, !password.isEmpty else {
             qrzAwardsStatus = "Enter QRZ username and password in Settings first."
             appendLog("QRZ Awards skipped: missing QRZ username/password in Settings.")
@@ -2052,26 +2124,43 @@ class AppState: NSObject, ObservableObject {
         let targetCall = searchedCallsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         
         guard !targetCall.isEmpty else { return }
+        let credentials = rankServiceCredentials()
         
         isFetchingRank = true
-        qrzRankData = nil
+        rankServiceStatus = "Refreshing QRZ rankings..."
         
         let group = DispatchGroup()
         
         if ownerRankData == nil || ownerRankData?.callsign?.uppercased() != ownerCall {
             group.enter()
-            fetchSingleRank(callsign: ownerCall) { [weak self] (result: QRZRankResponse?) in
+            fetchSingleRank(callsign: ownerCall, credentials: credentials) { [weak self] result in
                 Task { @MainActor in
-                    self?.ownerRankData = result
+                    if case .success(let response) = result {
+                        self?.ownerRankData = response
+                        self?.saveRankResponseSnapshot(response)
+                    }
                     group.leave()
                 }
             }
         }
         
         group.enter()
-        fetchSingleRank(callsign: targetCall) { [weak self] (result: QRZRankResponse?) in
+        fetchSingleRank(callsign: targetCall, credentials: credentials) { [weak self] result in
             Task { @MainActor in
-                self?.qrzRankData = result
+                switch result {
+                case .success(let response):
+                    self?.qrzRankData = response
+                    self?.rankServiceStatus = "Live QRZ ranking loaded."
+                    self?.saveRankResponseSnapshot(response)
+                case .failure(let error):
+                    if let cached = self?.cachedRankResponse(for: targetCall) {
+                        self?.qrzRankData = cached
+                        self?.rankServiceStatus = "Showing the last saved ranking. \(error.localizedDescription)"
+                    } else {
+                        self?.qrzRankData = .placeholder(callsign: targetCall)
+                        self?.rankServiceStatus = error.localizedDescription
+                    }
+                }
                 group.leave()
             }
         }
@@ -2093,24 +2182,34 @@ class AppState: NSObject, ObservableObject {
         }
 
         let ownerCall = currentStationCallsign
-        let targets = Array(Set(callsigns.map {
-            $0.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        }.filter { !$0.isEmpty && $0 != ownerCall })).prefix(6)
+        var seen = Set<String>()
+        let targets = callsigns.compactMap { raw -> String? in
+            let callsign = raw.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            guard !callsign.isEmpty, callsign != ownerCall, seen.insert(callsign).inserted else { return nil }
+            return callsign
+        }.prefix(8)
 
         guard !targets.isEmpty else { return }
+        let credentials = rankServiceCredentials()
 
         isFetchingRank = true
-        qrzComparisonRankData = []
+        rankServiceStatus = "Refreshing \(targets.count) QRZ rankings..."
 
         let group = DispatchGroup()
-        var results: [QRZRankResponse] = []
+        var results = Dictionary(uniqueKeysWithValues: targets.map { callsign in
+            (callsign, cachedRankResponse(for: callsign) ?? .placeholder(callsign: callsign))
+        })
+        var failures: [QRZRankFetchFailure] = []
         let lock = NSLock()
 
         if ownerRankData == nil || ownerRankData?.callsign?.uppercased() != ownerCall {
             group.enter()
-            fetchSingleRank(callsign: ownerCall) { [weak self] result in
+            fetchSingleRank(callsign: ownerCall, credentials: credentials) { [weak self] result in
                 Task { @MainActor in
-                    self?.ownerRankData = result
+                    if case .success(let response) = result {
+                        self?.ownerRankData = response
+                        self?.saveRankResponseSnapshot(response)
+                    }
                     group.leave()
                 }
             }
@@ -2118,10 +2217,15 @@ class AppState: NSObject, ObservableObject {
 
         for callsign in targets {
             group.enter()
-            fetchSingleRank(callsign: callsign) { result in
-                if let result {
+            fetchSingleRank(callsign: callsign, credentials: credentials) { result in
+                switch result {
+                case .success(let response):
                     lock.lock()
-                    results.append(result)
+                    results[callsign] = response
+                    lock.unlock()
+                case .failure(let error):
+                    lock.lock()
+                    failures.append(error)
                     lock.unlock()
                 }
                 group.leave()
@@ -2129,12 +2233,20 @@ class AppState: NSObject, ObservableObject {
         }
 
         group.notify(queue: .main) { [weak self] in
-            self?.qrzComparisonRankData = results.sorted {
-                ($0.callsign ?? "") < ($1.callsign ?? "")
+            guard let self else { return }
+            self.qrzComparisonRankData = targets.compactMap { results[$0] }
+            self.qrzRankData = self.qrzComparisonRankData.first
+            self.qrzComparisonRankData.filter(\.hasRankingValue).forEach { self.saveRankResponseSnapshot($0) }
+            self.isFetchingRank = false
+            if let firstFailure = failures.first {
+                let cachedCount = self.qrzComparisonRankData.filter(\.hasRankingValue).count
+                self.rankServiceStatus = cachedCount > 0
+                    ? "Showing \(cachedCount) saved/live rankings. \(firstFailure.localizedDescription)"
+                    : firstFailure.localizedDescription
+            } else {
+                self.rankServiceStatus = "Loaded \(results.values.filter(\.hasRankingValue).count) live QRZ rankings."
             }
-            self?.qrzRankData = self?.qrzComparisonRankData.first
-            self?.isFetchingRank = false
-            self?.appendLog("Leaderboard multi comparison loaded for \(results.count) callsigns.")
+            self.appendLog("Leaderboard multi comparison loaded for \(results.values.filter(\.hasRankingValue).count) callsigns; \(failures.count) failed.")
         }
     }
 
@@ -2150,9 +2262,12 @@ class AppState: NSObject, ObservableObject {
         guard !ownerCall.isEmpty else { return }
         guard ownerRankData == nil || ownerRankData?.callsign?.uppercased() != ownerCall else { return }
 
-        fetchSingleRank(callsign: ownerCall) { [weak self] result in
+        fetchSingleRank(callsign: ownerCall, credentials: rankServiceCredentials()) { [weak self] result in
             Task { @MainActor in
-                self?.ownerRankData = result
+                if case .success(let response) = result {
+                    self?.ownerRankData = response
+                    self?.saveRankResponseSnapshot(response)
+                }
             }
         }
     }
@@ -2168,6 +2283,7 @@ class AppState: NSObject, ObservableObject {
         let merged = Array(Set(trackedRankCallsigns + normalized)).sorted()
         trackedRankCallsigns = Array(merged.prefix(8))
         saveTrackedRankCallsigns()
+        hydrateLeaderboardFromSavedRankHistory()
         refreshTrackedRankHistoryIfNeeded(force: true)
     }
 
@@ -2175,6 +2291,7 @@ class AppState: NSObject, ObservableObject {
         let normalized = callsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         trackedRankCallsigns.removeAll { $0 == normalized }
         saveTrackedRankCallsigns()
+        hydrateLeaderboardFromSavedRankHistory()
     }
 
     func refreshTrackedRankHistoryIfNeeded(force: Bool = false) {
@@ -2204,24 +2321,31 @@ class AppState: NSObject, ObservableObject {
             rankHistoryStatus = "Rank history is current for today."
             return
         }
+        let credentials = rankServiceCredentials()
 
         isRefreshingRankHistory = true
         rankHistoryStatus = "Refreshing \(targets.count) QRZ rank snapshots..."
 
         let group = DispatchGroup()
         var snapshots: [QRZRankHistorySnapshot] = []
+        var failures: [QRZRankFetchFailure] = []
         let lock = NSLock()
 
         for callsign in targets {
             group.enter()
-            fetchSingleRank(callsign: callsign) { result in
-                if let result {
-                    let snapshot = QRZRankHistorySnapshot(response: result)
+            fetchSingleRank(callsign: callsign, credentials: credentials) { result in
+                switch result {
+                case .success(let response):
+                    let snapshot = QRZRankHistorySnapshot(response: response)
                     if !snapshot.callsign.isEmpty {
                         lock.lock()
                         snapshots.append(snapshot)
                         lock.unlock()
                     }
+                case .failure(let error):
+                    lock.lock()
+                    failures.append(error)
+                    lock.unlock()
                 }
                 group.leave()
             }
@@ -2232,24 +2356,22 @@ class AppState: NSObject, ObservableObject {
             for snapshot in snapshots {
                 self.upsertRankHistorySnapshot(snapshot)
                 if snapshot.callsign == ownerCall {
-                    self.ownerRankData = QRZRankResponse(
-                        bid: nil,
-                        callsign: snapshot.callsign,
-                        country_iso: snapshot.countryIso,
-                        country_name: nil,
-                        rank_band: snapshot.bandRank.map { "#\($0)" },
-                        rank_countries: snapshot.dxccRank.map { "#\($0)" },
-                        rank_qso: snapshot.qsoRank.map { "#\($0)" },
-                        score_band: snapshot.bandScore.map { "\($0)" },
-                        score_countries: snapshot.dxccScore.map { "\($0)" },
-                        score_qso: snapshot.qsoScore.map { "\($0)" }
-                    )
+                    self.ownerRankData = QRZRankResponse(snapshot: snapshot)
                 }
             }
             self.rankHistorySnapshots.sort { $0.date < $1.date }
             self.saveRankHistorySnapshots()
+            self.hydrateLeaderboardFromSavedRankHistory()
             self.isRefreshingRankHistory = false
-            self.rankHistoryStatus = snapshots.isEmpty ? "No QRZ rank snapshots were returned." : "Saved \(snapshots.count) rank snapshots for today."
+            if let firstFailure = failures.first {
+                self.rankHistoryStatus = snapshots.isEmpty
+                    ? "Saved rivals are still available offline. \(firstFailure.localizedDescription)"
+                    : "Saved \(snapshots.count) snapshots; \(failures.count) could not refresh. \(firstFailure.localizedDescription)"
+                self.rankServiceStatus = self.rankHistoryStatus
+            } else {
+                self.rankHistoryStatus = "Saved \(snapshots.count) rank snapshots for today."
+                self.rankServiceStatus = self.rankHistoryStatus
+            }
             self.appendLog("QRZ rank history refreshed: \(snapshots.count) snapshots saved.")
         }
     }
@@ -2287,11 +2409,20 @@ class AppState: NSObject, ObservableObject {
     }
 
     private func loadRankHistory() {
-        trackedRankCallsigns = UserDefaults.standard.stringArray(forKey: trackedRankCallsignsKey) ?? []
+        var seen = Set<String>()
+        trackedRankCallsigns = (UserDefaults.standard.stringArray(forKey: trackedRankCallsignsKey) ?? [])
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() }
+            .filter { !$0.isEmpty && seen.insert($0).inserted }
+            .prefix(8)
+            .map { $0 }
         if let data = UserDefaults.standard.data(forKey: qrzRankHistorySnapshotsKey),
            let snapshots = try? JSONDecoder().decode([QRZRankHistorySnapshot].self, from: data) {
             rankHistorySnapshots = snapshots.sorted { $0.date < $1.date }
         }
+        if !trackedRankCallsigns.isEmpty {
+            leaderboardSearchCallsign = trackedRankCallsigns.joined(separator: ", ")
+        }
+        hydrateLeaderboardFromSavedRankHistory()
     }
 
     private func saveTrackedRankCallsigns() {
@@ -2312,29 +2443,79 @@ class AppState: NSObject, ObservableObject {
         rankHistorySnapshots.append(snapshot)
     }
 
+    private func saveRankResponseSnapshot(_ response: QRZRankResponse) {
+        guard response.hasRankingValue else { return }
+        let snapshot = QRZRankHistorySnapshot(response: response)
+        guard !snapshot.callsign.isEmpty else { return }
+        upsertRankHistorySnapshot(snapshot)
+        rankHistorySnapshots.sort { $0.date < $1.date }
+        saveRankHistorySnapshots()
+    }
+
+    private func cachedRankResponse(for callsign: String) -> QRZRankResponse? {
+        let normalized = callsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        return rankHistorySnapshots
+            .filter { $0.callsign == normalized }
+            .max(by: { $0.date < $1.date })
+            .map(QRZRankResponse.init(snapshot:))
+    }
+
+    private func hydrateLeaderboardFromSavedRankHistory() {
+        let ownerCall = currentStationCallsign
+        if let cachedOwner = cachedRankResponse(for: ownerCall) {
+            ownerRankData = cachedOwner
+        }
+        qrzComparisonRankData = trackedRankCallsigns.map { callsign in
+            cachedRankResponse(for: callsign) ?? .placeholder(callsign: callsign)
+        }
+        qrzRankData = qrzComparisonRankData.first
+        if !trackedRankCallsigns.isEmpty, rankServiceStatus.isEmpty {
+            let cachedCount = qrzComparisonRankData.filter(\.hasRankingValue).count
+            rankServiceStatus = cachedCount > 0
+                ? "Restored \(trackedRankCallsigns.count) tracked rivals with \(cachedCount) saved rankings."
+                : "Restored \(trackedRankCallsigns.count) tracked rivals. Refresh to load rankings."
+            rankHistoryStatus = rankServiceStatus
+        }
+    }
+
     private var shortRankHistoryDateFormatter: DateFormatter {
         let formatter = DateFormatter()
         formatter.dateFormat = "MMM d"
         return formatter
     }
 
-    private func fetchSingleRank(callsign: String, completion: @escaping (QRZRankResponse?) -> Void) {
-        guard let url = URL(string: "https://qrz-rank.asis.sh/api/rank/\(callsign)") else {
-            completion(nil)
-            return
-        }
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.setValue("session=\(qrzSecureSessionToken)", forHTTPHeaderField: "Cookie")
-        request.setValue("YAAM-macOS/\(currentVersion)", forHTTPHeaderField: "User-Agent")
-        
-        URLSession.shared.dataTask(with: request) { data, _, _ in
-            guard let data = data, let decoded = try? JSONDecoder().decode(QRZRankResponse.self, from: data) else {
-                completion(nil)
-                return
+    private func fetchSingleRank(
+        callsign: String,
+        credentials: QRZRankServiceCredentials,
+        completion: @escaping (Result<QRZRankResponse, QRZRankFetchFailure>) -> Void
+    ) {
+        let userAgent = "YAAM-macOS/\(currentVersion)"
+
+        Task {
+            do {
+                let response = try await QRZRankService.shared.fetchRank(
+                    callsign: callsign,
+                    username: credentials.username,
+                    password: credentials.password,
+                    userAgent: userAgent
+                )
+                completion(.success(response))
+            } catch let failure as QRZRankFetchFailure {
+                completion(.failure(failure))
+            } catch {
+                completion(.failure(.transport(error.localizedDescription)))
             }
-            completion(decoded)
-        }.resume()
+        }
+    }
+
+    private func rankServiceCredentials() -> QRZRankServiceCredentials {
+        let username = UserDefaults.standard.string(forKey: "qrzRankServiceUsername") ?? ""
+        return QRZRankServiceCredentials(
+            username: username,
+            password: username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? ""
+                : CredentialVault.value(for: .qrzRankPassword)
+        )
     }
     
     private var internalDatabaseURL: URL? {
@@ -2383,7 +2564,12 @@ class AppState: NSObject, ObservableObject {
     }
     
     var currentStationCallsign: String {
-        let call = UserDefaults.standard.string(forKey: "stationCallsign")?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
+        let profileCall = activeStationProfile?.normalizedCallsign ?? ""
+        if !profileCall.isEmpty { return profileCall }
+
+        let operatorCall = UserDefaults.standard.string(forKey: "operatorCallsign")?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
+        let stationCall = UserDefaults.standard.string(forKey: "stationCallsign")?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
+        let call = operatorCall.isEmpty ? stationCall : operatorCall
         return call.isEmpty ? "DEFAULT" : call
     }
     
@@ -2396,8 +2582,39 @@ class AppState: NSObject, ObservableObject {
     }
     
     func loadMasterLogbook() {
+        if let database = logbookDatabase, let profileID = activeStationProfileID {
+            do {
+                let workspace = try database.loadWorkspace(profileID: profileID)
+                let storedCount = try database.qsoCount(profileID: profileID)
+                guard storedCount == workspace.records.count else {
+                    throw LogbookDatabaseError.unavailable(
+                        "The database contains \(storedCount) QSOs, but only \(workspace.records.count) could be decoded. Loading was stopped to protect your log."
+                    )
+                }
+                isMasterMode = true
+                loadedFileURL = nil
+                loadedFileName = "Master Log · \(currentStationCallsign)"
+                selectedRecordIDs.removeAll()
+                tableHeaders = workspace.headers.isEmpty
+                    ? ["QSO_DATE", "TIME_ON", "CALL", "BAND", "MODE", "FREQ", "RST_SENT", "RST_RCVD", "COUNTRY", "COMMENT"]
+                    : workspace.headers
+                qsoRecords = workspace.records.enumerated().map { offset, record in
+                    QSORecordModel(id: record.id, index: offset + 1, fields: record.fields)
+                }
+                loadedWorkspaceProfileID = profileID
+                refreshEmailHistoryColumns()
+                appendLog("Loaded \(qsoRecords.count) QSOs for station profile \(currentStationCallsign) from the protected database.")
+                return
+            } catch {
+                loadedWorkspaceProfileID = nil
+                databaseStatus = error.localizedDescription
+                appendLog("Database workspace load failed: \(error.localizedDescription)")
+            }
+        }
+
         guard let url = masterLogbookURL else { return }
         self.isMasterMode = true
+        self.loadedWorkspaceProfileID = nil
         self.loadedFileURL = url
         self.loadedFileName = "Master Log (\(currentStationCallsign))"
         self.selectedRecordIDs.removeAll()
@@ -2418,7 +2635,33 @@ class AppState: NSObject, ObservableObject {
         }
     }
     
-    private func autoSaveActiveWorkspace() {
+    func autoSaveActiveWorkspace(allowEmptyReplacement: Bool = false) {
+        if isMasterMode, let database = logbookDatabase, let profileID = activeStationProfileID {
+            guard loadedWorkspaceProfileID == profileID else {
+                databaseStatus = YAAMPersistenceError.workspaceNotLoaded.localizedDescription
+                appendLog("Automatic save skipped because the protected workspace is not fully loaded.")
+                return
+            }
+            let headers = tableHeaders
+            let records = qsoRecords.map { PersistedQSO(id: $0.id, index: $0.index, fields: $0.fields) }
+            workspaceSaveQueue.async { [weak self] in
+                do {
+                    try database.saveWorkspace(
+                        profileID: profileID,
+                        headers: headers,
+                        records: records,
+                        allowEmptyReplacement: allowEmptyReplacement
+                    )
+                } catch {
+                    DispatchQueue.main.async {
+                        self?.databaseStatus = error.localizedDescription
+                        self?.appendLog("Automatic database save failed: \(error.localizedDescription)")
+                    }
+                }
+            }
+            return
+        }
+
         guard let url = loadedFileURL, !qsoRecords.isEmpty else { return }
         DispatchQueue.global(qos: .background).async { [weak self] in
             guard let self = self else { return }
@@ -2449,7 +2692,7 @@ class AppState: NSObject, ObservableObject {
             let response = alert.runModal()
             
             if response == .alertFirstButtonReturn {
-                mergeADIFIntoMaster(from: url)
+                prepareImportReview(from: url)
             } else if response == .alertSecondButtonReturn {
                 loadGuestLog(from: url)
             }
@@ -2485,23 +2728,48 @@ class AppState: NSObject, ObservableObject {
         }
     }
 
-    func syncSDRControlLogbookIfNeeded(isAutomatic: Bool = false) {
-        guard !isLoading else { return }
-        guard let source = sdrControlLogbookSource() ?? (isAutomatic ? nil : promptForSDRControlLogbookSource()) else {
+    func syncSDRControlLogbookIfNeeded(
+        isAutomatic: Bool = false,
+        completion: ((Result<MergeSummary, Error>) -> Void)? = nil
+    ) {
+        guard !isLoading else {
+            completion?(.failure(NSError(
+                domain: "YAAM.SDRControl",
+                code: 3,
+                userInfo: [NSLocalizedDescriptionKey: "Another log operation is already running."]
+            )))
             return
         }
+        guard let source = sdrControlLogbookSource() ?? (isAutomatic ? nil : promptForSDRControlLogbookSource()) else {
+            completion?(.failure(NSError(
+                domain: "YAAM.SDRControl",
+                code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "SDR-Control logbook is not configured."]
+            )))
+            return
+        }
+
+        beginSyncStatus(.sdrControl, detail: "Reading SDR-Control logbook...")
 
         let lastModified = (try? source.url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
         let lastSynced = UserDefaults.standard.object(forKey: "sdrControlLastSyncedModificationDate") as? Date
         if isAutomatic, let lastModified, let lastSynced, lastModified <= lastSynced {
+            let result = Result<MergeSummary, Error>.success(MergeSummary(added: 0, updated: 0, skipped: 0))
+            completeSyncStatus(.sdrControl, result: result, unchangedText: "Source has no changes")
+            completion?(result)
             return
         }
 
-        mergeSDRControlLogbook(from: source, allowPermissionPrompt: !isAutomatic)
-        if let lastModified {
-            UserDefaults.standard.set(lastModified, forKey: "sdrControlLastSyncedModificationDate")
+        mergeSDRControlLogbook(from: source, allowPermissionPrompt: !isAutomatic) { result in
+            if case .success = result {
+                if let lastModified {
+                    UserDefaults.standard.set(lastModified, forKey: "sdrControlLastSyncedModificationDate")
+                }
+                UserDefaults.standard.set(Date(), forKey: "sdrControlLastSyncRunDate")
+            }
+            self.completeSyncStatus(.sdrControl, result: result, unchangedText: "No new SDR-Control QSOs")
+            completion?(result)
         }
-        UserDefaults.standard.set(Date(), forKey: "sdrControlLastSyncRunDate")
     }
 
     private struct SDRControlLogbookSource {
@@ -2630,7 +2898,11 @@ class AppState: NSObject, ObservableObject {
         }
     }
 
-    private func mergeSDRControlLogbook(from source: SDRControlLogbookSource, allowPermissionPrompt: Bool = true) {
+    private func mergeSDRControlLogbook(
+        from source: SDRControlLogbookSource,
+        allowPermissionPrompt: Bool = true,
+        completion: ((Result<MergeSummary, Error>) -> Void)? = nil
+    ) {
         isLoading = true
         let url = source.url
         appendLog("Reading SDR-Control logbook: \(url.path)")
@@ -2662,7 +2934,7 @@ class AppState: NSObject, ObservableObject {
                     var skippedCount = 0
 
                     for record in records {
-                        let model = QSORecordModel(index: self.qsoRecords.count + 1, fields: record)
+                        let model = QSORecordModel(index: self.qsoRecords.count + 1, fields: self.stationTaggedFields(record))
                         guard !existingKeys.contains(model.uniqueKey) else {
                             skippedCount += 1
                             continue
@@ -2681,6 +2953,7 @@ class AppState: NSObject, ObservableObject {
                     self.isLoading = false
                     self.appendLog("SDR-Control sync complete: \(addedCount) new QSOs added, \(skippedCount) duplicates skipped.")
                     self.playActivitySound(.success)
+                    completion?(.success(MergeSummary(added: addedCount, updated: 0, skipped: skippedCount)))
                 }
             } catch {
                 DispatchQueue.main.async {
@@ -2688,7 +2961,7 @@ class AppState: NSObject, ObservableObject {
                     if allowPermissionPrompt, self.isFilePermissionError(error), !source.securityScoped {
                         UserDefaults.standard.removeObject(forKey: "sdrControlLogbookPath")
                         if let selectedSource = self.promptForSDRControlLogbookSource() {
-                            self.mergeSDRControlLogbook(from: selectedSource)
+                            self.mergeSDRControlLogbook(from: selectedSource, completion: completion)
                         }
                         return
                     }
@@ -2698,6 +2971,7 @@ class AppState: NSObject, ObservableObject {
                         message: error.localizedDescription
                     )
                     self.playActivitySound(.failure)
+                    completion?(.failure(error))
                 }
             }
         }
@@ -2815,7 +3089,10 @@ class AppState: NSObject, ObservableObject {
         }
     }
     
-    private func mergeADIFIntoMaster(from url: URL) {
+    private func mergeADIFIntoMaster(
+        from url: URL,
+        completion: ((Result<MergeSummary, Error>) -> Void)? = nil
+    ) {
         isLoading = true
         appendLog("Analyzing & Merging '\(url.lastPathComponent)' into Master Logbook...")
         archiveLogToDatabase(originalURL: url)
@@ -2828,7 +3105,16 @@ class AppState: NSObject, ObservableObject {
             }
             
             guard let content = (try? String(contentsOfFile: url.path, encoding: .utf8)) ?? (try? String(contentsOfFile: url.path, encoding: .isoLatin1)) else {
-                DispatchQueue.main.async { self.isLoading = false; self.appendLog("Error reading file encoding.") }
+                let error = NSError(
+                    domain: "YAAM.ExternalADIF",
+                    code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: "Unable to read the ADIF file with a supported text encoding."]
+                )
+                DispatchQueue.main.async {
+                    self.isLoading = false
+                    self.appendLog("Error reading file encoding.")
+                    completion?(.failure(error))
+                }
                 return
             }
             
@@ -2844,7 +3130,7 @@ class AppState: NSObject, ObservableObject {
                 var updatedCount = 0
                 
                 for dict in newRecordsDicts {
-                    let tempModel = QSORecordModel(index: 0, fields: dict)
+                    let tempModel = QSORecordModel(index: 0, fields: self.stationTaggedFields(dict))
                     let key = tempModel.uniqueKey
                     
                     if !existingKeys.contains(key) {
@@ -2880,6 +3166,7 @@ class AppState: NSObject, ObservableObject {
                 self.isLoading = false
                 self.appendLog("Merge Complete: \(addedCount) New QSOs added, \(updatedCount) Confirmations updated.")
                 self.playActivitySound(.success)
+                completion?(.success(MergeSummary(added: addedCount, updated: updatedCount, skipped: newRecordsDicts.count - addedCount - updatedCount)))
             }
         }
     }
@@ -2946,8 +3233,18 @@ class AppState: NSObject, ObservableObject {
         configureExternalADIFAutoSync()
     }
 
-    func syncExternalADIFLogIfNeeded(isAutomatic: Bool = false) {
-        guard !isLoading else { return }
+    func syncExternalADIFLogIfNeeded(
+        isAutomatic: Bool = false,
+        completion: ((Result<MergeSummary, Error>) -> Void)? = nil
+    ) {
+        guard !isLoading else {
+            completion?(.failure(NSError(
+                domain: "YAAM.ExternalADIF",
+                code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "Another log operation is already running."]
+            )))
+            return
+        }
 
         let path = (
             UserDefaults.standard.string(forKey: "externalADIFLogPath") ??
@@ -2962,6 +3259,11 @@ class AppState: NSObject, ObservableObject {
                 )
                 playActivitySound(.failure)
             }
+            completion?(.failure(NSError(
+                domain: "YAAM.ExternalADIF",
+                code: 3,
+                userInfo: [NSLocalizedDescriptionKey: "External ADIF log is not configured."]
+            )))
             return
         }
 
@@ -2975,28 +3277,48 @@ class AppState: NSObject, ObservableObject {
                 )
                 playActivitySound(.failure)
             }
+            completion?(.failure(NSError(
+                domain: "YAAM.ExternalADIF",
+                code: 4,
+                userInfo: [NSLocalizedDescriptionKey: "The configured source is not an ADIF file."]
+            )))
             return
         }
 
         guard FileManager.default.fileExists(atPath: url.path) else {
             appendLog("External ADIF sync skipped: file not found at saved path.")
             if !isAutomatic { playActivitySound(.failure) }
+            completion?(.failure(NSError(
+                domain: "YAAM.ExternalADIF",
+                code: 5,
+                userInfo: [NSLocalizedDescriptionKey: "The configured ADIF file could not be found."]
+            )))
             return
         }
+
+        beginSyncStatus(.externalADIF, detail: "Reading external ADIF log...")
 
         let lastModified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
         let lastSynced = UserDefaults.standard.object(forKey: "externalADIFLastSyncedModificationDate") as? Date ??
             UserDefaults.standard.object(forKey: "sdrControlLastSyncedModificationDate") as? Date
         if isAutomatic, let lastModified, let lastSynced, lastModified <= lastSynced {
+            let result = Result<MergeSummary, Error>.success(MergeSummary(added: 0, updated: 0, skipped: 0))
+            completeSyncStatus(.externalADIF, result: result, unchangedText: "Source has no changes")
+            completion?(result)
             return
         }
 
         appendLog("External ADIF sync started...")
-        mergeADIFIntoMaster(from: url)
-        if let lastModified {
-            UserDefaults.standard.set(lastModified, forKey: "externalADIFLastSyncedModificationDate")
+        mergeADIFIntoMaster(from: url) { result in
+            if case .success = result {
+                if let lastModified {
+                    UserDefaults.standard.set(lastModified, forKey: "externalADIFLastSyncedModificationDate")
+                }
+                UserDefaults.standard.set(Date(), forKey: "externalADIFLastSyncRunDate")
+            }
+            self.completeSyncStatus(.externalADIF, result: result, unchangedText: "No new ADIF QSOs")
+            completion?(result)
         }
-        UserDefaults.standard.set(Date(), forKey: "externalADIFLastSyncRunDate")
     }
 
     func syncSDRControlLogIfNeeded(isAutomatic: Bool = false) {
@@ -3195,7 +3517,7 @@ class AppState: NSObject, ObservableObject {
 
     func confirmAndFetchCloudLogbook() {
         let lotwUser = UserDefaults.standard.string(forKey: "lotwUsername")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let lotwPass = UserDefaults.standard.string(forKey: "lotwPassword")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let lotwPass = CredentialVault.value(for: .lotwPassword)
         
         if lotwUser.isEmpty || lotwPass.isEmpty {
             self.alertTitle = "Credentials Required 🔑"
@@ -3222,7 +3544,7 @@ class AppState: NSObject, ObservableObject {
 
     private func fetchAndManageCloudLogbook() {
         let lotwUser = UserDefaults.standard.string(forKey: "lotwUsername")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let lotwPass = UserDefaults.standard.string(forKey: "lotwPassword")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let lotwPass = CredentialVault.value(for: .lotwPassword)
         
         isLoading = true
         appendLog("☁️ Connecting to ARRL LoTW servers for Full Historical Cloud Download...")
@@ -3430,8 +3752,8 @@ class AppState: NSObject, ObservableObject {
             appendLog("QRZ name/email backfill skipped: previous batch is still running.")
             return
         }
-        let hasQRZCookies = await QRZWebKitScraper.shared.hasQRZCookies()
-        let hasHAMQTHCredentials = hasHAMQTHLookupCredentials
+        let hasQRZCookies = await QRZWebKitScraper.shared.hasQRZCookies(allowCredentialPrompt: false)
+        let hasHAMQTHCredentials = hasHAMQTHLookupCredentialHint
         guard hasQRZCookies || hasHAMQTHCredentials else {
             appendLog("QRZ/HAMQTH name/email backfill skipped: no saved QRZ.com session cookies or HAMQTH credentials. Open QRZ Login or enter HAMQTH credentials in Settings.")
             return
@@ -3464,7 +3786,11 @@ class AppState: NSObject, ObservableObject {
             if Task.isCancelled { break }
 
             detailLines.append("[\(offset + 1)/\(callsigns.count)] \(callsign): checking")
-            let contact = await fetchContactInfo(for: callsign, allowQRZWebKitFallback: false)
+            let contact = await fetchContactInfo(
+                for: callsign,
+                allowQRZWebKitFallback: false,
+                allowCredentialPrompt: false
+            )
             let checkedMarker = Self.adifDateFormatter.string(from: Date())
             var changedNameForCallsign = false
             var changedEmailForCallsign = false
@@ -3568,7 +3894,6 @@ class AppState: NSObject, ObservableObject {
             return ("", "", "")
         }
         var req = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 8)
-        req.setValue("session=\(qrzSecureSessionToken)", forHTTPHeaderField: "Cookie")
         req.setValue("YAAM-macOS/\(currentVersion)", forHTTPHeaderField: "User-Agent")
         
         do {
@@ -3580,8 +3905,15 @@ class AppState: NSObject, ObservableObject {
         return ("", "", "")
     }
 
-    private func fetchQRZContactInfo(for callsign: String, allowWebKitFallback: Bool = false) async -> QRZEmailFetchResult {
-        let rawResult = await fetchQRZEmailFromRawHTML(for: callsign)
+    private func fetchQRZContactInfo(
+        for callsign: String,
+        allowWebKitFallback: Bool = false,
+        allowCredentialPrompt: Bool = true
+    ) async -> QRZEmailFetchResult {
+        let rawResult = await fetchQRZEmailFromRawHTML(
+            for: callsign,
+            allowCredentialPrompt: allowCredentialPrompt
+        )
         if rawResult.email != nil || rawResult.notFound || !allowWebKitFallback {
             return rawResult
         }
@@ -3596,15 +3928,25 @@ class AppState: NSObject, ObservableObject {
         )
     }
 
-    private var hasHAMQTHLookupCredentials: Bool {
+    private var hasHAMQTHLookupCredentialHint: Bool {
         let username = UserDefaults.standard.string(forKey: "hamqthUsername")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let password = UserDefaults.standard.string(forKey: "hamqthPassword")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return !username.isEmpty && !password.isEmpty
+        return !username.isEmpty && CredentialVault.hasStoredValueHint(for: .hamqthPassword)
     }
 
-    private func fetchContactInfo(for callsign: String, allowQRZWebKitFallback: Bool = false) async -> QRZEmailFetchResult {
-        async let qrzContact = fetchQRZContactInfo(for: callsign, allowWebKitFallback: allowQRZWebKitFallback)
-        async let hamqthContact = fetchHAMQTHContactInfo(for: callsign)
+    private func fetchContactInfo(
+        for callsign: String,
+        allowQRZWebKitFallback: Bool = false,
+        allowCredentialPrompt: Bool = true
+    ) async -> QRZEmailFetchResult {
+        async let qrzContact = fetchQRZContactInfo(
+            for: callsign,
+            allowWebKitFallback: allowQRZWebKitFallback,
+            allowCredentialPrompt: allowCredentialPrompt
+        )
+        async let hamqthContact = fetchHAMQTHContactInfo(
+            for: callsign,
+            allowCredentialPrompt: allowCredentialPrompt
+        )
 
         let (qrz, hamqth) = await (qrzContact, hamqthContact)
         return QRZEmailFetchResult(
@@ -3616,13 +3958,13 @@ class AppState: NSObject, ObservableObject {
         )
     }
 
-    private func fetchHAMQTHContactInfo(for callsign: String) async -> QRZEmailFetchResult {
+    private func fetchHAMQTHContactInfo(for callsign: String, allowCredentialPrompt: Bool) async -> QRZEmailFetchResult {
         let normalizedCallsign = callsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        guard !normalizedCallsign.isEmpty, hasHAMQTHLookupCredentials else {
+        guard !normalizedCallsign.isEmpty else {
             return QRZEmailFetchResult(email: nil, qmailRaw: "", qmailDecoded: "")
         }
 
-        guard let sessionID = await hamqthSessionIDForLookup() else {
+        guard let sessionID = await hamqthSessionIDForLookup(allowCredentialPrompt: allowCredentialPrompt) else {
             return QRZEmailFetchResult(email: nil, qmailRaw: "", qmailDecoded: "")
         }
 
@@ -3642,7 +3984,10 @@ class AppState: NSObject, ObservableObject {
             let xml = try await fetchHAMQTHXML(from: url)
             if hamqthXMLValue("error", in: xml) != nil {
                 hamqthSessionID = nil
-                if let refreshedSessionID = await hamqthSessionIDForLookup(forceRefresh: true) {
+                if let refreshedSessionID = await hamqthSessionIDForLookup(
+                    forceRefresh: true,
+                    allowCredentialPrompt: allowCredentialPrompt
+                ) {
                     components.queryItems = [
                         URLQueryItem(name: "id", value: refreshedSessionID),
                         URLQueryItem(name: "callsign", value: normalizedCallsign),
@@ -3663,13 +4008,18 @@ class AppState: NSObject, ObservableObject {
         }
     }
 
-    private func hamqthSessionIDForLookup(forceRefresh: Bool = false) async -> String? {
+    private func hamqthSessionIDForLookup(
+        forceRefresh: Bool = false,
+        allowCredentialPrompt: Bool = true
+    ) async -> String? {
         if !forceRefresh, let hamqthSessionID, !hamqthSessionID.isEmpty {
             return hamqthSessionID
         }
 
         let username = UserDefaults.standard.string(forKey: "hamqthUsername")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let password = UserDefaults.standard.string(forKey: "hamqthPassword")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let password = allowCredentialPrompt
+            ? CredentialVault.value(for: .hamqthPassword)
+            : CredentialVault.valueIfAvailableWithoutPrompt(for: .hamqthPassword)
         guard !username.isEmpty, !password.isEmpty else { return nil }
 
         guard var components = URLComponents(string: "https://www.hamqth.com/xml.php") else { return nil }
@@ -3870,7 +4220,10 @@ class AppState: NSObject, ObservableObject {
         showEmailComposer = true
     }
 
-    private func fetchQRZEmailFromRawHTML(for callsign: String) async -> QRZEmailFetchResult {
+    private func fetchQRZEmailFromRawHTML(
+        for callsign: String,
+        allowCredentialPrompt: Bool = true
+    ) async -> QRZEmailFetchResult {
         let normalizedCallsign = callsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         guard let url = URL(string: "https://www.qrz.com/db/\(normalizedCallsign)") else {
             return QRZEmailFetchResult(email: nil, qmailRaw: "", qmailDecoded: "")
@@ -3878,7 +4231,7 @@ class AppState: NSObject, ObservableObject {
 
         var request = QRZWebKitSession.browserLikeRequest(url: url, timeoutInterval: 12)
 
-        let cookieHeader = await qrzCookieHeader()
+        let cookieHeader = await qrzCookieHeader(allowCredentialPrompt: allowCredentialPrompt)
         if !cookieHeader.isEmpty {
             request.setValue(cookieHeader, forHTTPHeaderField: "Cookie")
         }
@@ -3912,7 +4265,7 @@ class AppState: NSObject, ObservableObject {
         return QRZEmailFetchResult(email: nil, qmailRaw: "", qmailDecoded: "")
     }
 
-    private func qrzCookieHeader() async -> String {
+    private func qrzCookieHeader(allowCredentialPrompt: Bool = true) async -> String {
         await withCheckedContinuation { continuation in
             QRZWebKitSession.websiteDataStore.httpCookieStore.getAllCookies { cookies in
                 let qrzCookies = cookies
@@ -3920,7 +4273,11 @@ class AppState: NSObject, ObservableObject {
                     .map { "\($0.name)=\($0.value)" }
                     .joined(separator: "; ")
                 if qrzCookies.isEmpty {
-                    continuation.resume(returning: QRZSessionStore.savedCookieHeader())
+                    continuation.resume(
+                        returning: QRZSessionStore.savedCookieHeader(
+                            allowUserInteraction: allowCredentialPrompt
+                        )
+                    )
                 } else {
                     continuation.resume(returning: qrzCookies)
                 }
@@ -4207,7 +4564,7 @@ class AppState: NSObject, ObservableObject {
         let port = rawPort.isEmpty ? "465" : rawPort
         
         let user = UserDefaults.standard.string(forKey: "smtpUser")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let rawPass = UserDefaults.standard.string(forKey: "smtpPass")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let rawPass = CredentialVault.value(for: .smtpPassword)
         
         let pass = rawPass.replacingOccurrences(of: " ", with: "")
         
@@ -4717,22 +5074,23 @@ class AppState: NSObject, ObservableObject {
     }
 
     private func qslCardStationInfoFromDefaults() -> QSLCardStationInfo {
-        let stationCallsign = currentStationCallsign == "DEFAULT" ? "EP2AES" : currentStationCallsign
-        let grid = UserDefaults.standard.string(forKey: "stationGrid")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let radio = UserDefaults.standard.string(forKey: "radioModel")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let antenna = UserDefaults.standard.string(forKey: "antennaDescription")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let power = UserDefaults.standard.integer(forKey: "radioPowerWatts")
+        let profile = activeStationProfile
+        let stationCallsign = currentStationCallsign == "DEFAULT" ? "NOCALL" : currentStationCallsign
+        let grid = profile?.normalizedGrid ?? ""
+        let radio = profile?.radioModel ?? ""
+        let antenna = profile?.antennaDescription ?? ""
+        let power = profile?.powerWatts ?? 100
         return QSLCardStationInfo(
             callsign: stationCallsign,
-            grid: grid.isEmpty ? "LM55" : grid,
+            grid: grid,
             radio: radio,
             antenna: antenna,
-            powerWatts: power == 0 ? 100 : power
+            powerWatts: power
         )
     }
 
     private func qslCardDeliveryMessage(for record: QSORecordModel) -> (subject: String, body: String) {
-        let myCall = currentStationCallsign == "DEFAULT" ? "EP2AES" : currentStationCallsign
+        let myCall = currentStationCallsign == "DEFAULT" ? "NOCALL" : currentStationCallsign
         let targetCall = record["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         let name = record["NAME"].trimmingCharacters(in: .whitespacesAndNewlines)
         let greeting = name.isEmpty ? targetCall : name
@@ -4758,7 +5116,7 @@ class AppState: NSObject, ObservableObject {
     }
 
     private func friendlyRecentConfirmationReminderMessage(for recipient: BulkEmailRecipient) -> (subject: String, body: String) {
-        let myCall = currentStationCallsign == "DEFAULT" ? "EP2AES" : currentStationCallsign
+        let myCall = currentStationCallsign == "DEFAULT" ? "NOCALL" : currentStationCallsign
         let qsoText = recipient.qsoCount == 1 ? "one recent QSO" : "\(recipient.qsoCount) recent QSOs"
         let details = confirmationRequestDetailsBlock(for: recipient.unconfirmedQSOs)
 
@@ -5179,21 +5537,37 @@ class AppState: NSObject, ObservableObject {
         return true
     }
 
-    func syncConfirmations(forceFullSync: Bool = false) {
+    func syncConfirmations(
+        forceFullSync: Bool = false,
+        sources: Set<SyncSource> = [.lotw, .qrz],
+        showCompletionAlert: Bool = true,
+        completion: ((ConfirmationSyncSummary) -> Void)? = nil
+    ) {
         guard !qsoRecords.isEmpty else {
             appendLog("Error: No log loaded to sync.")
+            completion?(ConfirmationSyncSummary())
+            return
+        }
+
+        guard !isSyncingAPI else {
+            appendLog("Confirmation sync skipped: another confirmation sync is already running.")
+            completion?(ConfirmationSyncSummary())
             return
         }
         
         let lotwUser = UserDefaults.standard.string(forKey: "lotwUsername")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let lotwPass = UserDefaults.standard.string(forKey: "lotwPassword")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let qrzKey = UserDefaults.standard.string(forKey: "qrzApiKey")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        
-        if lotwUser.isEmpty && qrzKey.isEmpty {
+        let lotwPass = CredentialVault.value(for: .lotwPassword)
+        let qrzKey = activeQRZAPIKey
+
+        let syncLoTW = sources.contains(.lotw) && !lotwUser.isEmpty && !lotwPass.isEmpty
+        let syncQRZ = sources.contains(.qrz) && !qrzKey.isEmpty
+
+        if !syncLoTW && !syncQRZ {
             self.alertTitle = "Credentials Required 🔑"
-            self.alertMessage = "Please enter your LoTW or QRZ Logbook API credentials in Preferences (Cmd+,) to sync online QSL confirmations."
+            self.alertMessage = "Configure credentials for the selected LoTW or QRZ confirmation source in Settings."
             self.showAlert = true
             self.playActivitySound(.failure)
+            completion?(ConfirmationSyncSummary())
             return
         }
         
@@ -5205,6 +5579,8 @@ class AppState: NSObject, ObservableObject {
         }
         
         isSyncingAPI = true
+        if syncLoTW { beginSyncStatus(.lotw, detail: "Downloading LoTW confirmations...") }
+        if syncQRZ { beginSyncStatus(.qrz, detail: "Downloading QRZ confirmations...") }
         
         let isFirstFullSync = forceFullSync || (totalConfirmedCount < 50 && qsoRecords.count > 1000)
         let lastLoTWSyncDate = isFirstFullSync ? nil : (UserDefaults.standard.object(forKey: "lastLoTWSyncDate") as? Date)
@@ -5216,6 +5592,7 @@ class AppState: NSObject, ObservableObject {
         
         let lotwSinceDateString = lastLoTWSyncDate != nil ? dateFormatter.string(from: lastLoTWSyncDate!) : "1900-01-01"
         let qrzSinceDateString = lastQRZSyncDate.map { dateFormatter.string(from: $0) }
+        let matchIndex = ConfirmationMatchIndex(records: qsoRecords.map(\.fields))
         
         if isFirstFullSync {
             appendLog("🚀 Launching FULL Historical QSL Sync (Fetching all confirmations since 1900)...")
@@ -5227,12 +5604,17 @@ class AppState: NSObject, ObservableObject {
             guard let self = self else { return }
             
             var newlyConfirmedCount = 0
-            var fetchedRecordsCount = 0
+            var lotwChangedCount = 0
+            var qrzChangedCount = 0
+            var lotwFetchedCount = 0
+            var qrzFetchedCount = 0
+            var lotwFailed = false
+            var qrzFailed = false
             var syncLogs: [String] = []
             
             let group = DispatchGroup()
             
-            if !lotwUser.isEmpty && !lotwPass.isEmpty {
+            if syncLoTW {
                 group.enter()
                 if let encodedUser = lotwUser.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
                    let encodedPass = lotwPass.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
@@ -5241,16 +5623,24 @@ class AppState: NSObject, ObservableObject {
                     var request = URLRequest(url: lotwEndpoint, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: 45)
                     request.setValue("YAAM-macOS/\(self.currentVersion)", forHTTPHeaderField: "User-Agent")
                     
-                    URLSession.shared.dataTask(with: request) { data, response, error in
+                    URLSession.shared.dataTask(with: request) { data, _, error in
                         defer { group.leave() }
-                        
+
+                        if let error {
+                            DispatchQueue.main.async {
+                                lotwFailed = true
+                                syncLogs.append("LoTW Error: \(error.localizedDescription)")
+                            }
+                            return
+                        }
+
                         if let data = data, let reportADIF = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) {
                             if !reportADIF.lowercased().contains("invalid password") && !reportADIF.lowercased().contains("access denied") {
                                 let (_, serverRecords) = parseADIF(content: reportADIF)
-                                fetchedRecordsCount += serverRecords.count
-                                syncLogs.append("LoTW: Server returned \(serverRecords.count) confirmed QSL records.")
-                                
+
                                 DispatchQueue.main.async {
+                                    lotwFetchedCount += serverRecords.count
+                                    syncLogs.append("LoTW: Server returned \(serverRecords.count) confirmed QSL records.")
                                     for rec in serverRecords {
                                         let call = self.normalizeCallsign(rec["CALL"] ?? "")
                                         let date = self.cleanDate(rec["QSO_DATE"] ?? "")
@@ -5264,7 +5654,8 @@ class AppState: NSObject, ObservableObject {
                                         )
                                         
                                         if lotwRcvd == "Y" || lotwRcvd == "V" {
-                                            for i in 0..<self.qsoRecords.count {
+                                            let candidates = matchIndex.candidates(callsign: call, date: date, band: band)
+                                            for i in candidates where self.qsoRecords.indices.contains(i) {
                                                 let qCall = self.normalizeCallsign(self.qsoRecords[i]["CALL"])
                                                 let qDate = self.cleanDate(self.qsoRecords[i]["QSO_DATE"])
                                                 let qBand = self.cleanBand(self.qsoRecords[i]["BAND"])
@@ -5279,6 +5670,7 @@ class AppState: NSObject, ObservableObject {
                                                         self.qsoRecords[i].fields["QSL_RCVD"] = "Y"
                                                         self.rememberConfirmedRecord(self.qsoRecords[i])
                                                         newlyConfirmedCount += 1
+                                                        lotwChangedCount += 1
                                                     }
                                                 }
                                             }
@@ -5286,25 +5678,36 @@ class AppState: NSObject, ObservableObject {
                                     }
                                 }
                             } else {
-                                syncLogs.append("LoTW Error: Invalid credentials.")
+                                DispatchQueue.main.async {
+                                    lotwFailed = true
+                                    syncLogs.append("LoTW Error: Invalid credentials.")
+                                }
+                            }
+                        } else {
+                            DispatchQueue.main.async {
+                                lotwFailed = true
+                                syncLogs.append("LoTW Error: Empty or unreadable response.")
                             }
                         }
                     }.resume()
                 } else {
+                    DispatchQueue.main.async {
+                        lotwFailed = true
+                        syncLogs.append("LoTW Error: Unable to create request URL.")
+                    }
                     group.leave()
                 }
             }
             
-            if !qrzKey.isEmpty {
+            if syncQRZ {
                 group.enter()
                 self.fetchQRZConfirmedRecords(apiKey: qrzKey, sinceDateString: qrzSinceDateString) { result in
 
                     switch result {
                     case .success(let serverRecords):
-                        fetchedRecordsCount += serverRecords.count
-                        syncLogs.append("QRZ: Server returned \(serverRecords.count) confirmed logbook records.")
-
                         DispatchQueue.main.async {
+                            qrzFetchedCount += serverRecords.count
+                            syncLogs.append("QRZ: Server returned \(serverRecords.count) confirmed logbook records.")
                             for rec in serverRecords {
                                 guard self.isQRZConfirmedRecord(rec) else { continue }
                                 let qrzConfirmedDate = self.cleanDate(
@@ -5315,7 +5718,11 @@ class AppState: NSObject, ObservableObject {
                                     ""
                                 )
 
-                                for i in 0..<self.qsoRecords.count {
+                                let candidates = matchIndex.candidates(
+                                    callsign: rec["CALL"] ?? "",
+                                    date: rec["QSO_DATE"] ?? ""
+                                )
+                                for i in candidates where self.qsoRecords.indices.contains(i) {
                                     guard self.qrzRecord(rec, matches: self.qsoRecords[i]) else { continue }
 
                                     if !qrzConfirmedDate.isEmpty {
@@ -5328,6 +5735,7 @@ class AppState: NSObject, ObservableObject {
                                         self.qsoRecords[i].fields["APP_QRZLOG_STATUS"] = "CONFIRMED"
                                         self.rememberConfirmedRecord(self.qsoRecords[i])
                                         newlyConfirmedCount += 1
+                                        qrzChangedCount += 1
                                     }
                                 }
                             }
@@ -5335,16 +5743,17 @@ class AppState: NSObject, ObservableObject {
                         group.leave()
                     case .failure(let message):
                         if qrzSinceDateString != nil, message.uppercased().contains("RESULT=FAIL"), message.uppercased().contains("COUNT=0") {
-                            syncLogs.append("QRZ: Incremental confirmed sync returned no records, retrying full confirmed sync...")
+                            DispatchQueue.main.async {
+                                syncLogs.append("QRZ: Incremental confirmed sync returned no records, retrying full confirmed sync...")
+                            }
                             self.fetchQRZConfirmedRecords(apiKey: qrzKey, sinceDateString: nil) { fallbackResult in
                                 defer { group.leave() }
 
                                 switch fallbackResult {
                                 case .success(let serverRecords):
-                                    fetchedRecordsCount += serverRecords.count
-                                    syncLogs.append("QRZ: Full confirmed sync returned \(serverRecords.count) confirmed logbook records.")
-
                                     DispatchQueue.main.async {
+                                        qrzFetchedCount += serverRecords.count
+                                        syncLogs.append("QRZ: Full confirmed sync returned \(serverRecords.count) confirmed logbook records.")
                                         for rec in serverRecords {
                                             guard self.isQRZConfirmedRecord(rec) else { continue }
                                             let qrzConfirmedDate = self.cleanDate(
@@ -5355,7 +5764,11 @@ class AppState: NSObject, ObservableObject {
                                                 ""
                                             )
 
-                                            for i in 0..<self.qsoRecords.count {
+                                            let candidates = matchIndex.candidates(
+                                                callsign: rec["CALL"] ?? "",
+                                                date: rec["QSO_DATE"] ?? ""
+                                            )
+                                            for i in candidates where self.qsoRecords.indices.contains(i) {
                                                 guard self.qrzRecord(rec, matches: self.qsoRecords[i]) else { continue }
 
                                                 if !qrzConfirmedDate.isEmpty {
@@ -5368,16 +5781,23 @@ class AppState: NSObject, ObservableObject {
                                                     self.qsoRecords[i].fields["APP_QRZLOG_STATUS"] = "CONFIRMED"
                                                     self.rememberConfirmedRecord(self.qsoRecords[i])
                                                     newlyConfirmedCount += 1
+                                                    qrzChangedCount += 1
                                                 }
                                             }
                                         }
                                     }
                                 case .failure(let fallbackMessage):
-                                    syncLogs.append("QRZ Error: \(fallbackMessage)")
+                                    DispatchQueue.main.async {
+                                        qrzFailed = true
+                                        syncLogs.append("QRZ Error: \(fallbackMessage)")
+                                    }
                                 }
                             }
                         } else {
-                            syncLogs.append("QRZ Error: \(message)")
+                            DispatchQueue.main.async {
+                                qrzFailed = true
+                                syncLogs.append("QRZ Error: \(message)")
+                            }
                             group.leave()
                         }
                     }
@@ -5386,8 +5806,10 @@ class AppState: NSObject, ObservableObject {
             
             group.notify(queue: .main) {
                 self.isSyncingAPI = false
-                UserDefaults.standard.set(Date(), forKey: "lastLoTWSyncDate")
-                if !qrzKey.isEmpty {
+                if syncLoTW, !lotwFailed {
+                    UserDefaults.standard.set(Date(), forKey: "lastLoTWSyncDate")
+                }
+                if syncQRZ, !qrzFailed {
                     UserDefaults.standard.set(Date(), forKey: "lastQRZSyncDate")
                 }
                 
@@ -5397,26 +5819,66 @@ class AppState: NSObject, ObservableObject {
                 
                 self.objectWillChange.send()
                 self.autoSaveActiveWorkspace()
+
+                let lotwMessage = lotwFailed
+                    ? (syncLogs.last(where: { $0.hasPrefix("LoTW Error") }) ?? "LoTW synchronization failed")
+                    : "\(lotwFetchedCount) checked, \(lotwChangedCount) confirmations updated"
+                let qrzMessage = qrzFailed
+                    ? (syncLogs.last(where: { $0.hasPrefix("QRZ Error") }) ?? "QRZ synchronization failed")
+                    : "\(qrzFetchedCount) checked, \(qrzChangedCount) confirmations updated"
+                if syncLoTW {
+                    self.finishSyncStatus(
+                        .lotw,
+                        state: lotwFailed ? .failure : .success,
+                        detail: lotwMessage,
+                        changed: lotwChangedCount
+                    )
+                }
+                if syncQRZ {
+                    self.finishSyncStatus(
+                        .qrz,
+                        state: qrzFailed ? .failure : .success,
+                        detail: qrzMessage,
+                        changed: qrzChangedCount
+                    )
+                }
+
+                let summary = ConfirmationSyncSummary(
+                    lotwFetched: lotwFetchedCount,
+                    qrzFetched: qrzFetchedCount,
+                    lotwChanged: lotwChangedCount,
+                    qrzChanged: qrzChangedCount,
+                    lotwMessage: lotwMessage,
+                    qrzMessage: qrzMessage,
+                    lotwFailed: lotwFailed,
+                    qrzFailed: qrzFailed
+                )
                 
                 if newlyConfirmedCount > 0 {
                     self.appendLog("✅ Sync Complete: \(newlyConfirmedCount) new QSL confirmations matched!")
-                    self.alertTitle = "QSL Sync Complete 🟢"
-                    self.alertMessage = "Successfully updated \(newlyConfirmedCount) confirmations in your logbook!"
-                    self.showAlert = true
+                    if showCompletionAlert {
+                        self.alertTitle = "QSL Sync Complete 🟢"
+                        self.alertMessage = "Successfully updated \(newlyConfirmedCount) confirmations in your logbook!"
+                        self.showAlert = true
+                    }
                     self.playActivitySound(.success)
                 } else {
-                    self.appendLog("⚪ Sync Complete: All confirmations are up to date (\(fetchedRecordsCount) records checked).")
-                    self.alertTitle = "Log Up To Date ⚪"
-                    self.alertMessage = "Checked \(fetchedRecordsCount) cloud records. All confirmations in your log are up to date."
-                    self.showAlert = true
+                    self.appendLog("⚪ Sync Complete: All confirmations are up to date (\(summary.fetched) records checked).")
+                    if showCompletionAlert {
+                        self.alertTitle = "Log Up To Date ⚪"
+                        self.alertMessage = "Checked \(summary.fetched) cloud records. All confirmations in your log are up to date."
+                        self.showAlert = true
+                    }
                     self.playActivitySound(syncLogs.contains { $0.lowercased().contains("error") } ? .failure : .success)
                 }
+                completion?(summary)
             }
         }
     }
 
     func deleteRecord(id: UUID) {
         if let idx = qsoRecords.firstIndex(where: { $0.id == id }) {
+            guard createDestructiveCheckpointIfNeeded(reason: "Before deleting QSO records") else { return }
             let recordNum = qsoRecords[idx].index
             let call = qsoRecords[idx]["CALL"]
             qsoRecords.remove(at: idx)
@@ -5426,7 +5888,7 @@ class AppState: NSObject, ObservableObject {
                 qsoRecords[i].index = i + 1
             }
             appendLog("Deleted QSO record #\(recordNum) (\(call)).")
-            autoSaveActiveWorkspace()
+            autoSaveActiveWorkspace(allowEmptyReplacement: qsoRecords.isEmpty)
         }
     }
 
@@ -5438,7 +5900,52 @@ class AppState: NSObject, ObservableObject {
         }
     }
 
+    @discardableResult
+    func populateMissingGridSquaresFromCoordinates() -> Int {
+        var updatedCount = 0
+
+        for index in qsoRecords.indices {
+            let existingGrid = qsoRecords[index]["GRIDSQUARE"].trimmingCharacters(in: .whitespacesAndNewlines)
+            let alternateGrid = qsoRecords[index]["GRID"].trimmingCharacters(in: .whitespacesAndNewlines)
+            if GridLocator.fourCharacterGrid(from: existingGrid) != nil ||
+                GridLocator.fourCharacterGrid(from: alternateGrid) != nil {
+                continue
+            }
+
+            let latitude = firstCoordinateValue(in: qsoRecords[index], keys: ["LAT", "LATITUDE"])
+            let longitude = firstCoordinateValue(in: qsoRecords[index], keys: ["LON", "LONG", "LONGITUDE"])
+            guard let grid = GridLocator.fourCharacterGrid(latitude: latitude, longitude: longitude) else {
+                continue
+            }
+
+            qsoRecords[index].fields["GRIDSQUARE"] = grid
+            updatedCount += 1
+        }
+
+        guard updatedCount > 0 else { return 0 }
+        if !tableHeaders.contains("GRIDSQUARE") {
+            if let countryIndex = tableHeaders.firstIndex(of: "COUNTRY") {
+                tableHeaders.insert("GRIDSQUARE", at: countryIndex + 1)
+            } else {
+                tableHeaders.append("GRIDSQUARE")
+            }
+        }
+
+        appendLog("Derived 4-character Maidenhead grids for \(updatedCount) QSO record(s) from LAT/LON coordinates.")
+        autoSaveActiveWorkspace()
+        return updatedCount
+    }
+
+    private func firstCoordinateValue(in record: QSORecordModel, keys: [String]) -> String {
+        for key in keys {
+            let value = record[key].trimmingCharacters(in: .whitespacesAndNewlines)
+            if !value.isEmpty { return value }
+        }
+        return ""
+    }
+
     func deleteColumn(header: String) {
+        guard createDestructiveCheckpointIfNeeded(reason: "Before deleting column \(header)") else { return }
         tableHeaders.removeAll(where: { $0 == header })
         for i in 0..<qsoRecords.count {
             qsoRecords[i].fields.removeValue(forKey: header)
@@ -5544,6 +6051,17 @@ class AppState: NSObject, ObservableObject {
     }
 
     func saveCurrentLog() {
+        if isMasterMode {
+            do {
+                try persistCurrentWorkspace(reason: "Manual save")
+                appendLog("Master Log saved to the protected database.")
+            } catch {
+                databaseStatus = error.localizedDescription
+                appendLog("Master Log save failed: \(error.localizedDescription)")
+            }
+            return
+        }
+
         guard let url = loadedFileURL else {
             saveAsCurrentLog()
             return
@@ -5552,6 +6070,7 @@ class AppState: NSObject, ObservableObject {
     }
 
     func saveAsCurrentLog() {
+        let exportingMasterLog = isMasterMode
         let panel = NSSavePanel()
         var types: [UTType] = [.plainText]
         if let adiType = UTType(filenameExtension: "adi") { types.append(adiType) }
@@ -5562,8 +6081,10 @@ class AppState: NSObject, ObservableObject {
         
         if panel.runModal() == .OK, let url = panel.url {
             writeRecordsToFileAsync(records: qsoRecords.map { $0.fields }, to: url)
-            self.loadedFileURL = url
-            self.loadedFileName = url.lastPathComponent
+            if !exportingMasterLog {
+                self.loadedFileURL = url
+                self.loadedFileName = url.lastPathComponent
+            }
         }
     }
 

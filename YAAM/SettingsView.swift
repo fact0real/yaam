@@ -10,26 +10,24 @@ import SwiftUI
 // MARK: - macOS Preferences & Credentials Settings Sheet
 struct SettingsView: View {
     private enum Tabs: Hashable {
-        case general, qrz, lotw, hamqth, smtp, externalADIF, sdrControl
+        case stations, dataSafety, qrz, qrzRank, lotw, hamqth, smtp, externalADIF, sdrControl
     }
 
     @EnvironmentObject var appState: AppState
     
-    @AppStorage("operatorCallsign") private var operatorCallsign = ""
-    @AppStorage("stationGrid") private var stationGrid = ""
-    @AppStorage("radioModel") private var radioModel = ""
-    @AppStorage("radioPowerWatts") private var radioPowerWatts = 100
-    @AppStorage("antennaDescription") private var antennaDescription = ""
-    @AppStorage("antennaHeightMeters") private var antennaHeightMeters = 10
-    
     @AppStorage("qrzUsername") private var qrzUsername = ""
-    @AppStorage("qrzPassword") private var qrzPassword = ""
-    @AppStorage("qrzApiKey") private var qrzApiKey = ""
+    @State private var qrzPassword = ""
+    @State private var qrzCredentialStatus = ""
+    @AppStorage("qrzRankServiceUsername") private var qrzRankServiceUsername = ""
+    @State private var qrzRankServicePassword = ""
+    @State private var qrzRankCredentialStatus = ""
     
     @AppStorage("lotwUsername") private var lotwUsername = ""
-    @AppStorage("lotwPassword") private var lotwPassword = ""
+    @State private var lotwPassword = ""
+    @State private var lotwCredentialStatus = ""
     @AppStorage("hamqthUsername") private var hamqthUsername = ""
-    @AppStorage("hamqthPassword") private var hamqthPassword = ""
+    @State private var hamqthPassword = ""
+    @State private var hamqthCredentialStatus = ""
     @AppStorage("externalADIFLogPath") private var externalADIFLogPath = ""
     @AppStorage("externalADIFAutoSyncEnabled") private var externalADIFAutoSyncEnabled = false
     @AppStorage("externalADIFSyncIntervalMinutes") private var externalADIFSyncIntervalMinutes = 15.0
@@ -39,61 +37,53 @@ struct SettingsView: View {
 
     var body: some View {
         TabView {
-            // MARK: - General Settings Tab
-            Form {
-                VStack(alignment: .leading, spacing: 16) {
-                    Text("Station Details")
-                        .font(.headline)
-                    TextField("My Callsign:", text: $operatorCallsign)
-                        .textFieldStyle(.roundedBorder)
-
-                    TextField("Grid Locator:", text: $stationGrid)
-                        .textFieldStyle(.roundedBorder)
-
-                    Divider()
-
-                    Text("Radio & Antenna")
-                        .font(.headline)
-
-                    TextField("Radio model:", text: $radioModel)
-                        .textFieldStyle(.roundedBorder)
-
-                    Stepper("Power: \(radioPowerWatts) W", value: $radioPowerWatts, in: 1...1500, step: 5)
-
-                    TextField("Antenna:", text: $antennaDescription)
-                        .textFieldStyle(.roundedBorder)
-
-                    Stepper("Antenna height: \(antennaHeightMeters) m", value: $antennaHeightMeters, in: 1...80, step: 1)
-                    
-                    Text("These values improve DX Advisor recommendations and will be used by future VOACAP-style prediction logic.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-                .padding()
-            }
+            StationProfilesSettingsView()
+                .environmentObject(appState)
             .tabItem {
-                Label("General", systemImage: "gearshape")
+                Label("Stations", systemImage: "antenna.radiowaves.left.and.right")
             }
-            .tag(Tabs.general)
-            
+            .tag(Tabs.stations)
+
+            DataSafetySettingsView()
+                .environmentObject(appState)
+                .tabItem {
+                    Label("Data Safety", systemImage: "externaldrive.fill.badge.checkmark")
+                }
+                .tag(Tabs.dataSafety)
+
             // MARK: - QRZ.com Settings Tab
             Form {
                 VStack(alignment: .leading, spacing: 16) {
                     Text("QRZ.com Integration")
                         .font(.headline)
-                    
+
                     TextField("Username:", text: $qrzUsername)
                         .textFieldStyle(.roundedBorder)
-                    
-                    SecureField("Password:", text: $qrzPassword)
+
+                    SecureField("New password (blank keeps the saved password):", text: $qrzPassword)
                         .textFieldStyle(.roundedBorder)
+
+                    Label("Stored in macOS Keychain", systemImage: "lock.fill")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    HStack {
+                        Button {
+                            saveCredential(qrzPassword, as: .qrzPassword, status: $qrzCredentialStatus)
+                        } label: {
+                            Label("Save QRZ Password", systemImage: "checkmark.circle")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(qrzPassword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                        Button("Remove Password", role: .destructive) {
+                            removeCredential(.qrzPassword, value: $qrzPassword, status: $qrzCredentialStatus)
+                        }
+
+                        credentialStatus(qrzCredentialStatus)
+                    }
                     
-                    Divider()
-                    
-                    TextField("XML API Key:", text: $qrzApiKey)
-                        .textFieldStyle(.roundedBorder)
-                    
-                    Text("The API Key is used to fetch QRZ Logbook confirmations via the QRZ Logbook API. LoTW confirmations still use the LoTW tab credentials.")
+                    Label("The QRZ Logbook API key is stored per station under the Stations tab. The account password remains shared for QRZ login and Awards.", systemImage: "key.horizontal.fill")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -103,6 +93,55 @@ struct SettingsView: View {
                 Label("QRZ.com", systemImage: "q.circle.fill")
             }
             .tag(Tabs.qrz)
+
+            Form {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("QRZ Rank Service")
+                        .font(.headline)
+
+                    TextField("Rank service username:", text: $qrzRankServiceUsername)
+                        .textFieldStyle(.roundedBorder)
+
+                    SecureField("New password (blank keeps the saved password):", text: $qrzRankServicePassword)
+                        .textFieldStyle(.roundedBorder)
+
+                    Label("Stored in macOS Keychain", systemImage: "lock.fill")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    HStack {
+                        Button {
+                            saveCredential(qrzRankServicePassword, as: .qrzRankPassword, status: $qrzRankCredentialStatus)
+                            Task { await QRZRankService.shared.resetAuthentication() }
+                        } label: {
+                            Label("Save Rank Password", systemImage: "checkmark.circle")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(qrzRankServicePassword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                        Button("Remove Password", role: .destructive) {
+                            removeCredential(.qrzRankPassword, value: $qrzRankServicePassword, status: $qrzRankCredentialStatus)
+                            Task { await QRZRankService.shared.resetAuthentication() }
+                        }
+
+                        credentialStatus(qrzRankCredentialStatus)
+                    }
+
+                    Link(destination: URL(string: "https://qrz-rank.asis.sh/")!) {
+                        Label("Open QRZ Rank account and subscription", systemImage: "arrow.up.right.square")
+                    }
+
+                    Text("Leaderboard queries are served by QRZ Rank Panel. Guest access is limited to three lookups; add a Rank Panel account here for tracked callsigns and daily history. This account is separate from QRZ.com.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding()
+            }
+            .tabItem {
+                Label("Rank Service", systemImage: "chart.line.uptrend.xyaxis")
+            }
+            .tag(Tabs.qrzRank)
             
             // MARK: - LoTW Settings Tab
             Form {
@@ -113,8 +152,28 @@ struct SettingsView: View {
                     TextField("Username:", text: $lotwUsername)
                         .textFieldStyle(.roundedBorder)
                     
-                    SecureField("Password:", text: $lotwPassword)
+                    SecureField("New password (blank keeps the saved password):", text: $lotwPassword)
                         .textFieldStyle(.roundedBorder)
+
+                    Label("Stored in macOS Keychain", systemImage: "lock.fill")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    HStack {
+                        Button {
+                            saveCredential(lotwPassword, as: .lotwPassword, status: $lotwCredentialStatus)
+                        } label: {
+                            Label("Save LoTW Password", systemImage: "checkmark.circle")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(lotwPassword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                        Button("Remove Password", role: .destructive) {
+                            removeCredential(.lotwPassword, value: $lotwPassword, status: $lotwCredentialStatus)
+                        }
+
+                        credentialStatus(lotwCredentialStatus)
+                    }
                     
                     Text("Credentials are used to securely download your latest TQSL verification records directly from ARRL servers.")
                         .font(.caption)
@@ -136,8 +195,28 @@ struct SettingsView: View {
                     TextField("Username:", text: $hamqthUsername)
                         .textFieldStyle(.roundedBorder)
 
-                    SecureField("Password:", text: $hamqthPassword)
+                    SecureField("New password (blank keeps the saved password):", text: $hamqthPassword)
                         .textFieldStyle(.roundedBorder)
+
+                    Label("Stored in macOS Keychain", systemImage: "lock.fill")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    HStack {
+                        Button {
+                            saveCredential(hamqthPassword, as: .hamqthPassword, status: $hamqthCredentialStatus)
+                        } label: {
+                            Label("Save HAMQTH Password", systemImage: "checkmark.circle")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(hamqthPassword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                        Button("Remove Password", role: .destructive) {
+                            removeCredential(.hamqthPassword, value: $hamqthPassword, status: $hamqthCredentialStatus)
+                        }
+
+                        credentialStatus(hamqthCredentialStatus)
+                    }
 
                     Text("Credentials will be used for HAMQTH callsign lookups in DX Advisor and contact enrichment.")
                         .font(.caption)
@@ -276,6 +355,45 @@ struct SettingsView: View {
         .onAppear {
             refreshSDRControlPath()
         }
+    }
+
+    @ViewBuilder
+    private func credentialStatus(_ status: String) -> some View {
+        if !status.isEmpty {
+            let succeeded = ["Saved", "Removed"].contains(status)
+            Label(status, systemImage: succeeded ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                .font(.caption)
+                .foregroundStyle(succeeded ? .green : .orange)
+        }
+    }
+
+    private func saveCredential(
+        _ value: String,
+        as credential: SecureCredential,
+        status: Binding<String>
+    ) {
+        status.wrappedValue = CredentialVault.set(value, for: credential) ? "Saved" : "Keychain could not save this password"
+        if status.wrappedValue == "Saved" {
+            switch credential {
+            case .qrzPassword: qrzPassword = ""
+            case .qrzRankPassword: qrzRankServicePassword = ""
+            case .lotwPassword: lotwPassword = ""
+            case .hamqthPassword: hamqthPassword = ""
+            default: break
+            }
+        }
+        appState.refreshSyncServiceConfiguration()
+    }
+
+    private func removeCredential(
+        _ credential: SecureCredential,
+        value: Binding<String>,
+        status: Binding<String>
+    ) {
+        let removed = CredentialVault.delete(credential)
+        if removed { value.wrappedValue = "" }
+        status.wrappedValue = removed ? "Removed" : "Keychain could not remove this password"
+        appState.refreshSyncServiceConfiguration()
     }
 
     private var resolvedExternalADIFPath: String {

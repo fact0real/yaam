@@ -233,12 +233,24 @@ struct QRZAwardsView: View {
 struct QRZAwardCard: View {
     let award: QRZAwardSummary
 
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var normalizedProgress: Double {
+        min(max(award.percentComplete, 0), 100)
+    }
+
+    private var isComplete: Bool {
+        award.earned || (award.progressAvailable && normalizedProgress >= 100)
+    }
+
     private var color: Color {
-        if award.earned { return .green }
+        if isComplete { return .green }
         if !award.progressAvailable { return .secondary }
-        if award.percentComplete >= 75 { return .orange }
-        if award.percentComplete >= 40 { return .blue }
-        return .secondary
+
+        let fraction = normalizedProgress / 100
+        let hue = 0.015 + (0.315 * pow(fraction, 1.65))
+        let brightness = colorScheme == .dark ? 0.96 : 0.78
+        return Color(hue: hue, saturation: 0.86, brightness: brightness)
     }
 
     var body: some View {
@@ -273,6 +285,19 @@ struct QRZAwardCard: View {
                 }
 
                 Spacer(minLength: 0)
+
+                if isComplete {
+                    ZStack {
+                        Circle()
+                            .fill(Color.green.opacity(0.16))
+                            .frame(width: 40, height: 40)
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 31, weight: .bold))
+                            .foregroundColor(.green)
+                    }
+                    .accessibilityLabel("Completed")
+                    .help("Completed")
+                }
             }
 
             HStack(spacing: 0) {
@@ -303,8 +328,19 @@ struct QRZAwardCard: View {
             }
 
             if award.progressAvailable {
-                ProgressView(value: min(max(award.percentComplete, 0), 100), total: 100)
-                    .tint(color)
+                GeometryReader { geometry in
+                    ZStack(alignment: .leading) {
+                        Capsule()
+                            .fill(color.opacity(0.15))
+                        Capsule()
+                            .fill(color)
+                            .frame(width: geometry.size.width * normalizedProgress / 100)
+                    }
+                }
+                .frame(height: 8)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Award progress")
+                .accessibilityValue("\(Int(normalizedProgress.rounded())) percent")
             }
 
             Text(award.detail.isEmpty ? award.status : award.detail)
@@ -320,8 +356,18 @@ struct QRZAwardCard: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, minHeight: 205, alignment: .topLeading)
-        .background(Color(NSColor.controlBackgroundColor).opacity(0.48))
+        .background(
+            ZStack {
+                Color(NSColor.controlBackgroundColor).opacity(0.48)
+                if award.progressAvailable {
+                    color.opacity(isComplete ? 0.035 : 0.025)
+                }
+            }
+        )
         .cornerRadius(8)
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(color.opacity(0.24), lineWidth: 1))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(color.opacity(isComplete ? 0.48 : 0.34), lineWidth: isComplete ? 1.4 : 1)
+        )
     }
 }

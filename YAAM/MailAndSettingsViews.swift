@@ -13,16 +13,6 @@ struct EmailComposerView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var appState: AppState
     
-    @AppStorage("stationCallsign") private var savedStationCallsign: String = ""
-    @AppStorage("qrzUsername") private var qrzUser: String = ""
-    @AppStorage("lotwUsername") private var lotwUser: String = ""
-    
-    @AppStorage("operatorCallsign") private var operatorCallsign = ""
-    @AppStorage("stationGrid") private var stationGrid = ""
-    @AppStorage("radioModel") private var radioModel = ""
-    @AppStorage("radioPowerWatts") private var radioPowerWatts = 100
-    @AppStorage("antennaDescription") private var antennaDescription = ""
-    
     @State private var selectedTemplate: String = "QSL Card Request"
     @State private var emailSubject: String = ""
     @State private var emailBody: String = ""
@@ -67,14 +57,8 @@ struct EmailComposerView: View {
     
     // Strict Callsign Resolver for My Station
     private var resolvedMyCallsign: String {
-        let saved = savedStationCallsign.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !saved.isEmpty && !saved.contains("@") { return saved.uppercased() }
-
-        let qrz = qrzUser.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !qrz.isEmpty && !qrz.contains("@") { return qrz.uppercased() }
-
-        let lotw = lotwUser.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !lotw.isEmpty && !lotw.contains("@") { return lotw.uppercased() }
+        let active = appState.currentStationCallsign
+        if !active.isEmpty && active != "DEFAULT" { return active }
 
         if let recCall = appState.qsoRecords.first(where: {
             let c = $0["STATION_CALLSIGN"].trimmingCharacters(in: .whitespaces)
@@ -90,7 +74,7 @@ struct EmailComposerView: View {
             return recOp.uppercased()
         }
 
-        return "EP2AES"
+        return "NOCALL"
     }
     
     var body: some View {
@@ -374,12 +358,13 @@ struct EmailComposerView: View {
         let body = emailBody
         
         let myCall = resolvedMyCallsign
+        let profile = appState.activeStationProfile
         let resolvedStation = QSLCardStationInfo(
             callsign: myCall,
-            grid: stationGrid.isEmpty ? "LM55" : stationGrid,
-            radio: radioModel,
-            antenna: antennaDescription,
-            powerWatts: radioPowerWatts
+            grid: profile?.normalizedGrid ?? "",
+            radio: profile?.radioModel ?? "",
+            antenna: profile?.antennaDescription ?? "",
+            powerWatts: profile?.powerWatts ?? 100
         )
         
         var attachmentData: Data? = nil
@@ -435,12 +420,13 @@ struct EmailComposerView: View {
 // MARK: - SMTP & Station Settings Sheet
 struct SMTPSettingsView: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var appState: AppState
     var embeddedInSettings = false
-    @AppStorage("stationCallsign") private var stationCallsign = "EP2AES"
     @AppStorage("smtpHost") private var smtpHost = "smtp.gmail.com"
     @AppStorage("smtpPort") private var smtpPort = "465"
     @AppStorage("smtpUser") private var smtpUser = ""
-    @AppStorage("smtpPass") private var smtpPass = ""
+    @State private var smtpPass = ""
+    @State private var saveStatus = ""
     
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -452,34 +438,49 @@ struct SMTPSettingsView: View {
                     .font(.headline)
             }
             
-            Text("Enter your station callsign and SMTP settings. For Gmail / Google Workspace, use your 16-character App Password.")
+            Text("Configure SMTP delivery. For Gmail / Google Workspace, use your 16-character App Password.")
                 .font(.caption)
                 .foregroundColor(.secondary)
             
             Form {
-                TextField("My Station Callsign (e.g. EP2AES):", text: $stationCallsign)
+                LabeledContent("Active station:", value: appState.currentStationCallsign)
                 TextField("SMTP Host (e.g. smtp.gmail.com):", text: $smtpHost)
                 TextField("SMTP Port (465 for SSL or 587 for TLS):", text: $smtpPort)
                 TextField("Email Address:", text: $smtpUser)
-                SecureField("App Password (spaces auto-removed):", text: $smtpPass)
+                SecureField("New App Password (blank keeps the saved password):", text: $smtpPass)
             }
             .padding(.vertical, 8)
             
             if embeddedInSettings {
-                Text("Settings are saved automatically and used by single and bulk QSL email requests.")
+                Label("Server settings update immediately. Save the app password once after editing it.", systemImage: "lock.fill")
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
+
+                HStack {
+                    Button {
+                        saveSettings(closeWhenFinished: false)
+                    } label: {
+                        Label("Save Email Password", systemImage: "checkmark.circle")
+                    }
+                    .buttonStyle(.borderedProminent)
+
+                    Button("Remove Password", role: .destructive) {
+                        let removed = CredentialVault.delete(.smtpPassword)
+                        if removed { smtpPass = "" }
+                        saveStatus = removed ? "Removed" : "Keychain could not remove this password"
+                    }
+
+                    if !saveStatus.isEmpty {
+                        Text(saveStatus)
+                            .font(.caption)
+                            .foregroundStyle(["Saved", "Removed"].contains(saveStatus) ? .green : .orange)
+                    }
+                }
             } else {
                 HStack {
                     Spacer()
                     Button("Save & Close") {
-                        UserDefaults.standard.set(stationCallsign, forKey: "stationCallsign")
-                        UserDefaults.standard.set(smtpHost.isEmpty ? "smtp.gmail.com" : smtpHost, forKey: "smtpHost")
-                        UserDefaults.standard.set(smtpPort.isEmpty ? "465" : smtpPort, forKey: "smtpPort")
-                        UserDefaults.standard.set(smtpUser, forKey: "smtpUser")
-                        UserDefaults.standard.set(smtpPass, forKey: "smtpPass")
-
-                        dismiss()
+                        saveSettings(closeWhenFinished: true)
                     }
                     .buttonStyle(.borderedProminent)
                 }
@@ -487,5 +488,16 @@ struct SMTPSettingsView: View {
         }
         .padding(20)
         .frame(width: embeddedInSettings ? nil : 480)
+    }
+
+    private func saveSettings(closeWhenFinished: Bool) {
+        UserDefaults.standard.set(smtpHost.isEmpty ? "smtp.gmail.com" : smtpHost, forKey: "smtpHost")
+        UserDefaults.standard.set(smtpPort.isEmpty ? "465" : smtpPort, forKey: "smtpPort")
+        UserDefaults.standard.set(smtpUser, forKey: "smtpUser")
+        let cleanPassword = smtpPass.replacingOccurrences(of: " ", with: "")
+        let didSave = cleanPassword.isEmpty || CredentialVault.set(cleanPassword, for: .smtpPassword)
+        if didSave, !cleanPassword.isEmpty { smtpPass = "" }
+        saveStatus = didSave ? "Saved" : "Keychain could not save this password"
+        if didSave, closeWhenFinished { dismiss() }
     }
 }

@@ -68,6 +68,17 @@ struct StatisticsView: View {
                 StatBadgeCard(title: "DXCC Countries", value: "\(stats.dxccCountryCount)", icon: "globe.americas.fill", color: .purple)
                 StatBadgeCard(title: "Confirmed DXCC", value: "\(stats.confirmedDxccCountryCount)", icon: "checkmark.circle.fill", color: .mint)
             }
+
+            HStack(spacing: 10) {
+                StatBadgeCard(title: "Worked 4-char Grids", value: "\(stats.workedGridCount)", icon: "square.grid.3x3.fill", color: .cyan)
+                StatBadgeCard(title: "Confirmed Grids", value: "\(stats.confirmedGridCount)", icon: "checkmark.square.fill", color: .green)
+                StatBadgeCard(
+                    title: "Grid Confirmation",
+                    value: String(format: "%.1f%%", stats.gridConfirmationPercentage),
+                    icon: "percent",
+                    color: .orange
+                )
+            }
             
             Picker("", selection: $selectedTab) {
                 Text("Band Breakdown").tag(0)
@@ -341,6 +352,7 @@ struct StatisticsView: View {
         .frame(width: 900, height: 680)
         .onAppear {
             appState.refreshOwnerQRZRankIfNeeded()
+            appState.populateMissingGridSquaresFromCoordinates()
             snapshot = StatisticsSnapshot.make(from: appState)
         }
     }
@@ -548,6 +560,9 @@ struct StatisticsSnapshot {
     let unconfirmedCount: Int
     let dxccCountryCount: Int
     let confirmedDxccCountryCount: Int
+    let workedGridCount: Int
+    let confirmedGridCount: Int
+    let gridConfirmationPercentage: Double
     let bandStatistics: [BandStatModel]
     let countryStatistics: [CountryStatModel]
     let unconfirmedBandCountryStatistics: [UnconfirmedBandCountryStatModel]
@@ -561,17 +576,36 @@ struct StatisticsSnapshot {
             }
         )
 
+        let workedGrids = Set(appState.qsoRecords.compactMap { fourCharacterGrid(for: $0) })
+        let confirmedGrids = Set(
+            appState.qsoRecords.compactMap { record -> String? in
+                guard record.isConfirmed else { return nil }
+                return fourCharacterGrid(for: record)
+            }
+        )
+        let gridConfirmationPercentage = workedGrids.isEmpty
+            ? 0
+            : Double(confirmedGrids.count) / Double(workedGrids.count) * 100
+
         return StatisticsSnapshot(
             totalQSOCount: appState.qsoRecords.count,
             confirmedCount: appState.totalConfirmedCount,
             unconfirmedCount: appState.totalUnconfirmedCount,
             dxccCountryCount: appState.availableCountries.count,
             confirmedDxccCountryCount: confirmedDxccCountries.count,
+            workedGridCount: workedGrids.count,
+            confirmedGridCount: confirmedGrids.count,
+            gridConfirmationPercentage: gridConfirmationPercentage,
             bandStatistics: appState.bandStatistics,
             countryStatistics: appState.countryStatistics,
             unconfirmedBandCountryStatistics: appState.unconfirmedBandCountryStatistics,
             progressSummary: ConfirmedProgressAnalyzer.makeSummary(records: appState.qsoRecords, ownerRankData: appState.ownerRankData)
         )
+    }
+
+    private static func fourCharacterGrid(for record: QSORecordModel) -> String? {
+        GridLocator.fourCharacterGrid(from: record["GRIDSQUARE"])
+            ?? GridLocator.fourCharacterGrid(from: record["GRID"])
     }
 }
 

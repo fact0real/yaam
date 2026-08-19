@@ -81,6 +81,35 @@ struct LogTableView: View {
                 .frame(width: 85)
                 
                 Divider().frame(height: 14)
+
+                Menu {
+                    ForEach(appState.stationProfiles) { profile in
+                        Button {
+                            activateStation(profile)
+                        } label: {
+                            Label(
+                                profile.displayTitle,
+                                systemImage: profile.id == appState.activeStationProfileID ? "checkmark" : "antenna.radiowaves.left.and.right"
+                            )
+                        }
+                    }
+                    Divider()
+                    SettingsLink {
+                        Label("Manage Stations", systemImage: "slider.horizontal.3")
+                    }
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "antenna.radiowaves.left.and.right")
+                            .foregroundStyle(.green)
+                        Text(appState.currentStationCallsign)
+                            .font(.caption.monospaced().weight(.semibold))
+                    }
+                }
+                .menuStyle(.borderlessButton)
+                .frame(width: 108)
+                .help("Active station profile")
+
+                Divider().frame(height: 14)
                 
                 Button(action: { appState.confirmAndFetchCloudLogbook() }) {
                     HStack(spacing: 4) {
@@ -456,6 +485,16 @@ struct LogTableView: View {
         }
         .sheet(isPresented: $appState.showQRZLoginSheet) {
             QRZLoginView().environmentObject(appState)
+        }
+    }
+
+    private func activateStation(_ profile: StationProfile) {
+        do {
+            try appState.activateStationProfile(profile)
+        } catch {
+            appState.alertTitle = "Station Profile"
+            appState.alertMessage = error.localizedDescription
+            appState.showAlert = true
         }
     }
 

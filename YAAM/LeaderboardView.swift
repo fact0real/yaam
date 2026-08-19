@@ -122,6 +122,28 @@ struct LeaderboardView: View {
             .background(Color(NSColor.controlBackgroundColor))
             
             Divider()
+
+            if !appState.rankServiceStatus.isEmpty {
+                HStack(spacing: 10) {
+                    Image(systemName: rankStatusIcon)
+                        .foregroundStyle(rankStatusColor)
+                    Text(appState.rankServiceStatus)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                    Spacer()
+                    if rankServiceNeedsConfiguration {
+                        SettingsLink {
+                            Label("Configure Rank Service", systemImage: "gearshape")
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 9)
+                .background(rankStatusColor.opacity(0.08))
+                Divider()
+            }
             
             // 2. Main Content
             if appState.isFetchingRank {
@@ -141,7 +163,7 @@ struct LeaderboardView: View {
                     VStack(spacing: 18) {
                         PlayerCard(
                             title: "YOU (STATION)",
-                            callsign: owner?.callsign ?? "EP2AES",
+                            callsign: owner?.callsign ?? appState.currentStationCallsign,
                             countryIso: owner?.country_iso,
                             isOwner: true
                         )
@@ -182,7 +204,7 @@ struct LeaderboardView: View {
                             // Left Player: YOU
                             PlayerCard(
                                 title: "YOU (STATION)",
-                                callsign: owner?.callsign ?? "EP2AES",
+                                callsign: owner?.callsign ?? appState.currentStationCallsign,
                                 countryIso: owner?.country_iso,
                                 isOwner: true
                             )
@@ -292,6 +314,35 @@ struct LeaderboardView: View {
             }
             appState.refreshTrackedRankHistoryIfNeeded()
         }
+    }
+
+    private var rankServiceNeedsConfiguration: Bool {
+        let status = appState.rankServiceStatus.lowercased()
+        return status.contains("guest")
+            || status.contains("sign in")
+            || status.contains("subscription")
+            || status.contains("premium")
+            || status.contains("account")
+    }
+
+    private var rankStatusColor: Color {
+        let status = appState.rankServiceStatus.lowercased()
+        if status.contains("failed") || status.contains("invalid") || status.contains("unavailable") {
+            return .red
+        }
+        if rankServiceNeedsConfiguration || status.contains("saved") || status.contains("offline") {
+            return .orange
+        }
+        return .green
+    }
+
+    private var rankStatusIcon: String {
+        if rankServiceNeedsConfiguration { return "person.badge.key.fill" }
+        let status = appState.rankServiceStatus.lowercased()
+        if status.contains("failed") || status.contains("invalid") || status.contains("unavailable") {
+            return "exclamationmark.triangle.fill"
+        }
+        return "checkmark.circle.fill"
     }
 }
 

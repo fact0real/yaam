@@ -384,8 +384,6 @@ struct QSLCardComposerView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var appState: AppState
 
-    @AppStorage("operatorCallsign") private var operatorCallsign = ""
-    @AppStorage("stationCallsign") private var stationCallsign = ""
     @AppStorage("stationGrid") private var stationGrid = ""
     @AppStorage("radioModel") private var radioModel = ""
     @AppStorage("radioPowerWatts") private var radioPowerWatts = 100
@@ -395,16 +393,15 @@ struct QSLCardComposerView: View {
     @State private var statusMessage = ""
 
     private var station: QSLCardStationInfo {
-        let call = [operatorCallsign, stationCallsign, "EP2AES"]
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .first { !$0.isEmpty } ?? "EP2AES"
+        let profile = appState.activeStationProfile
+        let call = appState.currentStationCallsign == "DEFAULT" ? "NOCALL" : appState.currentStationCallsign
 
         return QSLCardStationInfo(
             callsign: call,
-            grid: stationGrid.isEmpty ? "LM55" : stationGrid,
-            radio: radioModel,
-            antenna: antennaDescription,
-            powerWatts: radioPowerWatts
+            grid: profile?.normalizedGrid ?? stationGrid,
+            radio: profile?.radioModel ?? radioModel,
+            antenna: profile?.antennaDescription ?? antennaDescription,
+            powerWatts: profile?.powerWatts ?? radioPowerWatts
         )
     }
 

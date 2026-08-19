@@ -45,6 +45,19 @@ struct YAAMApp: App {
             
             // MARK: - Tools Menu Commands
             CommandMenu("Tools") {
+                Button("Quick Log QSO") {
+                    appState.selectedTab = 5
+                    appState.operatorDeskSection = 0
+                }
+                .keyboardShortcut("l", modifiers: .command)
+
+                Button("Open DX Cluster") {
+                    appState.selectedTab = 5
+                    appState.operatorDeskSection = 1
+                }
+
+                Divider()
+
                 Button("Log Statistics...") { appState.showStatsSheet = true }
                     .keyboardShortcut("t", modifiers: .command)
                 
@@ -69,15 +82,16 @@ struct YAAMApp: App {
         Settings {
             SettingsView()
                 .environmentObject(appState)
-                .frame(width: 560, height: 460)
+                .frame(width: 980, height: 700)
         }
         #endif
 
         // MARK: - Help Secondary Window Scene
         Window("ADIF Processor Help & FAQ", id: "help-window") {
             HelpView()
-                .frame(width: 540, height: 480)
+                .frame(minWidth: 820, idealWidth: 980, minHeight: 600, idealHeight: 700)
         }
-        .windowResizability(.contentSize)
+        .defaultSize(width: 980, height: 700)
+        .windowResizability(.contentMinSize)
     }
 }

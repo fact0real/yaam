@@ -1,120 +1,590 @@
 //
 //  HelpView.swift
-//  ADIF to Excel
-//
-//  Created by factoreal on 7/30/26.
+//  YAAM
 //
 
 import SwiftUI
 
-struct HelpView: View {
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            // Header Title
-            HStack(spacing: 12) {
-                Image(systemName: "questionmark.circle.fill")
-                    .font(.largeTitle)
-                    .foregroundColor(.accentColor)
-                
-                VStack(alignment: .leading) {
-                    Text("User Guide & FAQ")
-                        .font(.title2)
-                        .bold()
-                    Text("ADIF Log Processor & Converter")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                }
-            }
-            .padding(.bottom, 4)
-            
-            Divider()
-            
-            // Interactive Accordion FAQ List
-            ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    FAQItem(
-                        question: "How do I convert ADIF files to CSV / Excel?",
-                        answer: "1. Click 'ADIF File' to pick an input (.adi or .adif) file.\n2. Ensure 'Convert Output to CSV / Excel' is checked.\n3. Click 'Process' to generate the file, then click 'Open Output File' to view it in Microsoft Excel."
-                    )
-                    
-                    FAQItem(
-                        question: "How does the UTC Contest Filter work?",
-                        answer: "Enable 'UTC Time Filter (Contest Mode)' and enter:\n- Start Date & End Date (YYYYMMDD).\n- Start Time & End Time (HHMMSS).\nThis allows filtering logs across multi-day contests or overnight UTC boundaries (e.g., 20260727 190000 to 20260728 020000)."
-                    )
-                    
-                    FAQItem(
-                        question: "How do I find the ADIF log file in WSJT-X?",
-                        answer: "In WSJT-X on macOS:\n1. Open WSJT-X and go to the top menu: File -> Open log directory.\n2. Locate the file named 'wsjtx_log.adi'.\n\nAlternatively, navigate in Finder to:\n~/.local/share/WSJT-X/wsjtx_log.adi"
-                    )
-                    
-                    FAQItem(
-                        question: "How do I sync an external ADIF log?",
-                        answer: "Open Settings -> External ADIF, choose a live .adi/.adif file, then click Sync Now or enable automatic sync. This works with WSJT-X, JTDX, GridTracker, Log4OM, N1MM, MacLoggerDX, SDR-Control ADIF exports, and other apps that write ADIF."
-                    )
-                    
-                    FAQItem(
-                        question: "How do I export ADIF from MacLoggerDX?",
-                        answer: "In MacLoggerDX:\n1. Go to File -> Export -> ADIF...\n2. Select your desired date range or export all records to a .adi file."
-                    )
-                    
-                    FAQItem(
-                        question: "Can I clean up ADIF logs without converting to CSV?",
-                        answer: "Yes! Uncheck 'Convert Output to CSV / Excel'. The application will process, clean, and filter your log while saving the result in clean ADIF (.adi) format without trailing spaces."
-                    )
+private enum HelpTopic: String, CaseIterable, Identifiable {
+    case start, stations, quickLog, dxCluster, radioBridge, contest, syncCenter, qslHub, awards, portable, connectivity, importReview, dataSafety, credentials, workflows, faq
+    var id: String { rawValue }
 
-                    FAQItem(
-                        question: "How do I use DX Advisor?",
-                        answer: "Open DX Advisor to see live propagation, VOACAP-style path suggestions, band opportunities, unconfirmed DXCC targets, callsigns with no confirmed QSOs, bulk QSL email tools, and email history. Enter your Grid Locator, radio power, antenna and height in Settings -> General for better recommendations."
-                    )
-
-                    FAQItem(
-                        question: "What does the VOACAP-style planner calculate?",
-                        answer: "YAAM estimates path quality from your Grid Locator to worked countries in your log. It combines distance, bearing, current UTC hour, target day/night window, HamQSL propagation conditions, station power, antenna details, and whether a country still needs confirmation. It is a practical planner, not the original VOACAP engine."
-                    )
-
-                    FAQItem(
-                        question: "How do I compare multiple callsigns in Global Leaderboard?",
-                        answer: "Open Global Leaderboard and enter at least three callsigns separated by commas or spaces, then click Compare. Use Random 3 to automatically pick three comparison callsigns. YAAM shows your station against each rival for QSO rank, band rank, and DXCC rank."
-                    )
-
-                    FAQItem(
-                        question: "How do I send bulk confirmation request emails?",
-                        answer: "First enrich your log so EMAIL fields are available. Then open DX Advisor and use Bulk QSL Email. Choose a template and click Send Bulk. YAAM sends to callsigns that have no confirmed QSOs and have an email address, with a safety limit of 25 emails per run."
-                    )
-
-                    FAQItem(
-                        question: "How do I configure SMTP for email sending?",
-                        answer: "Open SMTP settings and enter your email address, SMTP host, port, and password. For Gmail or Google Workspace, use an App Password rather than your normal account password. Bulk email uses the same SMTP settings as single-recipient email."
-                    )
-                }
-                .padding(.trailing, 8)
-            }
+    var title: String {
+        switch self {
+        case .start: return "Getting Started"
+        case .stations: return "Station Profiles"
+        case .quickLog: return "Quick Log"
+        case .dxCluster: return "DX Cluster"
+        case .radioBridge: return "Radio & Digital Bridge"
+        case .contest: return "Contest Workspace"
+        case .syncCenter: return "Sync Center"
+        case .qslHub: return "QSL Hub"
+        case .awards: return "Award Engine"
+        case .portable: return "Portable Activities"
+        case .connectivity: return "Cloud & Mobile"
+        case .importReview: return "Import Review"
+        case .dataSafety: return "Backup & Restore"
+        case .credentials: return "Credentials"
+        case .workflows: return "Log Workflows"
+        case .faq: return "FAQ"
         }
-        .padding(20)
+    }
+
+    var icon: String {
+        switch self {
+        case .start: return "sparkles"
+        case .stations: return "antenna.radiowaves.left.and.right"
+        case .quickLog: return "plus.circle.fill"
+        case .dxCluster: return "dot.radiowaves.left.and.right"
+        case .radioBridge: return "wave.3.right.circle"
+        case .contest: return "flag.checkered"
+        case .syncCenter: return "arrow.triangle.2.circlepath"
+        case .qslHub: return "arrow.left.arrow.right.circle"
+        case .awards: return "medal"
+        case .portable: return "figure.hiking"
+        case .connectivity: return "network"
+        case .importReview: return "doc.badge.magnifyingglass"
+        case .dataSafety: return "externaldrive.fill.badge.checkmark"
+        case .credentials: return "lock.shield.fill"
+        case .workflows: return "arrow.triangle.2.circlepath"
+        case .faq: return "questionmark.circle"
+        }
     }
 }
 
-// MARK: - FAQ Accordion Item Component (With Focus Ring Fix)
+struct HelpView: View {
+    @State private var selection: HelpTopic? = .start
+
+    var body: some View {
+        NavigationSplitView {
+            List(HelpTopic.allCases, selection: $selection) { topic in
+                Label(topic.title, systemImage: topic.icon)
+                    .tag(topic)
+                    .padding(.vertical, 3)
+            }
+            .navigationTitle("YAAM Help")
+            .navigationSplitViewColumnWidth(min: 190, ideal: 215, max: 245)
+        } detail: {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    detail(for: selection ?? .start)
+                }
+                .frame(maxWidth: 820, alignment: .leading)
+                .padding(28)
+            }
+        }
+        .frame(minWidth: 820, minHeight: 600)
+    }
+
+    @ViewBuilder
+    private func detail(for topic: HelpTopic) -> some View {
+        switch topic {
+        case .start: gettingStarted
+        case .stations: stationProfiles
+        case .quickLog: quickLog
+        case .dxCluster: dxCluster
+        case .radioBridge: radioBridge
+        case .contest: contest
+        case .syncCenter: syncCenter
+        case .qslHub: qslHub
+        case .awards: awards
+        case .portable: portable
+        case .connectivity: connectivity
+        case .importReview: importReview
+        case .dataSafety: dataSafety
+        case .credentials: credentials
+        case .workflows: workflows
+        case .faq: faq
+        }
+    }
+
+    private var gettingStarted: some View {
+        Group {
+            helpHeader(
+                title: "A Safer Master Log",
+                subtitle: "YAAM keeps each station separate, reviews incoming contacts before merging, and creates restore points around important changes.",
+                icon: "shield.lefthalf.filled",
+                color: .blue
+            )
+            HelpFlow(steps: [
+                HelpFlowStep(icon: "antenna.radiowaves.left.and.right", title: "Choose a station", detail: "Select the callsign profile in the Log Table toolbar."),
+                HelpFlowStep(icon: "square.and.arrow.down", title: "Import or sync", detail: "Open an ADIF log or use a configured live source."),
+                HelpFlowStep(icon: "doc.badge.magnifyingglass", title: "Review", detail: "Accept new QSOs and confirmation updates; inspect conflicts."),
+                HelpFlowStep(icon: "externaldrive.fill.badge.checkmark", title: "Protected save", detail: "The Master Log is committed to SQLite with a restore point.")
+            ])
+            helpSection("First Setup") {
+                HelpInstruction(number: 1, title: "Create or verify your station", text: "Open Settings > Stations. Enter the station callsign, Grid Locator, radio, antenna, and any service-specific identity.")
+                HelpInstruction(number: 2, title: "Add online accounts", text: "Use the QRZ.com, LoTW, HAMQTH, and Email tabs, then press the password Save button once. Secret values are stored in macOS Keychain.")
+                HelpInstruction(number: 3, title: "Bring in your log", text: "Choose File > Import ADIF Log. Review the categories and import only the records you intend to keep.")
+                HelpInstruction(number: 4, title: "Check protection", text: "Open Settings > Data Safety to verify the database and view automatic restore points.")
+                HelpInstruction(number: 5, title: "Open Operator Desk", text: "Use Quick Log during an operating session, DX Cluster for live spots, and Sync Center to monitor every configured log source.")
+            }
+            helpCallout(icon: "arrow.down.doc.fill", title: "Existing users", text: "On first launch, YAAM copies legacy MasterLogbook ADIF data into the protected database. The original ADIF file is retained as an additional fallback.", color: .green)
+        }
+    }
+
+    private var stationProfiles: some View {
+        Group {
+            helpHeader(title: "Station Profiles", subtitle: "Keep home, portable, remote, club, or historical operations distinct without changing contacts by hand.", icon: "antenna.radiowaves.left.and.right", color: .green)
+            HelpFlow(steps: [
+                HelpFlowStep(icon: "plus", title: "Add", detail: "Create a profile in Settings > Stations."),
+                HelpFlowStep(icon: "mappin.and.ellipse", title: "Describe", detail: "Set callsign, Grid, QTH, zones, radio, and validity dates."),
+                HelpFlowStep(icon: "dot.radiowaves.left.and.right", title: "Activate", detail: "Use Make Active or the station menu above the log table."),
+                HelpFlowStep(icon: "tray.full.fill", title: "Work", detail: "YAAM loads only that profile's Master Log and service key.")
+            ])
+            helpSection("What Belongs to a Profile") {
+                HelpDefinition(icon: "person.text.rectangle", title: "Identity", text: "Profile name, callsign, QTH, country, DXCC, CQ zone, and ITU zone.")
+                HelpDefinition(icon: "location.fill", title: "Operating location", text: "Grid Locator, latitude, longitude, and optional start/end dates for historical or portable operation.")
+                HelpDefinition(icon: "radio.fill", title: "Station equipment", text: "Radio model, power, antenna description, and antenna height used by DX Advisor and QSL output.")
+                HelpDefinition(icon: "key.horizontal.fill", title: "Service identity", text: "LoTW station location, eQSL QTH nickname, and a station-specific QRZ Logbook API key.")
+            }
+            helpCallout(icon: "exclamationmark.triangle.fill", title: "Deleting a profile", text: "An active profile or a profile that still owns QSOs cannot be deleted. Activate another profile and preserve its contacts first.", color: .orange)
+        }
+    }
+
+    private var quickLog: some View {
+        Group {
+            helpHeader(
+                title: "Quick Log",
+                subtitle: "Log a contact in seconds while YAAM checks callbooks, worked history, and likely duplicates before the QSO reaches the active station's Master Log.",
+                icon: "plus.circle.fill",
+                color: .blue
+            )
+            HelpFlow(steps: [
+                HelpFlowStep(icon: "character.cursor.ibeam", title: "Enter callsign", detail: "YAAM normalizes the call and searches QRZ, HAMQTH, and local history."),
+                HelpFlowStep(icon: "waveform.path", title: "Set operation", detail: "Enter frequency; band and common digital submode are inferred."),
+                HelpFlowStep(icon: "clock.badge.exclamationmark", title: "Review", detail: "Check worked status and any recent same-band duplicate warning."),
+                HelpFlowStep(icon: "checkmark.circle.fill", title: "Log", detail: "Press Command-Return to save to the active station in UTC.")
+            ])
+            helpSection("Operating Details") {
+                HelpDefinition(icon: "globe", title: "UTC throughout", text: "Date and time are recorded in UTC. The current time is suggested when a fresh draft is opened.")
+                HelpDefinition(icon: "dial.high", title: "Flexible frequency input", text: "Enter MHz, kHz, or Hz, for example 14.074, 14074, or 14074000. YAAM stores normalized MHz and derives the amateur band.")
+                HelpDefinition(icon: "person.crop.circle.badge.checkmark", title: "Two callbooks plus local data", text: "When credentials are available, QRZ and HAMQTH are queried together. Missing details can be filled from earlier contacts in the local log.")
+                HelpDefinition(icon: "clock.arrow.2.circlepath", title: "Worked history", text: "The side panel shows total and confirmed QSOs, same-band/mode count, last contact, and whether the callsign or band is new.")
+                HelpDefinition(icon: "exclamationmark.triangle.fill", title: "Duplicate guard", text: "An exact duplicate is blocked. A contact with the same callsign, band, and mode in the last 30 minutes asks for explicit confirmation.", color: .orange)
+            }
+            helpCallout(icon: "scope", title: "From a DX spot", text: "Double-click a spot or use its target button to transfer callsign, frequency, mode, and comment into Quick Log without retyping.", color: .blue)
+        }
+    }
+
+    private var dxCluster: some View {
+        Group {
+            helpHeader(
+                title: "DX Cluster",
+                subtitle: "Follow live Telnet spots with worked and confirmation intelligence from the active station's Master Log.",
+                icon: "dot.radiowaves.left.and.right",
+                color: .orange
+            )
+            HelpFlow(steps: [
+                HelpFlowStep(icon: "network", title: "Connect", detail: "Set a cluster host and port; YAAM sends the active station callsign when prompted."),
+                HelpFlowStep(icon: "line.3.horizontal.decrease.circle", title: "Focus", detail: "Filter by need, band, callsign, comment, or watchlist."),
+                HelpFlowStep(icon: "scope", title: "Prepare", detail: "Double-click a spot to move it into Quick Log."),
+                HelpFlowStep(icon: "checkmark.circle.fill", title: "Complete", detail: "Review RST and details, then save the QSO.")
+            ])
+            helpSection("Spot Status") {
+                HelpDefinition(icon: "sparkles", title: "New callsign", text: "The active station has never worked this callsign.", color: .orange)
+                HelpDefinition(icon: "rectangle.split.3x1", title: "New band", text: "The callsign is in the log, but not on the spotted band.", color: .blue)
+                HelpDefinition(icon: "clock.arrow.2.circlepath", title: "Worked", text: "The callsign and band have already been worked, but no confirmation is present.", color: .secondary)
+                HelpDefinition(icon: "checkmark.seal.fill", title: "Confirmed", text: "A matching callsign and band are confirmed in the Master Log.", color: .green)
+            }
+            helpSection("Connection & Alerts") {
+                HelpDefinition(icon: "arrow.clockwise", title: "Automatic recovery", text: "After an unexpected disconnect, YAAM reconnects with a bounded delay and sends a keep-alive while connected.")
+                HelpDefinition(icon: "star.fill", title: "Watchlist", text: "Star a callsign or edit the comma-separated watchlist in connection settings. The Watchlist filter shows only those operators.", color: .yellow)
+                HelpDefinition(icon: "speaker.wave.2.fill", title: "Selective sound", text: "Optional sound is limited to watched, new-callsign, and new-band spots to avoid constant noise.")
+                HelpDefinition(icon: "rectangle.stack.badge.minus", title: "Efficient stream", text: "Repeated spots are coalesced, updates are applied in batches, and the visible feed is capped to keep long sessions responsive.")
+            }
+            helpCallout(icon: "person.badge.key.fill", title: "Cluster access", text: "Some cluster nodes require registration, a password, or a different port. Enter the node details supplied by that cluster operator.", color: .orange)
+        }
+    }
+
+    private var radioBridge: some View {
+        Group {
+            helpHeader(
+                title: "Radio & Digital Bridge",
+                subtitle: "Keep rig frequency, digital-mode activity, and Quick Log aligned while retaining explicit control over what reaches the Master Log.",
+                icon: "wave.3.right.circle.fill",
+                color: .blue
+            )
+            HelpFlow(steps: [
+                HelpFlowStep(icon: "radio", title: "Start rigctld", detail: "Run Hamlib rigctld for your radio on the local Mac or trusted LAN."),
+                HelpFlowStep(icon: "link", title: "Connect radio", detail: "Use 127.0.0.1 and TCP 4532 unless your rigctld setup differs."),
+                HelpFlowStep(icon: "ear", title: "Listen for digital", detail: "Match YAAM's UDP port with WSJT-X or JTDX Reporting settings."),
+                HelpFlowStep(icon: "tray.full", title: "Review logged QSOs", detail: "Inspect, import, or dismiss each Logged ADIF message.")
+            ])
+            helpSection("Hamlib Rig Control") {
+                HelpInstruction(number: 1, title: "Configure the radio backend", text: "Start rigctld with the model and serial/network parameters required by your transceiver. YAAM speaks the standard rigctld TCP protocol rather than opening the radio device itself.")
+                HelpInstruction(number: 2, title: "Open Operator Desk > Radio Bridge", text: "Enter the rigctld host and port, then press Connect. Frequency, band, mode, and passband update about once per second.")
+                HelpInstruction(number: 3, title: "Choose the fill behavior", text: "Use Use in Quick Log for a one-time copy, or enable Fill Quick Log to keep frequency and mode synchronized automatically.")
+            }
+            helpSection("WSJT-X / JTDX UDP") {
+                HelpDefinition(icon: "network", title: "Matching port", text: "The default is UDP 2237. Configure WSJT-X/JTDX to send status and logged ADIF messages to this Mac on the same port.")
+                HelpDefinition(icon: "waveform", title: "Live context", text: "YAAM shows dial frequency, mode, selected DX callsign/Grid, and whether the decoder is monitoring, decoding, or transmitting.")
+                HelpDefinition(icon: "doc.badge.magnifyingglass", title: "Review-first queue", text: "Logged ADIF packets do not silently enter the Master Log. Exact duplicates are marked and blocked; new entries can be reviewed or imported.", color: .green)
+                HelpDefinition(icon: "rectangle.stack.badge.minus", title: "Bounded memory", text: "The listener retains at most 50 pending QSOs and coalesces identical packets so a long digital session stays responsive.")
+            }
+            helpCallout(icon: "lock.shield", title: "Local-network safety", text: "rigctld has no built-in encryption or authentication. Keep it on localhost or a trusted private network and do not expose its port to the public Internet.", color: .orange)
+        }
+    }
+
+    private var contest: some View {
+        Group {
+            helpHeader(
+                title: "Contest Workspace",
+                subtitle: "Run a UTC contest session, capture exchanges and serials in ADIF, detect same-band/mode dupes, and export Cabrillo 3.0.",
+                icon: "flag.checkered",
+                color: .orange
+            )
+            HelpFlow(steps: [
+                HelpFlowStep(icon: "slider.horizontal.3", title: "Define", detail: "Enter the official contest ID, sent exchange, operator, and category."),
+                HelpFlowStep(icon: "play.fill", title: "Start", detail: "YAAM freezes the UTC start and prepares serial 1."),
+                HelpFlowStep(icon: "plus.circle.fill", title: "Log", detail: "Quick Log adds CONTEST_ID, STX/STX_STRING, and received exchange."),
+                HelpFlowStep(icon: "square.and.arrow.up", title: "Export", detail: "End or pause the session and create a Cabrillo 3.0 .log file.")
+            ])
+            helpSection("Session Setup") {
+                HelpDefinition(icon: "textformat.abc", title: "Contest ID", text: "Use the sponsor's Cabrillo contest identifier, such as CQ-WW-SSB. This value is written to both ADIF and the Cabrillo CONTEST header.")
+                HelpDefinition(icon: "number", title: "Exchange and serial", text: "YAAM keeps a persistent next serial and writes the fixed sent exchange separately. Enter the received exchange in Quick Log for every QSO.")
+                HelpDefinition(icon: "person.text.rectangle", title: "Categories", text: "Operator, assistance, band, mode, and power become Cabrillo category headers. Select values that match the contest rules and your actual operation.")
+                HelpDefinition(icon: "clock", title: "Persistent UTC session", text: "The active session survives an app restart. Ending it records the UTC boundary; Resume continues with the next unused serial.")
+            }
+            helpSection("During the Contest") {
+                HelpInstruction(number: 1, title: "Keep the session active", text: "The orange Contest Exchange block appears in Quick Log and shows the next serial and sent exchange.")
+                HelpInstruction(number: 2, title: "Watch the Dupe warning", text: "A callsign already worked on the same band and normalized contest mode is flagged before save. You can still explicitly log it when the contest rules require it.")
+                HelpInstruction(number: 3, title: "Review live totals", text: "Contest Workspace reports QSOs, unique callsigns, DXCC entities, bands, duplicates, and the next serial without rescanning outside the current session.")
+            }
+            helpCallout(icon: "doc.text.magnifyingglass", title: "Verify before submission", text: "Cabrillo layouts and scoring rules vary by sponsor. YAAM emits a standards-based Cabrillo 3.0 log with CLAIMED-SCORE set to zero; calculate the official score and validate categories and exchange columns with the contest sponsor's checker.", color: .blue)
+        }
+    }
+
+    private var syncCenter: some View {
+        Group {
+            helpHeader(
+                title: "Sync Center",
+                subtitle: "See configuration, health, results, and recent history for every source that can change the active station's Master Log.",
+                icon: "arrow.triangle.2.circlepath",
+                color: .green
+            )
+            HelpFlow(steps: [
+                HelpFlowStep(icon: "gearshape", title: "Configure", detail: "Choose live ADIF or SDR files and add LoTW or QRZ credentials."),
+                HelpFlowStep(icon: "arrow.triangle.2.circlepath", title: "Sync All", detail: "YAAM processes local sources first, then online confirmations."),
+                HelpFlowStep(icon: "checkmark.shield", title: "Verify", detail: "Each source reports success, changes, duration, or a specific failure."),
+                HelpFlowStep(icon: "clock.arrow.circlepath", title: "Schedule", detail: "Enable a single automatic interval for configured sources.")
+            ])
+            helpSection("Source Cards") {
+                HelpDefinition(icon: "doc.text.fill", title: "External ADIF", text: "Watches the configured logger file and merges only meaningful additions or updates.")
+                HelpDefinition(icon: "radio.fill", title: "SDR-Control", text: "Reads SmartSDR.smartsdrlog after the file has been selected and authorized once.")
+                HelpDefinition(icon: "checkmark.seal.fill", title: "LoTW", text: "Downloads confirmation data for the active callsign and applies it to matching local QSOs.")
+                HelpDefinition(icon: "q.square.fill", title: "QRZ Logbook", text: "Uses the active station's QRZ Logbook API key to apply QRZ confirmations.")
+            }
+            helpSection("Status & Performance") {
+                HelpDefinition(icon: "circle.dotted", title: "Not configured", text: "The source is skipped until its file or credentials are supplied in Settings.", color: .secondary)
+                HelpDefinition(icon: "checkmark.circle.fill", title: "Success", text: "The card records the last successful run, number of fetched items, changed QSOs, and elapsed time.", color: .green)
+                HelpDefinition(icon: "exclamationmark.triangle.fill", title: "Needs attention", text: "The source keeps its failure message and time in history so a partial Sync All run is never mistaken for full success.", color: .orange)
+                HelpDefinition(icon: "bolt.fill", title: "Indexed matching", text: "Confirmation candidates are indexed by callsign, date, and band before matching, keeping large logs responsive.", color: .yellow)
+            }
+            helpCallout(icon: "clock.badge.checkmark", title: "Automatic sync", text: "Choose an interval of at least five minutes. YAAM avoids overlapping runs and keeps the latest 100 source results locally.", color: .green)
+        }
+    }
+
+    private var qslHub: some View {
+        Group {
+            helpHeader(title: "Two-way QSL Hub", subtitle: "Send QSOs through official service paths, retain every pending job, and bring confirmations back without overwriting the log.", icon: "arrow.left.arrow.right.circle.fill", color: .green)
+            HelpFlow(steps: [
+                HelpFlowStep(icon: "scope", title: "Choose scope", detail: "Use selected rows, 24 hours, unsent records, or the full station log."),
+                HelpFlowStep(icon: "checkmark.circle", title: "Choose services", detail: "Enable LoTW, QRZ, eQSL, or Club Log for this batch."),
+                HelpFlowStep(icon: "tray.full", title: "Queue", detail: "YAAM saves one durable delivery job per QSO and service."),
+                HelpFlowStep(icon: "paperplane.fill", title: "Deliver", detail: "Process controlled batches and inspect success, retry, or blocked status.")
+            ])
+            helpSection("Service Paths") {
+                HelpDefinition(icon: "checkmark.seal", title: "LoTW through TQSL", text: "YAAM creates ADIF and invokes your installed TrustedQSL command-line tool. Set the station location in the active Station Profile.")
+                HelpDefinition(icon: "globe.americas", title: "QRZ Logbook", text: "The official INSERT API accepts one QSO per request, so YAAM keeps the queue durable and sends records individually.")
+                HelpDefinition(icon: "envelope.badge", title: "eQSL", text: "Uploads can be batched. Download Inbox matches confirmation ADIF to local QSOs and adds EQSL_QSL_RCVD without replacing existing fields.")
+                HelpDefinition(icon: "person.3", title: "Club Log", text: "Batch upload uses an application password and API key. Download LoTW State imports Club Log's sent, confirmed, and verified LoTW flags. Club Log matches themselves are not counted as independent DXCC confirmation.")
+            }
+            helpSection("Recovery Rules") {
+                HelpDefinition(icon: "clock.arrow.circlepath", title: "Transient failure", text: "A bounded exponential delay is recorded in SQLite; the job can be resumed after restart.")
+                HelpDefinition(icon: "hand.raised.fill", title: "Authentication failure", text: "YAAM stops retrying that job to avoid account lockouts or repeated rejected uploads.", color: .orange)
+                HelpDefinition(icon: "checkmark.shield", title: "Sent markers", text: "Only a successful service response updates that service's ADIF sent field and date.", color: .green)
+            }
+            helpCallout(icon: "arrow.down.circle", title: "Confirmation downloads", text: "The QSL Hub can pull LoTW and QRZ confirmations, eQSL Inbox ADIF, and Club Log's LoTW synchronization state. Each source is matched to the active station log and merged field by field.", color: .blue)
+            helpCallout(icon: "exclamationmark.triangle.fill", title: "Large log safety", text: "A scope above 500 QSOs requires confirmation. Previously sent records and completed jobs are skipped, but verify the chosen station and credentials before continuing.", color: .orange)
+        }
+    }
+
+    private var awards: some View {
+        Group {
+            helpHeader(title: "Independent Award Engine", subtitle: "Use the Master Log for planning while preserving the difference between contact evidence and an officially issued award.", icon: "medal.fill", color: .orange)
+            HelpFlow(steps: [
+                HelpFlowStep(icon: "antenna.radiowaves.left.and.right", title: "Worked", detail: "A unique entity, state, grid, park, island, or summit appears in the log."),
+                HelpFlowStep(icon: "checkmark.circle", title: "Confirmed", detail: "At least one accepted confirmation method exists in the QSO."),
+                HelpFlowStep(icon: "checkmark.seal", title: "Credited", detail: "An imported ADIF credit field identifies issuer credit where available."),
+                HelpFlowStep(icon: "medal", title: "Submitted / Granted", detail: "You record administrative stages after applying to the issuer.")
+            ])
+            helpSection("Built-in Trackers") {
+                HelpDefinition(icon: "globe.americas.fill", title: "DXCC, WAC, and WAS", text: "Tracks unique DXCC entities, populated continents, and US state codes with separate worked and confirmed counts.")
+                HelpDefinition(icon: "square.grid.3x3.fill", title: "VUCC", text: "Uses unique four-character Maidenhead grids by band. Targets are 100 for 6 m and 2 m, and 50 for 70 cm.")
+                HelpDefinition(icon: "water.waves", title: "IOTA", text: "Provides a 100-group local milestone from standard IOTA references.")
+                HelpDefinition(icon: "tree.fill", title: "POTA", text: "Tracks unique hunted parks and qualifying activator park-days with at least 10 QSOs on the same UTC date.")
+                HelpDefinition(icon: "mountain.2.fill", title: "SOTA", text: "Tracks unique references and activity. Official summit points are not guessed without the issuer's current summit database.")
+            }
+            helpCallout(icon: "building.columns", title: "Local estimate, official decision", text: "YAAM helps answer what remains. ARRL, POTA, SOTA, RSGB and other issuing organizations decide accepted credits and award grants.", color: .blue)
+        }
+    }
+
+    private var portable: some View {
+        Group {
+            helpHeader(title: "Portable Activities", subtitle: "Capture activator and hunter references during the QSO, then review and export each UTC activity without proprietary fields.", icon: "figure.hiking", color: .green)
+            HelpFlow(steps: [
+                HelpFlowStep(icon: "plus.circle", title: "Open Quick Log", detail: "Expand Portable Activity and choose Standard, Hunter, or Activator."),
+                HelpFlowStep(icon: "tag", title: "Add references", detail: "Enter your reference and the contacted station's reference independently."),
+                HelpFlowStep(icon: "arrow.forward", title: "Keep context", detail: "Your activator reference remains for the next QSO; contacted references clear."),
+                HelpFlowStep(icon: "square.and.arrow.up", title: "Export", detail: "Create one standard ADIF file for the selected reference and UTC date.")
+            ])
+            helpSection("Standard ADIF Mapping") {
+                HelpDefinition(icon: "tree.fill", title: "POTA", text: "Writes MY_POTA_REF/POTA_REF and compatible MY_SIG/SIG information.")
+                HelpDefinition(icon: "mountain.2.fill", title: "SOTA", text: "Writes MY_SOTA_REF/SOTA_REF and compatible signal-program fields.")
+                HelpDefinition(icon: "water.waves", title: "IOTA", text: "Writes MY_IOTA and IOTA for your and the contacted station's island references.")
+                HelpDefinition(icon: "square.grid.3x3", title: "VUCC", text: "Writes MY_VUCC_GRIDS and VUCC_GRIDS. Award analysis reduces contacted locators to the leftmost valid four characters.")
+            }
+            helpCallout(icon: "calendar.badge.clock", title: "POTA readiness", text: "The Portable view marks a park-day ready at 10 logged QSOs on the same UTC date. POTA performs final validation after upload.", color: .green)
+        }
+    }
+
+    private var connectivity: some View {
+        Group {
+            helpHeader(title: "Cloud & Mobile", subtitle: "Move a mergeable station package between Macs and use a private phone dashboard on the local network.", icon: "network", color: .blue)
+            HelpFlow(steps: [
+                HelpFlowStep(icon: "folder", title: "Choose cloud folder", detail: "Select a folder inside iCloud Drive or another synchronized location."),
+                HelpFlowStep(icon: "arrow.down.circle", title: "Pull safely", detail: "YAAM reads the station package and creates a restore point before changes."),
+                HelpFlowStep(icon: "arrow.triangle.2.circlepath", title: "Merge", detail: "Stable UUIDs and QSO keys add missing records and preserve confirmations."),
+                HelpFlowStep(icon: "arrow.up.circle", title: "Push", detail: "The merged, versioned package is written atomically for the next device.")
+            ])
+            helpSection("Why a Package, Not the Database") {
+                HelpDefinition(icon: "externaldrive.badge.xmark", title: "No live SQLite sharing", text: "Cloud services can duplicate or partially synchronize SQLite, WAL, and SHM files. YAAM keeps the active database local.")
+                HelpDefinition(icon: "doc.zipper", title: "Versioned package", text: "Each named station profile gets a JSON-based .yaamsync package with format version, device identity, headers, stable QSO IDs, and ADIF fields. YAAM refuses an ambiguous same-callsign merge.")
+                HelpDefinition(icon: "externaldrive.fill.badge.checkmark", title: "Restore before merge", text: "A database restore point is created before any incoming package adds or updates QSOs.", color: .green)
+            }
+            helpSection("Mobile Companion") {
+                HelpInstruction(number: 1, title: "Start explicitly", text: "Open Operator Desk > Connect, choose a high local port, and press Start. The server is off at every fresh launch.")
+                HelpInstruction(number: 2, title: "Scan or open", text: "Use the QR code or private URL from a phone on the same Wi-Fi or trusted LAN.")
+                HelpInstruction(number: 3, title: "Control write access", text: "Disable Allow Quick Log for a read-only dashboard. Rotate the Keychain token whenever a link may have been exposed.")
+                HelpDefinition(icon: "list.number", title: "Paginated local API", text: "GET /api/v1/qsos accepts offset and limit. A page is capped at 500 QSOs so a large log cannot stall the phone or desktop app.")
+            }
+            helpCallout(icon: "lock.shield", title: "Local network only", text: "Do not port-forward the mobile companion to the Internet. The bearer token protects requests, but the local HTTP transport is designed for a trusted private network.", color: .orange)
+        }
+    }
+
+    private var importReview: some View {
+        Group {
+            helpHeader(title: "Import Review", subtitle: "See exactly what an ADIF file will change before it reaches the Master Log.", icon: "doc.badge.magnifyingglass", color: .orange)
+            helpSection("Record Categories") {
+                HelpDefinition(icon: "plus.circle.fill", title: "New", text: "No matching QSO exists. These records are selected by default.", color: .blue)
+                HelpDefinition(icon: "arrow.triangle.2.circlepath.circle.fill", title: "Confirmation update", text: "The contact exists, but the incoming record adds a confirmation or fills a missing field.", color: .green)
+                HelpDefinition(icon: "doc.on.doc", title: "Duplicate", text: "The same callsign, date, time, band, and mode already exist with no useful update. It is excluded.", color: .secondary)
+                HelpDefinition(icon: "exclamationmark.triangle.fill", title: "Needs review", text: "A similar contact exists within five minutes. It is not selected until you decide both QSOs are valid.", color: .orange)
+                HelpDefinition(icon: "xmark.octagon.fill", title: "Invalid", text: "CALL or the eight-digit QSO_DATE is missing. Correct the source record before importing it.", color: .red)
+            }
+            HelpFlow(steps: [
+                HelpFlowStep(icon: "folder", title: "Open ADIF", detail: "Choose Merge into Master Log."),
+                HelpFlowStep(icon: "line.3.horizontal.decrease.circle", title: "Filter", detail: "Select a summary category to inspect it."),
+                HelpFlowStep(icon: "checkmark.circle", title: "Choose", detail: "Include only intentional new records and conflicts."),
+                HelpFlowStep(icon: "square.and.arrow.down", title: "Import", detail: "YAAM backs up, merges, audits, and saves.")
+            ])
+        }
+    }
+
+    private var dataSafety: some View {
+        Group {
+            helpHeader(title: "Backup & Restore", subtitle: "The Master Log uses a local SQLite database with stable QSO identities, integrity checks, an audit trail, and versioned restore points.", icon: "externaldrive.fill.badge.checkmark", color: .blue)
+            helpSection("Automatic Restore Points") {
+                HelpDefinition(icon: "calendar.badge.clock", title: "Daily", text: "Created when the log has data and the latest restore point is at least 24 hours old.")
+                HelpDefinition(icon: "square.and.arrow.down", title: "Before import", text: "Created before selected ADIF changes are applied.")
+                HelpDefinition(icon: "arrow.triangle.2.circlepath", title: "Around migration", text: "Created before and after legacy ADIF data moves into SQLite.")
+                HelpDefinition(icon: "arrow.counterclockwise", title: "Before restore", text: "A rollback point is created immediately before an older version replaces the current database.")
+            }
+            HelpFlow(steps: [
+                HelpFlowStep(icon: "gearshape", title: "Open Data Safety", detail: "Go to Settings > Data Safety."),
+                HelpFlowStep(icon: "checkmark.shield", title: "Verify", detail: "Run a SQLite integrity check at any time."),
+                HelpFlowStep(icon: "clock.arrow.circlepath", title: "Choose version", detail: "Review date, reason, and file size."),
+                HelpFlowStep(icon: "arrow.counterclockwise", title: "Restore", detail: "Profiles and QSOs reload together after validation.")
+            ])
+            helpCallout(icon: "internaldrive.fill", title: "Stored locally", text: "Restore points remain in YAAM's Application Support folder and are never uploaded by the backup feature.", color: .blue)
+        }
+    }
+
+    private var credentials: some View {
+        Group {
+            helpHeader(title: "Credentials & Keychain", subtitle: "Passwords, API keys, and QRZ browser session cookies are protected by the macOS credential store instead of preferences files.", icon: "lock.shield.fill", color: .green)
+            HelpFlow(steps: [
+                HelpFlowStep(icon: "rectangle.and.pencil.and.ellipsis", title: "Enter", detail: "Add the secret in the relevant Settings tab."),
+                HelpFlowStep(icon: "key.fill", title: "Protect", detail: "Press Save once to write it to this Mac's Keychain."),
+                HelpFlowStep(icon: "network", title: "Use", detail: "The value is read only when contacting that service."),
+                HelpFlowStep(icon: "trash.slash", title: "Keep private", detail: "It is not written to preferences or exported with ADIF.")
+            ])
+            helpSection("Credential Scope") {
+                HelpDefinition(icon: "person.crop.circle", title: "Account-wide", text: "QRZ login password, LoTW password, HAMQTH password, and SMTP app password.")
+                HelpDefinition(icon: "chart.line.uptrend.xyaxis", title: "QRZ Rank Service", text: "Global ranking uses a separate qrz-rank.asis.sh account after the three-query guest allowance. Configure it in Settings > Rank Service; it is not your QRZ.com account.")
+                HelpDefinition(icon: "antenna.radiowaves.left.and.right", title: "Per station", text: "The QRZ Logbook API key follows the active station profile.")
+                HelpDefinition(icon: "safari.fill", title: "QRZ session", text: "Saved QRZ cookies support Awards and authenticated lookups, and can be refreshed with QRZ Login.")
+            }
+            helpCallout(icon: "bolt.slash.fill", title: "No startup interruption", text: "The Master Log loads before online credentials. Keychain values are requested only when their Settings tab or related service is used.", color: .blue)
+            helpCallout(icon: "arrow.triangle.2.circlepath", title: "Automatic migration", text: "Existing secrets from older YAAM versions are moved into Keychain after the log is available and removed from ordinary preferences only after a successful transfer.", color: .green)
+        }
+    }
+
+    private var workflows: some View {
+        Group {
+            helpHeader(title: "Log Workflows", subtitle: "Import, live sync, confirmations, enrichment, and conversion remain available around the protected Master Log.", icon: "arrow.triangle.2.circlepath", color: .indigo)
+            helpSection("Common Tasks") {
+                HelpInstruction(number: 1, title: "Log while operating", text: "Open Operator Desk > Quick Log or press Command-L. Command-Return saves a validated QSO.")
+                HelpInstruction(number: 2, title: "Work a DX spot", text: "Open Operator Desk > DX Cluster, connect to your node, and double-click a relevant spot to prepare it in Quick Log.")
+                HelpInstruction(number: 3, title: "Sync every source", text: "Open Operator Desk > Sync Center and use Sync All, or run only the source you need.")
+                HelpInstruction(number: 4, title: "Convert or filter", text: "Open Convert, choose input/output files, then select an optional UTC range, band, mode, or any combination of the three before processing.")
+                HelpInstruction(number: 5, title: "Enrich contacts", text: "Select rows in Log Table Viewer or use Enrich Data to add available QRZ/HAMQTH identity data.")
+            }
+            helpCallout(icon: "info.circle.fill", title: "Guest logs", text: "Opening an ADIF as a Guest keeps it outside the active station database. Save As exports it without changing the protected Master Log.", color: .blue)
+        }
+    }
+
+    private var faq: some View {
+        Group {
+            helpHeader(title: "Frequently Asked Questions", subtitle: "Short answers for the workflows operators use most often.", icon: "questionmark.circle.fill", color: .blue)
+            FAQItem(question: "Where is the WSJT-X ADIF log on macOS?", answer: "In WSJT-X choose File > Open log directory and select wsjtx_log.adi. A common location is ~/.local/share/WSJT-X/wsjtx_log.adi.")
+            FAQItem(question: "Can I open a log without merging it?", answer: "Yes. Choose Open as Guest Log in the import prompt. Guest edits are saved or exported separately and do not change the active station Master Log.")
+            FAQItem(question: "How does the UTC contest filter handle midnight?", answer: "The filter compares complete UTC date-and-time values, so a range can begin on one UTC day and end on the next.")
+            FAQItem(question: "Can Convert filter FT8 records stored as MFSK?", answer: "Yes. Mode filtering checks both ADIF MODE and SUBMODE, so selecting FT8 matches records stored as MODE=MFSK and SUBMODE=FT8. Band filtering can also infer a missing BAND from FREQ.")
+            FAQItem(question: "Does DX Advisor use the active station?", answer: "Yes. Grid Locator, radio, power, antenna, and height come from the active station profile.")
+            FAQItem(question: "What frequency formats does Quick Log accept?", answer: "MHz, kHz, and Hz are accepted. For 20-meter FT8, 14.074, 14074, and 14074000 resolve to the same frequency and band.")
+            FAQItem(question: "Why is a DX spot marked as new?", answer: "Status is calculated from the active station's Master Log. New Callsign means no prior QSO; New Band means the callsign exists but not on that band.")
+            FAQItem(question: "Why did Sync All skip a source?", answer: "Only configured sources run. Open the source card or its Settings section and supply the required file, password, or station API key.")
+            FAQItem(question: "Why are tracked rankings unavailable?", answer: "YAAM restores the tracked callsign list and last valid snapshots locally. Live refresh needs a QRZ Rank Service account after its guest allowance expires; configure that separate account in Settings > Rank Service. A service failure never deletes saved rivals.")
+            FAQItem(question: "Why can I not delete a station?", answer: "The active station cannot be deleted, and a profile that owns QSOs is protected. Activate another profile and preserve or relocate its contacts first.")
+            FAQItem(question: "What happens if a restore fails?", answer: "YAAM validates the selected SQLite file and creates a rollback version before replacement. If reopening fails, it attempts to restore the database that was active immediately before the operation.")
+            FAQItem(question: "How do I refresh QRZ Awards access?", answer: "Use QRZ Login in the Log Table toolbar, complete any QRZ browser challenge, then return to QRZ Awards and press Refresh.")
+            FAQItem(question: "What password should Gmail SMTP use?", answer: "Use a Google App Password, not the normal Google account password. YAAM stores it in macOS Keychain.")
+        }
+    }
+
+    private func helpHeader(title: String, subtitle: String, icon: String, color: Color) -> some View {
+        HStack(alignment: .top, spacing: 16) {
+            Image(systemName: icon)
+                .font(.system(size: 28, weight: .semibold))
+                .foregroundStyle(color)
+                .frame(width: 54, height: 54)
+                .background(color.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+            VStack(alignment: .leading, spacing: 6) {
+                Text(title).font(.largeTitle.weight(.semibold))
+                Text(subtitle).font(.body).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func helpSection<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title).font(.title3.weight(.semibold))
+            content()
+        }
+    }
+
+    private func helpCallout(icon: String, title: String, text: String, color: Color) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: icon).foregroundStyle(color).font(.system(size: 17, weight: .semibold)).frame(width: 24)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(.callout.weight(.semibold))
+                Text(text).font(.callout).foregroundStyle(.secondary)
+            }
+        }
+        .padding(14)
+        .background(color.opacity(0.08), in: RoundedRectangle(cornerRadius: 7))
+    }
+}
+
+private struct HelpFlowStep: Identifiable {
+    let id = UUID()
+    let icon: String
+    let title: String
+    let detail: String
+}
+
+private struct HelpFlow: View {
+    let steps: [HelpFlowStep]
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            ForEach(Array(steps.enumerated()), id: \.element.id) { index, step in
+                VStack(spacing: 9) {
+                    Image(systemName: step.icon)
+                        .font(.system(size: 19, weight: .semibold))
+                        .foregroundStyle(.blue)
+                        .frame(width: 40, height: 40)
+                        .background(.blue.opacity(0.11), in: Circle())
+                    Text(step.title).font(.callout.weight(.semibold)).multilineTextAlignment(.center)
+                    Text(step.detail).font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity)
+                if index < steps.count - 1 {
+                    Image(systemName: "chevron.right").foregroundStyle(.tertiary).padding(.top, 13)
+                }
+            }
+        }
+        .padding(.vertical, 8)
+    }
+}
+
+private struct HelpInstruction: View {
+    let number: Int
+    let title: String
+    let text: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text(number.formatted())
+                .font(.caption.weight(.bold).monospacedDigit())
+                .foregroundStyle(.white)
+                .frame(width: 24, height: 24)
+                .background(.blue, in: Circle())
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(.callout.weight(.semibold))
+                Text(text).font(.callout).foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+private struct HelpDefinition: View {
+    let icon: String
+    let title: String
+    let text: String
+    var color: Color = .blue
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: icon).foregroundStyle(color).font(.system(size: 15, weight: .semibold)).frame(width: 24)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(.callout.weight(.semibold))
+                Text(text).font(.callout).foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
 struct FAQItem: View {
     let question: String
     let answer: String
-    @State private var isExpanded: Bool = false
+    @State private var isExpanded = false
 
     var body: some View {
         DisclosureGroup(isExpanded: $isExpanded) {
             Text(answer)
-                .font(.body)
-                .foregroundColor(.secondary)
-                .padding(.top, 4)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .padding(.top, 6)
                 .frame(maxWidth: .infinity, alignment: .leading)
         } label: {
-            Text(question)
-                .font(.headline)
+            Text(question).font(.callout.weight(.semibold))
         }
-        .buttonStyle(.plain) // Fixes blue focus border on macOS
-        .focusEffectDisabled() // Ensures no outline frame on hover/focus
-        .padding(10)
-        .background(Color(NSColor.controlBackgroundColor))
-        .cornerRadius(8)
+        .buttonStyle(.plain)
+        .focusEffectDisabled()
+        .padding(.vertical, 8)
+        Divider()
     }
 }
