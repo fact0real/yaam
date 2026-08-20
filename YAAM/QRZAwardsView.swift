@@ -60,6 +60,7 @@ struct QRZAwardsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 header
+                lotwAwardProgress
 
                 if appState.qrzAwardSummaries.isEmpty {
                     if appState.isFetchingQRZAwards {
@@ -159,6 +160,73 @@ struct QRZAwardsView: View {
         return "\(Int(award.remainingPercent.rounded()))% left"
     }
 
+    private var lotwAwardProgress: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("LoTW Award Progress", systemImage: "checkmark.seal.fill")
+                    .font(.headline)
+                Spacer()
+                Button {
+                    appState.downloadLoTWAndQRZConfirmations()
+                } label: {
+                    Label("Sync LoTW", systemImage: "arrow.clockwise.icloud")
+                }
+                .disabled(appState.isSyncingAPI || appState.isProcessingQSLQueue)
+            }
+
+            HStack(spacing: 10) {
+                lotwMetric("Confirmed QSOs", lotwConfirmedRecords.count.formatted(), "q.circle.fill", .green)
+                lotwMetric("DXCC entities", "\(lotwDXCCCount)/100", "globe.americas.fill", .blue)
+                lotwMetric("US states", "\(lotwStateCount)/50", "map.fill", .purple)
+                lotwMetric("6m grids", "\(lotwSixMeterGridCount)/100", "square.grid.3x3.fill", .orange)
+            }
+
+            Text("LoTW does not expose every award account page through a simple public awards API here, so YAAM calculates practical DXCC/WAS/VUCC-style progress from LoTW-confirmed records already merged into the active station log.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(14)
+        .background(Color(NSColor.controlBackgroundColor).opacity(0.56))
+        .cornerRadius(8)
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.green.opacity(0.22)))
+    }
+
+    private var lotwConfirmedRecords: [QSORecordModel] {
+        appState.qsoRecords.filter { record in
+            ["Y", "V", "C", "CONFIRMED"].contains(record["LOTW_QSL_RCVD"].uppercased())
+        }
+    }
+
+    private var lotwDXCCCount: Int {
+        Set(lotwConfirmedRecords.map { $0["DXCC"] }.filter { !$0.isEmpty }).count
+    }
+
+    private var lotwStateCount: Int {
+        Set(lotwConfirmedRecords.map { $0["STATE"].uppercased() }.filter { !$0.isEmpty }).count
+    }
+
+    private var lotwSixMeterGridCount: Int {
+        Set(lotwConfirmedRecords.filter { $0["BAND"].lowercased() == "6m" }.map { ($0["GRIDSQUARE"].isEmpty ? $0["GRID"] : $0["GRIDSQUARE"]).uppercased() }.filter { !$0.isEmpty }).count
+    }
+
+    private func lotwMetric(_ title: String, _ value: String, _ icon: String, _ color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Image(systemName: icon)
+                .foregroundColor(color)
+            Text(value)
+                .font(.system(.title2, design: .rounded))
+                .bold()
+            Text(title)
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(NSColor.controlBackgroundColor).opacity(0.46))
+        .cornerRadius(8)
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(color.opacity(0.24), lineWidth: 1))
+    }
+
     private func awardMetric(_ title: String, _ value: String, _ icon: String, _ color: Color) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Image(systemName: icon)
@@ -256,21 +324,7 @@ struct QRZAwardCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 11) {
             HStack(alignment: .top, spacing: 10) {
-                Group {
-                    if let url = URL(string: award.ribbonURL), !award.ribbonURL.isEmpty {
-                        AsyncImage(url: url) { image in
-                            image
-                                .resizable()
-                                .scaledToFit()
-                        } placeholder: {
-                            Image(systemName: "trophy.fill")
-                                .foregroundColor(color)
-                        }
-                    } else {
-                        Image(systemName: "trophy.fill")
-                            .foregroundColor(color)
-                    }
-                }
+                AwardContinentIcon(award: award, tint: color)
                 .frame(width: 88, height: 44)
 
                 VStack(alignment: .leading, spacing: 4) {
@@ -369,5 +423,54 @@ struct QRZAwardCard: View {
             RoundedRectangle(cornerRadius: 8)
                 .stroke(color.opacity(isComplete ? 0.48 : 0.34), lineWidth: isComplete ? 1.4 : 1)
         )
+    }
+}
+
+private struct AwardContinentIcon: View {
+    let award: QRZAwardSummary
+    let tint: Color
+
+    private var signature: (symbol: String, title: String, colors: [Color]) {
+        let text = "\(award.title) \(award.detail) \(award.awardType)".uppercased()
+        if text.contains("AFRICA") || text.contains("AF") {
+            return ("globe.europe.africa.fill", "AF", [.orange, .green])
+        }
+        if text.contains("ASIA") || text.contains("AS") {
+            return ("globe.central.south.asia.fill", "AS", [.red, .yellow])
+        }
+        if text.contains("EUROPE") || text.contains("EU") {
+            return ("globe.europe.africa.fill", "EU", [.blue, .indigo])
+        }
+        if text.contains("NORTH AMERICA") || text.contains("NA") {
+            return ("globe.americas.fill", "NA", [.blue, .green])
+        }
+        if text.contains("SOUTH AMERICA") || text.contains("SA") {
+            return ("globe.americas.fill", "SA", [.green, .yellow])
+        }
+        if text.contains("OCEANIA") || text.contains("OC") {
+            return ("globe.asia.australia.fill", "OC", [.cyan, .blue])
+        }
+        if text.contains("ANTARCTICA") || text.contains("AN") {
+            return ("snowflake", "AN", [.cyan, .white])
+        }
+        return ("trophy.fill", "DX", [tint, .yellow])
+    }
+
+    var body: some View {
+        let item = signature
+        ZStack {
+            RoundedRectangle(cornerRadius: 8)
+                .fill(LinearGradient(colors: item.colors.map { $0.opacity(0.82) }, startPoint: .topLeading, endPoint: .bottomTrailing))
+            Image(systemName: item.symbol)
+                .font(.system(size: 28, weight: .bold))
+                .foregroundStyle(.white.opacity(0.92))
+                .offset(x: -15)
+            Text(item.title)
+                .font(.system(size: 18, weight: .black, design: .rounded))
+                .foregroundStyle(.white)
+                .shadow(color: .black.opacity(0.2), radius: 2, y: 1)
+                .offset(x: 22)
+        }
+        .accessibilityLabel("\(item.title) award icon")
     }
 }

@@ -63,6 +63,8 @@ struct OperatorDeskView: View {
                 PortableActivitiesPanel()
             case 8:
                 ConnectivityPanel()
+            case 9:
+                ContestCalendarAndPropagationPanel()
             default:
                 QuickLogPanel()
             }
@@ -87,6 +89,7 @@ struct OperatorDeskView: View {
             Label("Awards", systemImage: "medal").tag(6)
             Label("Portable", systemImage: "figure.hiking").tag(7)
             Label("Connect", systemImage: "network").tag(8)
+            Label("Calendar/6m", systemImage: "calendar.badge.clock").tag(9)
         }
         .labelsHidden()
         .onChange(of: appState.operatorDeskSection) { _, value in
@@ -111,6 +114,8 @@ struct OperatorDeskView: View {
             (!appState.portableActivitySummaries.isEmpty, "Portable activity log")
         case 8:
             (appState.isMobileCompanionRunning || appState.cloudSyncLastRun != nil, appState.isMobileCompanionRunning ? appState.mobileCompanionStatus : appState.cloudSyncStatus)
+        case 9:
+            (appState.sixMeterAssessment.isOpen, appState.sixMeterAssessment.title)
         default:
             (appState.dxClusterClient.state.isConnected, appState.dxClusterClient.state.title)
         }

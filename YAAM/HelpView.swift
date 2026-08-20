@@ -6,7 +6,7 @@
 import SwiftUI
 
 private enum HelpTopic: String, CaseIterable, Identifiable {
-    case start, stations, quickLog, dxCluster, radioBridge, contest, syncCenter, qslHub, awards, portable, connectivity, importReview, dataSafety, credentials, workflows, faq
+    case start, stations, quickLog, dxCluster, radioBridge, contest, contestCalendar, magicBand, syncCenter, qslHub, awards, portable, connectivity, importReview, dataSafety, credentials, workflows, faq
     var id: String { rawValue }
 
     var title: String {
@@ -17,6 +17,8 @@ private enum HelpTopic: String, CaseIterable, Identifiable {
         case .dxCluster: return "DX Cluster"
         case .radioBridge: return "Radio & Digital Bridge"
         case .contest: return "Contest Workspace"
+        case .contestCalendar: return "Contest Calendar"
+        case .magicBand: return "6m & Propagation"
         case .syncCenter: return "Sync Center"
         case .qslHub: return "QSL Hub"
         case .awards: return "Award Engine"
@@ -38,6 +40,8 @@ private enum HelpTopic: String, CaseIterable, Identifiable {
         case .dxCluster: return "dot.radiowaves.left.and.right"
         case .radioBridge: return "wave.3.right.circle"
         case .contest: return "flag.checkered"
+        case .contestCalendar: return "calendar.badge.clock"
+        case .magicBand: return "dot.radiowaves.left.and.right"
         case .syncCenter: return "arrow.triangle.2.circlepath"
         case .qslHub: return "arrow.left.arrow.right.circle"
         case .awards: return "medal"
@@ -85,6 +89,8 @@ struct HelpView: View {
         case .dxCluster: dxCluster
         case .radioBridge: radioBridge
         case .contest: contest
+        case .contestCalendar: contestCalendar
+        case .magicBand: magicBand
         case .syncCenter: syncCenter
         case .qslHub: qslHub
         case .awards: awards
@@ -252,6 +258,41 @@ struct HelpView: View {
                 HelpInstruction(number: 3, title: "Review live totals", text: "Contest Workspace reports QSOs, unique callsigns, DXCC entities, bands, duplicates, and the next serial without rescanning outside the current session.")
             }
             helpCallout(icon: "doc.text.magnifyingglass", title: "Verify before submission", text: "Cabrillo layouts and scoring rules vary by sponsor. YAAM emits a standards-based Cabrillo 3.0 log with CLAIMED-SCORE set to zero; calculate the official score and validate categories and exchange columns with the contest sponsor's checker.", color: .blue)
+        }
+    }
+
+    private var contestCalendar: some View {
+        Group {
+            helpHeader(title: "Contest Calendar", subtitle: "Use the Operator Desk calendar to pick upcoming operating windows and move quickly into a contest session.", icon: "calendar.badge.clock", color: .blue)
+            HelpFlow(steps: [
+                HelpFlowStep(icon: "calendar", title: "Review", detail: "Open Operator Desk > Calendar/6m and scan the highlighted upcoming contests."),
+                HelpFlowStep(icon: "arrow.up.right.square", title: "Verify", detail: "Open the WA7BNM 5-week calendar for the official schedule and rule links."),
+                HelpFlowStep(icon: "flag.checkered", title: "Prepare", detail: "Create or resume a Contest Workspace session with the official contest ID."),
+                HelpFlowStep(icon: "square.and.arrow.up", title: "Submit", detail: "Export Cabrillo after the session and validate with the sponsor's checker.")
+            ])
+            helpSection("Practical Use") {
+                HelpDefinition(icon: "location.north.line", title: "Regional focus", text: "YAAM highlights contests that are useful from Iran and the Middle East, but the linked calendar remains authoritative for late changes.")
+                HelpDefinition(icon: "timer", title: "UTC windows", text: "Times are shown in UTC so they match ADIF, Cabrillo, LoTW, and most contest announcements.")
+                HelpDefinition(icon: "chart.line.uptrend.xyaxis", title: "Rank growth", text: "Use contests to increase QSO volume, find new DXCC entities, and fill missing bands for QRZ Rank movement.")
+            }
+        }
+    }
+
+    private var magicBand: some View {
+        Group {
+            helpHeader(title: "6m & Propagation", subtitle: "Combine PSK Reporter evidence, solar context, and regional locator matching to sense whether the Magic Band is worth immediate attention.", icon: "dot.radiowaves.left.and.right", color: .orange)
+            HelpFlow(steps: [
+                HelpFlowStep(icon: "antenna.radiowaves.left.and.right", title: "Set station", detail: "Choose the active station callsign before querying PSK Reporter."),
+                HelpFlowStep(icon: "arrow.clockwise", title: "Refresh", detail: "Refresh no more than every few minutes; PSK Reporter asks developers to avoid repeated frequent queries."),
+                HelpFlowStep(icon: "bolt.circle.fill", title: "React", detail: "When YAAM reports a likely 6m opening, check 50.313 FT8, beacons, and DX Cluster immediately."),
+                HelpFlowStep(icon: "checkmark.seal", title: "Confirm", detail: "After QSOs are uploaded and confirmed, LoTW progress updates the local VUCC-style grid count.")
+            ])
+            helpSection("Evidence Model") {
+                HelpDefinition(icon: "6.circle.fill", title: "6m reports", text: "Reports between 50 and 54 MHz are counted separately from HF reception reports.", color: .orange)
+                HelpDefinition(icon: "location.north.circle", title: "Near Middle East", text: "YAAM treats LL, LM, LK, KL, and KM grid prefixes as regional evidence around Iran and neighboring paths.", color: .blue)
+                HelpDefinition(icon: "sparkles", title: "E-skip context", text: "HamQSL VHF propagation values are used as supporting context, not as a replacement for live reception reports.")
+            }
+            helpCallout(icon: "exclamationmark.triangle.fill", title: "Opening alerts are advisory", text: "6m can open and close quickly. Treat YAAM's alert as a strong prompt to listen and transmit, not as a guarantee of propagation.", color: .orange)
         }
     }
 

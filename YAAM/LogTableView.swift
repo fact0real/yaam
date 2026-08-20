@@ -120,107 +120,63 @@ struct LogTableView: View {
 
                 Divider().frame(height: 14)
                 
-                Button(action: { appState.confirmAndFetchCloudLogbook() }) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "icloud.and.arrow.down.fill")
-                            .foregroundColor(.blue)
-                        Text("Cloud Logbook")
-                            .font(.caption)
-                            .fontWeight(.bold)
-                    }
-                }
-                .buttonStyle(.plain)
-
-                Divider().frame(height: 14)
-
-                if appState.isEnriching {
-                    Button(action: { appState.stopEnrichment() }) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "stop.circle.fill")
-                                .foregroundColor(.red)
-                            Text("Stop Enriching")
-                                .font(.caption)
-                                .fontWeight(.bold)
-                                .foregroundColor(.red)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                } else if !appState.selectedRecordIDs.isEmpty {
-                    Button(action: { appState.enrichSelectedRecords() }) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "wand.and.stars.inverse")
-                                .foregroundColor(.orange)
-                            Text("Enrich Selected (\(appState.selectedRecordIDs.count))")
-                                .font(.caption)
-                                .fontWeight(.bold)
-                                .foregroundColor(.orange)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    
-                    Button(action: { appState.clearSelection() }) {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Clear row selections")
-                } else {
-                    Menu {
-                        Button("Enrich Today's QSOs with Rank + QRZ") {
-                            appState.enrichLogData()
-                        }
-                        Button("Backfill Missing QRZ Names & Emails Now") {
-                            appState.backfillMissingQRZEmailsNow()
-                        }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "wand.and.stars")
-                                .foregroundColor(.purple)
-                            Text("Enrich Data")
-                                .font(.caption)
-                                .fontWeight(.bold)
-                        }
-                    }
-                    .help("With no selected rows, Enrich Data processes today's QSOs. Use the menu to manually backfill missing QRZ names and emails.")
-                    .buttonStyle(.plain)
-                    .disabled(appState.qsoRecords.isEmpty)
-                }
-
-                if !appState.isEnriching {
-                    let rankCandidateCount = appState.dailyRankBackfillCandidateCount
-                    Divider().frame(height: 14)
-
-                    Button(action: { appState.fetchDailyQRZRankBackfill() }) {
-                        HStack(spacing: 5) {
-                            Image(systemName: "chart.line.uptrend.xyaxis")
-                                .foregroundColor(.green)
-                            Text("Daily Rank")
-                                .font(.caption)
-                                .fontWeight(.bold)
-                            Text("\(rankCandidateCount)")
-                                .font(.caption2.monospacedDigit().weight(.semibold))
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(rankCandidateCount == 0 || appState.dailyRankRequestsRemaining == 0)
-                    .help("Fetch missing authenticated QRZ rankings for up to 1,440 unique callsigns per day. \(appState.dailyRankRequestsRemaining) requests remain today.")
-                }
-                
-                Divider().frame(height: 14)
-
                 Menu {
+                    Button {
+                        appState.confirmAndFetchCloudLogbook()
+                    } label: {
+                        Label("Download LoTW Cloud Logbook...", systemImage: "icloud.and.arrow.down.fill")
+                    }
+
+                    Divider()
+
+                    if appState.isEnriching {
+                        Button {
+                            appState.stopEnrichment()
+                        } label: {
+                            Label("Stop Enriching", systemImage: "stop.circle.fill")
+                        }
+                    } else if !appState.selectedRecordIDs.isEmpty {
+                        Button {
+                            appState.enrichSelectedRecords()
+                        } label: {
+                            Label("Enrich Selected (\(appState.selectedRecordIDs.count))", systemImage: "wand.and.stars.inverse")
+                        }
+                        Button {
+                            appState.clearSelection()
+                        } label: {
+                            Label("Clear Row Selection", systemImage: "xmark.circle")
+                        }
+                    } else {
+                        Button {
+                            appState.enrichLogData()
+                        } label: {
+                            Label("Enrich Today's QSOs", systemImage: "wand.and.stars")
+                        }
+                        Button {
+                            appState.backfillMissingQRZEmailsNow()
+                        } label: {
+                            Label("Backfill Missing QRZ Names & Emails", systemImage: "person.text.rectangle")
+                        }
+                    }
+
+                    let rankCandidateCount = appState.dailyRankBackfillCandidateCount
+                    Button {
+                        appState.fetchDailyQRZRankBackfill()
+                    } label: {
+                        Label("Daily Rank Backfill (\(rankCandidateCount))", systemImage: "chart.line.uptrend.xyaxis")
+                    }
+                    .disabled(appState.isEnriching || rankCandidateCount == 0 || appState.dailyRankRequestsRemaining == 0)
+
+                    Divider()
+
                     let qslCount = appState.recentConfirmedQSLBatchCandidateCount()
                     let reminderCount = appState.recentUnconfirmedReminderBatchRecipientCount()
-
                     Button {
                         appState.sendRecentConfirmedQSLCardsBatch()
                     } label: {
                         Label("Send Recent QSL Cards (\(qslCount))", systemImage: "rectangle.stack.badge.person.crop")
                     }
                     .disabled(qslCount == 0 || appState.isSendingBatchMail)
-                    .help(qslCount == 0 ? "No confirmed QSO from the last 24 hours has an EMAIL value." : "Send QSL card PDFs for confirmed QSOs from the last 24 hours.")
 
                     Button {
                         appState.sendRecentUnconfirmedReminderBatch()
@@ -228,42 +184,31 @@ struct LogTableView: View {
                         Label("Remind Recent Unconfirmed (\(reminderCount))", systemImage: "bell.badge")
                     }
                     .disabled(reminderCount == 0 || appState.isSendingBatchMail)
-                    .help(reminderCount == 0 ? "No unconfirmed QSO from the last 7 days has an EMAIL value." : "Send friendly reminders grouped by callsign.")
+
+                    Divider()
+
+                    Button {
+                        appState.forceQRZReLogin()
+                    } label: {
+                        Label("QRZ Login", systemImage: "key.fill")
+                    }
                 } label: {
-                    HStack(spacing: 4) {
-                        if appState.isSendingBatchMail {
+                    HStack(spacing: 5) {
+                        if appState.isEnriching || appState.isSendingBatchMail {
                             ProgressView()
                                 .scaleEffect(0.55)
                                 .frame(width: 14, height: 14)
-                            Text(appState.batchMailStatus.isEmpty ? "Sending..." : appState.batchMailStatus)
-                                .lineLimit(1)
                         } else {
-                            Image(systemName: "tray.and.arrow.up.fill")
-                                .foregroundColor(.indigo)
-                            Text("Batch Mail")
+                            Image(systemName: "ellipsis.circle")
                         }
-                    }
-                    .font(.caption)
-                    .fontWeight(.semibold)
-                    .frame(minWidth: appState.isSendingBatchMail ? 170 : 86, alignment: .leading)
-                }
-                .menuStyle(.borderlessButton)
-                .help("Send up to 40 recent QSL cards or friendly confirmation reminders.")
-                .disabled(appState.qsoRecords.isEmpty || appState.isSendingBatchMail)
-
-                Divider().frame(height: 14)
-                
-                Button(action: { appState.forceQRZReLogin() }) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "key.fill")
-                            .foregroundColor(.green)
-                        Text("QRZ Login")
+                        Text("Tools")
                             .font(.caption)
                             .fontWeight(.semibold)
                     }
                 }
-                .buttonStyle(.plain)
-                .help("Re-authenticate with QRZ.com to refresh expired session cookies")
+                .menuStyle(.borderlessButton)
+                .disabled(appState.qsoRecords.isEmpty && !appState.isEnriching && !appState.isSendingBatchMail)
+                .help("Cloud logbook, enrichment, rank backfill, batch mail, and QRZ login")
                 
                 Divider().frame(height: 14)
                 

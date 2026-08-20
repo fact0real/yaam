@@ -318,6 +318,60 @@ struct PropagationSnapshot {
     var solarForecast: [SolarForecastPoint] = []
 }
 
+struct PSKReporterSignal: Identifiable {
+    let id = UUID()
+    let receiverCallsign: String
+    let receiverLocator: String
+    let senderCallsign: String
+    let frequencyHz: Int
+    let mode: String
+    let snr: Int?
+    let flowStart: Date
+
+    var isSixMeters: Bool {
+        (50_000_000...54_000_000).contains(frequencyHz)
+    }
+
+    var bandLabel: String {
+        switch frequencyHz {
+        case 50_000_000...54_000_000: return "6m"
+        case 28_000_000...29_700_000: return "10m"
+        case 24_890_000...24_990_000: return "12m"
+        case 21_000_000...21_450_000: return "15m"
+        case 18_068_000...18_168_000: return "17m"
+        case 14_000_000...14_350_000: return "20m"
+        case 7_000_000...7_300_000: return "40m"
+        default:
+            return String(format: "%.3f MHz", Double(frequencyHz) / 1_000_000)
+        }
+    }
+
+    var snrText: String {
+        snr.map { "\($0) dB" } ?? "-"
+    }
+
+    var snrColor: Color {
+        guard let snr else { return .secondary }
+        if snr >= -8 { return .green }
+        if snr >= -18 { return .orange }
+        return .red
+    }
+
+    var ageText: String {
+        let minutes = max(0, Int(Date().timeIntervalSince(flowStart) / 60))
+        return minutes < 60 ? "\(minutes)m" : "\(minutes / 60)h"
+    }
+}
+
+struct SixMeterOpeningAssessment {
+    let title: String
+    let detail: String
+    let evidence: String
+    let icon: String
+    let color: Color
+    let isOpen: Bool
+}
+
 struct SolarForecastPoint: Identifiable {
     var id: String { dateLabel }
     let date: Date
@@ -1593,6 +1647,10 @@ class AppState: NSObject, ObservableObject {
     @Published var isSyncingAPI: Bool = false
     @Published var propagationSnapshot = PropagationSnapshot()
     @Published var isFetchingPropagation: Bool = false
+    @Published var pskReporterSignals: [PSKReporterSignal] = []
+    @Published var isFetchingPSKReporter: Bool = false
+    @Published var pskReporterStatus: String = ""
+    @Published var pskReporterLastUpdated: Date?
     
     // Row Selection State
     @Published var selectedRecordIDs: Set<UUID> = []
@@ -1679,7 +1737,7 @@ class AppState: NSObject, ObservableObject {
     var loadedWorkspaceProfileID: UUID?
 
     // Operator Desk
-    @Published var operatorDeskSection = min(8, max(0, UserDefaults.standard.integer(forKey: "operatorDeskSection")))
+    @Published var operatorDeskSection = min(9, max(0, UserDefaults.standard.integer(forKey: "operatorDeskSection")))
     @Published var quickLogDraft = QuickLogDraft()
     @Published var quickLogLookup: CallsignLookupResult?
     @Published var quickLogAssessment = QuickLogAssessment()
@@ -3450,6 +3508,166 @@ class AppState: NSObject, ObservableObject {
             self.propagationSnapshot = snapshot
             self.isFetchingPropagation = false
         }
+    }
+
+    var sixMeterSignalCount: Int {
+        pskReporterSignals.filter(\.isSixMeters).count
+    }
+
+    var middleEastSixMeterSignalCount: Int {
+        pskReporterSignals.filter { $0.isSixMeters && isMiddleEastLocator($0.receiverLocator) }.count
+    }
+
+    var bestSixMeterSNRText: String {
+        pskReporterSignals
+            .filter(\.isSixMeters)
+            .compactMap(\.snr)
+            .max()
+            .map { "\($0) dB" } ?? "-"
+    }
+
+    var sixMeterAssessment: SixMeterOpeningAssessment {
+        let sixMeter = pskReporterSignals.filter(\.isSixMeters)
+        let regional = sixMeter.filter { isMiddleEastLocator($0.receiverLocator) }
+        let strong = sixMeter.filter { ($0.snr ?? -99) >= -12 }
+        let euESkip = propagationSnapshot.vhfConditions["E-Skip|Europe 6m"] ?? propagationSnapshot.vhfConditions["E-Skip|Europe"] ?? "-"
+        let eSkipLooksOpen = euESkip.localizedCaseInsensitiveContains("good") ||
+            euESkip.localizedCaseInsensitiveContains("fair") ||
+            euESkip.localizedCaseInsensitiveContains("open")
+
+        if !regional.isEmpty || sixMeter.count >= 4 || (!sixMeter.isEmpty && eSkipLooksOpen) {
+            return SixMeterOpeningAssessment(
+                title: "6m may be opening now",
+                detail: "There is fresh reception evidence on 50 MHz. Check 50.313 FT8, local beacons, and DX Cluster spots before the opening fades.",
+                evidence: "\(sixMeter.count) recent 6m report(s), \(regional.count) near Middle East locators, best SNR \(bestSixMeterSNRText), E-skip: \(euESkip).",
+                icon: "bolt.circle.fill",
+                color: .orange,
+                isOpen: true
+            )
+        }
+
+        if !strong.isEmpty {
+            return SixMeterOpeningAssessment(
+                title: "6m has weak positive signs",
+                detail: "A few stronger reports exist, but the regional evidence is not convincing yet.",
+                evidence: "\(sixMeter.count) 6m report(s), \(strong.count) stronger than -12 dB, E-skip: \(euESkip).",
+                icon: "waveform.path.ecg",
+                color: .yellow,
+                isOpen: false
+            )
+        }
+
+        return SixMeterOpeningAssessment(
+            title: "6m looks quiet",
+            detail: "No strong regional evidence is visible in the recent PSK Reporter sample.",
+            evidence: "\(sixMeter.count) recent 6m report(s), \(regional.count) regional report(s), E-skip: \(euESkip).",
+            icon: "moon.zzz.fill",
+            color: .secondary,
+            isOpen: false
+        )
+    }
+
+    func fetchPSKReporterSignals() {
+        guard !isFetchingPSKReporter else { return }
+        let callsign = currentStationCallsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard !callsign.isEmpty, callsign != "DEFAULT", callsign != "NOCALL" else {
+            pskReporterStatus = "Set an active station callsign before querying PSK Reporter."
+            return
+        }
+        if let last = pskReporterLastUpdated, Date().timeIntervalSince(last) < 240 {
+            pskReporterStatus = "PSK Reporter was refreshed recently; wait a minute before querying again."
+            return
+        }
+
+        isFetchingPSKReporter = true
+        pskReporterStatus = "Querying PSK Reporter for \(callsign)..."
+
+        guard var components = URLComponents(string: "https://retrieve.pskreporter.info/query") else {
+            isFetchingPSKReporter = false
+            pskReporterStatus = "Invalid PSK Reporter endpoint."
+            return
+        }
+        components.queryItems = [
+            URLQueryItem(name: "senderCallsign", value: callsign),
+            URLQueryItem(name: "flowStartSeconds", value: "-21600"),
+            URLQueryItem(name: "rptlimit", value: "120"),
+            URLQueryItem(name: "rronly", value: "1")
+        ]
+        guard let url = components.url else {
+            isFetchingPSKReporter = false
+            pskReporterStatus = "Unable to create PSK Reporter request."
+            return
+        }
+
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: 30)
+        request.setValue("YAAM-macOS/\(currentVersion) factoreal", forHTTPHeaderField: "User-Agent")
+        URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+            guard let self else { return }
+            DispatchQueue.main.async {
+                defer { self.isFetchingPSKReporter = false }
+                if let error {
+                    self.pskReporterStatus = error.localizedDescription
+                    self.playActivitySound(.failure)
+                    return
+                }
+                guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode), let data else {
+                    self.pskReporterStatus = "PSK Reporter did not return a successful response."
+                    self.playActivitySound(.failure)
+                    return
+                }
+                let signals = self.parsePSKReporterSignals(data)
+                    .sorted { $0.flowStart > $1.flowStart }
+                self.pskReporterSignals = signals
+                self.pskReporterLastUpdated = Date()
+                self.pskReporterStatus = "Loaded \(signals.count) recent reception report(s) from PSK Reporter."
+                if self.sixMeterAssessment.isOpen {
+                    self.playActivitySound(.notice)
+                }
+            }
+        }.resume()
+    }
+
+    private func parsePSKReporterSignals(_ data: Data) -> [PSKReporterSignal] {
+        let xml = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) ?? ""
+        let pattern = #"<receptionReport\b([^>]*)/?>"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return [] }
+        let range = NSRange(xml.startIndex..<xml.endIndex, in: xml)
+        return regex.matches(in: xml, range: range).compactMap { match in
+            guard let attributeRange = Range(match.range(at: 1), in: xml) else { return nil }
+            let attributes = pskReporterAttributes(String(xml[attributeRange]))
+            let frequency = attributes["frequency"].flatMap(Int.init) ?? 0
+            guard frequency > 0 else { return nil }
+            let startSeconds = attributes["flowStartSeconds"].flatMap(TimeInterval.init) ?? Date().timeIntervalSince1970
+            return PSKReporterSignal(
+                receiverCallsign: attributes["receiverCallsign"] ?? "UNKNOWN",
+                receiverLocator: attributes["receiverLocator"] ?? "",
+                senderCallsign: attributes["senderCallsign"] ?? currentStationCallsign,
+                frequencyHz: frequency,
+                mode: attributes["mode"] ?? "-",
+                snr: attributes["sNR"].flatMap(Int.init) ?? attributes["snr"].flatMap(Int.init),
+                flowStart: Date(timeIntervalSince1970: startSeconds)
+            )
+        }
+    }
+
+    private func pskReporterAttributes(_ raw: String) -> [String: String] {
+        let pattern = #"([A-Za-z0-9_]+)\s*=\s*"([^"]*)""#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [:] }
+        let range = NSRange(raw.startIndex..<raw.endIndex, in: raw)
+        var values: [String: String] = [:]
+        for match in regex.matches(in: raw, range: range) where match.numberOfRanges == 3 {
+            guard let keyRange = Range(match.range(at: 1), in: raw),
+                  let valueRange = Range(match.range(at: 2), in: raw) else { continue }
+            values[String(raw[keyRange])] = String(raw[valueRange])
+        }
+        return values
+    }
+
+    private func isMiddleEastLocator(_ locator: String) -> Bool {
+        let normalized = locator.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard normalized.count >= 2 else { return false }
+        let prefix = String(normalized.prefix(2))
+        return ["LL", "LM", "LK", "KL", "KM"].contains(prefix)
     }
 
     private func xmlValue(_ tag: String, in xml: String) -> String? {

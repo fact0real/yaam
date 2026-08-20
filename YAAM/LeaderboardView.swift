@@ -181,6 +181,9 @@ struct LeaderboardView: View {
                         )
                         .padding(.horizontal, 24)
 
+                        LeaderboardInvestmentPanel(owner: owner, rivals: appState.qrzComparisonRankData)
+                            .padding(.horizontal, 24)
+
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 340), spacing: 14)], spacing: 14) {
                             ForEach(appState.qrzComparisonRankData, id: \.callsign) { rival in
                                 RivalComparisonPanel(owner: owner, rival: rival)
@@ -249,6 +252,9 @@ struct LeaderboardView: View {
                             removeAction: { appState.removeTrackedRankCallsign($0) }
                         )
                         .padding(.horizontal, 24)
+
+                        LeaderboardInvestmentPanel(owner: owner, rivals: [searched])
+                            .padding(.horizontal, 24)
                         
                         // Comparison Categories
                         VStack(spacing: 16) {
@@ -383,6 +389,8 @@ struct RankPerformanceMonitor: View {
                 .disabled(isRefreshing)
             }
 
+            LeaderboardMomentumBanner(series: series)
+
             if trackedCallsigns.isEmpty {
                 VStack(spacing: 8) {
                     Image(systemName: "scope")
@@ -429,6 +437,152 @@ struct RankPerformanceMonitor: View {
         .background(Color(NSColor.controlBackgroundColor).opacity(0.65))
         .cornerRadius(8)
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.blue.opacity(0.22), lineWidth: 1))
+    }
+}
+
+private struct LeaderboardMomentumBanner: View {
+    let series: [RankTrendSeries]
+
+    private var momentum: (title: String, detail: String, icon: String, color: Color) {
+        let deltas = series.compactMap { item -> Int? in
+            guard item.points.count >= 2,
+                  let previous = item.points.dropLast().last?.gap,
+                  let latest = item.points.last?.gap else { return nil }
+            return latest - previous
+        }
+        guard !deltas.isEmpty else {
+            return (
+                "Need one more day of rank snapshots",
+                "Track rivals and refresh daily; tomorrow YAAM can compare today against yesterday.",
+                "calendar.badge.plus",
+                .secondary
+            )
+        }
+
+        let improved = deltas.filter { $0 > 0 }.count
+        let slipped = deltas.filter { $0 < 0 }.count
+        let net = deltas.reduce(0, +)
+        let formatted = NumberFormatter.localizedString(from: NSNumber(value: abs(net)), number: .decimal)
+        if net > 0 {
+            return (
+                "Good day against tracked rivals",
+                "Your relative gap improved by \(formatted) rank point(s) across \(improved) tracked comparison(s). Keep investing in the category selected above.",
+                "hand.thumbsup.fill",
+                .green
+            )
+        }
+        if net < 0 {
+            return (
+                "You lost ground today",
+                "Tracked rivals gained \(formatted) net rank point(s). Prioritize fresh QSOs and bands where your QRZ score trails.",
+                "exclamationmark.triangle.fill",
+                .orange
+            )
+        }
+        return (
+            "Stable versus rivals",
+            "Your relative position is unchanged across \(improved + slipped) tracked comparison(s). A targeted band or DXCC push is the fastest way to move.",
+            "equal.circle.fill",
+            .blue
+        )
+    }
+
+    var body: some View {
+        let item = momentum
+        HStack(spacing: 10) {
+            Image(systemName: item.icon)
+                .foregroundStyle(item.color)
+                .frame(width: 22)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.title)
+                    .font(.subheadline.weight(.semibold))
+                Text(item.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer()
+        }
+        .padding(10)
+        .background(item.color.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(item.color.opacity(0.22)))
+    }
+}
+
+private struct LeaderboardInvestmentPanel: View {
+    let owner: QRZRankResponse?
+    let rivals: [QRZRankResponse]
+
+    private struct Gap {
+        let title: String
+        let icon: String
+        let ownerRank: Int
+        let bestRivalRank: Int
+
+        var deficit: Int { max(0, ownerRank - bestRivalRank) }
+    }
+
+    private var gaps: [Gap] {
+        guard let owner else { return [] }
+        let rankedRivals = rivals.filter(\.hasRankingValue)
+        func gap(_ title: String, _ icon: String, _ ownerValue: String?, _ rivalValue: (QRZRankResponse) -> String?) -> Gap? {
+            guard let ownerRank = parseRankInt(ownerValue) else { return nil }
+            let best = rankedRivals.compactMap { parseRankInt(rivalValue($0)) }.min()
+            guard let best else { return nil }
+            return Gap(title: title, icon: icon, ownerRank: ownerRank, bestRivalRank: best)
+        }
+        return [
+            gap("QSO volume", "antenna.radiowaves.left.and.right", owner.rank_qso, { $0.rank_qso }),
+            gap("Band coverage", "waveform.path.ecg", owner.rank_band, { $0.rank_band }),
+            gap("DXCC reach", "globe.americas.fill", owner.rank_countries, { $0.rank_countries })
+        ].compactMap { $0 }
+    }
+
+    private var recommendation: String {
+        guard let weakest = gaps.max(by: { $0.deficit < $1.deficit }), weakest.deficit > 0 else {
+            return "You are tied with or ahead of the loaded rivals in the available QRZ rank categories. Invest next in 6m monitoring and contest timing to create harder-to-copy gains."
+        }
+        switch weakest.title {
+        case "QSO volume":
+            return "Best investment: increase daily QSO volume during high-activity windows and contests. This is the largest visible gap against loaded rivals."
+        case "Band coverage":
+            return "Best investment: expand band coverage, especially 6m/10m openings and underused bands. Band rank is currently the weakest competitive axis."
+        default:
+            return "Best investment: chase new DXCC entities and confirmations. Your country-rank gap is the biggest opportunity in the loaded comparison."
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Competitive investment", systemImage: "chart.bar.xaxis")
+                .font(.headline)
+
+            Text(recommendation)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if !gaps.isEmpty {
+                HStack(spacing: 10) {
+                    ForEach(gaps, id: \.title) { gap in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Image(systemName: gap.icon)
+                                .foregroundStyle(gap.deficit == 0 ? .green : .orange)
+                            Text(gap.title)
+                                .font(.caption.weight(.semibold))
+                            Text(gap.deficit == 0 ? "Ahead/tied" : "\(gap.deficit.formatted()) ranks behind")
+                                .font(.caption2.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+            }
+        }
+        .padding(14)
+        .background(Color(NSColor.controlBackgroundColor).opacity(0.65))
+        .cornerRadius(8)
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.orange.opacity(0.22), lineWidth: 1))
     }
 }
 
