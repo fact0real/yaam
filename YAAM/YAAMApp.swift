@@ -26,8 +26,8 @@ struct YAAMApp: App {
         .commands {
             // MARK: - File Menu Commands
             CommandGroup(replacing: .newItem) {
-                Button("Import ADIF Log...") {
-                    appState.importADIFDialog()
+                Button("Import Log File...") {
+                    appState.importLogDialog()
                 }
                 .keyboardShortcut("o", modifiers: .command)
                 

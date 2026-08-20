@@ -108,14 +108,14 @@ struct HelpView: View {
             )
             HelpFlow(steps: [
                 HelpFlowStep(icon: "antenna.radiowaves.left.and.right", title: "Choose a station", detail: "Select the callsign profile in the Log Table toolbar."),
-                HelpFlowStep(icon: "square.and.arrow.down", title: "Import or sync", detail: "Open an ADIF log or use a configured live source."),
+                HelpFlowStep(icon: "square.and.arrow.down", title: "Import or sync", detail: "Open ADIF or SmartSDR directly, or use a configured live source."),
                 HelpFlowStep(icon: "doc.badge.magnifyingglass", title: "Review", detail: "Accept new QSOs and confirmation updates; inspect conflicts."),
                 HelpFlowStep(icon: "externaldrive.fill.badge.checkmark", title: "Protected save", detail: "The Master Log is committed to SQLite with a restore point.")
             ])
             helpSection("First Setup") {
                 HelpInstruction(number: 1, title: "Create or verify your station", text: "Open Settings > Stations. Enter the station callsign, Grid Locator, radio, antenna, and any service-specific identity.")
                 HelpInstruction(number: 2, title: "Add online accounts", text: "Use the QRZ.com, LoTW, HAMQTH, and Email tabs, then press the password Save button once. Secret values are stored in macOS Keychain.")
-                HelpInstruction(number: 3, title: "Bring in your log", text: "Choose File > Import ADIF Log. Review the categories and import only the records you intend to keep.")
+                HelpInstruction(number: 3, title: "Bring in your log", text: "Choose File > Import Log File and select .adi, .adif, or SmartSDR.smartsdrlog. Review the categories and import only the records you intend to keep.")
                 HelpInstruction(number: 4, title: "Check protection", text: "Open Settings > Data Safety to verify the database and view automatic restore points.")
                 HelpInstruction(number: 5, title: "Open Operator Desk", text: "Use Quick Log during an operating session, DX Cluster for live spots, and Sync Center to monitor every configured log source.")
             }
@@ -271,9 +271,9 @@ struct HelpView: View {
             ])
             helpSection("Source Cards") {
                 HelpDefinition(icon: "doc.text.fill", title: "External ADIF", text: "Watches the configured logger file and merges only meaningful additions or updates.")
-                HelpDefinition(icon: "radio.fill", title: "SDR-Control", text: "Reads SmartSDR.smartsdrlog after the file has been selected and authorized once.")
-                HelpDefinition(icon: "checkmark.seal.fill", title: "LoTW", text: "Downloads confirmation data for the active callsign and applies it to matching local QSOs.")
-                HelpDefinition(icon: "q.square.fill", title: "QRZ Logbook", text: "Uses the active station's QRZ Logbook API key to apply QRZ confirmations.")
+                HelpDefinition(icon: "radio.fill", title: "SDR-Control", text: "Reads SmartSDR.smartsdrlog directly, ignores entries marked Deleted, normalizes date/time fields, and preserves the SDR Control record ID.")
+                HelpDefinition(icon: "checkmark.seal.fill", title: "LoTW", text: "The first successful run builds a complete confirmation baseline for the active station. Later runs use LoTW's last-QSL cursor to fetch only newer confirmations.")
+                HelpDefinition(icon: "q.square.fill", title: "QRZ Logbook", text: "The first successful run pages through the full confirmed log using the station API key. Later runs request only records modified since the previous success.")
             }
             helpSection("Status & Performance") {
                 HelpDefinition(icon: "circle.dotted", title: "Not configured", text: "The source is skipped until its file or credentials are supplied in Settings.", color: .secondary)
@@ -375,7 +375,7 @@ struct HelpView: View {
 
     private var importReview: some View {
         Group {
-            helpHeader(title: "Import Review", subtitle: "See exactly what an ADIF file will change before it reaches the Master Log.", icon: "doc.badge.magnifyingglass", color: .orange)
+            helpHeader(title: "Import Review", subtitle: "See exactly what an ADIF or SmartSDR file will change before it reaches the Master Log.", icon: "doc.badge.magnifyingglass", color: .orange)
             helpSection("Record Categories") {
                 HelpDefinition(icon: "plus.circle.fill", title: "New", text: "No matching QSO exists. These records are selected by default.", color: .blue)
                 HelpDefinition(icon: "arrow.triangle.2.circlepath.circle.fill", title: "Confirmation update", text: "The contact exists, but the incoming record adds a confirmation or fills a missing field.", color: .green)
@@ -384,7 +384,7 @@ struct HelpView: View {
                 HelpDefinition(icon: "xmark.octagon.fill", title: "Invalid", text: "CALL or the eight-digit QSO_DATE is missing. Correct the source record before importing it.", color: .red)
             }
             HelpFlow(steps: [
-                HelpFlowStep(icon: "folder", title: "Open ADIF", detail: "Choose Merge into Master Log."),
+                HelpFlowStep(icon: "folder", title: "Open log", detail: "Choose an ADIF or SmartSDR file, then Merge into Master Log."),
                 HelpFlowStep(icon: "line.3.horizontal.decrease.circle", title: "Filter", detail: "Select a summary category to inspect it."),
                 HelpFlowStep(icon: "checkmark.circle", title: "Choose", detail: "Include only intentional new records and conflicts."),
                 HelpFlowStep(icon: "square.and.arrow.down", title: "Import", detail: "YAAM backs up, merges, audits, and saves.")
@@ -397,7 +397,7 @@ struct HelpView: View {
             helpHeader(title: "Backup & Restore", subtitle: "The Master Log uses a local SQLite database with stable QSO identities, integrity checks, an audit trail, and versioned restore points.", icon: "externaldrive.fill.badge.checkmark", color: .blue)
             helpSection("Automatic Restore Points") {
                 HelpDefinition(icon: "calendar.badge.clock", title: "Daily", text: "Created when the log has data and the latest restore point is at least 24 hours old.")
-                HelpDefinition(icon: "square.and.arrow.down", title: "Before import", text: "Created before selected ADIF changes are applied.")
+                HelpDefinition(icon: "square.and.arrow.down", title: "Before import", text: "Created before selected ADIF or SmartSDR changes are applied.")
                 HelpDefinition(icon: "arrow.triangle.2.circlepath", title: "Around migration", text: "Created before and after legacy ADIF data moves into SQLite.")
                 HelpDefinition(icon: "arrow.counterclockwise", title: "Before restore", text: "A rollback point is created immediately before an older version replaces the current database.")
             }
@@ -422,7 +422,7 @@ struct HelpView: View {
             ])
             helpSection("Credential Scope") {
                 HelpDefinition(icon: "person.crop.circle", title: "Account-wide", text: "QRZ login password, LoTW password, HAMQTH password, and SMTP app password.")
-                HelpDefinition(icon: "chart.line.uptrend.xyaxis", title: "QRZ Rank Service", text: "Global ranking uses a separate qrz-rank.asis.sh account after the three-query guest allowance. Configure it in Settings > Rank Service; it is not your QRZ.com account.")
+                HelpDefinition(icon: "chart.line.uptrend.xyaxis", title: "QRZ Rank Service", text: "Leaderboard and log enrichment use a separate qrz-rank.asis.sh account after the three-query guest allowance. Configure it in Settings > Rank Service; it is not your QRZ.com account.")
                 HelpDefinition(icon: "antenna.radiowaves.left.and.right", title: "Per station", text: "The QRZ Logbook API key follows the active station profile.")
                 HelpDefinition(icon: "safari.fill", title: "QRZ session", text: "Saved QRZ cookies support Awards and authenticated lookups, and can be refreshed with QRZ Login.")
             }
@@ -438,10 +438,13 @@ struct HelpView: View {
                 HelpInstruction(number: 1, title: "Log while operating", text: "Open Operator Desk > Quick Log or press Command-L. Command-Return saves a validated QSO.")
                 HelpInstruction(number: 2, title: "Work a DX spot", text: "Open Operator Desk > DX Cluster, connect to your node, and double-click a relevant spot to prepare it in Quick Log.")
                 HelpInstruction(number: 3, title: "Sync every source", text: "Open Operator Desk > Sync Center and use Sync All, or run only the source you need.")
-                HelpInstruction(number: 4, title: "Convert or filter", text: "Open Convert, choose input/output files, then select an optional UTC range, band, mode, or any combination of the three before processing.")
-                HelpInstruction(number: 5, title: "Enrich contacts", text: "Select rows in Log Table Viewer or use Enrich Data to add available QRZ/HAMQTH identity data.")
+                HelpInstruction(number: 4, title: "Convert or filter", text: "Open Convert, choose an ADIF or SmartSDR input and an output file, then select an optional UTC range, band, mode, or any combination before processing.")
+                HelpInstruction(number: 5, title: "Enrich contacts", text: "Select rows in Log Table or use Enrich Data to add authenticated QRZ Rank values plus available QRZ/HAMQTH identity data.")
+                HelpInstruction(number: 6, title: "Backfill rankings", text: "Use Daily Rank in the Log Table toolbar to fill missing rankings for unique callsigns. Progress and the requests remaining today stay visible while it runs.")
+                HelpInstruction(number: 7, title: "Review duplicates", text: "Open Database > Review Duplicate QSOs. YAAM groups exact station, callsign, UTC, band, and mode matches, keeps the richest record, merges confirmations, and creates a recovery checkpoint before removal.")
             }
-            helpCallout(icon: "info.circle.fill", title: "Guest logs", text: "Opening an ADIF as a Guest keeps it outside the active station database. Save As exports it without changing the protected Master Log.", color: .blue)
+            helpCallout(icon: "gauge.with.dots.needle.67percent", title: "Daily Rank safety", text: "All leaderboard and enrichment lookups share a durable ceiling of 1,440 attempts per local day. The count survives relaunches and resets at local midnight; stopping a backfill keeps every completed result.", color: .green)
+            helpCallout(icon: "info.circle.fill", title: "Guest logs", text: "Opening ADIF or SmartSDR as a Guest keeps it outside the active station database. A SmartSDR source is read-only; Save exports a separate ADIF and never overwrites the binary source.", color: .blue)
         }
     }
 
@@ -450,13 +453,18 @@ struct HelpView: View {
             helpHeader(title: "Frequently Asked Questions", subtitle: "Short answers for the workflows operators use most often.", icon: "questionmark.circle.fill", color: .blue)
             FAQItem(question: "Where is the WSJT-X ADIF log on macOS?", answer: "In WSJT-X choose File > Open log directory and select wsjtx_log.adi. A common location is ~/.local/share/WSJT-X/wsjtx_log.adi.")
             FAQItem(question: "Can I open a log without merging it?", answer: "Yes. Choose Open as Guest Log in the import prompt. Guest edits are saved or exported separately and do not change the active station Master Log.")
-            FAQItem(question: "How does the UTC contest filter handle midnight?", answer: "The filter compares complete UTC date-and-time values, so a range can begin on one UTC day and end on the next.")
+            FAQItem(question: "How does the UTC contest filter handle time and midnight?", answer: "Both pickers and the displayed range are true UTC values rounded to the minute. The start is included and the end is excluded, so 19:00 to 21:00 includes contacts from 19:00:00 through 20:59:59 and can safely cross UTC midnight.")
             FAQItem(question: "Can Convert filter FT8 records stored as MFSK?", answer: "Yes. Mode filtering checks both ADIF MODE and SUBMODE, so selecting FT8 matches records stored as MODE=MFSK and SUBMODE=FT8. Band filtering can also infer a missing BAND from FREQ.")
+            FAQItem(question: "Can I import SmartSDR.smartsdrlog without exporting ADIF first?", answer: "Yes. Choose File > Import Log File or select it in Convert. YAAM reads SDR Control's binary property list directly, skips Deleted entries, normalizes QSO date/time, and sends Master Log imports through the same duplicate review used for ADIF.")
             FAQItem(question: "Does DX Advisor use the active station?", answer: "Yes. Grid Locator, radio, power, antenna, and height come from the active station profile.")
             FAQItem(question: "What frequency formats does Quick Log accept?", answer: "MHz, kHz, and Hz are accepted. For 20-meter FT8, 14.074, 14074, and 14074000 resolve to the same frequency and band.")
             FAQItem(question: "Why is a DX spot marked as new?", answer: "Status is calculated from the active station's Master Log. New Callsign means no prior QSO; New Band means the callsign exists but not on that band.")
             FAQItem(question: "Why did Sync All skip a source?", answer: "Only configured sources run. Open the source card or its Settings section and supply the required file, password, or station API key.")
+            FAQItem(question: "How do QRZ and LoTW confirmation downloads stay complete?", answer: "Each station gets one full baseline per source, then incremental updates. Use Sync QSLs > Rebuild All Confirmations whenever credentials, station ownership, or older confirmation history changed and you want to rebuild the baseline from the beginning.")
+            FAQItem(question: "What happens when duplicate QSOs are removed?", answer: "YAAM keeps the record with the strongest confirmation evidence and most complete data, fills its missing fields from the duplicates, and removes only the selected extras. A database checkpoint is created first so the operation remains recoverable.")
             FAQItem(question: "Why are tracked rankings unavailable?", answer: "YAAM restores the tracked callsign list and last valid snapshots locally. Live refresh needs a QRZ Rank Service account after its guest allowance expires; configure that separate account in Settings > Rank Service. A service failure never deletes saved rivals.")
+            FAQItem(question: "How does Daily Rank choose callsigns?", answer: "It processes each unique callsign with missing QSO, Band, or DXCC rank once per day, newest QSOs first. Existing rank values are copied to duplicate contacts locally before any online request, so they do not consume the daily allowance.")
+            FAQItem(question: "What counts toward the 1,440 daily rank limit?", answer: "Every attempted QRZ Rank lookup from Leaderboard, Enrich Data, or Daily Rank uses one slot. The counter is stored locally, survives app restarts, and resets at local midnight. Failed attempts count because they still reached the lookup workflow.")
             FAQItem(question: "Why can I not delete a station?", answer: "The active station cannot be deleted, and a profile that owns QSOs is protected. Activate another profile and preserve or relocate its contacts first.")
             FAQItem(question: "What happens if a restore fails?", answer: "YAAM validates the selected SQLite file and creates a rollback version before replacement. If reopening fails, it attempts to restore the database that was active immediately before the operation.")
             FAQItem(question: "How do I refresh QRZ Awards access?", answer: "Use QRZ Login in the Log Table toolbar, complete any QRZ browser challenge, then return to QRZ Awards and press Refresh.")

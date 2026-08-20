@@ -18,7 +18,7 @@ enum YAAMPersistenceError: LocalizedError {
         case .noActiveStation: return "Choose an active station profile first."
         case .workspaceNotLoaded: return "The active logbook has not finished loading, so YAAM refused to overwrite its saved QSOs."
         case .cannotDeleteActiveStation: return "Activate another profile before deleting this station."
-        case .importUnavailable: return "The selected file could not be read as an ADIF log."
+        case .importUnavailable: return "The selected file could not be read as an ADIF or SmartSDR log."
         }
     }
 }
@@ -188,28 +188,49 @@ extension AppState {
         if !isMasterMode {
             loadMasterLogbook()
         }
-        guard let content = (try? String(contentsOf: url, encoding: .utf8))
-            ?? (try? String(contentsOf: url, encoding: .isoLatin1)) else {
-            presentPersistenceError(YAAMPersistenceError.importUnavailable)
-            return
-        }
+        let destinationProfileID = activeStationProfileID
+        let existingRecords = qsoRecords
+        isLoading = true
+        appendLog("Reading \(url.lastPathComponent) for import review...")
 
-        let parsed = parseADIF(content: content)
-        guard !parsed.records.isEmpty else {
-            presentPersistenceError(YAAMPersistenceError.importUnavailable)
-            return
-        }
+        Task { @MainActor in
+            do {
+                let result = try await Task.detached(priority: .userInitiated) {
+                    let parsed = try LogFileReader.loadWithSecurityScopedAccess(from: url)
+                    let review = ImportReviewAnalyzer.analyze(
+                        sourceName: url.lastPathComponent,
+                        sourceURL: url,
+                        sourceFormat: parsed.format,
+                        destinationProfileID: destinationProfileID,
+                        headers: parsed.headers,
+                        incoming: parsed.records,
+                        existing: existingRecords
+                    )
+                    return (parsed, review)
+                }.value
 
-        pendingImportReview = ImportReviewAnalyzer.analyze(
-            sourceName: url.lastPathComponent,
-            sourceURL: url,
-            destinationProfileID: activeStationProfileID,
-            headers: parsed.headers,
-            incoming: parsed.records,
-            existing: qsoRecords
-        )
-        showImportReviewSheet = true
-        appendLog("Import review prepared for \(parsed.records.count) records from \(url.lastPathComponent).")
+                guard activeStationProfileID == destinationProfileID else {
+                    throw LogbookDatabaseError.unavailable(
+                        "The active station changed while the source log was being read. Choose the file again for the current station."
+                    )
+                }
+
+                pendingImportReview = result.1
+                showImportReviewSheet = true
+                isLoading = false
+                var details = "Import review prepared for \(result.0.records.count) \(result.0.format.title) record(s)"
+                if result.0.ignoredDeletedRecordCount > 0 {
+                    details += "; \(result.0.ignoredDeletedRecordCount) deleted record(s) ignored"
+                }
+                if result.0.validationIssueCount > 0 {
+                    details += "; \(result.0.validationIssueCount) record(s) need validation"
+                }
+                appendLog(details + ".")
+            } catch {
+                isLoading = false
+                presentPersistenceError(error)
+            }
+        }
     }
 
     func setImportReviewSelection(itemID: UUID, selected: Bool) {
@@ -237,7 +258,7 @@ extension AppState {
     func commitPendingImport() {
         guard let review = pendingImportReview else { return }
         guard review.destinationProfileID == activeStationProfileID else {
-            presentPersistenceError(LogbookDatabaseError.unavailable("The active station changed after this review was prepared. Reopen the ADIF file for the current station."))
+            presentPersistenceError(LogbookDatabaseError.unavailable("The active station changed after this review was prepared. Reopen the source log for the current station."))
             return
         }
         let selected = review.items.filter(\.isSelected)
@@ -282,7 +303,7 @@ extension AppState {
             refreshAwardProgress()
             updateMobileCompanionSnapshot()
             try logbookDatabase?.recordAudit(
-                action: "adif-imported",
+                action: "log-imported",
                 detail: "\(review.sourceName): \(added) added, \(updated) updated",
                 profileID: activeStationProfileID
             )

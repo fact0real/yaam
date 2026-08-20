@@ -13,16 +13,20 @@ import UniformTypeIdentifiers
 struct ContentView: View {
     @EnvironmentObject var appState: AppState
     
-    @State private var adifPath: String = ""
+    @State private var inputPath: String = ""
     @State private var outputPath: String = ""
+    @State private var conversionInput: ParsedLogFile?
+    @State private var conversionInputError: String?
+    @State private var isReadingConversionInput = false
+    @State private var conversionLoadID: UUID?
     
     // Conversion & Output Options
     @State private var convertToCSV: Bool = true
     
     // Contest / UTC Time Filter Settings
     @State private var enableFilter: Bool = false
-    @State private var startDateTime: Date = Date()
-    @State private var endDateTime: Date = Date().addingTimeInterval(7200)
+    @State private var startDateTime: Date = UTCMinuteKey.normalized(Date())
+    @State private var endDateTime: Date = UTCMinuteKey.normalized(Date().addingTimeInterval(7200))
 
     // Band / Mode Filter Settings
     @State private var selectedBand: String = ADIFConversionFilter.allBands
@@ -30,13 +34,6 @@ struct ContentView: View {
     @State private var conversionBands: [String] = [ADIFConversionFilter.allBands] + ADIFConversionFilter.defaultBands
     @State private var conversionModes: [String] = [ADIFConversionFilter.allModes] + ADIFConversionFilter.defaultModes
     
-    private var utcFormatter: DateFormatter {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyyMMddHHmmss"
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
-        return formatter
-    }
-
     var body: some View {
         VStack(spacing: 0) {
             // MARK: - Top Global Tab Navigation Selector
@@ -66,20 +63,31 @@ struct ContentView: View {
             } else if appState.selectedTab == 1 {
                 // Tab 1: Conversion & Contest Filter Tool
                 VStack(alignment: .leading, spacing: 14) {
-                    // Row 1: ADIF File Picker
-                    HStack(spacing: 10) {
-                        TextField("Input ADIF file path...", text: $adifPath)
-                            .textFieldStyle(.roundedBorder)
-                            .onSubmit {
-                                let url = URL(fileURLWithPath: adifPath)
-                                refreshConversionFilterOptions(from: url)
-                                updateOutputPathForFilters()
+                    // Row 1: Supported Log File Picker
+                    VStack(alignment: .leading, spacing: 7) {
+                        HStack(spacing: 10) {
+                            TextField("Input ADIF or SmartSDR log path...", text: $inputPath)
+                                .textFieldStyle(.roundedBorder)
+                                .onSubmit {
+                                    loadConversionInput(from: URL(fileURLWithPath: inputPath))
+                                }
+                                .onChange(of: inputPath) { _, newPath in
+                                    if conversionInput?.sourceURL.path != newPath {
+                                        conversionInput = nil
+                                        conversionInputError = nil
+                                    }
+                                }
+
+                            Button {
+                                selectLogFile()
+                            } label: {
+                                Label("Log File", systemImage: "doc.badge.plus")
                             }
-                        
-                        Button("ADIF File") {
-                            selectADIFFile()
+                            .frame(width: 115)
+                            .disabled(isReadingConversionInput)
                         }
-                        .frame(width: 100)
+
+                        conversionInputStatus
                     }
                     
                     // Row 2: Output File Picker
@@ -130,6 +138,7 @@ struct ContentView: View {
                                         DatePicker("", selection: $startDateTime, displayedComponents: [.date, .hourAndMinute])
                                             .labelsHidden()
                                             .datePickerStyle(.compact)
+                                            .environment(\.timeZone, UTCMinuteKey.timeZone)
                                     }
                                     .padding(8)
                                     .background(Color(NSColor.controlBackgroundColor))
@@ -148,6 +157,7 @@ struct ContentView: View {
                                         DatePicker("", selection: $endDateTime, displayedComponents: [.date, .hourAndMinute])
                                             .labelsHidden()
                                             .datePickerStyle(.compact)
+                                            .environment(\.timeZone, UTCMinuteKey.timeZone)
                                     }
                                     .padding(8)
                                     .background(Color(NSColor.controlBackgroundColor))
@@ -159,7 +169,7 @@ struct ContentView: View {
                                         .foregroundColor(.accentColor)
                                     Text("UTC Range:")
                                         .fontWeight(.medium)
-                                    Text("\(utcFormatter.string(from: startDateTime)) ➔ \(utcFormatter.string(from: endDateTime))")
+                                    Text("\(UTCMinuteKey.string(from: startDateTime)) ➔ \(UTCMinuteKey.string(from: endDateTime))")
                                         .font(.system(.caption, design: .monospaced))
                                         .fontWeight(.semibold)
                                 }
@@ -228,6 +238,7 @@ struct ContentView: View {
                             }
                         }
                         .keyboardShortcut(.defaultAction)
+                        .disabled(isReadingConversionInput)
                         
                         Button(action: { openOutputFile() }) {
                             HStack {
@@ -250,10 +261,10 @@ struct ContentView: View {
                             Spacer()
                             
                             Circle()
-                                .fill(Color.green)
+                                .fill(conversionStatusColor)
                                 .frame(width: 7, height: 7)
                             
-                            Text("Ready")
+                            Text(conversionStatusTitle)
                                 .font(.caption2)
                                 .foregroundColor(.secondary)
                         }
@@ -304,21 +315,24 @@ struct ContentView: View {
     }
 
     // MARK: - Helper Functions
-    private func selectADIFFile() {
+    private func selectLogFile() {
         let panel = NSOpenPanel()
-        var types: [UTType] = [.plainText]
+        var types: [UTType] = []
         if let adiType = UTType(filenameExtension: "adi") { types.append(adiType) }
         if let adifType = UTType(filenameExtension: "adif") { types.append(adifType) }
-        
+        if let smartSDRType = UTType(filenameExtension: "smartsdrlog") { types.append(smartSDRType) }
+
+        panel.title = "Choose Input Log"
+        panel.message = "ADIF and SDR Control SmartSDR logs are supported."
+        panel.prompt = "Choose Log"
         panel.allowedContentTypes = types
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
-        
+
         if panel.runModal() == .OK, let url = panel.url {
-            adifPath = url.path
-            appState.loadADIFFile(from: url)
-            refreshConversionFilterOptions(from: url)
+            inputPath = url.path
             updateOutputPathForFilters()
+            loadConversionInput(from: url)
         }
     }
 
@@ -348,8 +362,8 @@ struct ContentView: View {
     }
 
     private func updateOutputPathForFilters() {
-        guard !adifPath.isEmpty else { return }
-        let inputUrl = URL(fileURLWithPath: adifPath)
+        guard !inputPath.isEmpty else { return }
+        let inputUrl = URL(fileURLWithPath: inputPath)
         let baseName = inputUrl.deletingPathExtension().lastPathComponent
         let dirUrl = inputUrl.deletingLastPathComponent()
         
@@ -365,8 +379,8 @@ struct ContentView: View {
     }
 
     private func processFile() {
-        guard !adifPath.isEmpty else {
-            appState.appendLog("Error: Please select an input ADIF file first.")
+        guard !inputPath.isEmpty else {
+            appState.appendLog("Error: Please select an input ADIF or SmartSDR log first.")
             return
         }
         guard !outputPath.isEmpty else {
@@ -375,30 +389,42 @@ struct ContentView: View {
         }
 
         do {
-            let adifContent = try readADIFContent(from: URL(fileURLWithPath: adifPath))
-            refreshConversionFilterOptions(content: adifContent)
-            executeProcessing(content: adifContent)
+            let parsed: ParsedLogFile
+            if let cached = conversionInput, cached.sourceURL.path == inputPath {
+                parsed = cached
+            } else {
+                parsed = try LogFileReader.loadWithSecurityScopedAccess(
+                    from: URL(fileURLWithPath: inputPath)
+                )
+                conversionInput = parsed
+            }
+            refreshConversionFilterOptions(records: parsed.records)
+            executeProcessing(parsed: parsed)
         } catch {
+            conversionInputError = error.localizedDescription
             appState.appendLog("Error reading file: \(error.localizedDescription)")
         }
     }
 
-    private func executeProcessing(content: String) {
-        appState.appendLog("Parsing ADIF structure...")
-        var (headers, records) = parseADIF(content: content)
-        
+    private func executeProcessing(parsed: ParsedLogFile) {
+        appState.appendLog("Processing \(parsed.format.title) log structure...")
+        let headers = parsed.headers
+        var records = parsed.records
+
         if records.isEmpty {
-            appState.appendLog("Warning: No records found in the ADIF file.")
+            appState.appendLog("Warning: No active records found in the selected log.")
             return
         }
         
-        if enableFilter, startDateTime >= endDateTime {
+        let normalizedStart = UTCMinuteKey.normalized(startDateTime)
+        let normalizedEnd = UTCMinuteKey.normalized(endDateTime)
+        if enableFilter, normalizedStart >= normalizedEnd {
             appState.appendLog("Error: UTC filter end time must be later than its start time.")
             return
         }
 
-        let startKey = enableFilter ? utcFormatter.string(from: startDateTime) : nil
-        let endKey = enableFilter ? utcFormatter.string(from: endDateTime) : nil
+        let startKey = enableFilter ? UTCMinuteKey.string(from: normalizedStart) : nil
+        let endKey = enableFilter ? UTCMinuteKey.string(from: normalizedEnd) : nil
         let conversionFilter = ADIFConversionFilter(
             startUTCKey: startKey,
             endUTCKey: endKey,
@@ -450,7 +476,10 @@ struct ContentView: View {
                 appState.appendLog("Error saving CSV file: \(error.localizedDescription)")
             }
         } else {
-            let adifOutput = generateADIF(originalContent: content, records: records)
+            let adifOutput = generateADIF(
+                originalContent: parsed.originalADIFContent ?? "",
+                records: records
+            )
             
             do {
                 try adifOutput.write(toFile: outputPath, atomically: true, encoding: .utf8)
@@ -469,6 +498,96 @@ struct ContentView: View {
         }
         NSWorkspace.shared.open(URL(fileURLWithPath: outputPath))
         appState.appendLog("Opened output file in default application.")
+    }
+
+    private func loadConversionInput(from url: URL) {
+        guard !url.path.isEmpty else { return }
+        let loadID = UUID()
+        conversionLoadID = loadID
+        isReadingConversionInput = true
+        conversionInputError = nil
+
+        Task { @MainActor in
+            do {
+                let parsed = try await Task.detached(priority: .userInitiated) {
+                    try LogFileReader.loadWithSecurityScopedAccess(from: url)
+                }.value
+                guard conversionLoadID == loadID else { return }
+
+                conversionLoadID = nil
+                isReadingConversionInput = false
+                conversionInput = parsed
+                refreshConversionFilterOptions(records: parsed.records)
+                updateOutputPathForFilters()
+
+                var details = "Loaded \(parsed.records.count) \(parsed.format.title) QSO(s) for conversion"
+                if parsed.ignoredDeletedRecordCount > 0 {
+                    details += "; \(parsed.ignoredDeletedRecordCount) deleted record(s) ignored"
+                }
+                appState.appendLog(details + ".")
+            } catch {
+                guard conversionLoadID == loadID else { return }
+                conversionLoadID = nil
+                isReadingConversionInput = false
+                conversionInput = nil
+                conversionInputError = error.localizedDescription
+                appState.appendLog("Input log failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var conversionInputStatus: some View {
+        if isReadingConversionInput {
+            HStack(spacing: 7) {
+                ProgressView()
+                    .controlSize(.small)
+                Text("Reading input log...")
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        } else if let parsed = conversionInput {
+            HStack(spacing: 8) {
+                Label(parsed.format.title, systemImage: parsed.format.systemImage)
+                    .foregroundStyle(.blue)
+                Divider().frame(height: 12)
+                Text("\(parsed.records.count.formatted()) QSOs")
+                if parsed.ignoredDeletedRecordCount > 0 {
+                    Divider().frame(height: 12)
+                    Label(
+                        "\(parsed.ignoredDeletedRecordCount.formatted()) deleted skipped",
+                        systemImage: "trash.slash"
+                    )
+                }
+                if parsed.validationIssueCount > 0 {
+                    Divider().frame(height: 12)
+                    Label(
+                        "\(parsed.validationIssueCount.formatted()) need review",
+                        systemImage: "exclamationmark.triangle.fill"
+                    )
+                    .foregroundStyle(.orange)
+                }
+            }
+            .font(.caption.weight(.medium))
+            .foregroundStyle(.secondary)
+        } else if let conversionInputError {
+            Label(conversionInputError, systemImage: "exclamationmark.triangle.fill")
+                .font(.caption)
+                .foregroundStyle(.red)
+                .lineLimit(2)
+        }
+    }
+
+    private var conversionStatusTitle: String {
+        if isReadingConversionInput { return "Reading Input" }
+        if conversionInputError != nil { return "Input Error" }
+        return "Ready"
+    }
+
+    private var conversionStatusColor: Color {
+        if isReadingConversionInput { return .orange }
+        if conversionInputError != nil { return .red }
+        return .green
     }
 
     private var isBandModeFilterActive: Bool {
@@ -511,13 +630,7 @@ struct ContentView: View {
         }
     }
 
-    private func refreshConversionFilterOptions(from url: URL) {
-        guard let content = try? readADIFContent(from: url) else { return }
-        refreshConversionFilterOptions(content: content)
-    }
-
-    private func refreshConversionFilterOptions(content: String) {
-        let records = parseADIF(content: content).records
+    private func refreshConversionFilterOptions(records: [[String: String]]) {
         let detectedBands = ADIFConversionFilter.availableBands(in: records)
         let detectedModes = ADIFConversionFilter.availableModes(in: records)
 
@@ -528,17 +641,6 @@ struct ContentView: View {
         var modes = detectedModes.isEmpty ? ADIFConversionFilter.defaultModes : detectedModes
         if selectedMode != ADIFConversionFilter.allModes, !modes.contains(selectedMode) { modes.append(selectedMode) }
         conversionModes = [ADIFConversionFilter.allModes] + modes
-    }
-
-    private func readADIFContent(from url: URL) throws -> String {
-        let data = try Data(contentsOf: url)
-        if let content = String(data: data, encoding: .utf8) { return content }
-        if let content = String(data: data, encoding: .isoLatin1) { return content }
-        throw NSError(
-            domain: "YAAM.Convert",
-            code: 1,
-            userInfo: [NSLocalizedDescriptionKey: "The selected ADIF file is not UTF-8 or ISO Latin-1 encoded."]
-        )
     }
 
     private func fileSafeFilterName(_ value: String) -> String {

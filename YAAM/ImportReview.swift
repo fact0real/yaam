@@ -52,6 +52,7 @@ nonisolated struct PendingImportReview: Identifiable, Sendable {
     let id: UUID
     let sourceName: String
     let sourceURL: URL
+    let sourceFormat: LogSourceFormat
     let destinationProfileID: UUID?
     let headers: [String]
     var items: [ImportReviewItem]
@@ -71,6 +72,7 @@ nonisolated enum ImportReviewAnalyzer {
     static func analyze(
         sourceName: String,
         sourceURL: URL,
+        sourceFormat: LogSourceFormat,
         destinationProfileID: UUID?,
         headers: [String],
         incoming: [[String: String]],
@@ -146,6 +148,7 @@ nonisolated enum ImportReviewAnalyzer {
             id: UUID(),
             sourceName: sourceName,
             sourceURL: sourceURL,
+            sourceFormat: sourceFormat,
             destinationProfileID: destinationProfileID,
             headers: headers,
             items: items

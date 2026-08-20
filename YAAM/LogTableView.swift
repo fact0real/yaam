@@ -21,6 +21,7 @@ struct LogTableView: View {
 
     private let defaultHiddenColumns: Set<String> = [
         "STATION",
+        "STATION_CALLSIGN",
         "LOTW_QSL_RCVD",
         "QSL_RCVD",
         "QRZLOG_QSL_RCVD",
@@ -67,8 +68,15 @@ struct LogTableView: View {
                     }
                     Divider()
                     Button("Import New Log...") {
-                        appState.importADIFDialog()
+                        appState.importLogDialog()
                     }
+                    Divider()
+                    Button {
+                        appState.prepareDuplicateReview()
+                    } label: {
+                        Label("Review Duplicate QSOs...", systemImage: "doc.on.doc")
+                    }
+                    .disabled(appState.qsoRecords.isEmpty || appState.isAnalyzingDuplicates)
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "folder.badge.gearshape")
@@ -176,6 +184,27 @@ struct LogTableView: View {
                     .help("With no selected rows, Enrich Data processes today's QSOs. Use the menu to manually backfill missing QRZ names and emails.")
                     .buttonStyle(.plain)
                     .disabled(appState.qsoRecords.isEmpty)
+                }
+
+                if !appState.isEnriching {
+                    let rankCandidateCount = appState.dailyRankBackfillCandidateCount
+                    Divider().frame(height: 14)
+
+                    Button(action: { appState.fetchDailyQRZRankBackfill() }) {
+                        HStack(spacing: 5) {
+                            Image(systemName: "chart.line.uptrend.xyaxis")
+                                .foregroundColor(.green)
+                            Text("Daily Rank")
+                                .font(.caption)
+                                .fontWeight(.bold)
+                            Text("\(rankCandidateCount)")
+                                .font(.caption2.monospacedDigit().weight(.semibold))
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(rankCandidateCount == 0 || appState.dailyRankRequestsRemaining == 0)
+                    .help("Fetch missing authenticated QRZ rankings for up to 1,440 unique callsigns per day. \(appState.dailyRankRequestsRemaining) requests remain today.")
                 }
                 
                 Divider().frame(height: 14)
@@ -336,7 +365,21 @@ struct LogTableView: View {
                 
                 Divider().frame(height: 14)
                 
-                Button(action: { appState.syncConfirmations() }) {
+                Menu {
+                    Button {
+                        appState.syncConfirmations()
+                    } label: {
+                        Label("Sync New Confirmations", systemImage: "arrow.clockwise.icloud")
+                    }
+
+                    Divider()
+
+                    Button {
+                        appState.syncConfirmations(forceFullSync: true)
+                    } label: {
+                        Label("Rebuild All Confirmations", systemImage: "arrow.triangle.2.circlepath")
+                    }
+                } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "arrow.clockwise.icloud")
                             .foregroundColor(appState.isSyncingAPI ? .gray : .cyan)
@@ -345,7 +388,9 @@ struct LogTableView: View {
                             .fontWeight(.semibold)
                     }
                 }
+                .menuStyle(.borderlessButton)
                 .disabled(appState.isSyncingAPI || appState.qsoRecords.isEmpty)
+                .help("Sync new LoTW and QRZ confirmations, or rebuild the full confirmation baseline")
                 
                 Button(action: { appState.showStatsSheet = true }) {
                     HStack(spacing: 4) {
@@ -359,37 +404,64 @@ struct LogTableView: View {
                 
                 Divider().frame(height: 14)
                 
-                HStack(spacing: 12) {
+                HStack(spacing: 10) {
                     HStack(spacing: 4) {
-                        Text("📻 QSOs:")
+                        Image(systemName: "archivebox.fill")
+                            .foregroundStyle(.secondary)
+                        Text(appState.qsoRecords.count.formatted())
+                            .font(.caption.monospacedDigit().bold())
+                        Text("QSOs")
                             .font(.caption2)
-                            .foregroundColor(.secondary)
-                        Text("\(appState.qsoRecords.count)")
-                            .font(.caption)
-                            .bold()
+                            .foregroundStyle(.secondary)
                     }
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .help("\(appState.qsoRecords.count.formatted()) QSOs in the active station log")
                     
                     HStack(spacing: 4) {
-                        Text("🌍 DXCC:")
+                        Image(systemName: "globe")
+                            .foregroundStyle(.secondary)
+                        Text(appState.availableCountries.count.formatted())
+                            .font(.caption.monospacedDigit().bold())
+                        Text("DXCC")
                             .font(.caption2)
-                            .foregroundColor(.secondary)
-                        Text("\(appState.availableCountries.count)")
-                            .font(.caption)
-                            .bold()
+                            .foregroundStyle(.secondary)
                     }
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
                 }
                 
                 Spacer()
                 
-                if appState.isLoading || appState.isSyncingAPI || appState.isEnriching {
+                if appState.isLoading || appState.isSyncingAPI || (appState.isEnriching && !appState.isDailyRankBackfillRunning) {
                     ProgressView()
                         .scaleEffect(0.6)
                         .padding(.trailing, 4)
                 }
                 
-                Text("Tip: Select rows to enrich specific QSOs; with no selection, Enrich Data processes today's QSOs.")
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
+                if appState.isDailyRankBackfillRunning {
+                    ProgressView(
+                        value: Double(appState.dailyRankBackfillCompleted),
+                        total: Double(max(1, appState.dailyRankBackfillTotal))
+                    )
+                    .frame(width: 110)
+
+                    Text(appState.dailyRankBackfillStatus)
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                        .help(appState.dailyRankBackfillStatus)
+                } else if !appState.dailyRankBackfillStatus.isEmpty {
+                    Text(appState.dailyRankBackfillStatus)
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                        .help(appState.dailyRankBackfillStatus)
+                } else {
+                    Text("Tip: Select rows to enrich specific QSOs; with no selection, Enrich Data processes today's QSOs.")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
@@ -415,12 +487,14 @@ struct LogTableView: View {
                     Text("No Log Loaded")
                         .font(.title3)
                         .bold()
-                    Text("Use File ➔ Import ADIF Log... (⌘O) or select a recent file from Database.")
+                    Text("Use File > Import Log File or select a recent file from Database.")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                     
-                    Button("Import ADIF File") {
-                        appState.importADIFDialog()
+                    Button {
+                        appState.importLogDialog()
+                    } label: {
+                        Label("Import Log File", systemImage: "square.and.arrow.down")
                     }
                     .padding(.top, 4)
                 }
@@ -485,6 +559,9 @@ struct LogTableView: View {
         }
         .sheet(isPresented: $appState.showQRZLoginSheet) {
             QRZLoginView().environmentObject(appState)
+        }
+        .sheet(isPresented: $appState.showDuplicateReviewSheet) {
+            DuplicateReviewView().environmentObject(appState)
         }
     }
 

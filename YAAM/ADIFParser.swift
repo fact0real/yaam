@@ -9,6 +9,34 @@ import Foundation
 
 // MARK: - ADIF Parsing & Processing Logic
 
+nonisolated enum UTCMinuteKey {
+    static let timeZone = TimeZone(secondsFromGMT: 0)!
+
+    static func normalized(_ date: Date) -> Date {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        return calendar.dateInterval(of: .minute, for: date)?.start
+            ?? Date(timeIntervalSince1970: floor(date.timeIntervalSince1970 / 60) * 60)
+    }
+
+    static func string(from date: Date) -> String {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        let components = calendar.dateComponents(
+            [.year, .month, .day, .hour, .minute],
+            from: normalized(date)
+        )
+        return String(
+            format: "%04d%02d%02d%02d%02d00",
+            components.year ?? 0,
+            components.month ?? 0,
+            components.day ?? 0,
+            components.hour ?? 0,
+            components.minute ?? 0
+        )
+    }
+}
+
 nonisolated struct ADIFConversionFilter: Equatable, Sendable {
     static let allBands = "All Bands"
     static let allModes = "All Modes"

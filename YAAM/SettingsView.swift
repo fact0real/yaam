@@ -131,7 +131,7 @@ struct SettingsView: View {
                         Label("Open QRZ Rank account and subscription", systemImage: "arrow.up.right.square")
                     }
 
-                    Text("Leaderboard queries are served by QRZ Rank Panel. Guest access is limited to three lookups; add a Rank Panel account here for tracked callsigns and daily history. This account is separate from QRZ.com.")
+                    Text("Leaderboard, enrichment, and Daily Rank Backfill use QRZ Rank Panel. Guest access is limited to three lookups; add a Rank Panel account here for authenticated retrieval. YAAM enforces one shared limit of 1,440 rank requests per local day. This account is separate from QRZ.com.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)

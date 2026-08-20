@@ -34,7 +34,7 @@ struct ImportReviewView: View {
                 ContentUnavailableView(
                     "No Import Pending",
                     systemImage: "tray",
-                    description: Text("Choose an ADIF file from the File menu to begin.")
+                    description: Text("Choose an ADIF or SmartSDR log from the File menu to begin.")
                 )
             }
         }
@@ -43,16 +43,16 @@ struct ImportReviewView: View {
 
     private var header: some View {
         HStack(spacing: 14) {
-            Image(systemName: "doc.badge.magnifyingglass")
+            Image(systemName: review?.sourceFormat.systemImage ?? "doc.badge.magnifyingglass")
                 .font(.system(size: 24, weight: .semibold))
                 .foregroundStyle(.blue)
                 .frame(width: 42, height: 42)
                 .background(.blue.opacity(0.12), in: RoundedRectangle(cornerRadius: 7))
 
             VStack(alignment: .leading, spacing: 3) {
-                Text("Review Import")
+                Text(review.map { "Review \($0.sourceFormat.title) Import" } ?? "Review Import")
                     .font(.title2.weight(.semibold))
-                Text(review?.sourceName ?? "ADIF import")
+                Text(review?.sourceName ?? "Log import")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }

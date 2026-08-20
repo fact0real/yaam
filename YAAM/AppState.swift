@@ -1583,7 +1583,7 @@ class AppState: NSObject, ObservableObject {
     }()
 
     var currentVersion: String {
-        return Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.14.1"
+        return Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.14.4"
     }
     
     // UI & Status States
@@ -1631,6 +1631,11 @@ class AppState: NSObject, ObservableObject {
     @Published var isRefreshingRankHistory: Bool = false
     @Published var rankHistoryStatus: String = ""
     @Published var rankServiceStatus: String = ""
+    @Published private(set) var rankDailyQuota = QRZRankDailyQuota()
+    @Published var isDailyRankBackfillRunning: Bool = false
+    @Published var dailyRankBackfillStatus: String = ""
+    @Published var dailyRankBackfillCompleted: Int = 0
+    @Published var dailyRankBackfillTotal: Int = 0
     @Published var qrzAwardSummaries: [QRZAwardSummary] = []
     @Published var isFetchingQRZAwards: Bool = false
     @Published var qrzAwardsStatus: String = ""
@@ -1638,13 +1643,20 @@ class AppState: NSObject, ObservableObject {
 
     private let trackedRankCallsignsKey = "trackedRankCallsigns"
     private let qrzRankHistorySnapshotsKey = "qrzRankHistorySnapshots"
+    private let qrzRankDailyQuotaKey = "qrzRankDailyQuota.v1"
 
     @Published var showQRZLoginSheet: Bool = false
     
     // Search & Smart Sorting States
-    @Published var searchText: String = ""
-    @Published var sortHeader: String? = "QSO_DATE"
-    @Published var sortAscending: Bool = false
+    @Published var searchText: String = "" {
+        didSet { filteredRecordsCache = nil }
+    }
+    @Published var sortHeader: String? = "QSO_DATE" {
+        didSet { filteredRecordsCache = nil }
+    }
+    @Published var sortAscending: Bool = false {
+        didSet { filteredRecordsCache = nil }
+    }
     
     // Workspace File Tracking
     @Published var loadedFileURL: URL? = nil
@@ -1659,6 +1671,9 @@ class AppState: NSObject, ObservableObject {
     @Published var databaseStatus: String = "Preparing protected local logbook..."
     @Published var pendingImportReview: PendingImportReview?
     @Published var showImportReviewSheet: Bool = false
+    @Published var duplicateReview: DuplicateReview?
+    @Published var showDuplicateReviewSheet: Bool = false
+    @Published var isAnalyzingDuplicates: Bool = false
     let workspaceSaveQueue = DispatchQueue(label: "app.yaam.workspace-save", qos: .utility)
     var lastDestructiveCheckpointDate: Date?
     var loadedWorkspaceProfileID: UUID?
@@ -1704,8 +1719,21 @@ class AppState: NSObject, ObservableObject {
     var unifiedSyncTimer: Timer?
     var syncStartedAt: [SyncSource: Date] = [:]
     
+    private var qsoRecordsRevision = 0
+    private var filteredRecordsCache: [QSORecordModel]?
+    private var availableCountriesCache: [String]?
+    private var rankCandidateCacheDay = ""
+    private var rankCandidateCacheRevision = -1
+    private var rankCandidateCacheAvailable = 0
+
     @Published var tableHeaders: [String] = []
-    @Published var qsoRecords: [QSORecordModel] = []
+    @Published var qsoRecords: [QSORecordModel] = [] {
+        didSet {
+            qsoRecordsRevision &+= 1
+            filteredRecordsCache = nil
+            availableCountriesCache = nil
+        }
+    }
     @Published var recentLogFiles: [URL] = []
     @Published var selectedTab: Int = min(5, max(0, UserDefaults.standard.integer(forKey: "selectedTab")))
     
@@ -1713,7 +1741,9 @@ class AppState: NSObject, ObservableObject {
     private var localConfirmedKeys: Set<String> = []
     
     // Filter & Modal Sheet States
-    @Published var filterCriteria = FilterCriteria()
+    @Published var filterCriteria = FilterCriteria() {
+        didSet { filteredRecordsCache = nil }
+    }
     @Published var showFilterSheet: Bool = false
     @Published var showStatsSheet: Bool = false
     
@@ -1729,6 +1759,7 @@ class AppState: NSObject, ObservableObject {
         configurePersistentStorage()
         loadMasterLogbook()
         loadRankHistory()
+        loadDailyRankQuota()
         loadPersistentConfirmationCache()
         loadRecentLogsFromDatabase()
         loadEmailHistory()
@@ -1767,8 +1798,11 @@ class AppState: NSObject, ObservableObject {
     }
 
     var availableCountries: [String] {
+        if let availableCountriesCache { return availableCountriesCache }
         let countries = Set(qsoRecords.compactMap { $0["COUNTRY"].isEmpty ? nil : $0["COUNTRY"] })
-        return Array(countries).sorted()
+        let result = Array(countries).sorted()
+        availableCountriesCache = result
+        return result
     }
 
     var activeModesCount: Int {
@@ -1909,6 +1943,7 @@ class AppState: NSObject, ObservableObject {
     }
 
     var filteredRecords: [QSORecordModel] {
+        if let filteredRecordsCache { return filteredRecordsCache }
         var records = qsoRecords
         
         if filterCriteria.isActive {
@@ -1988,24 +2023,29 @@ class AppState: NSObject, ObservableObject {
             records.sort { r1, r2 in
                 let v1 = r1[sortKey].trimmingCharacters(in: .whitespaces)
                 let v2 = r2[sortKey].trimmingCharacters(in: .whitespaces)
-                
-                let isAscending: Bool
+
                 if sortKey == "QSO_DATE" {
                     let t1 = r1["TIME_ON"].trimmingCharacters(in: .whitespaces)
                     let t2 = r2["TIME_ON"].trimmingCharacters(in: .whitespaces)
-                    isAscending = "\(v1)\(t1)" < "\(v2)\(t2)"
+                    let first = "\(v1)\(t1)"
+                    let second = "\(v2)\(t2)"
+                    guard first != second else { return false }
+                    return sortAscending ? first < second : first > second
                 } else if let d1 = Double(v1), let d2 = Double(v2) {
-                    isAscending = d1 < d2
-                } else if sortKey == "QSO_DATE" || sortKey == "TIME_ON" || sortKey == "TIME_OFF" {
-                    isAscending = v1 < v2
+                    guard d1 != d2 else { return false }
+                    return sortAscending ? d1 < d2 : d1 > d2
+                } else if sortKey == "TIME_ON" || sortKey == "TIME_OFF" {
+                    guard v1 != v2 else { return false }
+                    return sortAscending ? v1 < v2 : v1 > v2
                 } else {
-                    isAscending = v1.localizedCaseInsensitiveCompare(v2) == .orderedAscending
+                    let comparison = v1.localizedCaseInsensitiveCompare(v2)
+                    guard comparison != .orderedSame else { return false }
+                    return sortAscending ? comparison == .orderedAscending : comparison == .orderedDescending
                 }
-                
-                return sortAscending ? isAscending : !isAscending
             }
         }
-        
+
+        filteredRecordsCache = records
         return records
     }
 
@@ -2447,6 +2487,8 @@ class AppState: NSObject, ObservableObject {
         guard response.hasRankingValue else { return }
         let snapshot = QRZRankHistorySnapshot(response: response)
         guard !snapshot.callsign.isEmpty else { return }
+        let retainedCallsigns = Set(trackedRankCallsigns + [currentStationCallsign])
+        guard retainedCallsigns.contains(snapshot.callsign) else { return }
         upsertRankHistorySnapshot(snapshot)
         rankHistorySnapshots.sort { $0.date < $1.date }
         saveRankHistorySnapshots()
@@ -2484,27 +2526,103 @@ class AppState: NSObject, ObservableObject {
         return formatter
     }
 
+    var dailyRankRequestsRemaining: Int {
+        var quota = rankDailyQuota
+        quota.resetIfNeeded()
+        return quota.remainingRequests
+    }
+
+    var dailyRankBackfillCandidateCount: Int {
+        let checkedDay = Self.adifDateFormatter.string(from: Date())
+        if rankCandidateCacheDay != checkedDay || rankCandidateCacheRevision != qsoRecordsRevision {
+            rankCandidateCacheAvailable = QRZRankBackfillPlanner.candidateCallsigns(
+                from: qsoRecords,
+                checkedDay: checkedDay,
+                limit: Int.max,
+                value: { record, field in record[field] }
+            ).count
+            rankCandidateCacheDay = checkedDay
+            rankCandidateCacheRevision = qsoRecordsRevision
+        }
+        return min(rankCandidateCacheAvailable, dailyRankRequestsRemaining)
+    }
+
+    private func loadDailyRankQuota() {
+        if let data = UserDefaults.standard.data(forKey: qrzRankDailyQuotaKey),
+           var savedQuota = try? JSONDecoder().decode(QRZRankDailyQuota.self, from: data) {
+            savedQuota.resetIfNeeded()
+            rankDailyQuota = savedQuota
+        } else {
+            rankDailyQuota = QRZRankDailyQuota()
+        }
+        saveDailyRankQuota()
+    }
+
+    private func saveDailyRankQuota() {
+        guard let data = try? JSONEncoder().encode(rankDailyQuota) else { return }
+        UserDefaults.standard.set(data, forKey: qrzRankDailyQuotaKey)
+    }
+
+    private func refreshDailyRankQuotaIfNeeded() {
+        var quota = rankDailyQuota
+        quota.resetIfNeeded()
+        guard quota != rankDailyQuota else { return }
+        rankDailyQuota = quota
+        saveDailyRankQuota()
+    }
+
+    private func reserveDailyRankRequest() -> Bool {
+        var quota = rankDailyQuota
+        guard quota.reserveRequest() else {
+            if quota != rankDailyQuota {
+                rankDailyQuota = quota
+                saveDailyRankQuota()
+            }
+            return false
+        }
+        rankDailyQuota = quota
+        saveDailyRankQuota()
+        return true
+    }
+
+    private func recordDailyRankSuccess() {
+        var quota = rankDailyQuota
+        quota.recordSuccess()
+        rankDailyQuota = quota
+        saveDailyRankQuota()
+    }
+
+    private func fetchRankWithDailyQuota(
+        callsign: String,
+        credentials: QRZRankServiceCredentials
+    ) async -> Result<QRZRankResponse, QRZRankFetchFailure> {
+        guard reserveDailyRankRequest() else {
+            return .failure(.dailyLimitReached(QRZRankDailyQuota.maximumRequests))
+        }
+
+        do {
+            let response = try await QRZRankService.shared.fetchRank(
+                callsign: callsign,
+                username: credentials.username,
+                password: credentials.password,
+                userAgent: "YAAM-macOS/\(currentVersion)"
+            )
+            recordDailyRankSuccess()
+            return .success(response)
+        } catch let failure as QRZRankFetchFailure {
+            return .failure(failure)
+        } catch {
+            return .failure(.transport(error.localizedDescription))
+        }
+    }
+
     private func fetchSingleRank(
         callsign: String,
         credentials: QRZRankServiceCredentials,
         completion: @escaping (Result<QRZRankResponse, QRZRankFetchFailure>) -> Void
     ) {
-        let userAgent = "YAAM-macOS/\(currentVersion)"
-
-        Task {
-            do {
-                let response = try await QRZRankService.shared.fetchRank(
-                    callsign: callsign,
-                    username: credentials.username,
-                    password: credentials.password,
-                    userAgent: userAgent
-                )
-                completion(.success(response))
-            } catch let failure as QRZRankFetchFailure {
-                completion(.failure(failure))
-            } catch {
-                completion(.failure(.transport(error.localizedDescription)))
-            }
+        Task { @MainActor in
+            completion(await fetchRankWithDailyQuota(callsign: callsign, credentials: credentials))
         }
     }
 
@@ -2671,19 +2789,24 @@ class AppState: NSObject, ObservableObject {
         }
     }
 
-    func importADIFDialog() {
+    func importLogDialog() {
         let panel = NSOpenPanel()
-        var types: [UTType] = [.plainText]
+        var types: [UTType] = []
         if let adiType = UTType(filenameExtension: "adi") { types.append(adiType) }
         if let adifType = UTType(filenameExtension: "adif") { types.append(adifType) }
-        
+        if let smartSDRType = UTType(filenameExtension: "smartsdrlog") { types.append(smartSDRType) }
+
+        panel.title = "Import Log File"
+        panel.message = "Choose an ADIF log or an SDR Control SmartSDR log."
+        panel.prompt = "Choose Log"
         panel.allowedContentTypes = types
         panel.allowsMultipleSelection = false
-        
+
         if panel.runModal() == .OK, let url = panel.url {
+            let isSmartSDR = url.pathExtension.caseInsensitiveCompare("smartsdrlog") == .orderedSame
             let alert = NSAlert()
-            alert.messageText = "How would you like to handle this log?"
-            alert.informativeText = "You can merge these new QSOs into your Master Logbook (\(currentStationCallsign)), or simply open the file as a Guest Logbook to view and enrich it separately."
+            alert.messageText = isSmartSDR ? "Import SDR Control Log" : "Import ADIF Log"
+            alert.informativeText = "Review and merge contacts into the \(currentStationCallsign) Master Log, or open them separately as a Guest Log.\(isSmartSDR ? " Deleted SDR Control entries are ignored and the source file remains unchanged." : "")"
             alert.alertStyle = .informational
             alert.addButton(withTitle: "Merge into Master Log")
             alert.addButton(withTitle: "Open as Guest Log")
@@ -2697,6 +2820,10 @@ class AppState: NSObject, ObservableObject {
                 loadGuestLog(from: url)
             }
         }
+    }
+
+    func importADIFDialog() {
+        importLogDialog()
     }
 
     func syncSDRControlLogbook() {
@@ -2917,15 +3044,20 @@ class AppState: NSObject, ObservableObject {
             }
 
             do {
-                let records = try self.parseSDRControlLogbook(url: url)
+                let parsed = try LogFileReader.load(from: url)
+                guard parsed.format == .smartSDR else {
+                    throw LogFileReaderError.unsupportedFormat(url.lastPathComponent)
+                }
+                let records = parsed.records.filter { record in
+                    !(record["CALL"] ?? "").isEmpty && (record["QSO_DATE"] ?? "").filter(\.isNumber).count == 8
+                }
 
                 DispatchQueue.main.async {
                     if !self.isMasterMode {
                         self.loadMasterLogbook()
                     }
 
-                    let headers = self.sdrControlHeaders(from: records)
-                    for header in headers where !self.tableHeaders.contains(header) {
+                    for header in parsed.headers where !self.tableHeaders.contains(header) {
                         self.tableHeaders.append(header)
                     }
 
@@ -2951,7 +3083,15 @@ class AppState: NSObject, ObservableObject {
 
                     self.autoSaveActiveWorkspace()
                     self.isLoading = false
-                    self.appendLog("SDR-Control sync complete: \(addedCount) new QSOs added, \(skippedCount) duplicates skipped.")
+                    let invalidCount = parsed.validationIssueCount
+                    var details = "SDR-Control sync complete: \(addedCount) new QSOs added, \(skippedCount) duplicates skipped"
+                    if parsed.ignoredDeletedRecordCount > 0 {
+                        details += ", \(parsed.ignoredDeletedRecordCount) deleted entries ignored"
+                    }
+                    if invalidCount > 0 {
+                        details += ", \(invalidCount) invalid entries ignored"
+                    }
+                    self.appendLog(details + ".")
                     self.playActivitySound(.success)
                     completion?(.success(MergeSummary(added: addedCount, updated: 0, skipped: skippedCount)))
                 }
@@ -2983,108 +3123,45 @@ class AppState: NSObject, ObservableObject {
             (nsError.code == NSFileReadNoPermissionError || nsError.code == NSFileReadNoSuchFileError)
     }
 
-    private func parseSDRControlLogbook(url: URL) throws -> [[String: String]] {
-        let data = try Data(contentsOf: url)
-        let plist = try PropertyListSerialization.propertyList(from: data, options: [], format: nil)
-        guard let entries = plist as? [[String: Any]] else {
-            throw NSError(
-                domain: "YAAM.SDRControl",
-                code: 1,
-                userInfo: [NSLocalizedDescriptionKey: "SmartSDR.smartsdrlog does not contain the expected array of QSO records."]
-            )
-        }
-
-        return entries.compactMap { entry in
-            let deleted = stringValue(entry["Deleted"]).trimmingCharacters(in: .whitespacesAndNewlines)
-            guard deleted != "1" else { return nil }
-
-            var record: [String: String] = [:]
-            for (key, value) in entry {
-                guard key != "Deleted" else { continue }
-                let normalizedKey = normalizedSDRControlKey(key)
-                let normalizedValue = normalizedSDRControlValue(value, key: normalizedKey)
-                if !normalizedValue.isEmpty {
-                    record[normalizedKey] = normalizedValue
-                }
-            }
-
-            record["APP_SDR_CONTROL_ID"] = stringValue(entry["UniqueId"])
-            record["APP_SDR_CONTROL_IMPORTED"] = "Y"
-            return record["CALL", default: ""].isEmpty ? nil : record
-        }
-    }
-
-    private func normalizedSDRControlKey(_ key: String) -> String {
-        switch key {
-        case "Name": return "NAME"
-        case "UniqueId": return "APP_SDR_CONTROL_ID"
-        default: return key.uppercased()
-        }
-    }
-
-    private func normalizedSDRControlValue(_ value: Any, key: String) -> String {
-        let rawValue = stringValue(value)
-        switch key {
-        case "QSO_DATE":
-            return rawValue.replacingOccurrences(of: "-", with: "")
-        case "TIME_ON", "TIME_OFF":
-            return rawValue.replacingOccurrences(of: ":", with: "")
-        default:
-            return rawValue
-        }
-    }
-
-    private func sdrControlHeaders(from records: [[String: String]]) -> [String] {
-        let preferred = [
-            "QSO_DATE", "TIME_ON", "TIME_OFF", "CALL", "FREQ", "FREQ_RX", "BAND", "BAND_RX",
-            "MODE", "SUBMODE", "RST_SENT", "RST_RCVD", "NAME", "QTH", "COUNTRY", "CONT",
-            "DXCC", "CQZ", "ITUZ", "GRIDSQUARE", "LAT", "LON", "COMMENT", "OPERATOR",
-            "STATION_CALLSIGN", "APP_SDR_CONTROL_ID", "APP_SDR_CONTROL_IMPORTED"
-        ]
-        let allHeaders = Set(records.flatMap { $0.keys })
-        return preferred.filter { allHeaders.contains($0) } +
-            allHeaders.subtracting(preferred).sorted()
-    }
-
-    private func stringValue(_ value: Any?) -> String {
-        switch value {
-        case let string as String:
-            return string.trimmingCharacters(in: .whitespacesAndNewlines)
-        case let number as NSNumber:
-            return number.stringValue
-        default:
-            return ""
-        }
-    }
-    
     func loadGuestLog(from url: URL) {
         isLoading = true
-        isMasterMode = false
-        loadedFileURL = url
-        loadedFileName = "Guest: " + url.lastPathComponent
-        selectedRecordIDs.removeAll()
-        archiveLogToDatabase(originalURL: url)
         appendLog("Opening Guest Log: \(url.lastPathComponent)...")
-        
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            guard let self = self else { return }
-            guard let content = (try? String(contentsOfFile: url.path, encoding: .utf8)) ?? (try? String(contentsOfFile: url.path, encoding: .isoLatin1)) else {
-                DispatchQueue.main.async { self.isLoading = false; self.appendLog("Error: Unable to read guest file.") }
-                return
-            }
-            let (headers, records) = parseADIF(content: content)
-            var qsoModels = records.enumerated().map { QSORecordModel(index: $0 + 1, fields: $1) }
-            let offlineMatched = self.applyPersistentConfirmationCache(to: &qsoModels)
-            
-            DispatchQueue.main.async {
-                self.tableHeaders = headers
-                self.qsoRecords = qsoModels
-                self.refreshEmailHistoryColumns()
-                self.isLoading = false
-                self.appendLog("Successfully loaded \(records.count) QSOs in Guest Mode.")
-                if offlineMatched > 0 {
-                    self.appendLog("Offline Database Engine: Matched \(offlineMatched) confirmations instantly from local storage.")
+
+        if ["adi", "adif"].contains(url.pathExtension.lowercased()) {
+            archiveLogToDatabase(originalURL: url)
+        }
+
+        Task { @MainActor in
+            do {
+                let parsed = try await Task.detached(priority: .userInitiated) {
+                    try LogFileReader.loadWithSecurityScopedAccess(from: url)
+                }.value
+                var qsoModels = parsed.records.enumerated().map { QSORecordModel(index: $0 + 1, fields: $1) }
+                let offlineMatched = applyPersistentConfirmationCache(to: &qsoModels)
+
+                isMasterMode = false
+                loadedFileURL = parsed.format == .adif ? url : nil
+                loadedFileName = parsed.format == .adif
+                    ? "Guest: \(url.lastPathComponent)"
+                    : "Guest: \(url.deletingPathExtension().lastPathComponent) (SDR Control)"
+                selectedRecordIDs.removeAll()
+                tableHeaders = parsed.headers
+                qsoRecords = qsoModels
+                refreshEmailHistoryColumns()
+                isLoading = false
+                var details = "Loaded \(parsed.records.count) \(parsed.format.title) QSO(s) in Guest Mode"
+                if parsed.ignoredDeletedRecordCount > 0 {
+                    details += "; \(parsed.ignoredDeletedRecordCount) deleted record(s) ignored"
                 }
+                appendLog(details + ".")
+                if offlineMatched > 0 {
+                    appendLog("Offline Database Engine: Matched \(offlineMatched) confirmations instantly from local storage.")
+                }
+            } catch {
+                isLoading = false
+                showNativeAlert(title: "Unable to Open Log", message: error.localizedDescription)
+                appendLog("Guest log failed: \(error.localizedDescription)")
+                playActivitySound(.failure)
             }
         }
     }
@@ -3612,16 +3689,26 @@ class AppState: NSObject, ObservableObject {
     }
 
     func stopEnrichment() {
+        let wasDailyRankBackfill = isDailyRankBackfillRunning
         enrichmentTask?.cancel()
         enrichmentTask = nil
         isEnriching = false
-        appendLog("🛑 Enrichment process stopped by user.")
+        isDailyRankBackfillRunning = false
+        if wasDailyRankBackfill {
+            dailyRankBackfillStatus = "Stopped after \(dailyRankBackfillCompleted) of \(dailyRankBackfillTotal) callsigns."
+        }
+        autoSaveActiveWorkspace()
+        appendLog("🛑 Enrichment process stopped by user. Saved completed results.")
     }
 
     func enrichLogData(targetCallsigns: Set<String>? = nil) {
-        guard !qsoRecords.isEmpty else { return }
+        guard !qsoRecords.isEmpty, !isEnriching else { return }
 
-        let newHeaders = ["RANK_QSO", "RANK_BAND", "RANK_DXCC", "NAME", "EMAIL", "QRZ_URL", "APP_YAAM_ENRICHED", "APP_YAAM_EMAIL_CHECKED"]
+        let newHeaders = [
+            "RANK_QSO", "RANK_BAND", "RANK_DXCC", "NAME", "EMAIL", "QRZ_URL",
+            "APP_YAAM_ENRICHED", "APP_YAAM_EMAIL_CHECKED", "APP_YAAM_RANK_CHECKED",
+            "APP_YAAM_RANK_STATUS"
+        ]
         for header in newHeaders {
             if !tableHeaders.contains(header) {
                 tableHeaders.append(header)
@@ -3641,7 +3728,7 @@ class AppState: NSObject, ObservableObject {
             }
         }
         
-        let uniqueCallsigns = Array(callsignsToEnrich)
+        let uniqueCallsigns = callsignsToEnrich.sorted()
         guard !uniqueCallsigns.isEmpty else {
             if targetCallsigns == nil {
                 appendLog("ℹ️ No QSOs found for today to enrich.")
@@ -3652,26 +3739,62 @@ class AppState: NSObject, ObservableObject {
             return
         }
         
+        let rankCredentials = rankServiceCredentials()
+        var recordIndicesByCallsign: [String: [Int]] = [:]
+        for index in qsoRecords.indices {
+            let callsign = qsoRecords[index]["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            if !callsign.isEmpty { recordIndicesByCallsign[callsign, default: []].append(index) }
+        }
         isEnriching = true
         appendLog("🚀 Enrichment: Processing \(uniqueCallsigns.count) callsign(s)...")
         
         enrichmentTask = Task { @MainActor in
+            var rankBatchBlocker: QRZRankFetchFailure?
+            var workingRecords = self.qsoRecords
+            var hasUnsavedChanges = false
             for (idx, callsign) in uniqueCallsigns.enumerated() {
                 if Task.isCancelled { break }
-                
-                self.appendLog("[\(idx + 1)/\(uniqueCallsigns.count)] Step 1/2: Fetching ranks for \(callsign)...")
-                let (rankQSO, rankBand, rankDXCC) = await self.asyncFetchRank(for: callsign)
-                if rankQSO.isEmpty && rankBand.isEmpty && rankDXCC.isEmpty {
-                    self.appendLog("⚠️ No rank data returned for \(callsign).")
+
+                var rankQSO = ""
+                var rankBand = ""
+                var rankDXCC = ""
+                var shouldMarkRankLookup = false
+                var rankStatus = ""
+
+                if rankBatchBlocker == nil {
+                    let rankResult = await self.fetchRankWithDailyQuota(
+                        callsign: callsign,
+                        credentials: rankCredentials
+                    )
+                    switch rankResult {
+                    case .success(let response):
+                        rankQSO = response.rank_qso ?? ""
+                        rankBand = response.rank_band ?? ""
+                        rankDXCC = response.rank_countries ?? ""
+                        shouldMarkRankLookup = true
+                        rankStatus = "FOUND"
+                        self.saveRankResponseSnapshot(response)
+                    case .failure(let failure):
+                        shouldMarkRankLookup = failure.shouldRecordLookupOutcome
+                        switch failure {
+                        case .callsignNotFound:
+                            rankStatus = "NOT_FOUND"
+                        case .invalidCallsign:
+                            rankStatus = "INVALID"
+                        default:
+                            rankStatus = "ERROR"
+                        }
+                        self.rankServiceStatus = failure.localizedDescription
+                        if failure.shouldStopBatch {
+                            rankBatchBlocker = failure
+                            self.appendLog("QRZ Rank requests paused for the rest of this enrichment run: \(failure.localizedDescription)")
+                        }
+                    }
                 }
                 
                 if Task.isCancelled { break }
 
-                self.appendLog("[\(idx + 1)/\(uniqueCallsigns.count)] Step 2/2: Fetching QRZ/HAMQTH name/email for \(callsign)...")
                 let fetchedContact = await self.fetchContactInfo(for: callsign, allowQRZWebKitFallback: false)
-                if fetchedContact.name == nil && fetchedContact.email == nil {
-                    self.appendLog("⚠️ No QRZ/HAMQTH name/email found for \(callsign).")
-                }
 
                 if idx < uniqueCallsigns.count - 1 {
                     try? await Task.sleep(nanoseconds: 450_000_000)
@@ -3679,46 +3802,292 @@ class AppState: NSObject, ObservableObject {
 
                 if Task.isCancelled { break }
 
-                for i in 0..<self.qsoRecords.count {
-                    if self.qsoRecords[i]["CALL"].uppercased() == callsign {
-                        if !rankQSO.isEmpty { self.qsoRecords[i].fields["RANK_QSO"] = rankQSO }
-                        if !rankBand.isEmpty { self.qsoRecords[i].fields["RANK_BAND"] = rankBand }
-                        if !rankDXCC.isEmpty { self.qsoRecords[i].fields["RANK_DXCC"] = rankDXCC }
+                for i in recordIndicesByCallsign[callsign] ?? [] where workingRecords.indices.contains(i) {
+                        if !rankQSO.isEmpty { workingRecords[i].fields["RANK_QSO"] = rankQSO }
+                        if !rankBand.isEmpty { workingRecords[i].fields["RANK_BAND"] = rankBand }
+                        if !rankDXCC.isEmpty { workingRecords[i].fields["RANK_DXCC"] = rankDXCC }
+                        if shouldMarkRankLookup {
+                            workingRecords[i].fields["APP_YAAM_RANK_CHECKED"] = Self.adifDateFormatter.string(from: Date())
+                            workingRecords[i].fields["APP_YAAM_RANK_STATUS"] = rankStatus
+                        }
                         if let name = fetchedContact.name, !name.isEmpty {
-                            let currentName = self.qsoRecords[i]["NAME"].trimmingCharacters(in: .whitespacesAndNewlines)
+                            let currentName = workingRecords[i]["NAME"].trimmingCharacters(in: .whitespacesAndNewlines)
                             if currentName.isEmpty || self.isGenericQRZName(currentName) {
-                                self.qsoRecords[i].fields["NAME"] = name
+                                workingRecords[i].fields["NAME"] = name
                             } else {
-                                self.qsoRecords[i].fields["NAME"] = self.appendedDistinctValue(currentName, newValue: name)
+                                workingRecords[i].fields["NAME"] = self.appendedDistinctValue(currentName, newValue: name)
                             }
-                        } else if self.isGenericQRZName(self.qsoRecords[i]["NAME"]) {
-                            self.qsoRecords[i].fields["NAME"] = ""
+                        } else if self.isGenericQRZName(workingRecords[i]["NAME"]) {
+                            workingRecords[i].fields["NAME"] = ""
                         }
-                        if let email = fetchedContact.email, !email.isEmpty { self.qsoRecords[i].fields["EMAIL"] = email }
+                        if let email = fetchedContact.email, !email.isEmpty { workingRecords[i].fields["EMAIL"] = email }
 
-                        self.qsoRecords[i].fields["QRZ_URL"] = "https://www.qrz.com/db/\(callsign)"
+                        workingRecords[i].fields["QRZ_URL"] = "https://www.qrz.com/db/\(callsign)"
                         if fetchedContact.name != nil || fetchedContact.email != nil || !rankQSO.isEmpty || !rankBand.isEmpty || !rankDXCC.isEmpty {
-                            self.qsoRecords[i].fields["APP_YAAM_ENRICHED"] = "Y"
+                            workingRecords[i].fields["APP_YAAM_ENRICHED"] = "Y"
                         }
-                        self.qsoRecords[i].fields["APP_YAAM_EMAIL_CHECKED"] = Self.adifDateFormatter.string(from: Date())
-                    }
+                        workingRecords[i].fields["APP_YAAM_EMAIL_CHECKED"] = Self.adifDateFormatter.string(from: Date())
+                        hasUnsavedChanges = true
                 }
-                self.objectWillChange.send()
-                self.autoSaveActiveWorkspace()
+
+                let completed = idx + 1
+                if completed.isMultiple(of: 10) || completed == uniqueCallsigns.count {
+                    self.rankServiceStatus = "Enriched \(completed) of \(uniqueCallsigns.count) callsigns."
+                }
+                if completed.isMultiple(of: 25) || completed == uniqueCallsigns.count {
+                    self.qsoRecords = workingRecords
+                    self.autoSaveActiveWorkspace()
+                    hasUnsavedChanges = false
+                }
             }
             
             let wasCancelled = Task.isCancelled
+            if hasUnsavedChanges {
+                self.qsoRecords = workingRecords
+                self.autoSaveActiveWorkspace()
+            }
             self.isEnriching = false
+            self.isDailyRankBackfillRunning = false
             self.enrichmentTask = nil
             
             self.selectedRecordIDs.removeAll()
-            self.objectWillChange.send()
-            
             if wasCancelled {
                 self.appendLog("🛑 Enrichment stopped.")
             } else {
                 self.appendLog("✅ Enrichment complete & Workspace Auto-Saved!")
             }
+        }
+    }
+
+    func fetchDailyQRZRankBackfill() {
+        guard !qsoRecords.isEmpty, !isEnriching else { return }
+        refreshDailyRankQuotaIfNeeded()
+
+        let credentials = rankServiceCredentials()
+        guard !credentials.username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !credentials.password.isEmpty else {
+            dailyRankBackfillStatus = "Configure the QRZ Rank Service account in Settings first."
+            alertTitle = "QRZ Rank Account Required"
+            alertMessage = "Daily Rank Backfill uses the separate QRZ Rank Service account. Add its username and password in Settings > Rank Service, then try again."
+            showAlert = true
+            return
+        }
+
+        let propagatedRows = propagateExistingRankValues()
+        let remaining = rankDailyQuota.remainingRequests
+        guard remaining > 0 else {
+            dailyRankBackfillStatus = "Today's 1,440 QRZ Rank requests have been used. The counter resets at local midnight."
+            rankServiceStatus = dailyRankBackfillStatus
+            return
+        }
+
+        let checkedDay = Self.adifDateFormatter.string(from: Date())
+        let callsigns = QRZRankBackfillPlanner.candidateCallsigns(
+            from: qsoRecords,
+            checkedDay: checkedDay,
+            limit: remaining,
+            value: { record, field in record[field] }
+        )
+        guard !callsigns.isEmpty else {
+            dailyRankBackfillStatus = "No unchecked callsigns with missing QRZ rankings remain for today."
+            rankServiceStatus = dailyRankBackfillStatus
+            if propagatedRows > 0 {
+                objectWillChange.send()
+                autoSaveActiveWorkspace()
+            }
+            return
+        }
+
+        for header in [
+            "RANK_QSO", "RANK_BAND", "RANK_DXCC", "APP_YAAM_ENRICHED",
+            "APP_YAAM_RANK_CHECKED", "APP_YAAM_RANK_STATUS"
+        ] where !tableHeaders.contains(header) {
+            tableHeaders.append(header)
+        }
+
+        var recordIndicesByCallsign: [String: [Int]] = [:]
+        for index in qsoRecords.indices {
+            let callsign = qsoRecords[index]["CALL"]
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .uppercased()
+            guard !callsign.isEmpty else { continue }
+            recordIndicesByCallsign[callsign, default: []].append(index)
+        }
+
+        isEnriching = true
+        isDailyRankBackfillRunning = true
+        dailyRankBackfillCompleted = 0
+        dailyRankBackfillTotal = callsigns.count
+        dailyRankBackfillStatus = "Preparing \(callsigns.count) missing QRZ rankings..."
+        rankServiceStatus = dailyRankBackfillStatus
+        appendLog("QRZ Rank daily backfill started: \(callsigns.count) unique callsign(s), \(remaining) request(s) available today.")
+
+        enrichmentTask = Task { @MainActor in
+            var successfulCallsigns = 0
+            var unavailableCallsigns = 0
+            var consecutiveTransientFailures = 0
+            var stoppingFailure: QRZRankFetchFailure?
+            var workingRecords = self.qsoRecords
+            var hasUnsavedChanges = false
+
+            for (offset, callsign) in callsigns.enumerated() {
+                if Task.isCancelled { break }
+
+                let result = await self.fetchRankWithDailyQuota(callsign: callsign, credentials: credentials)
+                if Task.isCancelled { break }
+
+                switch result {
+                case .success(let response):
+                    consecutiveTransientFailures = 0
+                    successfulCallsigns += 1
+                    self.applyRankResponse(
+                        response,
+                        callsign: callsign,
+                        checkedDay: checkedDay,
+                        recordIndices: recordIndicesByCallsign[callsign] ?? [],
+                        records: &workingRecords
+                    )
+                    hasUnsavedChanges = true
+                    self.saveRankResponseSnapshot(response)
+
+                case .failure(let failure):
+                    unavailableCallsigns += 1
+
+                    switch failure {
+                    case .callsignNotFound:
+                        consecutiveTransientFailures = 0
+                        self.markRankLookup(
+                            callsign: callsign,
+                            checkedDay: checkedDay,
+                            status: "NOT_FOUND",
+                            recordIndices: recordIndicesByCallsign[callsign] ?? [],
+                            records: &workingRecords
+                        )
+                        hasUnsavedChanges = true
+                    case .invalidCallsign:
+                        consecutiveTransientFailures = 0
+                        self.markRankLookup(
+                            callsign: callsign,
+                            checkedDay: checkedDay,
+                            status: "INVALID",
+                            recordIndices: recordIndicesByCallsign[callsign] ?? [],
+                            records: &workingRecords
+                        )
+                        hasUnsavedChanges = true
+                    default:
+                        consecutiveTransientFailures += 1
+                    }
+
+                    if failure.shouldStopBatch || consecutiveTransientFailures >= 3 {
+                        stoppingFailure = failure
+                    }
+                }
+
+                let completed = offset + 1
+                if completed.isMultiple(of: 5) || completed == callsigns.count || stoppingFailure != nil {
+                    self.dailyRankBackfillCompleted = completed
+                    self.dailyRankBackfillStatus = "\(completed) of \(callsigns.count) checked, \(successfulCallsigns) saved, \(self.rankDailyQuota.remainingRequests) requests left today."
+                    self.rankServiceStatus = self.dailyRankBackfillStatus
+                }
+
+                if completed.isMultiple(of: 25) || completed == callsigns.count || stoppingFailure != nil {
+                    self.qsoRecords = workingRecords
+                    self.autoSaveActiveWorkspace()
+                    hasUnsavedChanges = false
+                }
+                if stoppingFailure != nil { break }
+
+                try? await Task.sleep(nanoseconds: 150_000_000)
+            }
+
+            let wasCancelled = Task.isCancelled
+            if hasUnsavedChanges {
+                self.qsoRecords = workingRecords
+                self.autoSaveActiveWorkspace()
+            }
+            self.isEnriching = false
+            self.isDailyRankBackfillRunning = false
+            self.enrichmentTask = nil
+
+            if wasCancelled {
+                self.dailyRankBackfillStatus = "Stopped after \(self.dailyRankBackfillCompleted) of \(callsigns.count) callsigns. Completed results were saved."
+            } else if let stoppingFailure {
+                self.dailyRankBackfillStatus = "Paused after \(self.dailyRankBackfillCompleted) callsigns: \(stoppingFailure.localizedDescription)"
+            } else {
+                self.dailyRankBackfillStatus = "Daily rank backfill finished: \(successfulCallsigns) saved, \(unavailableCallsigns) unavailable, \(self.rankDailyQuota.remainingRequests) requests left today."
+                self.playActivitySound(.success)
+            }
+            self.rankServiceStatus = self.dailyRankBackfillStatus
+            self.appendLog("QRZ Rank daily backfill: \(self.dailyRankBackfillStatus)")
+        }
+    }
+
+    @discardableResult
+    private func propagateExistingRankValues() -> Int {
+        let rankFields = ["RANK_QSO", "RANK_BAND", "RANK_DXCC"]
+        var knownValues: [String: [String: String]] = [:]
+        var workingRecords = qsoRecords
+
+        for record in workingRecords {
+            let callsign = record["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            guard !callsign.isEmpty else { continue }
+            for field in rankFields {
+                let value = record[field].trimmingCharacters(in: .whitespacesAndNewlines)
+                if !value.isEmpty, knownValues[callsign]?[field] == nil {
+                    knownValues[callsign, default: [:]][field] = value
+                }
+            }
+        }
+
+        var updatedRows = 0
+        for index in workingRecords.indices {
+            let callsign = workingRecords[index]["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            guard let values = knownValues[callsign] else { continue }
+            var rowChanged = false
+            for field in rankFields where workingRecords[index][field].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                if let value = values[field] {
+                    workingRecords[index].fields[field] = value
+                    rowChanged = true
+                }
+            }
+            if rowChanged { updatedRows += 1 }
+        }
+        if updatedRows > 0 { qsoRecords = workingRecords }
+        return updatedRows
+    }
+
+    private func applyRankResponse(
+        _ response: QRZRankResponse,
+        callsign: String,
+        checkedDay: String,
+        recordIndices: [Int],
+        records: inout [QSORecordModel]
+    ) {
+        let rankValues = [
+            "RANK_QSO": response.rank_qso ?? "",
+            "RANK_BAND": response.rank_band ?? "",
+            "RANK_DXCC": response.rank_countries ?? ""
+        ]
+        for index in recordIndices where records.indices.contains(index) {
+            for (field, value) in rankValues where !value.isEmpty {
+                records[index].fields[field] = value
+            }
+            records[index].fields["APP_YAAM_RANK_CHECKED"] = checkedDay
+            records[index].fields["APP_YAAM_RANK_STATUS"] = "FOUND"
+            records[index].fields["APP_YAAM_ENRICHED"] = "Y"
+        }
+    }
+
+    private func markRankLookup(
+        callsign: String,
+        checkedDay: String,
+        status: String,
+        recordIndices: [Int],
+        records: inout [QSORecordModel]
+    ) {
+        for index in recordIndices where records.indices.contains(index) {
+            records[index].fields["APP_YAAM_RANK_CHECKED"] = checkedDay
+            records[index].fields["APP_YAAM_RANK_STATUS"] = status
         }
     }
 
@@ -3781,6 +4150,13 @@ class AppState: NSObject, ObservableObject {
         var savedEmails: [String] = []
         var noContactCallsigns: [String] = []
         var detailLines: [String] = []
+        var workingRecords = qsoRecords
+        var recordIndicesByCallsign: [String: [Int]] = [:]
+        for index in workingRecords.indices {
+            let callsign = workingRecords[index]["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            if !callsign.isEmpty { recordIndicesByCallsign[callsign, default: []].append(index) }
+        }
+        var didChangeRecords = false
 
         for (offset, callsign) in callsigns.enumerated() {
             if Task.isCancelled { break }
@@ -3795,39 +4171,35 @@ class AppState: NSObject, ObservableObject {
             var changedNameForCallsign = false
             var changedEmailForCallsign = false
 
-            for index in qsoRecords.indices {
-                let rowCallsign = qsoRecords[index]["CALL"]
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                    .uppercased()
-                guard rowCallsign == callsign else { continue }
-
-                qsoRecords[index].fields["QRZ_URL"] = "https://www.qrz.com/db/\(callsign)"
-                qsoRecords[index].fields["APP_YAAM_EMAIL_CHECKED"] = checkedMarker
+            for index in recordIndicesByCallsign[callsign] ?? [] where workingRecords.indices.contains(index) {
+                workingRecords[index].fields["QRZ_URL"] = "https://www.qrz.com/db/\(callsign)"
+                workingRecords[index].fields["APP_YAAM_EMAIL_CHECKED"] = checkedMarker
+                didChangeRecords = true
 
                 if let name = contact.name, !name.isEmpty {
-                    let currentName = qsoRecords[index]["NAME"].trimmingCharacters(in: .whitespacesAndNewlines)
+                    let currentName = workingRecords[index]["NAME"].trimmingCharacters(in: .whitespacesAndNewlines)
                     let newName = currentName.isEmpty || isGenericQRZName(currentName)
                         ? name
                         : appendedDistinctValue(currentName, newValue: name)
                     if newName != currentName {
-                        qsoRecords[index].fields["NAME"] = newName
+                        workingRecords[index].fields["NAME"] = newName
                         updatedNameCount += 1
                         changedNameForCallsign = true
                     }
-                } else if isGenericQRZName(qsoRecords[index]["NAME"]) {
-                    qsoRecords[index].fields["NAME"] = ""
+                } else if isGenericQRZName(workingRecords[index]["NAME"]) {
+                    workingRecords[index].fields["NAME"] = ""
                     updatedNameCount += 1
                     changedNameForCallsign = true
                 }
 
                 if let email = contact.email, !email.isEmpty {
-                    let currentEmail = qsoRecords[index]["EMAIL"].trimmingCharacters(in: .whitespacesAndNewlines)
+                    let currentEmail = workingRecords[index]["EMAIL"].trimmingCharacters(in: .whitespacesAndNewlines)
                     if currentEmail != email {
-                        qsoRecords[index].fields["EMAIL"] = email
+                        workingRecords[index].fields["EMAIL"] = email
                         updatedEmailCount += 1
                         changedEmailForCallsign = true
                     }
-                    qsoRecords[index].fields["APP_YAAM_ENRICHED"] = "Y"
+                    workingRecords[index].fields["APP_YAAM_ENRICHED"] = "Y"
                 }
             }
 
@@ -3851,8 +4223,10 @@ class AppState: NSObject, ObservableObject {
             try? await Task.sleep(nanoseconds: 300_000_000)
         }
 
-        objectWillChange.send()
-        autoSaveActiveWorkspace()
+        if didChangeRecords {
+            qsoRecords = workingRecords
+            autoSaveActiveWorkspace()
+        }
         let namesSummary = savedNames.isEmpty ? "none" : savedNames.joined(separator: ", ")
         let emailsSummary = savedEmails.isEmpty ? "none" : savedEmails.joined(separator: ", ")
         let noContactSummary = noContactCallsigns.isEmpty ? "none" : noContactCallsigns.joined(separator: ", ")
@@ -3889,22 +4263,6 @@ class AppState: NSObject, ObservableObject {
         return callsigns
     }
     
-    private func asyncFetchRank(for callsign: String) async -> (String, String, String) {
-        guard let url = URL(string: "https://qrz-rank.asis.sh/api/rank/\(callsign)") else {
-            return ("", "", "")
-        }
-        var req = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 8)
-        req.setValue("YAAM-macOS/\(currentVersion)", forHTTPHeaderField: "User-Agent")
-        
-        do {
-            let (data, _) = try await URLSession.shared.data(for: req)
-            if let decoded = try? JSONDecoder().decode(QRZRankResponse.self, from: data) {
-                return (decoded.rank_qso ?? "", decoded.rank_band ?? "", decoded.rank_countries ?? "")
-            }
-        } catch {}
-        return ("", "", "")
-    }
-
     private func fetchQRZContactInfo(
         for callsign: String,
         allowWebKitFallback: Bool = false,
@@ -5537,7 +5895,7 @@ class AppState: NSObject, ObservableObject {
         return true
     }
 
-    func syncConfirmations(
+    private func legacySyncConfirmations(
         forceFullSync: Bool = false,
         sources: Set<SyncSource> = [.lotw, .qrz],
         showCompletionAlert: Bool = true,
@@ -6050,6 +6408,22 @@ class AppState: NSObject, ObservableObject {
         savePersistentConfirmationCache()
     }
 
+    func rememberConfirmedRecords(_ records: [QSORecordModel]) {
+        var didChange = false
+        for record in records {
+            let call = normalizeCallsign(record["CALL"])
+            let date = cleanDate(record["QSO_DATE"])
+            let band = cleanBand(record["BAND"])
+            guard !call.isEmpty, !date.isEmpty else { continue }
+
+            didChange = localConfirmedKeys.insert("\(call)_\(date)").inserted || didChange
+            if !band.isEmpty {
+                didChange = localConfirmedKeys.insert("\(call)_\(date)_\(band)").inserted || didChange
+            }
+        }
+        if didChange { savePersistentConfirmationCache() }
+    }
+
     func saveCurrentLog() {
         if isMasterMode {
             do {
@@ -6077,7 +6451,15 @@ class AppState: NSObject, ObservableObject {
         types.append(.commaSeparatedText)
         
         panel.allowedContentTypes = types
-        panel.nameFieldStringValue = loadedFileName.isEmpty ? "modified_log.adi" : loadedFileName
+        if !exportingMasterLog, loadedFileURL == nil {
+            let cleanName = loadedFileName
+                .replacingOccurrences(of: "Guest: ", with: "")
+                .replacingOccurrences(of: " (SDR Control)", with: "")
+            let baseName = URL(fileURLWithPath: cleanName).deletingPathExtension().lastPathComponent
+            panel.nameFieldStringValue = "\(baseName.isEmpty ? "SmartSDR" : baseName)_YAAM.adi"
+        } else {
+            panel.nameFieldStringValue = loadedFileName.isEmpty ? "modified_log.adi" : loadedFileName
+        }
         
         if panel.runModal() == .OK, let url = panel.url {
             writeRecordsToFileAsync(records: qsoRecords.map { $0.fields }, to: url)

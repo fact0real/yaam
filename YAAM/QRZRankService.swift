@@ -17,6 +17,8 @@ nonisolated enum QRZRankFetchFailure: LocalizedError, Equatable, Sendable {
     case authenticationFailed(String)
     case subscriptionRequired(String)
     case callsignNotFound(String)
+    case dailyLimitReached(Int)
+    case rateLimited(String)
     case server(status: Int, message: String)
     case transport(String)
     case invalidResponse
@@ -37,12 +39,39 @@ nonisolated enum QRZRankFetchFailure: LocalizedError, Equatable, Sendable {
             return message.isEmpty ? "The QRZ Rank Service account requires an active subscription." : message
         case .callsignNotFound(let callsign):
             return "No QRZ ranking was found for \(callsign)."
+        case .dailyLimitReached(let limit):
+            return "The daily QRZ Rank limit of \(limit) requests has been reached. It resets at local midnight."
+        case .rateLimited(let message):
+            return message.isEmpty
+                ? "QRZ Rank Service is temporarily rate limiting requests. Try again later."
+                : message
         case .server(let status, let message):
             return message.isEmpty ? "QRZ Rank Service returned HTTP \(status)." : message
         case .transport(let message):
             return "QRZ Rank Service is unavailable: \(message)"
         case .invalidResponse:
             return "QRZ Rank Service returned an invalid ranking response."
+        }
+    }
+
+    var shouldStopBatch: Bool {
+        switch self {
+        case .guestLimit, .authenticationRequired, .authenticationFailed,
+             .subscriptionRequired, .dailyLimitReached, .rateLimited:
+            return true
+        case .invalidCallsign, .callsignNotFound, .server, .transport, .invalidResponse:
+            return false
+        }
+    }
+
+    var shouldRecordLookupOutcome: Bool {
+        switch self {
+        case .invalidCallsign, .callsignNotFound:
+            return true
+        case .guestLimit, .authenticationRequired, .authenticationFailed,
+             .subscriptionRequired, .dailyLimitReached, .rateLimited,
+             .server, .transport, .invalidResponse:
+            return false
         }
     }
 }
@@ -200,6 +229,8 @@ actor QRZRankService {
                 throw QRZRankFetchFailure.authenticationRequired(message)
             case 404:
                 throw QRZRankFetchFailure.callsignNotFound(callsign)
+            case 429:
+                throw QRZRankFetchFailure.rateLimited(message)
             default:
                 throw QRZRankFetchFailure.server(status: http.statusCode, message: message)
             }
