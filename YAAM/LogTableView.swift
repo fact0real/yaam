@@ -18,6 +18,7 @@ struct LogTableView: View {
     @State private var columnWidths: [String: CGFloat] = [:]
     @State private var dragStartWidths: [String: CGFloat] = [:]
     @State private var explicitlyShownColumns: Set<String> = []
+    @State private var showFullConfirmationSyncPrompt = false
 
     private let defaultHiddenColumns: Set<String> = [
         "STATION",
@@ -365,20 +366,8 @@ struct LogTableView: View {
                 
                 Divider().frame(height: 14)
                 
-                Menu {
-                    Button {
-                        appState.syncConfirmations()
-                    } label: {
-                        Label("Sync New Confirmations", systemImage: "arrow.clockwise.icloud")
-                    }
-
-                    Divider()
-
-                    Button {
-                        appState.syncConfirmations(forceFullSync: true)
-                    } label: {
-                        Label("Rebuild All Confirmations", systemImage: "arrow.triangle.2.circlepath")
-                    }
+                Button {
+                    appState.syncConfirmations()
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "arrow.clockwise.icloud")
@@ -388,9 +377,24 @@ struct LogTableView: View {
                             .fontWeight(.semibold)
                     }
                 }
-                .menuStyle(.borderlessButton)
+                .buttonStyle(.borderless)
                 .disabled(appState.isSyncingAPI || appState.qsoRecords.isEmpty)
-                .help("Sync new LoTW and QRZ confirmations, or rebuild the full confirmation baseline")
+                .help("Download only new LoTW and QRZ confirmations")
+
+                Button {
+                    showFullConfirmationSyncPrompt = true
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                            .foregroundColor(appState.isSyncingAPI ? .gray : .green)
+                        Text("Full QSL History")
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                    }
+                }
+                .buttonStyle(.borderless)
+                .disabled(appState.isSyncingAPI || appState.qsoRecords.isEmpty)
+                .help("Download and reconcile every LoTW and QRZ confirmation from the beginning")
                 
                 Button(action: { appState.showStatsSheet = true }) {
                     HStack(spacing: 4) {
@@ -562,6 +566,18 @@ struct LogTableView: View {
         }
         .sheet(isPresented: $appState.showDuplicateReviewSheet) {
             DuplicateReviewView().environmentObject(appState)
+        }
+        .confirmationDialog(
+            "Rebuild the complete confirmation history?",
+            isPresented: $showFullConfirmationSyncPrompt,
+            titleVisibility: .visible
+        ) {
+            Button("Download Full LoTW & QRZ History") {
+                appState.syncConfirmations(forceFullSync: true)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("YAAM will page through every confirmed QRZ record and download LoTW confirmations from the beginning. The active station needs its QRZ Logbook API key and Settings needs your LoTW credentials. Existing log entries are preserved; only confirmation fields are reconciled.")
         }
     }
 

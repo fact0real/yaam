@@ -506,6 +506,12 @@ nonisolated struct MergeSummary: Equatable, Sendable {
 nonisolated struct ConfirmationSyncSummary: Equatable, Sendable {
     var lotwFetched = 0
     var qrzFetched = 0
+    var lotwReported = 0
+    var qrzReported = 0
+    var lotwMatched = 0
+    var qrzMatched = 0
+    var lotwUnmatched = 0
+    var qrzUnmatched = 0
     var lotwChanged = 0
     var qrzChanged = 0
     var lotwMessage = "Not run"
@@ -514,6 +520,8 @@ nonisolated struct ConfirmationSyncSummary: Equatable, Sendable {
     var qrzFailed = false
 
     var fetched: Int { lotwFetched + qrzFetched }
+    var matched: Int { lotwMatched + qrzMatched }
+    var unmatched: Int { lotwUnmatched + qrzUnmatched }
     var changed: Int { lotwChanged + qrzChanged }
 }
 

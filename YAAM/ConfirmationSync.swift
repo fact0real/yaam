@@ -12,7 +12,8 @@ nonisolated struct ConfirmationSyncCheckpoint: Codable, Equatable, Sendable {
 }
 
 nonisolated enum ConfirmationSyncCheckpointStore {
-    private static let schema = "v2"
+    // v3 invalidates baselines created before QRZ ADIF payloads were parsed atomically.
+    private static let schema = "v3"
 
     static func load(profileID: UUID, source: SyncSource) -> ConfirmationSyncCheckpoint {
         guard let data = UserDefaults.standard.data(forKey: key(profileID: profileID, source: source)),
@@ -36,7 +37,25 @@ nonisolated struct ConfirmationFetchOutcome: Sendable {
     let source: SyncSource
     let records: [[String: String]]
     let nextCursor: String?
+    let reportedCount: Int?
+    let pageCount: Int
     let detail: String
+
+    init(
+        source: SyncSource,
+        records: [[String: String]],
+        nextCursor: String?,
+        reportedCount: Int? = nil,
+        pageCount: Int = 1,
+        detail: String
+    ) {
+        self.source = source
+        self.records = records
+        self.nextCursor = nextCursor
+        self.reportedCount = reportedCount
+        self.pageCount = pageCount
+        self.detail = detail
+    }
 }
 
 nonisolated struct ConfirmationFetchAttempt: Sendable {
@@ -69,6 +88,7 @@ nonisolated enum ConfirmationDownloadService {
         username: String,
         password: String,
         cursor: String?,
+        ownCallsign: String,
         userAgent: String
     ) async -> ConfirmationFetchAttempt {
         guard enabled else { return .skipped }
@@ -78,6 +98,7 @@ nonisolated enum ConfirmationDownloadService {
                     username: username,
                     password: password,
                     cursor: cursor,
+                    ownCallsign: ownCallsign,
                     userAgent: userAgent
                 ),
                 errorMessage: nil
@@ -112,12 +133,13 @@ nonisolated enum ConfirmationDownloadService {
         username: String,
         password: String,
         cursor: String?,
+        ownCallsign: String,
         userAgent: String
     ) async throws -> ConfirmationFetchOutcome {
         guard var components = URLComponents(string: "https://lotw.arrl.org/lotwuser/lotwreport.adi") else {
             throw ConfirmationDownloadError.invalidEndpoint
         }
-        components.queryItems = [
+        var queryItems = [
             URLQueryItem(name: "login", value: username),
             URLQueryItem(name: "password", value: password),
             URLQueryItem(name: "qso_query", value: "1"),
@@ -126,6 +148,11 @@ nonisolated enum ConfirmationDownloadService {
             URLQueryItem(name: "qso_qsldetail", value: "yes"),
             URLQueryItem(name: "qso_withown", value: "yes")
         ]
+        let normalizedOwnCallsign = ownCallsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if !normalizedOwnCallsign.isEmpty {
+            queryItems.append(URLQueryItem(name: "qso_owncall", value: normalizedOwnCallsign))
+        }
+        components.queryItems = queryItems
         guard let url = components.url else { throw ConfirmationDownloadError.invalidEndpoint }
 
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: 90)
@@ -147,11 +174,18 @@ nonisolated enum ConfirmationDownloadService {
         let (_, records) = parseADIF(content: text)
         let nextCursor = adifHeaderValue(named: "APP_LOTW_LASTQSL", in: text)
             ?? adifHeaderValue(named: "APP_LoTW_LASTQSL", in: text)
+        let reportedCount = adifHeaderValue(named: "APP_LOTW_NUMREC", in: text).flatMap(Int.init)
+        if let reportedCount, records.count < reportedCount {
+            throw ConfirmationDownloadError.invalidResponse(
+                "LoTW reported \(reportedCount) confirmation record(s), but only \(records.count) were decoded. The baseline was not saved as complete."
+            )
+        }
         return ConfirmationFetchOutcome(
             source: .lotw,
             records: records,
             nextCursor: nextCursor,
-            detail: "LoTW returned \(records.count) confirmed QSL record(s)."
+            reportedCount: reportedCount,
+            detail: "LoTW returned \(records.count) confirmed QSL record(s) for \(normalizedOwnCallsign.isEmpty ? "the account" : normalizedOwnCallsign)."
         )
     }
 
@@ -167,6 +201,7 @@ nonisolated enum ConfirmationDownloadService {
         var allRecords: [[String: String]] = []
         var afterLogID = 0
         var page = 0
+        var totalReportedCount: Int?
         let modifiedSinceValue = modifiedSince.map(qrzDateFormatter.string(from:))
 
         while page < 2_000 {
@@ -189,21 +224,24 @@ nonisolated enum ConfirmationDownloadService {
                 URLQueryItem(name: "OPTION", value: options.joined(separator: ","))
             ])
 
-            let (data, response) = try await URLSession.shared.data(for: request)
-            try validateHTTP(response)
+            let (data, httpResponse) = try await URLSession.shared.data(for: request)
+            try validateHTTP(httpResponse)
             guard let raw = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) else {
                 throw ConfirmationDownloadError.invalidResponse("QRZ returned an unreadable response.")
             }
-            let values = formValues(raw)
-            let result = (values["RESULT"] ?? "").uppercased()
-            let count = Int(values["COUNT"] ?? "0") ?? 0
-            let reason = values["REASON"] ?? values["MESSAGE"] ?? ""
+            let parsedResponse = parseQRZResponse(raw)
+            let result = parsedResponse.result
+            let count = parsedResponse.count
+            let reason = parsedResponse.reason
+            if totalReportedCount == nil, result == "OK" {
+                totalReportedCount = count
+            }
 
             if result != "OK" {
                 let noRecords = count == 0 && (
                     reason.localizedCaseInsensitiveContains("no record") ||
                     reason.localizedCaseInsensitiveContains("not found") ||
-                    (reason.isEmpty && values["ADIF", default: ""].isEmpty)
+                    (reason.isEmpty && parsedResponse.adif.isEmpty)
                 )
                 if noRecords { break }
                 throw ConfirmationDownloadError.service(
@@ -211,25 +249,49 @@ nonisolated enum ConfirmationDownloadService {
                 )
             }
 
-            let adif = decodeHTMLEntities(values["ADIF"] ?? "")
-            let (_, pageRecords) = parseADIF(content: adif)
-            guard !pageRecords.isEmpty else { break }
+            let (_, pageRecords) = parseADIF(content: parsedResponse.adif)
+            if pageRecords.isEmpty {
+                if count == 0 { break }
+                throw ConfirmationDownloadError.invalidResponse(
+                    "QRZ reported \(count) matching record(s), but the ADIF payload on page \(page) could not be decoded."
+                )
+            }
             allRecords.append(contentsOf: pageRecords)
+
+            if let totalReportedCount, allRecords.count >= totalReportedCount {
+                break
+            }
 
             let logIDs = pageRecords.compactMap { record -> Int? in
                 let rawValue = record["APP_QRZLOG_LOGID"] ?? record["APP_QRZ_LOGID"] ?? record["LOGID"]
                 return rawValue.flatMap { Int($0.filter(\.isNumber)) }
             }
-            guard pageRecords.count >= qrzPageSize, let highestLogID = logIDs.max(), highestLogID >= afterLogID else {
+            guard pageRecords.count >= qrzPageSize else {
                 break
             }
+            guard let highestLogID = logIDs.max(), highestLogID >= afterLogID else {
+                throw ConfirmationDownloadError.invalidResponse(
+                    "QRZ returned a full page without APP_QRZLOG_LOGID, so the remaining confirmation history could not be paged safely."
+                )
+            }
             afterLogID = highestLogID + 1
+        }
+
+        if page >= 2_000 {
+            throw ConfirmationDownloadError.invalidResponse("QRZ confirmation paging exceeded the safety limit.")
+        }
+        if let totalReportedCount, allRecords.count < totalReportedCount {
+            throw ConfirmationDownloadError.invalidResponse(
+                "QRZ reported \(totalReportedCount) matching record(s), but only \(allRecords.count) were downloaded. The baseline was not saved as complete."
+            )
         }
 
         return ConfirmationFetchOutcome(
             source: .qrz,
             records: allRecords,
             nextCursor: nil,
+            reportedCount: totalReportedCount,
+            pageCount: page,
             detail: "QRZ returned \(allRecords.count) confirmed logbook record(s) in \(page) page(s)."
         )
     }
@@ -268,6 +330,20 @@ nonisolated enum ConfirmationDownloadService {
         return values
     }
 
+    static func parseQRZResponse(_ raw: String) -> (result: String, count: Int, reason: String, adif: String) {
+        let adifMarker = raw.range(of: "ADIF=", options: .caseInsensitive)
+        let metadataText = adifMarker.map { String(raw[..<$0.lowerBound]) } ?? raw
+        let values = formValues(metadataText)
+        let rawADIF = adifMarker.map { String(raw[$0.upperBound...]) } ?? ""
+        let decodedADIF = decodeHTMLEntities(decodeFormComponent(rawADIF))
+        return (
+            result: (values["RESULT"] ?? "").uppercased(),
+            count: Int(values["COUNT"] ?? "0") ?? 0,
+            reason: values["REASON"] ?? values["MESSAGE"] ?? "",
+            adif: decodedADIF
+        )
+    }
+
     private static func decodeFormComponent(_ value: String) -> String {
         value.replacingOccurrences(of: "+", with: " ").removingPercentEncoding ?? value
     }
@@ -300,10 +376,17 @@ nonisolated struct ConfirmationMergeResult: Sendable {
     let records: [QSORecordModel]
     let lotwChanged: Int
     let qrzChanged: Int
+    let lotwMatched: Int
+    let qrzMatched: Int
+    let lotwUnmatched: Int
+    let qrzUnmatched: Int
     let changedRecordIDs: Set<UUID>
 }
 
 nonisolated enum ConfirmationMergeEngine {
+    // LoTW itself accepts QSO start times within 30 minutes of each other.
+    private static let maximumTimeDifference = 30 * 60
+
     static func merge(
         localRecords: [QSORecordModel],
         lotwRecords: [[String: String]],
@@ -314,35 +397,45 @@ nonisolated enum ConfirmationMergeEngine {
         var changedIDs = Set<UUID>()
         var lotwChanged = 0
         var qrzChanged = 0
+        var lotwMatched = 0
+        var qrzMatched = 0
+        var lotwClaimed = Set<Int>()
+        var qrzClaimed = Set<Int>()
 
         for incoming in lotwRecords {
-            for target in matches(incoming, in: output, index: index) {
-                var changed = false
-                changed = set("LOTW_QSL_RCVD", to: "Y", in: &output[target]) || changed
-                changed = set("QSL_RCVD", to: "Y", in: &output[target]) || changed
-                if let date = confirmationDate(incoming, provider: .lotw) {
-                    changed = set("LOTW_QSLRDATE", to: date, in: &output[target]) || changed
-                }
-                if changed {
-                    lotwChanged += 1
-                    changedIDs.insert(output[target].id)
-                }
+            guard let target = bestMatch(incoming, in: output, index: index, excluding: lotwClaimed) else {
+                continue
+            }
+            lotwClaimed.insert(target)
+            lotwMatched += 1
+            var changed = false
+            changed = set("LOTW_QSL_RCVD", to: "Y", in: &output[target]) || changed
+            changed = set("QSL_RCVD", to: "Y", in: &output[target]) || changed
+            if let date = confirmationDate(incoming, provider: .lotw) {
+                changed = set("LOTW_QSLRDATE", to: date, in: &output[target]) || changed
+            }
+            if changed {
+                lotwChanged += 1
+                changedIDs.insert(output[target].id)
             }
         }
 
         for incoming in qrzRecords {
-            for target in matches(incoming, in: output, index: index) {
-                var changed = false
-                changed = set("QRZLOG_QSL_RCVD", to: "Y", in: &output[target]) || changed
-                changed = set("QSL_RCVD", to: "Y", in: &output[target]) || changed
-                changed = set("APP_QRZLOG_STATUS", to: "CONFIRMED", in: &output[target]) || changed
-                if let date = confirmationDate(incoming, provider: .qrz) {
-                    changed = set("APP_QRZLOG_QSLDATE", to: date, in: &output[target]) || changed
-                }
-                if changed {
-                    qrzChanged += 1
-                    changedIDs.insert(output[target].id)
-                }
+            guard let target = bestMatch(incoming, in: output, index: index, excluding: qrzClaimed) else {
+                continue
+            }
+            qrzClaimed.insert(target)
+            qrzMatched += 1
+            var changed = false
+            changed = set("QRZLOG_QSL_RCVD", to: "Y", in: &output[target]) || changed
+            changed = set("QSL_RCVD", to: "Y", in: &output[target]) || changed
+            changed = set("APP_QRZLOG_STATUS", to: "C", in: &output[target]) || changed
+            if let date = confirmationDate(incoming, provider: .qrz) {
+                changed = set("APP_QRZLOG_QSLDATE", to: date, in: &output[target]) || changed
+            }
+            if changed {
+                qrzChanged += 1
+                changedIDs.insert(output[target].id)
             }
         }
 
@@ -350,22 +443,38 @@ nonisolated enum ConfirmationMergeEngine {
             records: output,
             lotwChanged: lotwChanged,
             qrzChanged: qrzChanged,
+            lotwMatched: lotwMatched,
+            qrzMatched: qrzMatched,
+            lotwUnmatched: max(0, lotwRecords.count - lotwMatched),
+            qrzUnmatched: max(0, qrzRecords.count - qrzMatched),
             changedRecordIDs: changedIDs
         )
     }
 
-    private static func matches(
+    private static func bestMatch(
         _ incoming: [String: String],
         in local: [QSORecordModel],
-        index: [String: [Int]]
-    ) -> [Int] {
+        index: [String: [Int]],
+        excluding claimed: Set<Int>
+    ) -> Int? {
         let base = baseKey(incoming)
-        guard !base.hasPrefix("|"), var candidates = index[base], !candidates.isEmpty else { return [] }
+        let baseParts = base.split(separator: "|", omittingEmptySubsequences: false)
+        guard baseParts.count == 2,
+              !baseParts[0].isEmpty,
+              baseParts[1].count == 8,
+              var candidates = index[base]?.filter({ !claimed.contains($0) }),
+              !candidates.isEmpty else { return nil }
 
         let incomingBand = resolvedBand(incoming)
         if !incomingBand.isEmpty {
             let bandMatches = candidates.filter { resolvedBand(local[$0].fields) == incomingBand }
-            if !bandMatches.isEmpty { candidates = bandMatches }
+            if !bandMatches.isEmpty {
+                candidates = bandMatches
+            } else {
+                let missingLocalBand = candidates.filter { resolvedBand(local[$0].fields).isEmpty }
+                guard !missingLocalBand.isEmpty else { return nil }
+                candidates = missingLocalBand
+            }
         }
 
         if let incomingSeconds = seconds(incoming["TIME_ON"] ?? incoming["TIME_OFF"] ?? "") {
@@ -375,20 +484,27 @@ nonisolated enum ConfirmationMergeEngine {
                 }
                 return (candidate, abs(localSeconds - incomingSeconds))
             }
-            let nearby = timed.filter { $0.1 <= 120 }
-            guard let minimum = nearby.map(\.1).min() else { return [] }
+            let nearby = timed.filter { $0.1 <= maximumTimeDifference }
+            guard let minimum = nearby.map(\.1).min() else { return nil }
             candidates = nearby.filter { $0.1 == minimum }.map(\.0)
-        } else if candidates.count > 1 {
-            let identities = Set(candidates.map { exactIdentity(local[$0].fields) })
-            guard identities.count == 1 else { return [] }
         }
 
         let incomingModes = modeTokens(incoming)
-        if !incomingModes.isEmpty {
+        if candidates.count > 1, !incomingModes.isEmpty {
             let modeMatches = candidates.filter { !modeTokens(local[$0].fields).isDisjoint(with: incomingModes) }
             if !modeMatches.isEmpty { candidates = modeMatches }
         }
-        return candidates
+
+        if candidates.count > 1,
+           seconds(incoming["TIME_ON"] ?? incoming["TIME_OFF"] ?? "") == nil {
+            let identities = Set(candidates.map { exactIdentity(local[$0].fields) })
+            guard identities.count == 1 else { return nil }
+        }
+
+        return candidates.min { lhs, rhs in
+            if local[lhs].index != local[rhs].index { return local[lhs].index < local[rhs].index }
+            return lhs < rhs
+        }
     }
 
     private static func set(_ field: String, to value: String, in record: inout QSORecordModel) -> Bool {
@@ -480,8 +596,10 @@ extension AppState {
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let lotwPassword = CredentialVault.value(for: .lotwPassword)
         let qrzAPIKey = activeQRZAPIKey
-        let syncLoTW = sources.contains(.lotw) && !lotwUsername.isEmpty && !lotwPassword.isEmpty
-        let syncQRZ = sources.contains(.qrz) && !qrzAPIKey.isEmpty
+        let requestedLoTW = sources.contains(.lotw)
+        let requestedQRZ = sources.contains(.qrz)
+        let syncLoTW = requestedLoTW && !lotwUsername.isEmpty && !lotwPassword.isEmpty
+        let syncQRZ = requestedQRZ && !qrzAPIKey.isEmpty
 
         guard syncLoTW || syncQRZ else {
             alertTitle = "Credentials Required"
@@ -505,7 +623,15 @@ extension AppState {
         let fullQRZ = forceFullSync || !qrzCheckpoint.baselineCompleted
         let lotwCursor = fullLoTW ? nil : lotwCheckpoint.lotwCursor
         let qrzModifiedSince = fullQRZ ? nil : qrzCheckpoint.lastSuccess
+        let ownCallsign = currentStationCallsign
         let userAgent = "YAAM-macOS/\(currentVersion)"
+
+        if requestedLoTW, !syncLoTW {
+            appendLog("LoTW confirmation sync skipped: add the LoTW username and password in Settings.")
+        }
+        if requestedQRZ, !syncQRZ {
+            appendLog("QRZ confirmation sync skipped: add the QRZ Logbook API key to the active station profile.")
+        }
 
         isSyncingAPI = true
         if syncLoTW {
@@ -524,6 +650,7 @@ extension AppState {
                 username: lotwUsername,
                 password: lotwPassword,
                 cursor: lotwCursor,
+                ownCallsign: ownCallsign,
                 userAgent: userAgent
             )
             async let qrzAttempt = ConfirmationDownloadService.attemptQRZ(
@@ -555,6 +682,8 @@ extension AppState {
             let qrzFailed = syncQRZ && qrz.errorMessage != nil
             let lotwFetched = lotw.outcome?.records.count ?? 0
             let qrzFetched = qrz.outcome?.records.count ?? 0
+            let lotwReported = lotw.outcome?.reportedCount ?? lotwFetched
+            let qrzReported = qrz.outcome?.reportedCount ?? qrzFetched
 
             if let outcome = lotw.outcome {
                 var checkpoint = lotwCheckpoint
@@ -589,10 +718,10 @@ extension AppState {
 
             let lotwMessage = lotwFailed
                 ? (lotw.errorMessage ?? "LoTW synchronization failed")
-                : "\(lotwFetched) checked, \(mergeResult.lotwChanged) confirmations updated"
+                : "\(lotwFetched) downloaded, \(mergeResult.lotwMatched) matched, \(mergeResult.lotwUnmatched) unmatched, \(mergeResult.lotwChanged) updated"
             let qrzMessage = qrzFailed
                 ? (qrz.errorMessage ?? "QRZ synchronization failed")
-                : "\(qrzFetched) checked, \(mergeResult.qrzChanged) confirmations updated"
+                : "\(qrzFetched) downloaded, \(mergeResult.qrzMatched) matched, \(mergeResult.qrzUnmatched) unmatched, \(mergeResult.qrzChanged) updated"
 
             if syncLoTW {
                 self.finishSyncStatus(
@@ -614,6 +743,12 @@ extension AppState {
             let summary = ConfirmationSyncSummary(
                 lotwFetched: lotwFetched,
                 qrzFetched: qrzFetched,
+                lotwReported: lotwReported,
+                qrzReported: qrzReported,
+                lotwMatched: mergeResult.lotwMatched,
+                qrzMatched: mergeResult.qrzMatched,
+                lotwUnmatched: mergeResult.lotwUnmatched,
+                qrzUnmatched: mergeResult.qrzUnmatched,
                 lotwChanged: mergeResult.lotwChanged,
                 qrzChanged: mergeResult.qrzChanged,
                 lotwMessage: lotwMessage,
@@ -624,13 +759,31 @@ extension AppState {
             self.isSyncingAPI = false
 
             if showCompletionAlert {
-                self.alertTitle = summary.changed > 0 ? "Confirmations Updated" : (lotwFailed || qrzFailed ? "Sync Incomplete" : "Confirmations Up to Date")
-                self.alertMessage = summary.changed > 0
-                    ? "Updated \(summary.changed) QSO confirmation(s). Future syncs will download only new changes."
-                    : "Checked \(summary.fetched) cloud confirmation record(s). \(lotwFailed || qrzFailed ? "Review the activity log for the source that could not finish." : "No additional confirmations were found.")"
+                self.alertTitle = lotwFailed || qrzFailed
+                    ? "Confirmation Sync Incomplete"
+                    : (summary.changed > 0 ? "Confirmations Updated" : "Confirmations Up to Date")
+                var reportLines: [String] = []
+                if syncLoTW {
+                    reportLines.append(lotwFailed
+                        ? "LoTW: \(lotwMessage)"
+                        : "LoTW: \(lotwFetched.formatted()) downloaded, \(mergeResult.lotwMatched.formatted()) matched, \(mergeResult.lotwUnmatched.formatted()) unmatched, \(mergeResult.lotwChanged.formatted()) updated.")
+                } else if requestedLoTW {
+                    reportLines.append("LoTW: skipped because its username or password is missing in Settings.")
+                }
+                if syncQRZ {
+                    reportLines.append(qrzFailed
+                        ? "QRZ: \(qrzMessage)"
+                        : "QRZ: \(qrzFetched.formatted()) downloaded, \(mergeResult.qrzMatched.formatted()) matched, \(mergeResult.qrzUnmatched.formatted()) unmatched, \(mergeResult.qrzChanged.formatted()) updated.")
+                } else if requestedQRZ {
+                    reportLines.append("QRZ: skipped because the active station has no QRZ Logbook API key.")
+                }
+                if !lotwFailed, !qrzFailed, summary.unmatched > 0 {
+                    reportLines.append("Unmatched records belong to another station log, are absent locally, or do not agree on call, date, band, and the 30-minute time window.")
+                }
+                self.alertMessage = reportLines.joined(separator: "\n")
                 self.showAlert = true
             }
-            self.appendLog("Confirmation sync finished: \(summary.changed) QSO row(s) updated from \(summary.fetched) cloud record(s).")
+            self.appendLog("Confirmation sync finished: \(summary.matched) of \(summary.fetched) cloud record(s) matched; \(summary.changed) local QSO row(s) updated; \(summary.unmatched) unmatched.")
             self.playActivitySound(lotwFailed || qrzFailed ? .failure : .success)
             completion?(summary)
         }
