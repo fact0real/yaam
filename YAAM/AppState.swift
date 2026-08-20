@@ -3121,12 +3121,26 @@ class AppState: NSObject, ObservableObject {
 
                     var existingKeys = Set(self.qsoRecords.map { $0.uniqueKey })
                     var addedCount = 0
+                    var updatedCount = 0
                     var skippedCount = 0
 
                     for record in records {
                         let model = QSORecordModel(index: self.qsoRecords.count + 1, fields: self.stationTaggedFields(record))
                         guard !existingKeys.contains(model.uniqueKey) else {
-                            skippedCount += 1
+                            if let index = self.qsoRecords.firstIndex(where: { $0.uniqueKey == model.uniqueKey }) {
+                                let merged = ImportReviewAnalyzer.mergeUpdate(
+                                    incoming: model.fields,
+                                    into: self.qsoRecords[index].fields
+                                )
+                                if merged != self.qsoRecords[index].fields {
+                                    self.qsoRecords[index].fields = merged
+                                    updatedCount += 1
+                                } else {
+                                    skippedCount += 1
+                                }
+                            } else {
+                                skippedCount += 1
+                            }
                             continue
                         }
 
@@ -3139,10 +3153,14 @@ class AppState: NSObject, ObservableObject {
                         self.qsoRecords[index].index = index + 1
                     }
 
+                    let cleanupResult = self.reconcileDuplicateQSOsAfterImport(sourceName: "SDR-Control sync")
                     self.autoSaveActiveWorkspace()
                     self.isLoading = false
                     let invalidCount = parsed.validationIssueCount
-                    var details = "SDR-Control sync complete: \(addedCount) new QSOs added, \(skippedCount) duplicates skipped"
+                    var details = "SDR-Control sync complete: \(addedCount) new QSOs added, \(updatedCount) existing QSOs enriched, \(skippedCount) duplicates skipped"
+                    if let cleanupResult {
+                        details += ", \(cleanupResult.removedCount) extra duplicate row(s) removed"
+                    }
                     if parsed.ignoredDeletedRecordCount > 0 {
                         details += ", \(parsed.ignoredDeletedRecordCount) deleted entries ignored"
                     }
@@ -3151,7 +3169,7 @@ class AppState: NSObject, ObservableObject {
                     }
                     self.appendLog(details + ".")
                     self.playActivitySound(.success)
-                    completion?(.success(MergeSummary(added: addedCount, updated: 0, skipped: skippedCount)))
+                    completion?(.success(MergeSummary(added: addedCount, updated: updatedCount, skipped: skippedCount + (cleanupResult?.removedCount ?? 0))))
                 }
             } catch {
                 DispatchQueue.main.async {
@@ -3275,6 +3293,14 @@ class AppState: NSObject, ObservableObject {
                     } else {
                         if let idx = self.qsoRecords.firstIndex(where: { $0.uniqueKey == key }) {
                             var updated = false
+                            let merged = ImportReviewAnalyzer.mergeUpdate(
+                                incoming: tempModel.fields,
+                                into: self.qsoRecords[idx].fields
+                            )
+                            if merged != self.qsoRecords[idx].fields {
+                                self.qsoRecords[idx].fields = merged
+                                updated = true
+                            }
                             let incomingName = tempModel.fields["NAME"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                             if !incomingName.isEmpty {
                                 let existingName = self.qsoRecords[idx]["NAME"].trimmingCharacters(in: .whitespacesAndNewlines)
@@ -3297,11 +3323,13 @@ class AppState: NSObject, ObservableObject {
                 }
                 
                 for i in 0..<self.qsoRecords.count { self.qsoRecords[i].index = i + 1 }
+                let cleanupResult = self.reconcileDuplicateQSOsAfterImport(sourceName: "External ADIF sync")
                 self.autoSaveActiveWorkspace()
                 self.isLoading = false
-                self.appendLog("Merge Complete: \(addedCount) New QSOs added, \(updatedCount) Confirmations updated.")
+                let cleanupSuffix = cleanupResult.map { ", \($0.removedCount) extra duplicate row(s) removed" } ?? ""
+                self.appendLog("Merge Complete: \(addedCount) New QSOs added, \(updatedCount) existing QSOs enriched\(cleanupSuffix).")
                 self.playActivitySound(.success)
-                completion?(.success(MergeSummary(added: addedCount, updated: updatedCount, skipped: newRecordsDicts.count - addedCount - updatedCount)))
+                completion?(.success(MergeSummary(added: addedCount, updated: updatedCount, skipped: newRecordsDicts.count - addedCount - updatedCount + (cleanupResult?.removedCount ?? 0))))
             }
         }
     }

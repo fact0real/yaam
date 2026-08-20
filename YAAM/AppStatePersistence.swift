@@ -299,6 +299,7 @@ extension AppState {
                 tableHeaders.append(header)
             }
 
+            let cleanupResult = reconcileDuplicateQSOsAfterImport(sourceName: review.sourceName)
             try persistCurrentWorkspace(reason: "Imported \(review.sourceName)")
             refreshAwardProgress()
             updateMobileCompanionSnapshot()
@@ -311,7 +312,8 @@ extension AppState {
             showImportReviewSheet = false
             refreshDatabaseSafetyState()
             alertTitle = "Import Complete"
-            alertMessage = "Added \(added) new QSO(s) and updated \(updated) existing confirmation(s). A restore point was created first."
+            let cleanupMessage = cleanupResult.map { " Removed \($0.removedCount) extra duplicate row(s) after merging fuller data." } ?? ""
+            alertMessage = "Added \(added) new QSO(s) and updated \(updated) existing confirmation(s).\(cleanupMessage) A restore point was created first."
             showAlert = true
             playActivitySound(.success)
         } catch {

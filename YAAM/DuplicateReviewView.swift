@@ -34,7 +34,7 @@ struct DuplicateReviewView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text("Review Duplicate QSOs")
                     .font(.title3.bold())
-                Text("YAAM keeps the richest record and merges missing confirmation details before removal.")
+                Text("YAAM keeps the richest record, fills missing fields from matching rows, then removes only the extras.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -68,37 +68,45 @@ struct DuplicateReviewView: View {
     }
 
     private func duplicateList(_ review: DuplicateReview) -> some View {
-        List(review.groups) { group in
-            HStack(spacing: 12) {
-                Toggle("", isOn: Binding(
-                    get: { appState.duplicateReview?.selectedGroupIDs.contains(group.id) == true },
-                    set: { appState.setDuplicateGroupSelection(groupID: group.id, selected: $0) }
-                ))
-                .labelsHidden()
+        List {
+            ForEach(Array(review.groups.enumerated()), id: \.element.id) { _, group in
+                HStack(spacing: 12) {
+                    Toggle("", isOn: Binding(
+                        get: { appState.duplicateReview?.selectedGroupIDs.contains(group.id) == true },
+                        set: { appState.setDuplicateGroupSelection(groupID: group.id, selected: $0) }
+                    ))
+                    .labelsHidden()
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(group.callsign)
-                        .font(.headline.monospaced())
-                    Text("\(displayDate(group.date))  \(displayTime(group.time)) UTC")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
-                .frame(width: 190, alignment: .leading)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(group.callsign)
+                            .font(.headline.monospaced())
+                        Text("\(displayDate(group.date))  \(displayTime(group.time)) UTC")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                        Text(group.matchDescription)
+                            .font(.caption2)
+                            .foregroundStyle(.orange)
+                    }
+                    .frame(width: 190, alignment: .leading)
 
-                Label(group.band.isEmpty ? "Unknown band" : group.band, systemImage: "waveform.path")
-                    .frame(width: 120, alignment: .leading)
-                Label(group.mode.isEmpty ? "Unknown mode" : group.mode, systemImage: "dot.radiowaves.left.and.right")
-                    .frame(width: 140, alignment: .leading)
-                Spacer()
-                VStack(alignment: .trailing, spacing: 3) {
-                    Text("\(group.copyCount) copies")
-                        .font(.subheadline.bold())
-                    Text("Keep row #\(group.keeperRow)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    Label(group.band.isEmpty ? "Unknown band" : group.band, systemImage: "waveform.path")
+                        .frame(width: 120, alignment: .leading)
+                    Label(group.mode.isEmpty ? "Unknown mode" : group.mode, systemImage: "dot.radiowaves.left.and.right")
+                        .frame(width: 140, alignment: .leading)
+                    Spacer()
+                    VStack(alignment: .trailing, spacing: 3) {
+                        Text("\(group.copyCount) copies")
+                            .font(.subheadline.bold())
+                        Text("Keep row #\(group.keeperRow)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(group.mergedFieldCount == 0 ? "No missing fields" : "+\(group.mergedFieldCount) field(s) merged")
+                            .font(.caption2)
+                            .foregroundColor(group.mergedFieldCount == 0 ? .secondary : .green)
+                    }
                 }
+                .padding(.vertical, 5)
             }
-            .padding(.vertical, 5)
         }
         .listStyle(.inset)
     }

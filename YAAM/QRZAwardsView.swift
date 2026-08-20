@@ -430,47 +430,114 @@ private struct AwardContinentIcon: View {
     let award: QRZAwardSummary
     let tint: Color
 
-    private var signature: (symbol: String, title: String, colors: [Color]) {
-        let text = "\(award.title) \(award.detail) \(award.awardType)".uppercased()
-        if text.contains("AFRICA") || text.contains("AF") {
-            return ("globe.europe.africa.fill", "AF", [.orange, .green])
+    private struct Signature {
+        let symbol: String
+        let abbreviation: String
+        let title: String
+        let colors: [Color]
+    }
+
+    private var signature: Signature {
+        let title = award.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let searchable = normalizedSearchText([award.title, award.detail, award.awardType])
+        let tokens = tokenSet(searchable)
+
+        if containsPhrase("NORTH AMERICA", in: searchable) || tokens.contains("NA") {
+            return Signature(symbol: "globe.americas.fill", abbreviation: "NA", title: "North America", colors: [.blue, .teal])
         }
-        if text.contains("ASIA") || text.contains("AS") {
-            return ("globe.central.south.asia.fill", "AS", [.red, .yellow])
+        if containsPhrase("SOUTH AMERICA", in: searchable) || tokens.contains("SA") {
+            return Signature(symbol: "globe.americas.fill", abbreviation: "SA", title: "South America", colors: [.green, .yellow])
         }
-        if text.contains("EUROPE") || text.contains("EU") {
-            return ("globe.europe.africa.fill", "EU", [.blue, .indigo])
+        if containsPhrase("ANTARCTICA", in: searchable) || tokens.contains("AN") {
+            return Signature(symbol: "snowflake", abbreviation: "AN", title: "Antarctica", colors: [.cyan, .blue])
         }
-        if text.contains("NORTH AMERICA") || text.contains("NA") {
-            return ("globe.americas.fill", "NA", [.blue, .green])
+        if containsPhrase("AFRICA", in: searchable) || tokens.contains("AF") {
+            return Signature(symbol: "globe.europe.africa.fill", abbreviation: "AF", title: "Africa", colors: [.orange, .green])
         }
-        if text.contains("SOUTH AMERICA") || text.contains("SA") {
-            return ("globe.americas.fill", "SA", [.green, .yellow])
+        if containsPhrase("ASIA", in: searchable) || tokens.contains("AS") {
+            return Signature(symbol: "globe.central.south.asia.fill", abbreviation: "AS", title: "Asia", colors: [.red, .yellow])
         }
-        if text.contains("OCEANIA") || text.contains("OC") {
-            return ("globe.asia.australia.fill", "OC", [.cyan, .blue])
+        if containsPhrase("EUROPE", in: searchable) || tokens.contains("EU") {
+            return Signature(symbol: "globe.europe.africa.fill", abbreviation: "EU", title: "Europe", colors: [.blue, .indigo])
         }
-        if text.contains("ANTARCTICA") || text.contains("AN") {
-            return ("snowflake", "AN", [.cyan, .white])
+        if containsPhrase("OCEANIA", in: searchable) || tokens.contains("OC") {
+            return Signature(symbol: "globe.asia.australia.fill", abbreviation: "OC", title: "Oceania", colors: [.cyan, .green])
         }
-        return ("trophy.fill", "DX", [tint, .yellow])
+        if containsPhrase("WORLD CONTINENTS", in: searchable) {
+            return Signature(symbol: "globe", abbreviation: "WC", title: "World Continents", colors: [.green, .yellow])
+        }
+        if containsPhrase("DX WORLD", in: searchable) || containsPhrase("DXCC", in: searchable) {
+            return Signature(symbol: "globe", abbreviation: "DX", title: "DX World", colors: [.purple, .blue])
+        }
+        if containsPhrase("GRID", in: searchable) || containsPhrase("GRID SQUARED", in: searchable) {
+            return Signature(symbol: "square.grid.3x3.fill", abbreviation: "GR", title: "Grid", colors: [.teal, .blue])
+        }
+        if containsPhrase("COUNTIES", in: searchable) || containsPhrase("UNITED STATES", in: searchable) {
+            return Signature(symbol: "map.fill", abbreviation: "US", title: "United States", colors: [.blue, .red])
+        }
+        if containsPhrase("FRIENDSHIP", in: searchable) {
+            return Signature(symbol: "person.2.fill", abbreviation: "FR", title: "Friendship", colors: [.mint, .blue])
+        }
+        if containsPhrase("DAYS OF QRZ", in: searchable) || containsPhrase("YEARS OF QRZ", in: searchable) || title.localizedCaseInsensitiveContains("QRZ") {
+            return Signature(symbol: "calendar.badge.clock", abbreviation: "QRZ", title: "QRZ", colors: [.cyan, .blue])
+        }
+        if containsPhrase("MASTER OF RADIO COMMUNICATION", in: searchable) {
+            return Signature(symbol: "antenna.radiowaves.left.and.right", abbreviation: "MRC", title: "Master of Radio Communication", colors: [.orange, .pink])
+        }
+        return Signature(symbol: "trophy.fill", abbreviation: "AWD", title: "Award", colors: [tint, .yellow])
     }
 
     var body: some View {
         let item = signature
-        ZStack {
-            RoundedRectangle(cornerRadius: 8)
-                .fill(LinearGradient(colors: item.colors.map { $0.opacity(0.82) }, startPoint: .topLeading, endPoint: .bottomTrailing))
-            Image(systemName: item.symbol)
-                .font(.system(size: 28, weight: .bold))
-                .foregroundStyle(.white.opacity(0.92))
-                .offset(x: -15)
-            Text(item.title)
-                .font(.system(size: 18, weight: .black, design: .rounded))
-                .foregroundStyle(.white)
-                .shadow(color: .black.opacity(0.2), radius: 2, y: 1)
-                .offset(x: 22)
+        HStack(spacing: 7) {
+            ZStack {
+                Circle()
+                    .fill(.white.opacity(0.22))
+                    .frame(width: 31, height: 31)
+                Image(systemName: item.symbol)
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundStyle(.white)
+            }
+
+            VStack(alignment: .leading, spacing: 0) {
+                Text(item.abbreviation)
+                    .font(.system(size: item.abbreviation.count > 2 ? 14 : 18, weight: .black, design: .rounded))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                Text(item.title)
+                    .font(.system(size: 7.5, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.86))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.55)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .accessibilityLabel("\(item.title) award icon")
+        .padding(.horizontal, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(LinearGradient(colors: item.colors.map { $0.opacity(0.88) }, startPoint: .topLeading, endPoint: .bottomTrailing))
+        )
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(.white.opacity(0.22), lineWidth: 1))
+        .accessibilityLabel("\(item.title) award icon, \(item.abbreviation)")
+    }
+
+    private func normalizedSearchText(_ values: [String]) -> String {
+        values
+            .joined(separator: " ")
+            .uppercased()
+            .replacingOccurrences(of: "&", with: " AND ")
+            .replacingOccurrences(of: "[^A-Z0-9]+", with: " ", options: .regularExpression)
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func tokenSet(_ text: String) -> Set<String> {
+        Set(text.split(separator: " ").map(String.init))
+    }
+
+    private func containsPhrase(_ phrase: String, in text: String) -> Bool {
+        let normalizedPhrase = normalizedSearchText([phrase])
+        return " \(text) ".contains(" \(normalizedPhrase) ")
     }
 }
