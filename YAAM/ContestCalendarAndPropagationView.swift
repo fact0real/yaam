@@ -33,6 +33,7 @@ struct ContestCalendarAndPropagationPanel: View {
         .onAppear {
             appState.fetchPropagationSnapshot()
             appState.fetchPSKReporterSignals()
+            appState.fetchContestCalendar()
         }
     }
 
@@ -42,18 +43,34 @@ struct ContestCalendarAndPropagationPanel: View {
                 Label("Upcoming contests", systemImage: "flag.checkered")
                     .font(.headline)
                 Spacer()
+                Button {
+                    appState.fetchContestCalendar(force: true)
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.borderless)
+                .help("Refresh contest calendar")
+                .disabled(appState.isFetchingContestCalendar)
                 Link(destination: calendarURL) {
                     Label("WA7BNM 5-week calendar", systemImage: "arrow.up.right.square")
                 }
             }
 
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 260), spacing: 10)], spacing: 10) {
-                ForEach(ContestCalendarItem.featuredUpcoming) { item in
+            if appState.contestCalendarEntries.isEmpty {
+                ContentUnavailableView(
+                    "Contest calendar unavailable",
+                    systemImage: "calendar.badge.exclamationmark",
+                    description: Text("Open the official WA7BNM calendar or refresh when your connection is available.")
+                )
+                .frame(maxWidth: .infinity, minHeight: 150)
+            } else {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 260), spacing: 10)], spacing: 10) {
+                    ForEach(Array(appState.contestCalendarEntries.prefix(12))) { item in
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
-                            Image(systemName: item.icon)
-                                .foregroundStyle(item.color)
-                            Text(item.name)
+                            Image(systemName: item.isMiddleEastRelevant ? "location.north.line.fill" : "flag.checkered")
+                                .foregroundStyle(item.isMiddleEastRelevant ? .green : .blue)
+                            Text(item.title)
                                 .font(.subheadline.weight(.semibold))
                                 .lineLimit(2)
                             Spacer()
@@ -61,7 +78,12 @@ struct ContestCalendarAndPropagationPanel: View {
                         Text(item.utcWindow)
                             .font(.caption.monospacedDigit())
                             .foregroundStyle(.secondary)
-                        Text(item.focus)
+                        if item.isMiddleEastRelevant {
+                            Text("Middle East relevant")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.green)
+                        }
+                        Text(item.operatingSummary.isEmpty ? item.geographicFocus : item.operatingSummary)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .lineLimit(2)
@@ -69,11 +91,20 @@ struct ContestCalendarAndPropagationPanel: View {
                     .padding(12)
                     .frame(maxWidth: .infinity, minHeight: 112, alignment: .topLeading)
                     .background(Color(nsColor: .controlBackgroundColor).opacity(0.55), in: RoundedRectangle(cornerRadius: 8))
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(item.color.opacity(0.28)))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke((item.isMiddleEastRelevant ? Color.green : Color.blue).opacity(0.28)))
+                    }
                 }
             }
 
-            Text("The embedded list highlights near-term contests useful from the Middle East. The linked WA7BNM page remains the source of truth for full dates, exchange rules, and late changes.")
+            HStack(spacing: 6) {
+                if appState.isFetchingContestCalendar {
+                    ProgressView().controlSize(.small)
+                }
+                Text(appState.contestCalendarStatus)
+                if let updated = appState.contestCalendarLastUpdated {
+                    Text("· Updated \(updated.formatted(date: .abbreviated, time: .shortened))")
+                }
+            }
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -281,21 +312,4 @@ private struct PropagationMetric: View {
         .frame(maxWidth: .infinity, minHeight: 86, alignment: .leading)
         .background(Color(nsColor: .controlBackgroundColor).opacity(0.45), in: RoundedRectangle(cornerRadius: 8))
     }
-}
-
-private struct ContestCalendarItem: Identifiable {
-    let id = UUID()
-    let name: String
-    let utcWindow: String
-    let focus: String
-    let icon: String
-    let color: Color
-
-    static let featuredUpcoming = [
-        ContestCalendarItem(name: "VHF-UHF FT8 Activity Contest-NA", utcWindow: "Aug 20, 0000Z-0500Z", focus: "Useful for digital VHF/UHF awareness and activity benchmarking.", icon: "waveform.path.ecg", color: .purple),
-        ContestCalendarItem(name: "NTC QSO Party", utcWindow: "Aug 20, 1900Z-2000Z", focus: "Short operating window; good for quick score practice.", icon: "timer", color: .blue),
-        ContestCalendarItem(name: "Turkiye HF Contest", utcWindow: "Aug 22 0600Z - Aug 23 0600Z", focus: "Regionally relevant from Iran and the Middle East.", icon: "location.north.line", color: .green),
-        ContestCalendarItem(name: "YO DX HF Contest", utcWindow: "Aug 22 1200Z - Aug 23 1200Z", focus: "Strong Europe and Asia paths; useful for DXCC/rank growth.", icon: "globe.europe.africa.fill", color: .orange),
-        ContestCalendarItem(name: "ARRL EME Contest", utcWindow: "Sep 5 0000Z - Sep 6 2359Z", focus: "VHF+ specialist activity; watch 6m/2m openings and station capability gaps.", icon: "moon.stars.fill", color: .indigo)
-    ]
 }

@@ -380,6 +380,8 @@ nonisolated struct ConfirmationMergeResult: Sendable {
     let qrzMatched: Int
     let lotwUnmatched: Int
     let qrzUnmatched: Int
+    let lotwUnmatchedRecords: [[String: String]]
+    let qrzUnmatchedRecords: [[String: String]]
     let changedRecordIDs: Set<UUID>
 }
 
@@ -401,9 +403,12 @@ nonisolated enum ConfirmationMergeEngine {
         var qrzMatched = 0
         var lotwClaimed = Set<Int>()
         var qrzClaimed = Set<Int>()
+        var lotwUnmatchedRecords: [[String: String]] = []
+        var qrzUnmatchedRecords: [[String: String]] = []
 
         for incoming in lotwRecords {
             guard let target = bestMatch(incoming, in: output, index: index, excluding: lotwClaimed) else {
+                lotwUnmatchedRecords.append(incoming)
                 continue
             }
             lotwClaimed.insert(target)
@@ -422,6 +427,7 @@ nonisolated enum ConfirmationMergeEngine {
 
         for incoming in qrzRecords {
             guard let target = bestMatch(incoming, in: output, index: index, excluding: qrzClaimed) else {
+                qrzUnmatchedRecords.append(incoming)
                 continue
             }
             qrzClaimed.insert(target)
@@ -445,8 +451,10 @@ nonisolated enum ConfirmationMergeEngine {
             qrzChanged: qrzChanged,
             lotwMatched: lotwMatched,
             qrzMatched: qrzMatched,
-            lotwUnmatched: max(0, lotwRecords.count - lotwMatched),
-            qrzUnmatched: max(0, qrzRecords.count - qrzMatched),
+            lotwUnmatched: lotwUnmatchedRecords.count,
+            qrzUnmatched: qrzUnmatchedRecords.count,
+            lotwUnmatchedRecords: lotwUnmatchedRecords,
+            qrzUnmatchedRecords: qrzUnmatchedRecords,
             changedRecordIDs: changedIDs
         )
     }
@@ -460,10 +468,22 @@ nonisolated enum ConfirmationMergeEngine {
         let base = baseKey(incoming)
         let baseParts = base.split(separator: "|", omittingEmptySubsequences: false)
         guard baseParts.count == 2,
-              !baseParts[0].isEmpty,
-              baseParts[1].count == 8,
-              var candidates = index[base]?.filter({ !claimed.contains($0) }),
-              !candidates.isEmpty else { return nil }
+            !baseParts[0].isEmpty,
+              baseParts[1].count == 8 else { return nil }
+
+        var candidates = index[base]?.filter { !claimed.contains($0) } ?? []
+        if candidates.isEmpty, let date = date(baseParts[1]) {
+            // Some exports use local time near midnight. Preserve strict matching first,
+            // then consider the adjacent UTC day only when the time and radio fields agree.
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .current
+            let adjacentKeys = [-1, 1].compactMap { offset -> String? in
+                guard let adjusted = calendar.date(byAdding: .day, value: offset, to: date) else { return nil }
+                return "\(baseParts[0])|\(adifDate(adjusted))"
+            }
+            candidates = adjacentKeys.flatMap { index[$0] ?? [] }.filter { !claimed.contains($0) }
+        }
+        guard !candidates.isEmpty else { return nil }
 
         let incomingBand = resolvedBand(incoming)
         if !incomingBand.isEmpty {
@@ -564,6 +584,24 @@ nonisolated enum ConfirmationMergeEngine {
 
     private static func clean(_ value: String) -> String {
         value.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+    }
+
+    private static func date(_ raw: Substring) -> Date? {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyyMMdd"
+        return formatter.date(from: String(raw))
+    }
+
+    private static func adifDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyyMMdd"
+        return formatter.string(from: date)
     }
 }
 
@@ -708,10 +746,15 @@ extension AppState {
                 self.appendLog("QRZ confirmation sync failed: \(message)")
             }
 
-            if !mergeResult.changedRecordIDs.isEmpty {
+            var importedConfirmedRecords = 0
+            if !mergeResult.changedRecordIDs.isEmpty || !mergeResult.lotwUnmatchedRecords.isEmpty || !mergeResult.qrzUnmatchedRecords.isEmpty {
                 self.qsoRecords = mergeResult.records
                 let changedRecords = mergeResult.records.filter { mergeResult.changedRecordIDs.contains($0.id) }
                 self.rememberConfirmedRecords(changedRecords)
+                importedConfirmedRecords = self.importRemoteConfirmationRecords(
+                    lotw: lotwFailed ? [] : mergeResult.lotwUnmatchedRecords,
+                    qrz: qrzFailed ? [] : mergeResult.qrzUnmatchedRecords
+                )
                 self.autoSaveActiveWorkspace()
                 self.refreshAwardProgress()
             }
@@ -778,12 +821,12 @@ extension AppState {
                     reportLines.append("QRZ: skipped because the active station has no QRZ Logbook API key.")
                 }
                 if !lotwFailed, !qrzFailed, summary.unmatched > 0 {
-                    reportLines.append("Unmatched records belong to another station log, are absent locally, or do not agree on call, date, band, and the 30-minute time window.")
+                    reportLines.append("\(importedConfirmedRecords.formatted()) confirmed QSO(s) absent from the local log were added and marked with their cloud source. Remaining unmatched records belong to another station log or do not contain enough QSO detail to import safely.")
                 }
                 self.alertMessage = reportLines.joined(separator: "\n")
                 self.showAlert = true
             }
-            self.appendLog("Confirmation sync finished: \(summary.matched) of \(summary.fetched) cloud record(s) matched; \(summary.changed) local QSO row(s) updated; \(summary.unmatched) unmatched.")
+            self.appendLog("Confirmation sync finished: \(summary.matched) of \(summary.fetched) cloud record(s) matched; \(summary.changed) local QSO row(s) updated; \(importedConfirmedRecords) confirmed cloud QSO(s) added; \(summary.unmatched) unmatched.")
             self.playActivitySound(lotwFailed || qrzFailed ? .failure : .success)
             completion?(summary)
         }
@@ -796,5 +839,64 @@ extension AppState {
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
         formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
         return formatter.string(from: date)
+    }
+
+    /// Preserves a valid remote confirmation when the corresponding local QSO is absent.
+    /// Only call/date records are imported; incomplete responses remain visible as unmatched.
+    private func importRemoteConfirmationRecords(
+        lotw: [[String: String]],
+        qrz: [[String: String]]
+    ) -> Int {
+        var added = 0
+        var knownIdentities = Set(qsoRecords.map(remoteConfirmationIdentity))
+
+        for (source, records) in [(SyncSource.lotw, lotw), (.qrz, qrz)] {
+            for record in records {
+                var fields = stationTaggedFields(record)
+                let call = fields["CALL"]?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
+                let date = (fields["QSO_DATE"] ?? "").filter(\.isNumber)
+                guard !call.isEmpty, date.count == 8 else { continue }
+
+                fields["QSL_RCVD"] = "Y"
+                fields["APP_YAAM_REMOTE_CONFIRMATION_IMPORTED"] = source.rawValue.uppercased()
+                switch source {
+                case .lotw:
+                    fields["LOTW_QSL_RCVD"] = "Y"
+                case .qrz:
+                    fields["QRZLOG_QSL_RCVD"] = "Y"
+                    fields["APP_QRZLOG_STATUS"] = "C"
+                default:
+                    break
+                }
+
+                let identity = remoteConfirmationIdentity(fields)
+                guard !knownIdentities.contains(identity) else { continue }
+                let model = QSORecordModel(index: qsoRecords.count + 1, fields: fields)
+                qsoRecords.append(model)
+                knownIdentities.insert(identity)
+                added += 1
+            }
+        }
+
+        if added > 0 {
+            for header in ["LOTW_QSL_RCVD", "QRZLOG_QSL_RCVD", "QSL_RCVD", "APP_YAAM_REMOTE_CONFIRMATION_IMPORTED"] where !tableHeaders.contains(header) {
+                tableHeaders.append(header)
+            }
+            rememberConfirmedRecords(Array(qsoRecords.suffix(added)))
+        }
+        return added
+    }
+
+    private func remoteConfirmationIdentity(_ record: QSORecordModel) -> String {
+        remoteConfirmationIdentity(record.fields)
+    }
+
+    private func remoteConfirmationIdentity(_ fields: [String: String]) -> String {
+        let call = fields["CALL"]?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
+        let date = (fields["QSO_DATE"] ?? "").filter(\.isNumber)
+        let time = (fields["TIME_ON"] ?? fields["TIME_OFF"] ?? "").filter(\.isNumber)
+        let band = (fields["BAND"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let mode = (fields["MODE"] ?? fields["SUBMODE"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        return "\(call)|\(date)|\(time)|\(band)|\(mode)"
     }
 }

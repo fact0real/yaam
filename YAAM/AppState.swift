@@ -1,4 +1,4 @@
-//
+//  In the name of Allah
 //  AppState.swift
 //  YAAM
 //
@@ -112,6 +112,7 @@ struct RankTrendSeries: Identifiable {
     let callsign: String
     let countryIso: String?
     let latestGap: Int?
+    let latestMovement: Int?
     let points: [RankTrendPoint]
 }
 
@@ -747,11 +748,11 @@ nonisolated struct QSORecordModel: Identifiable, Sendable {
     }
     
     var isConfirmed: Bool {
-        let lotw = fields["LOTW_QSL_RCVD"]?.uppercased() ?? ""
-        let qrz = fields["QRZLOG_QSL_RCVD"]?.uppercased() ?? ""
-        let eqsl = fields["EQSL_QSL_RCVD"]?.uppercased() ?? ""
-        let qsl = fields["QSL_RCVD"]?.uppercased() ?? ""
-        return lotw == "Y" || lotw == "V" || qrz == "Y" || eqsl == "Y" || eqsl == "V" || qsl == "Y" || qrz == "CONFIRMED" || qrz == "C"
+        let confirmationValues = [
+            "LOTW_QSL_RCVD", "QRZLOG_QSL_RCVD", "QRZCOM_QSL_RCVD",
+            "APP_QRZLOG_STATUS", "EQSL_QSL_RCVD", "QSL_RCVD"
+        ].map { fields[$0]?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? "" }
+        return confirmationValues.contains { ["Y", "V", "C", "CONFIRMED", "VERIFIED"].contains($0) }
     }
     
     // SMART DEDUPLICATION KEY: Call + Date + Time + Band + Mode
@@ -1651,6 +1652,10 @@ class AppState: NSObject, ObservableObject {
     @Published var isFetchingPSKReporter: Bool = false
     @Published var pskReporterStatus: String = ""
     @Published var pskReporterLastUpdated: Date?
+    @Published var contestCalendarEntries: [ContestCalendarEntry] = []
+    @Published var contestCalendarStatus: String = "Calendar not loaded yet"
+    @Published var contestCalendarLastUpdated: Date?
+    @Published var isFetchingContestCalendar: Bool = false
     
     // Row Selection State
     @Published var selectedRecordIDs: Set<UUID> = []
@@ -1829,6 +1834,7 @@ class AppState: NSObject, ObservableObject {
         loadContestSession()
         loadQSLHubState()
         loadConnectivityState()
+        loadContestCalendarCache()
         configureOperatorFeatureBridges()
         DispatchQueue.main.async {
             CredentialVault.migrateLegacyCredentials()
@@ -2501,8 +2507,17 @@ class AppState: NSObject, ObservableObject {
             }
 
             let latestGap = points.last?.gap
+            let latestMovement: Int? = points.count >= 2
+                ? (points[points.count - 1].gap - points[points.count - 2].gap)
+                : nil
             let countryIso = rivalSnapshots.last?.countryIso
-            return RankTrendSeries(callsign: callsign, countryIso: countryIso, latestGap: latestGap, points: points)
+            return RankTrendSeries(
+                callsign: callsign,
+                countryIso: countryIso,
+                latestGap: latestGap,
+                latestMovement: latestMovement,
+                points: points
+            )
         }
     }
 
@@ -2936,9 +2951,11 @@ class AppState: NSObject, ObservableObject {
 
         beginSyncStatus(.sdrControl, detail: "Reading SDR-Control logbook...")
 
-        let lastModified = (try? source.url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
-        let lastSynced = UserDefaults.standard.object(forKey: "sdrControlLastSyncedModificationDate") as? Date
-        if isAutomatic, let lastModified, let lastSynced, lastModified <= lastSynced {
+        let resourceValues = try? source.url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
+        let lastModified = resourceValues?.contentModificationDate
+        let sourceSignature = "\(resourceValues?.fileSize ?? 0)|\(lastModified?.timeIntervalSince1970 ?? 0)"
+        let lastSignature = UserDefaults.standard.string(forKey: "sdrControlLastSyncedSignature")
+        if isAutomatic, !sourceSignature.isEmpty, sourceSignature == lastSignature {
             let result = Result<MergeSummary, Error>.success(MergeSummary(added: 0, updated: 0, skipped: 0))
             completeSyncStatus(.sdrControl, result: result, unchangedText: "Source has no changes")
             completion?(result)
@@ -2950,6 +2967,7 @@ class AppState: NSObject, ObservableObject {
                 if let lastModified {
                     UserDefaults.standard.set(lastModified, forKey: "sdrControlLastSyncedModificationDate")
                 }
+                UserDefaults.standard.set(sourceSignature, forKey: "sdrControlLastSyncedSignature")
                 UserDefaults.standard.set(Date(), forKey: "sdrControlLastSyncRunDate")
             }
             self.completeSyncStatus(.sdrControl, result: result, unchangedText: "No new SDR-Control QSOs")
@@ -3485,7 +3503,7 @@ class AppState: NSObject, ObservableObject {
     }
 
     func syncSDRControlLogIfNeeded(isAutomatic: Bool = false) {
-        syncExternalADIFLogIfNeeded(isAutomatic: isAutomatic)
+        syncSDRControlLogbookIfNeeded(isAutomatic: isAutomatic)
     }
 
     func fetchPropagationSnapshot() {

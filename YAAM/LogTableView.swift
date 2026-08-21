@@ -20,15 +20,6 @@ struct LogTableView: View {
     @State private var explicitlyShownColumns: Set<String> = []
     @State private var showFullConfirmationSyncPrompt = false
 
-    private let defaultHiddenColumns: Set<String> = [
-        "STATION",
-        "STATION_CALLSIGN",
-        "LOTW_QSL_RCVD",
-        "QSL_RCVD",
-        "QRZLOG_QSL_RCVD",
-        "APP_YAAM_ENRICHED"
-    ]
-
     private let compactCenteredColumns: Set<String> = [
         "TIME",
         "TIME_ON",
@@ -41,8 +32,7 @@ struct LogTableView: View {
 
     private let preferredColumnOrder = [
         "QSO_DATE", "TIME_ON", "CALL", "FREQ", "BAND", "MODE", "RST_SENT", "RST_RCVD",
-        "NAME", "QTH", "CONT", "COUNTRY", "DXCC", "CQZ", "ITUZ",
-        "LOTW_QSL_RCVD", "QSL_RCVD", "QRZLOG_QSL_RCVD", "EMAIL", "QRZ_URL"
+        "NAME", "QTH", "CONT", "COUNTRY", "DXCC", "CQZ", "ITUZ"
     ]
 
     var body: some View {
@@ -252,6 +242,7 @@ struct LogTableView: View {
                                         } else {
                                             explicitlyShownColumns.remove(header)
                                         }
+                                        persistColumnVisibility()
                                     }
                                 ))
                             }
@@ -262,10 +253,12 @@ struct LogTableView: View {
 
                     Button("Show All Columns") {
                         explicitlyShownColumns = Set(appState.tableHeaders.filter { isHiddenByDefault($0) })
+                        persistColumnVisibility()
                     }
 
                     Button("Reset Default Columns") {
                         explicitlyShownColumns.removeAll()
+                        persistColumnVisibility()
                     }
                 } label: {
                     HStack(spacing: 5) {
@@ -523,6 +516,12 @@ struct LogTableView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("YAAM will page through every confirmed QRZ record and download LoTW confirmations from the beginning. The active station needs its QRZ Logbook API key and Settings needs your LoTW credentials. Existing log entries are preserved; only confirmation fields are reconciled.")
+        }
+        .onAppear {
+            restoreColumnVisibility()
+        }
+        .onChange(of: appState.activeStationProfileID) { _, _ in
+            restoreColumnVisibility()
         }
     }
 
@@ -884,7 +883,7 @@ struct LogTableView: View {
             return 9_000
         }
 
-        if header.hasPrefix("APP_") || header.hasPrefix("MY_") || isLowValueTrailingColumn(header) {
+        if TableColumnPolicy.isLowPriority(header) {
             return 10_000
         }
 
@@ -892,41 +891,31 @@ struct LogTableView: View {
     }
 
     private func isHiddenByDefault(_ header: String) -> Bool {
-        defaultHiddenColumns.contains(header) ||
-        header.hasPrefix("MY_") ||
-        header.hasPrefix("APP_LOTW_") ||
-        header.hasPrefix("APP_SDR_") ||
-        header == "COMMENT" ||
-        header == "QTH" ||
-        header == "TIME_OFF" ||
-        header == "TX_PWR" ||
-        header == "TX_POWER" ||
-        header == "SUBMODE" ||
-        header == "QSL_SENT" ||
-        header == "IOTA" ||
-        header == "STATE" ||
-        header == "CQZ" ||
-        header == "ITUZ" ||
-        header == "DXCC" ||
-        header == "APP_YAAM_LAST_EMAIL" ||
-        header == "APP_YAAM_EMAIL_CHECKED" ||
-        isMostlyEmpty(header)
+        TableColumnPolicy.isHiddenByDefault(header, isMostlyEmpty: isMostlyEmpty(header))
     }
 
     private func isLowValueTrailingColumn(_ header: String) -> Bool {
-        header.hasPrefix("APP_") ||
-        header == "QRZ_URL" ||
-        header == "QRZ" ||
-        header == "RANK_QSO" ||
-        header == "RANK_BAND" ||
-        header == "RANK_DXCC"
+        TableColumnPolicy.isLowPriority(header)
+    }
+
+    private var columnVisibilityStorageKey: String {
+        "logTable.explicitlyShownColumns.\(appState.activeStationProfileID?.uuidString ?? "default")"
+    }
+
+    private func restoreColumnVisibility() {
+        let saved = UserDefaults.standard.stringArray(forKey: columnVisibilityStorageKey) ?? []
+        explicitlyShownColumns = Set(saved.filter { appState.tableHeaders.contains($0) })
+    }
+
+    private func persistColumnVisibility() {
+        UserDefaults.standard.set(Array(explicitlyShownColumns).sorted(), forKey: columnVisibilityStorageKey)
     }
 
     private func isMostlyEmpty(_ header: String) -> Bool {
         guard !appState.qsoRecords.isEmpty else { return false }
         guard !preferredColumnOrder.contains(header) else { return false }
         guard !isLowValueTrailingColumn(header) else { return false }
-        guard !header.hasPrefix("APP_") else { return false }
+        guard !TableColumnPolicy.isDatabaseOnly(header) else { return false }
 
         let nonEmptyCount = appState.qsoRecords.prefix(200).reduce(0) { count, record in
             record[header].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? count : count + 1

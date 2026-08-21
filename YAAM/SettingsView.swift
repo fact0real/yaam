@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import AppKit
 
 // MARK: - macOS Preferences & Credentials Settings Sheet
 struct SettingsView: View {
@@ -25,6 +26,9 @@ struct SettingsView: View {
     @AppStorage("lotwUsername") private var lotwUsername = ""
     @State private var lotwPassword = ""
     @State private var lotwCredentialStatus = ""
+    @AppStorage("lotwCertificateContainerPath") private var lotwCertificateContainerPath = ""
+    @State private var lotwCertificatePassword = ""
+    @State private var lotwCertificateStatus = ""
     @AppStorage("hamqthUsername") private var hamqthUsername = ""
     @State private var hamqthPassword = ""
     @State private var hamqthCredentialStatus = ""
@@ -173,6 +177,42 @@ struct SettingsView: View {
                         }
 
                         credentialStatus(lotwCredentialStatus)
+                    }
+
+                    Divider()
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("LoTW Certificate Container (.p12)", systemImage: "doc.badge.gearshape")
+                            .font(.subheadline.weight(.semibold))
+                        Text(lotwCertificateContainerPath.isEmpty ? "No certificate container selected" : lotwCertificateContainerPath)
+                            .font(.caption.monospaced())
+                            .lineLimit(2)
+                            .truncationMode(.middle)
+                        HStack {
+                            Button("Choose .p12...") {
+                                chooseLoTWCertificateContainer()
+                            }
+                            Button("Remove Certificate", role: .destructive) {
+                                UserDefaults.standard.removeObject(forKey: "lotwCertificateContainerBookmark")
+                                lotwCertificateContainerPath = ""
+                            }
+                            .disabled(lotwCertificateContainerPath.isEmpty)
+                        }
+                        SecureField("Certificate password (optional, saved in Keychain)", text: $lotwCertificatePassword)
+                            .textFieldStyle(.roundedBorder)
+                        HStack {
+                            Button("Save Certificate Password") {
+                                saveCredential(lotwCertificatePassword, as: .lotwCertificatePassword, status: $lotwCertificateStatus)
+                            }
+                            .disabled(lotwCertificatePassword.isEmpty)
+                            Button("Remove Certificate Password", role: .destructive) {
+                                removeCredential(.lotwCertificatePassword, value: $lotwCertificatePassword, status: $lotwCertificateStatus)
+                            }
+                            credentialStatus(lotwCertificateStatus)
+                        }
+                        Text("YAAM keeps a security-scoped reference to the .p12 file. TQSL must import the certificate before it can sign and upload new QSOs; the file itself is never copied into the logbook.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                     
                     Text("Credentials are used to securely download your latest TQSL verification records directly from ARRL servers.")
@@ -378,6 +418,7 @@ struct SettingsView: View {
             case .qrzPassword: qrzPassword = ""
             case .qrzRankPassword: qrzRankServicePassword = ""
             case .lotwPassword: lotwPassword = ""
+            case .lotwCertificatePassword: lotwCertificatePassword = ""
             case .hamqthPassword: hamqthPassword = ""
             default: break
             }
@@ -402,6 +443,25 @@ struct SettingsView: View {
         }
 
         return UserDefaults.standard.string(forKey: "sdrControlLogPath") ?? ""
+    }
+
+    private func chooseLoTWCertificateContainer() {
+        let panel = NSOpenPanel()
+        panel.title = "Select LoTW Certificate Container"
+        panel.message = "Choose the .p12 certificate container exported from TQSL."
+        panel.prompt = "Choose Certificate"
+        panel.allowedFileTypes = ["p12", "pfx"]
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            let bookmark = try url.bookmarkData(options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil)
+            UserDefaults.standard.set(bookmark, forKey: "lotwCertificateContainerBookmark")
+            lotwCertificateContainerPath = url.path
+            lotwCertificateStatus = "Saved"
+        } catch {
+            lotwCertificateStatus = "Could not save file permission"
+        }
     }
 
     private var resolvedSDRControlLogbookPath: String {

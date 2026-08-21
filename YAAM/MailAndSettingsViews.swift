@@ -17,6 +17,17 @@ struct EmailComposerView: View {
     @State private var emailSubject: String = ""
     @State private var emailBody: String = ""
     @State private var isSending: Bool = false
+    @AppStorage("qslCardDeliveryEmailSubject") private var qslCardDeliveryEmailSubject = "QSL Card for our QSO - {CALLSIGN} de {MY_CALL}"
+    @AppStorage("qslCardDeliveryEmailBody") private var qslCardDeliveryEmailBody = """
+Hello {NAME},
+
+It was a genuine pleasure to meet you on the air. I have attached my QSL card for our confirmed contact.{QSO_DETAILS}
+
+Thank you for the QSO. This card was prepared with yaam.app.
+
+Warm 73,
+{MY_CALL}
+"""
     
     // Debugger States
     @State private var showDebugLog: Bool = false
@@ -265,7 +276,6 @@ struct EmailComposerView: View {
             """
             
         case "QSL Card Delivery":
-            emailSubject = "QSL Card for our QSO - \(targetCall) de \(myCall)"
             let qsoName = qso?["NAME"].trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             let greetingName = qsoName.isEmpty ? targetCall : qsoName
             
@@ -288,24 +298,39 @@ struct EmailComposerView: View {
                 }
             }
             
-            emailBody = """
-            Hello \(greetingName),
-            
-            I hope you are doing very well.
-            
-            It was a genuine pleasure to meet you on the air. Thank you for the nice QSO and for the friendly signal across the bands.
-            
-            I have attached my QSL card for our confirmed contact. I hope it reaches you well and brings back a good memory of our QSO.\(detailsBlock)
-            
-            Many thanks again, and I look forward to hearing you again soon.
-            
-            Warm 73,
-            \(myCall)
-            """
+            emailSubject = applyingQSLDeliveryTokens(
+                qslCardDeliveryEmailSubject,
+                callsign: targetCall,
+                name: greetingName,
+                myCall: myCall,
+                details: detailsBlock
+            )
+            emailBody = applyingQSLDeliveryTokens(
+                qslCardDeliveryEmailBody,
+                callsign: targetCall,
+                name: greetingName,
+                myCall: myCall,
+                details: detailsBlock
+            )
             
         default:
             break
         }
+    }
+
+    private func applyingQSLDeliveryTokens(
+        _ template: String,
+        callsign: String,
+        name: String,
+        myCall: String,
+        details: String
+    ) -> String {
+        template
+            .replacingOccurrences(of: "{CALLSIGN}", with: callsign)
+            .replacingOccurrences(of: "{NAME}", with: name)
+            .replacingOccurrences(of: "{MY_CALL}", with: myCall)
+            .replacingOccurrences(of: "{QSO_DETAILS}", with: details)
+            .replacingOccurrences(of: "{YAAM_APP}", with: "yaam.app")
     }
     
     private func formatDate(_ rawDate: String) -> String {
@@ -427,6 +452,17 @@ struct SMTPSettingsView: View {
     @AppStorage("smtpUser") private var smtpUser = ""
     @State private var smtpPass = ""
     @State private var saveStatus = ""
+    @AppStorage("qslCardDeliveryEmailSubject") private var qslCardDeliveryEmailSubject = "QSL Card for our QSO - {CALLSIGN} de {MY_CALL}"
+    @AppStorage("qslCardDeliveryEmailBody") private var qslCardDeliveryEmailBody = """
+Hello {NAME},
+
+It was a genuine pleasure to meet you on the air. I have attached my QSL card for our confirmed contact.{QSO_DETAILS}
+
+Thank you for the QSO. This card was prepared with yaam.app.
+
+Warm 73,
+{MY_CALL}
+"""
     
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -450,6 +486,22 @@ struct SMTPSettingsView: View {
                 SecureField("New App Password (blank keeps the saved password):", text: $smtpPass)
             }
             .padding(.vertical, 8)
+
+            if embeddedInSettings {
+                Divider()
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("QSL Card Delivery Template", systemImage: "envelope.badge")
+                        .font(.headline)
+                    TextField("Subject", text: $qslCardDeliveryEmailSubject)
+                    TextEditor(text: $qslCardDeliveryEmailBody)
+                        .font(.system(.body, design: .monospaced))
+                        .frame(minHeight: 150)
+                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.gray.opacity(0.3)))
+                    Text("Available: {CALLSIGN}, {NAME}, {MY_CALL}, {QSO_DETAILS}, {YAAM_APP}. Changes apply to the next QSL email.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
             
             if embeddedInSettings {
                 Label("Server settings update immediately. Save the app password once after editing it.", systemImage: "lock.fill")

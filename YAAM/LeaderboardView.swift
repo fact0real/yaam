@@ -418,6 +418,7 @@ struct RankPerformanceMonitor: View {
                                 callsign: callsign,
                                 countryIso: rivalSeries?.countryIso,
                                 latestGap: rivalSeries?.latestGap,
+                                latestMovement: rivalSeries?.latestMovement,
                                 removeAction: { removeAction(callsign) }
                             )
                         }
@@ -590,6 +591,7 @@ struct TrackedRivalRow: View {
     let callsign: String
     let countryIso: String?
     let latestGap: Int?
+    let latestMovement: Int?
     let removeAction: () -> Void
 
     private var gapText: String {
@@ -607,6 +609,13 @@ struct TrackedRivalRow: View {
         return .secondary
     }
 
+    private var movementText: String? {
+        guard let latestMovement else { return nil }
+        if latestMovement > 0 { return "Today +\(latestMovement.formatted())" }
+        if latestMovement < 0 { return "Today \(latestMovement.formatted())" }
+        return "Today unchanged"
+    }
+
     var body: some View {
         HStack(spacing: 8) {
             Text(countryToFlag(countryIso ?? ""))
@@ -618,6 +627,11 @@ struct TrackedRivalRow: View {
                 Text(gapText)
                     .font(.caption2)
                     .foregroundColor(gapColor)
+                if let movementText {
+                    Text(movementText)
+                        .font(.caption2.monospacedDigit())
+                        .foregroundColor(latestMovement == 0 ? .secondary : (latestMovement ?? 0) > 0 ? .green : .orange)
+                }
             }
             Spacer()
             Button(action: removeAction) {
@@ -752,8 +766,11 @@ struct RankGapTrendChart: View {
         Path { path in
             guard let first = coordinates.first else { return }
             path.move(to: first)
+            var previous = first
             for point in coordinates.dropFirst() {
+                path.addLine(to: CGPoint(x: point.x, y: previous.y))
                 path.addLine(to: point)
+                previous = point
             }
         }
     }

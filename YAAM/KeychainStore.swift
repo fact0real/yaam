@@ -11,6 +11,7 @@ enum SecureCredential: String, CaseIterable {
     case qrzPassword = "qrz.password"
     case qrzAPIKey = "qrz.api-key"
     case lotwPassword = "lotw.password"
+    case lotwCertificatePassword = "lotw.certificate-password"
     case hamqthPassword = "hamqth.password"
     case eqslPassword = "eqsl.password"
     case clubLogPassword = "clublog.password"

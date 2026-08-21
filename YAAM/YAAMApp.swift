@@ -1,6 +1,5 @@
 //  In the name of Allah
 //  YAAMApp.swift
-//  ADIF to Excel
 //
 //  Created by factoreal on 7/29/26.
 //

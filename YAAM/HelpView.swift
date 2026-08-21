@@ -265,13 +265,14 @@ struct HelpView: View {
         Group {
             helpHeader(title: "Contest Calendar", subtitle: "Use the Operator Desk calendar to pick upcoming operating windows and move quickly into a contest session.", icon: "calendar.badge.clock", color: .blue)
             HelpFlow(steps: [
-                HelpFlowStep(icon: "calendar", title: "Review", detail: "Open Operator Desk > Calendar/6m and scan the highlighted upcoming contests."),
+                HelpFlowStep(icon: "calendar", title: "Review", detail: "Open Operator Desk > Calendar/6m. YAAM loads the current WA7BNM 8-day calendar and keeps the last successful copy available offline."),
                 HelpFlowStep(icon: "arrow.up.right.square", title: "Verify", detail: "Open the WA7BNM 5-week calendar for the official schedule and rule links."),
                 HelpFlowStep(icon: "flag.checkered", title: "Prepare", detail: "Create or resume a Contest Workspace session with the official contest ID."),
                 HelpFlowStep(icon: "square.and.arrow.up", title: "Submit", detail: "Export Cabrillo after the session and validate with the sponsor's checker.")
             ])
             helpSection("Practical Use") {
-                HelpDefinition(icon: "location.north.line", title: "Regional focus", text: "YAAM highlights contests that are useful from Iran and the Middle East, but the linked calendar remains authoritative for late changes.")
+                HelpDefinition(icon: "location.north.line", title: "Regional focus", text: "YAAM marks worldwide, Asia, Europe, Middle East, and Turkiye events as relevant from Iran. The linked WA7BNM calendar remains authoritative for late changes and full rules.")
+                HelpDefinition(icon: "arrow.clockwise", title: "Refresh and cache", text: "Use Refresh to request the latest contest list. A network failure never removes the last successfully loaded calendar.")
                 HelpDefinition(icon: "timer", title: "UTC windows", text: "Times are shown in UTC so they match ADIF, Cabrillo, LoTW, and most contest announcements.")
                 HelpDefinition(icon: "chart.line.uptrend.xyaxis", title: "Rank growth", text: "Use contests to increase QSO volume, find new DXCC entities, and fill missing bands for QRZ Rank movement.")
             }

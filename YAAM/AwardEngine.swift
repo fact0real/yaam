@@ -248,13 +248,15 @@ nonisolated enum AwardEngine {
     static func fourCharacterGrids(_ record: QSORecordModel) -> Set<String> {
         var values = references(record["VUCC_GRIDS"])
         if values.isEmpty { values = references(record["GRIDSQUARE"]) }
-        return Set(values.compactMap { value in
-            let compact = value.filter { $0.isLetter || $0.isNumber }.uppercased()
-            guard compact.count >= 4 else { return nil }
-            let grid = String(compact.prefix(4))
-            guard grid.count == 4 else { return nil }
-            return grid
-        })
+        var grids = Set(values.compactMap(GridLocator.fourCharacterGrid(from:)))
+        if grids.isEmpty,
+           let derived = GridLocator.fourCharacterGrid(
+                latitude: record["LAT"].isEmpty ? record["LATITUDE"] : record["LAT"],
+                longitude: record["LON"].isEmpty ? record["LONGITUDE"] : record["LON"]
+           ) {
+            grids.insert(derived)
+        }
+        return grids
     }
 
     private static let validContinents: Set<String> = ["AF", "AS", "EU", "NA", "OC", "SA"]

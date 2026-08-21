@@ -277,6 +277,13 @@ nonisolated final class LogbookDatabase: @unchecked Sendable {
                     try stepDone(insertStatement)
                 }
 
+                try updateFieldCatalog(
+                    profileID: profileID,
+                    headers: headers,
+                    records: records,
+                    timestamp: now
+                )
+
                 let headerData = try JSONEncoder().encode(headers)
                 let headerValue = String(data: headerData, encoding: .utf8) ?? "[]"
                 try setMetadataValue(headerValue, for: "headers.\(profileID.uuidString.lowercased())")
@@ -319,6 +326,13 @@ nonisolated final class LogbookDatabase: @unchecked Sendable {
                 sqlite3_bind_double(statement, 11, now)
                 sqlite3_bind_double(statement, 12, now)
                 try stepDone(statement)
+
+                try updateFieldCatalog(
+                    profileID: profileID,
+                    headers: headers,
+                    records: [record],
+                    timestamp: now
+                )
 
                 let headerData = try JSONEncoder().encode(headers)
                 let headerValue = String(data: headerData, encoding: .utf8) ?? "[]"
@@ -693,6 +707,16 @@ nonisolated final class LogbookDatabase: @unchecked Sendable {
             CREATE INDEX IF NOT EXISTS idx_qsos_call_date
                 ON qsos(call, qso_date, time_on);
 
+            CREATE TABLE IF NOT EXISTS qso_field_catalog (
+                station_profile_id TEXT NOT NULL,
+                field_name TEXT NOT NULL,
+                is_database_only INTEGER NOT NULL DEFAULT 0,
+                first_seen_at REAL NOT NULL,
+                last_seen_at REAL NOT NULL,
+                PRIMARY KEY(station_profile_id, field_name),
+                FOREIGN KEY(station_profile_id) REFERENCES station_profiles(id) ON DELETE CASCADE
+            );
+
             CREATE TABLE IF NOT EXISTS audit_log (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 created_at REAL NOT NULL,
@@ -733,7 +757,40 @@ nonisolated final class LogbookDatabase: @unchecked Sendable {
                 FOREIGN KEY(station_profile_id) REFERENCES station_profiles(id) ON DELETE CASCADE
             );
             """)
-        try setMetadataValue("2", for: "schema.version")
+        try setMetadataValue("3", for: "schema.version")
+    }
+
+    private func updateFieldCatalog(
+        profileID: UUID,
+        headers: [String],
+        records: [PersistedQSO],
+        timestamp: TimeInterval
+    ) throws {
+        let fields = Set(headers.map(TableColumnPolicy.normalized)).union(
+            records.flatMap { $0.fields.keys.map(TableColumnPolicy.normalized) }
+        ).filter { !$0.isEmpty }
+        guard !fields.isEmpty else { return }
+
+        let statement = try prepare("""
+            INSERT INTO qso_field_catalog (
+                station_profile_id, field_name, is_database_only, first_seen_at, last_seen_at
+            ) VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(station_profile_id, field_name) DO UPDATE SET
+                is_database_only = excluded.is_database_only,
+                last_seen_at = excluded.last_seen_at;
+            """)
+        defer { sqlite3_finalize(statement) }
+
+        for field in fields {
+            sqlite3_reset(statement)
+            sqlite3_clear_bindings(statement)
+            bind(profileID.uuidString, to: 1, in: statement)
+            bind(field, to: 2, in: statement)
+            sqlite3_bind_int(statement, 3, TableColumnPolicy.isDatabaseOnly(field) ? 1 : 0)
+            sqlite3_bind_double(statement, 4, timestamp)
+            sqlite3_bind_double(statement, 5, timestamp)
+            try stepDone(statement)
+        }
     }
 
     private func qsoCountInternal(profileID: UUID?) throws -> Int {

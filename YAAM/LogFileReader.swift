@@ -176,6 +176,7 @@ nonisolated enum LogFileReader {
                     record[key] = value
                 }
             }
+            normalizeSmartSDRConfirmations(in: &record)
             if (record["BAND"] ?? "").isEmpty {
                 let inferredBand = ADIFConversionFilter.resolvedBand(for: record)
                 if !inferredBand.isEmpty { record["BAND"] = inferredBand }
@@ -208,6 +209,14 @@ nonisolated enum LogFileReader {
         switch upper {
         case "UNIQUEID", "UNIQUE_ID":
             return "APP_SDR_CONTROL_ID"
+        case "LOTWCONFIRMED", "LOTW_QSL_RECEIVED", "LOTWQSLRCVD", "LOTW_QSL_RCVD":
+            return "LOTW_QSL_RCVD"
+        case "QRZCONFIRMED", "QRZ_QSL_RECEIVED", "QRZQSLRCVD", "QRZLOG_QSL_RCVD":
+            return "QRZLOG_QSL_RCVD"
+        case "QSLRECEIVED", "QSL_RECEIVED", "QSLRCVD":
+            return "QSL_RCVD"
+        case "CONFIRMED", "ISCONFIRMED", "QSO_CONFIRMED":
+            return "APP_SDR_CONTROL_CONFIRMED"
         default:
             let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "_"))
             return upper.unicodeScalars.map { allowed.contains($0) ? String($0) : "_" }.joined()
@@ -272,6 +281,20 @@ nonisolated enum LogFileReader {
         let call = record["CALL"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let date = record["QSO_DATE"]?.filter(\.isNumber) ?? ""
         return !call.isEmpty && date.count == 8
+    }
+
+    private static func normalizeSmartSDRConfirmations(in record: inout [String: String]) {
+        let isAffirmative: (String?) -> Bool = { value in
+            ["1", "Y", "YES", "TRUE", "V", "C", "CONFIRMED", "VERIFIED"].contains(
+                (value ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            )
+        }
+        let hasLoTW = isAffirmative(record["LOTW_QSL_RCVD"])
+        let hasQRZ = isAffirmative(record["QRZLOG_QSL_RCVD"])
+        let isConfirmed = hasLoTW || hasQRZ || isAffirmative(record["QSL_RCVD"]) || isAffirmative(record["APP_SDR_CONTROL_CONFIRMED"])
+        if isConfirmed { record["QSL_RCVD"] = "Y" }
+        if hasLoTW { record["LOTW_QSL_RCVD"] = "Y" }
+        if hasQRZ { record["QRZLOG_QSL_RCVD"] = "Y" }
     }
 
     private static func embeddedADIFFields(in comment: String) -> [String: String] {
