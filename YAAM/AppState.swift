@@ -413,7 +413,9 @@ func countryToFlag(_ country: String) -> String {
     case "fiji islands", "fiji": return "🇫🇯"
     case "canary is.", "canary islands", "canary island", "canary": return "🇮🇨"
     case "sardinia": return "🇮🇹"
-    case "crete": return "🇬🇷"
+    // Crete is part of Greece, but it is a distinct DXCC-style operating entity in
+    // several log sources. Keep the Greek flag while marking the regional entity.
+    case "crete": return "🇬🇷◈"
     case "azores", "azores is.": return "🇵🇹"
     case "balearic is.", "balearic islands": return "🇪🇸"
     case "bonaire": return "🇧🇶"
@@ -653,7 +655,7 @@ func countryToFlag(_ country: String) -> String {
     if clean.contains("malawi") { return "🇲🇼" }
     if clean.contains("canary") { return "🇮🇨" }
     if clean.contains("sardinia") { return "🇮🇹" }
-    if clean.contains("crete") { return "🇬🇷" }
+    if clean.contains("crete") { return "🇬🇷◈" }
     if clean.contains("azores") { return "🇵🇹" }
     if clean.contains("balearic") { return "🇪🇸" }
     if clean.contains("bonaire") { return "🇧🇶" }
@@ -1687,6 +1689,24 @@ class AppState: NSObject, ObservableObject {
     @Published var selectedQSLCardQSO: QSORecordModel? = nil
     @Published var isSendingBatchMail: Bool = false
     @Published var batchMailStatus: String = ""
+
+    func openQRZRankCongratulationsEmailComposer(for record: QSORecordModel) {
+        let email = record["EMAIL"].trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !email.isEmpty else {
+            alertTitle = "Email Address Needed"
+            alertMessage = "Enrich this contact first, then YAAM can prepare a QRZ congratulations and confirmation email."
+            showAlert = true
+            return
+        }
+
+        selectedEmailCallsign = record["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        selectedEmailAddress = email
+        selectedEmailQSO = record
+        selectedEmailTemplate = "QRZ Rank Congratulations & QSL"
+        selectedEmailUnconfirmedQSOs = []
+        selectedEmailIncomingRequest = nil
+        showEmailComposer = true
+    }
     
     // QRZ Rank & Login States
     @Published var isFetchingRank: Bool = false
@@ -1831,6 +1851,7 @@ class AppState: NSObject, ObservableObject {
 
     override init() {
         super.init()
+        migrateEmailTemplateReferences()
         configurePersistentStorage()
         loadMasterLogbook()
         loadRankHistory()
@@ -1852,6 +1873,16 @@ class AppState: NSObject, ObservableObject {
         DispatchQueue.main.async {
             CredentialVault.migrateLegacyCredentials()
         }
+    }
+
+    private func migrateEmailTemplateReferences() {
+        let key = "qslCardDeliveryEmailBody"
+        guard let storedTemplate = UserDefaults.standard.string(forKey: key), storedTemplate.contains("yaam.app") else { return }
+
+        let updatedTemplate = storedTemplate
+            .replacingOccurrences(of: "https://yaam.app", with: "https://github.com/fact0real/yaam")
+            .replacingOccurrences(of: "yaam.app", with: "YAAM")
+        UserDefaults.standard.set(updatedTemplate, forKey: key)
     }
 
     func playActivitySound(_ sound: ActivitySound) {
@@ -5271,11 +5302,17 @@ class AppState: NSObject, ObservableObject {
                 Date: \(dateStr)
                 Message-ID: \(messageID)
                 Content-Type: text/plain; charset=UTF-8
+                Content-Transfer-Encoding: 8bit
                 
                 \(body)
                 """
                 
-                if let data = emailContent.data(using: .utf8) {
+                let normalizedEmailContent = emailContent
+                    .replacingOccurrences(of: "\r\n", with: "\n")
+                    .replacingOccurrences(of: "\r", with: "\n")
+                    .replacingOccurrences(of: "\n", with: "\r\n")
+
+                if let data = normalizedEmailContent.data(using: .utf8) {
                     emailContentData.append(data)
                 }
             }

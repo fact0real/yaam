@@ -99,7 +99,7 @@ extension AppState {
         isFetchingDXpeditions = true
         dxpeditionStatus = "Refreshing announced DXpeditions..."
         var request = URLRequest(url: DXpeditionService.sourceURL, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 25)
-        request.setValue("YAAM/\(currentVersion) (+https://yaam.app)", forHTTPHeaderField: "User-Agent")
+        request.setValue("YAAM/\(currentVersion) (+https://github.com/fact0real/yaam)", forHTTPHeaderField: "User-Agent")
 
         URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
             let entries = data.flatMap { String(data: $0, encoding: .utf8) }.map(DXpeditionService.parse) ?? []

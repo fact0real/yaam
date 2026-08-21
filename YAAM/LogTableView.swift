@@ -461,21 +461,18 @@ struct LogTableView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color(NSColor.textBackgroundColor))
             } else {
-                ScrollView(.horizontal, showsIndicators: true) {
-                    VStack(alignment: .leading, spacing: 0) {
-                        headerRowView
-                        
-                        ScrollView(.vertical, showsIndicators: true) {
-                            LazyVStack(alignment: .leading, spacing: 0) {
-                                ForEach(visibleRecords) { record in
-                                    rowView(for: record)
-                                }
+                ScrollView([.horizontal, .vertical], showsIndicators: true) {
+                    LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
+                        Section {
+                            ForEach(visibleRecords) { record in
+                                rowView(for: record)
                             }
+                        } header: {
+                            headerRowView
+                                .background(Color(NSColor.textBackgroundColor))
                         }
                     }
-                    .frame(maxHeight: .infinity, alignment: .topLeading)
                 }
-                .coordinateSpace(name: "TableScroll")
                 .background(Color(NSColor.textBackgroundColor))
             }
             
@@ -564,24 +561,9 @@ struct LogTableView: View {
 
     private var headerRowView: some View {
         HStack(spacing: 0) {
-            GeometryReader { geo in
-                let minX = geo.frame(in: .named("TableScroll")).minX
-                let isPinned = minX < 0
-                let offset = isPinned ? -minX : 0
-                
-                HStack(spacing: 4) {
-                    Text("#")
-                        .font(.system(size: 11, weight: .bold, design: .monospaced))
-                        .foregroundColor(.white)
-                }
-                .frame(width: 80, height: 28, alignment: .center)
-                .background(Color.accentColor)
+            Color.accentColor
+                .frame(width: 48, height: 28)
                 .border(Color.black.opacity(0.3), width: 0.5)
-                .shadow(color: isPinned ? Color.black.opacity(0.4) : .clear, radius: 3, x: 2, y: 0)
-                .offset(x: offset)
-            }
-            .frame(width: 80, height: 28)
-            .zIndex(10)
             
             ForEach(displayedHeaders, id: \.self) { header in
                 let w = columnWidths[header] ?? defaultColumnWidth(for: header)
@@ -665,40 +647,26 @@ struct LogTableView: View {
         let call = record["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         
         return HStack(spacing: 0) {
-            GeometryReader { geo in
-                let minX = geo.frame(in: .named("TableScroll")).minX
-                let isPinned = minX < 0
-                let offset = isPinned ? -minX : 0
-                
-                HStack(spacing: 4) {
-                    Button(action: { appState.toggleRecordSelection(record.id) }) {
-                        Image(systemName: isSelected ? "checkmark.square.fill" : "square")
-                            .font(.system(size: 11))
-                            .foregroundColor(isSelected ? .accentColor : .gray)
-                    }
-                    .buttonStyle(.plain)
-                    
-                    Button(action: { appState.deleteRecord(id: record.id) }) {
-                        Image(systemName: "trash.fill")
-                            .font(.system(size: 8))
-                            .foregroundColor(.red.opacity(0.6))
-                    }
-                    .buttonStyle(.plain)
-                    
-                    Text("\(record.index)")
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
-                        .fixedSize()
+            HStack(spacing: 6) {
+                Button(action: { appState.toggleRecordSelection(record.id) }) {
+                    Image(systemName: isSelected ? "checkmark.square.fill" : "square")
+                        .font(.system(size: 11))
+                        .foregroundColor(isSelected ? .accentColor : .gray)
                 }
-                .frame(width: 80, height: 28, alignment: .center)
-                .background(statusBgColor)
-                .border(Color.gray.opacity(0.2), width: 0.5)
-                .shadow(color: isPinned ? Color.black.opacity(0.2) : .clear, radius: 3, x: 2, y: 0)
-                .offset(x: offset)
+                .buttonStyle(.plain)
+                .help(isSelected ? "Deselect QSO" : "Select QSO")
+
+                Button(action: { appState.deleteRecord(id: record.id) }) {
+                    Image(systemName: "trash.fill")
+                        .font(.system(size: 8))
+                        .foregroundColor(.red.opacity(0.6))
+                }
+                .buttonStyle(.plain)
+                .help("Delete QSO")
             }
-            .frame(width: 80, height: 28)
-            .zIndex(10)
+            .frame(width: 48, height: 28, alignment: .center)
+            .background(statusBgColor)
+            .border(Color.gray.opacity(0.2), width: 0.5)
             
             ForEach(displayedHeaders, id: \.self) { header in
                 let w = columnWidths[header] ?? defaultColumnWidth(for: header)
@@ -793,7 +761,7 @@ struct LogTableView: View {
                         Divider()
                     }
 
-                    Button(isSelected ? "Deselect Row #\(record.index)" : "Select Row #\(record.index)") {
+                    Button(isSelected ? "Deselect QSO" : "Select QSO") {
                         appState.toggleRecordSelection(record.id)
                     }
                     
@@ -815,6 +783,13 @@ struct LogTableView: View {
                         }
                         .disabled(!record.isConfirmed || record["EMAIL"].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
+                        if ["RANK_QSO", "RANK_BAND", "RANK_DXCC"].contains(where: { !record[$0].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
+                            Button("Congratulate QRZ Achievement & Request Confirmation") {
+                                appState.openQRZRankCongratulationsEmailComposer(for: record)
+                            }
+                            .disabled(record["EMAIL"].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        }
+
                         Button("Generate QSL Card") {
                             appState.selectedQSLCardQSO = record
                             appState.showQSLCardComposer = true
@@ -823,7 +798,7 @@ struct LogTableView: View {
                     
                     Divider()
                     
-                    Button("Delete Record #\(record.index)") {
+                    Button("Delete QSO") {
                         appState.deleteRecord(id: record.id)
                     }
                     Button("Delete Column '\(header)'") {

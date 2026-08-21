@@ -6,13 +6,14 @@
 import SwiftUI
 
 private enum HelpTopic: String, CaseIterable, Identifiable {
-    case start, stations, quickLog, dxCluster, radioBridge, contest, contestCalendar, dxpeditions, magicBand, syncCenter, qslHub, confirmations, qrzIncoming, logAssistant, awards, portable, connectivity, importReview, dataSafety, credentials, workflows, faq
+    case start, stations, logTable, quickLog, dxCluster, radioBridge, contest, contestCalendar, dxpeditions, magicBand, syncCenter, qslHub, confirmations, qrzIncoming, logAssistant, awards, portable, connectivity, importReview, dataSafety, credentials, workflows, faq
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .start: return "Getting Started"
         case .stations: return "Station Profiles"
+        case .logTable: return "Log Table & Filters"
         case .quickLog: return "Quick Log"
         case .dxCluster: return "DX Cluster"
         case .radioBridge: return "Radio & Digital Bridge"
@@ -40,6 +41,7 @@ private enum HelpTopic: String, CaseIterable, Identifiable {
         switch self {
         case .start: return "sparkles"
         case .stations: return "antenna.radiowaves.left.and.right"
+        case .logTable: return "tablecells"
         case .quickLog: return "plus.circle.fill"
         case .dxCluster: return "dot.radiowaves.left.and.right"
         case .radioBridge: return "wave.3.right.circle"
@@ -66,13 +68,28 @@ private enum HelpTopic: String, CaseIterable, Identifiable {
 
 struct HelpView: View {
     @State private var selection: HelpTopic? = .start
+    @State private var searchText = ""
+
+    private var visibleTopics: [HelpTopic] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return HelpTopic.allCases }
+        return HelpTopic.allCases.filter {
+            $0.title.localizedCaseInsensitiveContains(query)
+        }
+    }
 
     var body: some View {
         NavigationSplitView {
-            List(HelpTopic.allCases, selection: $selection) { topic in
-                Label(topic.title, systemImage: topic.icon)
-                    .tag(topic)
-                    .padding(.vertical, 3)
+            VStack(spacing: 0) {
+                TextField("Search help", text: $searchText)
+                    .textFieldStyle(.roundedBorder)
+                    .padding(10)
+
+                List(visibleTopics, selection: $selection) { topic in
+                    Label(topic.title, systemImage: topic.icon)
+                        .tag(topic)
+                        .padding(.vertical, 3)
+                }
             }
             .navigationTitle("YAAM Help")
             .navigationSplitViewColumnWidth(min: 190, ideal: 215, max: 245)
@@ -93,6 +110,7 @@ struct HelpView: View {
         switch topic {
         case .start: gettingStarted
         case .stations: stationProfiles
+        case .logTable: logTable
         case .quickLog: quickLog
         case .dxCluster: dxCluster
         case .radioBridge: radioBridge
@@ -157,6 +175,35 @@ struct HelpView: View {
                 HelpDefinition(icon: "key.horizontal.fill", title: "Service identity", text: "LoTW station location, eQSL QTH nickname, and a station-specific QRZ Logbook API key.")
             }
             helpCallout(icon: "exclamationmark.triangle.fill", title: "Deleting a profile", text: "An active profile or a profile that still owns QSOs cannot be deleted. Activate another profile and preserve its contacts first.", color: .orange)
+        }
+    }
+
+    private var logTable: some View {
+        Group {
+            helpHeader(
+                title: "Log Table & Filters",
+                subtitle: "Browse large station logs smoothly, keep only useful columns on screen, and apply repeatable UTC-based filters without changing stored QSO data.",
+                icon: "tablecells",
+                color: .blue
+            )
+            HelpFlow(steps: [
+                HelpFlowStep(icon: "magnifyingglass", title: "Find", detail: "Use the toolbar search to match a callsign, country, grid, email, or any visible ADIF value."),
+                HelpFlowStep(icon: "line.3.horizontal.decrease.circle", title: "Filter", detail: "Open Filters to narrow the log by UTC date, band, mode, callsign, country, confirmation state, and more."),
+                HelpFlowStep(icon: "arrow.up.arrow.down", title: "Order", detail: "Applying filters orders matching QSOs by QSO date and UTC time, newest first."),
+                HelpFlowStep(icon: "rectangle.3.group", title: "Focus", detail: "Use Columns to reveal an extra field temporarily or hide it again without removing any information from the Master Log.")
+            ])
+            helpSection("Columns and Stored Data") {
+                HelpDefinition(icon: "eye.slash", title: "Hidden is not deleted", text: "Operational and service fields can be hidden by default to keep the table readable. They remain in the protected database and are available from Columns whenever needed.")
+                HelpDefinition(icon: "envelope", title: "Contact and QRZ data", text: "EMAIL, QRZ_URL, and rank columns remain visible by default. Other service bookkeeping fields stay available without crowding daily operation.", color: .blue)
+                HelpDefinition(icon: "slider.horizontal.3", title: "Your layout persists", text: "Column visibility is saved for the active station profile and is restored when changing tabs or reopening YAAM.")
+                HelpDefinition(icon: "number.square", title: "No record-number column", text: "YAAM does not show its internal database row number in the table. Use date, time, callsign, and the search/filter tools to identify a QSO; the stable internal identifier remains protected in the database.", color: .secondary)
+            }
+            helpSection("Filtering Safely") {
+                HelpDefinition(icon: "clock", title: "UTC date range", text: "Date filters compare QSO_DATE in UTC. After Apply Filters, matching results are sorted by QSO_DATE and TIME_ON, newest first.", color: .green)
+                HelpDefinition(icon: "checkmark.seal", title: "Confirmation filter", text: "Confirmed means a local QSO has a recognized LoTW, QRZ, eQSL, or QSL confirmation. Sync QSLs or Full QSL History refreshes these fields from configured services.")
+                HelpDefinition(icon: "xmark.circle", title: "Reset without risk", text: "Reset Filters clears only the temporary filter rules. It never removes QSOs, confirmations, or enrichment fields from the Master Log.", color: .orange)
+            }
+            helpCallout(icon: "cursorarrow.rays", title: "Fast large-log browsing", text: "Rows are rendered lazily and the table header stays visible while scrolling. Use search or filters before opening a wide set of auxiliary ADIF columns for the quickest review of a large log.", color: .blue)
         }
     }
 
@@ -357,7 +404,7 @@ struct HelpView: View {
             helpSection("Safe Completion") {
                 HelpDefinition(icon: "doc.text", title: "Review before creating", text: "The email asks the operator for the QSO date, UTC time, band, mode, reports, and confirmation method. Add a local QSO only after the details are credible.")
                 HelpDefinition(icon: "person.badge.key", title: "QRZ session", text: "Incoming requests are read through the user-approved QRZ browser session. If QRZ requires MFA or a browser check, complete it in QRZ Login and refresh.")
-                HelpDefinition(icon: "paperplane", title: "Your mail account", text: "YAAM drafts the email with your configured QSL signature and a short yaam.app reference; it does not send mail silently.")
+                HelpDefinition(icon: "paperplane", title: "Your mail account", text: "YAAM drafts the email with your configured QSL signature and a short YAAM reference; it does not send mail silently.")
             }
         }
     }

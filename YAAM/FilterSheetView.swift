@@ -56,6 +56,10 @@ struct FilterSheetView: View {
                             DatePicker("To:", selection: $tempCriteria.endDate, displayedComponents: .date)
                                 .disabled(!tempCriteria.useDate)
                         }
+
+                        Label("Applied results are ordered by UTC date and time, newest first.", systemImage: "clock.arrow.2.circlepath")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
                     }
                     .padding(12)
                     .background(Color(NSColor.controlBackgroundColor).opacity(0.6))
@@ -333,7 +337,9 @@ struct FilterSheetView: View {
                 
                 Button("Apply Filters") {
                     appState.filterCriteria = tempCriteria
-                    appState.appendLog("Applied active filters.")
+                    appState.sortHeader = "QSO_DATE"
+                    appState.sortAscending = false
+                    appState.appendLog("Applied active filters and ordered matching QSOs by UTC date/time (newest first).")
                     dismiss()
                 }
                 .keyboardShortcut(.defaultAction)

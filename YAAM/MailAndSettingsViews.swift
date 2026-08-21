@@ -23,7 +23,7 @@ Hello {NAME},
 
 It was a genuine pleasure to meet you on the air. I have attached my QSL card for our confirmed contact.{QSO_DETAILS}
 
-Thank you for the QSO. This card was prepared with yaam.app.
+Thank you for the QSO. This card was prepared with YAAM.
 
 Warm 73,
 {MY_CALL}
@@ -33,7 +33,7 @@ Warm 73,
     @State private var showDebugLog: Bool = false
     @State private var smtpDebugOutput: String = ""
     
-    let templates = ["QSL Card Request", "Sked Request", "LoTW/QRZ Confirmation", "QRZ Incoming Details", "QSL Card Delivery"]
+    let templates = ["QSL Card Request", "Sked Request", "LoTW/QRZ Confirmation", "QRZ Rank Congratulations & QSL", "QRZ Incoming Details", "QSL Card Delivery"]
     
     // DIRECT RESOLVER: Always prioritize the exact clicked row record!
     private var currentQSO: QSORecordModel? {
@@ -238,6 +238,8 @@ Warm 73,
         
         let bandMention = !qsoBand.isEmpty ? " on \(qsoBand)" : ""
         let bandTag = !qsoBand.isEmpty ? " (\(qsoBand))" : ""
+        let qsoName = qso?["NAME"].trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let greetingName = qsoName.isEmpty ? targetCall : qsoName
         
         switch template {
         case "QSL Card Request":
@@ -275,6 +277,51 @@ Warm 73,
             \(myCall)
             """
 
+        case "QRZ Rank Congratulations & QSL":
+            let rankLines = [
+                ("QSO World Rank", qso?["RANK_QSO"] ?? ""),
+                ("Bands World Rank", qso?["RANK_BAND"] ?? ""),
+                ("DXCC World Rank", qso?["RANK_DXCC"] ?? "")
+            ]
+            .filter { !$0.1.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .map { "- \($0.0): \($0.1)" }
+            .joined(separator: "\n")
+            let achievementBlock = rankLines.isEmpty
+                ? "I noticed the strength of your QRZ Logbook activity and wanted to congratulate you on the work behind it."
+                : "I noticed your excellent QRZ standing:\n\(rankLines)\n\nCongratulations on such a strong result. It clearly reflects consistent operating, band coverage, and careful logging."
+            let confirmationBlock: String
+            if qso?.isConfirmed == true {
+                confirmationBlock = "Our QSO is already confirmed, and I have attached my QSL card for you. I hope you enjoy it."
+            } else {
+                confirmationBlock = "When convenient, could you please confirm our QSO in QRZ Logbook and/or LoTW? I would be very grateful. I have kept the QSO details above so they are easy to compare with your log."
+            }
+
+            emailSubject = "A note after our QSO and your QRZ achievement - \(myCall)"
+            emailBody = """
+            Hello \(greetingName),
+
+            It was a pleasure to find you on the air\(bandMention). I was looking through my log after our QSO and noticed your QRZ standing.\(qsoDetailsBlock)
+
+            \(achievementBlock)
+
+            I keep my station log, confirmations, and award progress in YAAM, a small amateur-radio logbook project that I use every day. Your result is genuinely motivating. I am working toward the same kind of steady QRZ performance, and I would enjoy learning more about your operating style, station, and the habits that have helped you build it.
+
+            \(confirmationBlock)
+
+            If YAAM looks useful to you, the latest version is available on GitHub:
+            https://github.com/fact0real/yaam
+
+            There is also a short overview of its features here:
+            https://ep2aes.asis.sh
+
+            I would be very happy to hear any feedback you may have, whether about YAAM or simply about how you approach your operating and logging.
+
+            Thank you again for the contact. I hope we can meet on the air again soon.
+
+            Best 73,
+            \(myCall)
+            """
+
         case "QRZ Incoming Details":
             let incoming = appState.selectedEmailIncomingRequest
             let requestedDate = incoming?.qsoDate.isEmpty == false ? incoming!.qsoDate : "the date shown in QRZ Logbook"
@@ -289,13 +336,10 @@ Warm 73,
             Thank you for your help and 73,
             \(myCall)
 
-            Sent with yaam.app
+            Prepared with YAAM
             """
             
         case "QSL Card Delivery":
-            let qsoName = qso?["NAME"].trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            let greetingName = qsoName.isEmpty ? targetCall : qsoName
-            
             let sentRst = qso?["RST_SENT"].trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             let rcvdRst = qso?["RST_RCVD"].trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             let qsoRst = [sentRst, rcvdRst].filter { !$0.isEmpty }.joined(separator: "/")
@@ -347,7 +391,7 @@ Warm 73,
             .replacingOccurrences(of: "{NAME}", with: name)
             .replacingOccurrences(of: "{MY_CALL}", with: myCall)
             .replacingOccurrences(of: "{QSO_DETAILS}", with: details)
-            .replacingOccurrences(of: "{YAAM_APP}", with: "yaam.app")
+            .replacingOccurrences(of: "{YAAM_APP}", with: "YAAM")
     }
     
     private func formatDate(_ rawDate: String) -> String {
@@ -393,7 +437,7 @@ Warm 73,
         isSending = true
         showDebugLog = false
         
-        let shouldAttach = (selectedTemplate == "QSL Card Delivery" && currentQSO?.isConfirmed == true)
+        let shouldAttach = (["QSL Card Delivery", "QRZ Rank Congratulations & QSL"].contains(selectedTemplate) && currentQSO?.isConfirmed == true)
         let targetQSO = currentQSO
         let recipient = appState.selectedEmailAddress
         let subject = emailSubject
@@ -475,7 +519,7 @@ Hello {NAME},
 
 It was a genuine pleasure to meet you on the air. I have attached my QSL card for our confirmed contact.{QSO_DETAILS}
 
-Thank you for the QSO. This card was prepared with yaam.app.
+Thank you for the QSO. This card was prepared with YAAM.
 
 Warm 73,
 {MY_CALL}

@@ -160,7 +160,7 @@ struct LeaderboardView: View {
                 let owner = appState.ownerRankData
 
                 ScrollView {
-                    VStack(spacing: 18) {
+                    LazyVStack(spacing: 18) {
                         PlayerCard(
                             title: "YOU (STATION)",
                             callsign: owner?.callsign ?? appState.currentStationCallsign,
@@ -200,7 +200,7 @@ struct LeaderboardView: View {
                 let isSelfSearch = (owner?.callsign?.uppercased() == searched.callsign?.uppercased())
                 
                 ScrollView {
-                    VStack(spacing: 24) {
+                    LazyVStack(spacing: 24) {
                         
                         // VS Battle Banner
                         HStack(spacing: 20) {
@@ -652,6 +652,7 @@ struct RankGapTrendChart: View {
     let series: [RankTrendSeries]
 
     private let colors: [Color] = [.blue, .purple, .orange, .green, .pink, .cyan, .red, .indigo]
+    private let maximumVisibleDays = 90
 
     private var allPoints: [RankTrendPoint] {
         series.flatMap(\.points)
@@ -677,7 +678,7 @@ struct RankGapTrendChart: View {
                 let plotWidth = max(1, geometry.size.width - 58)
                 let plotHeight = max(1, geometry.size.height - 42)
                 let origin = CGPoint(x: 44, y: 18 + plotHeight / 2)
-                let datedPoints = uniqueSortedDates()
+                let datedPoints = Array(uniqueSortedDates().suffix(maximumVisibleDays))
                 let step = datedPoints.count > 1 ? plotWidth / CGFloat(datedPoints.count - 1) : plotWidth
                 let yScale = (plotHeight / 2 - 10) / CGFloat(maxAbsGap)
 
