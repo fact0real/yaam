@@ -22,6 +22,7 @@ enum SecureCredential: String, CaseIterable {
     case smtpPassword = "smtp.password"
     case qrzCookieHeader = "qrz.cookies.header"
     case qrzCookieArchive = "qrz.cookies.archive"
+    case logAssistantAPIKey = "log-assistant.api-key"
 }
 
 nonisolated enum KeychainStore {

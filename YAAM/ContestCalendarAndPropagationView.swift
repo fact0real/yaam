@@ -5,9 +5,15 @@
 
 import AppKit
 import SwiftUI
+import UserNotifications
 
 struct ContestCalendarAndPropagationPanel: View {
     @EnvironmentObject private var appState: AppState
+    @AppStorage("contestPreferredModes") private var contestPreferredModes = "FT8, FT4"
+    @AppStorage("contestInterestKeywords") private var contestInterestKeywords = "digital, FT8, FT4"
+    @AppStorage("contestInterestNotifications") private var contestInterestNotifications = false
+    @AppStorage("dxpeditionSpotNotifications") private var dxpeditionSpotNotifications = false
+    @State private var showContestPreferences = false
 
     private let calendarURL = URL(string: "https://www.contestcalendar.com/fivewkcal.php")!
     private let pskReporterURL = URL(string: "https://pskreporter.info/pskmap.html")!
@@ -23,6 +29,7 @@ struct ContestCalendarAndPropagationPanel: View {
                 )
 
                 contestCalendar
+                dxpeditionWatch
                 sixMeterAlert
                 signalReporter
                 sixMeterEvidence
@@ -34,7 +41,67 @@ struct ContestCalendarAndPropagationPanel: View {
             appState.fetchPropagationSnapshot()
             appState.fetchPSKReporterSignals()
             appState.fetchContestCalendar()
+            appState.fetchDXpeditions()
         }
+        .onChange(of: appState.dxClusterClient.spots.first?.id) { _, _ in
+            appState.scheduleDXpeditionOpportunityNotifications()
+        }
+        .sheet(isPresented: $showContestPreferences) {
+            ContestInterestSettingsView(
+                modes: $contestPreferredModes,
+                keywords: $contestInterestKeywords,
+                notificationsEnabled: $contestInterestNotifications,
+                dxpeditionNotificationsEnabled: $dxpeditionSpotNotifications
+            )
+        }
+    }
+
+    private var dxpeditionWatch: some View {
+        let workIndex = appState.workIndex()
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("DXpedition watch", systemImage: "binoculars.fill")
+                    .font(.headline)
+                Spacer()
+                Button {
+                    appState.fetchDXpeditions(force: true)
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.borderless)
+                .help("Refresh DXpeditions")
+                .disabled(appState.isFetchingDXpeditions)
+            }
+
+            if appState.dxpeditionEntries.isEmpty {
+                ContentUnavailableView("DXpedition list unavailable", systemImage: "binoculars", description: Text(appState.dxpeditionStatus))
+                    .frame(maxWidth: .infinity, minHeight: 110)
+            } else {
+                Text(dxpeditionSummary(workIndex: workIndex))
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                    .lineSpacing(5)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10)
+                    .background(Color(nsColor: .controlBackgroundColor).opacity(0.55), in: RoundedRectangle(cornerRadius: 8))
+            }
+
+            Text(appState.dxpeditionStatus)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .contestOperationsBand(color: .purple)
+    }
+
+    private func dxpeditionSummary(workIndex: LogWorkIndex) -> String {
+        appState.dxpeditionEntries.prefix(10).map { entry in
+            let spot = appState.dxClusterClient.spots.first { $0.callsign.uppercased() == entry.callsign.uppercased() }
+            if let spot {
+                let status = workIndex.status(for: entry.callsign, band: spot.band) == .worked ? "already worked" : "good chance to work"
+                return "● \(entry.callsign)  \(entry.entity)  ON AIR \(spot.band) \(String(format: "%.3f", spot.frequencyMHz)) MHz  \(status)"
+            }
+            return "○ \(entry.callsign)  \(entry.entity)  \(entry.start)-\(entry.end)  \(entry.isActive ? "active" : "planned")"
+        }.joined(separator: "\n")
     }
 
     private var contestCalendar: some View {
@@ -54,6 +121,13 @@ struct ContestCalendarAndPropagationPanel: View {
                 Link(destination: calendarURL) {
                     Label("WA7BNM 5-week calendar", systemImage: "arrow.up.right.square")
                 }
+                Button {
+                    showContestPreferences = true
+                } label: {
+                    Image(systemName: "slider.horizontal.3")
+                }
+                .buttonStyle(.borderless)
+                .help("Contest interests")
             }
 
             if appState.contestCalendarEntries.isEmpty {
@@ -65,11 +139,11 @@ struct ContestCalendarAndPropagationPanel: View {
                 .frame(maxWidth: .infinity, minHeight: 150)
             } else {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 260), spacing: 10)], spacing: 10) {
-                    ForEach(Array(appState.contestCalendarEntries.prefix(12))) { item in
+                    ForEach(Array(prioritizedContests.prefix(12))) { item in
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
-                            Image(systemName: item.isMiddleEastRelevant ? "location.north.line.fill" : "flag.checkered")
-                                .foregroundStyle(item.isMiddleEastRelevant ? .green : .blue)
+                            Image(systemName: isPreferredContest(item) ? "star.circle.fill" : (item.isMiddleEastRelevant ? "location.north.line.fill" : "flag.checkered"))
+                                .foregroundStyle(isPreferredContest(item) ? .orange : (item.isMiddleEastRelevant ? .green : .blue))
                             Text(item.title)
                                 .font(.subheadline.weight(.semibold))
                                 .lineLimit(2)
@@ -83,6 +157,11 @@ struct ContestCalendarAndPropagationPanel: View {
                                 .font(.caption2.weight(.semibold))
                                 .foregroundStyle(.green)
                         }
+                        if isPreferredContest(item) {
+                            Label("Matches your operating interests", systemImage: "checkmark.seal.fill")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.orange)
+                        }
                         Text(item.operatingSummary.isEmpty ? item.geographicFocus : item.operatingSummary)
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -91,7 +170,7 @@ struct ContestCalendarAndPropagationPanel: View {
                     .padding(12)
                     .frame(maxWidth: .infinity, minHeight: 112, alignment: .topLeading)
                     .background(Color(nsColor: .controlBackgroundColor).opacity(0.55), in: RoundedRectangle(cornerRadius: 8))
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke((item.isMiddleEastRelevant ? Color.green : Color.blue).opacity(0.28)))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke((isPreferredContest(item) ? Color.orange : (item.isMiddleEastRelevant ? Color.green : Color.blue)).opacity(0.42)))
                     }
                 }
             }
@@ -109,6 +188,34 @@ struct ContestCalendarAndPropagationPanel: View {
                 .foregroundStyle(.secondary)
         }
         .contestOperationsBand(color: .blue)
+    }
+
+    private var preferredTokens: [String] {
+        (contestPreferredModes + "," + contestInterestKeywords)
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() }
+            .filter { !$0.isEmpty }
+    }
+
+    private var prioritizedContests: [ContestCalendarEntry] {
+        appState.contestCalendarEntries.sorted { lhs, rhs in
+            let lhsScore = contestInterestScore(lhs)
+            let rhsScore = contestInterestScore(rhs)
+            if lhsScore != rhsScore { return lhsScore > rhsScore }
+            return lhs.utcWindow < rhs.utcWindow
+        }
+    }
+
+    private func contestInterestScore(_ item: ContestCalendarEntry) -> Int {
+        let context = [item.title, item.operatingSummary, item.geographicFocus, item.modes]
+            .joined(separator: " ")
+            .uppercased()
+        let matches = preferredTokens.filter { context.contains($0) }.count
+        return matches * 4 + (item.isMiddleEastRelevant ? 1 : 0)
+    }
+
+    private func isPreferredContest(_ item: ContestCalendarEntry) -> Bool {
+        contestInterestScore(item) >= 4
     }
 
     private var sixMeterAlert: some View {
@@ -311,5 +418,53 @@ private struct PropagationMetric: View {
         .padding(10)
         .frame(maxWidth: .infinity, minHeight: 86, alignment: .leading)
         .background(Color(nsColor: .controlBackgroundColor).opacity(0.45), in: RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+private struct ContestInterestSettingsView: View {
+    @Binding var modes: String
+    @Binding var keywords: String
+    @Binding var notificationsEnabled: Bool
+    @Binding var dxpeditionNotificationsEnabled: Bool
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack {
+                Label("Contest interests", systemImage: "flag.checkered.2.crossed")
+                    .font(.title3.weight(.bold))
+                Spacer()
+                Button("Done") { dismiss() }
+                    .buttonStyle(.borderedProminent)
+            }
+
+            Text("Matching contests are placed first in the calendar and marked with a star.")
+                .foregroundStyle(.secondary)
+
+            TextField("Preferred modes, comma separated", text: $modes)
+                .textFieldStyle(.roundedBorder)
+            TextField("Interest keywords, comma separated", text: $keywords)
+                .textFieldStyle(.roundedBorder)
+
+            Toggle("Notify me when a newly listed contest matches", isOn: $notificationsEnabled)
+                .onChange(of: notificationsEnabled) { _, enabled in
+                    guard enabled else { return }
+                    UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+                }
+
+            Toggle("Notify me when a watched DXpedition is spotted", isOn: $dxpeditionNotificationsEnabled)
+                .onChange(of: dxpeditionNotificationsEnabled) { _, enabled in
+                    guard enabled else { return }
+                    UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+                }
+
+            Text("Examples: FT8, FT4, RTTY, CW, SSB, digital, VHF, 6m.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Spacer(minLength: 0)
+        }
+        .padding(22)
+        .frame(width: 520, height: 330)
     }
 }

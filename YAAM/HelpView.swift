@@ -6,7 +6,7 @@
 import SwiftUI
 
 private enum HelpTopic: String, CaseIterable, Identifiable {
-    case start, stations, quickLog, dxCluster, radioBridge, contest, contestCalendar, magicBand, syncCenter, qslHub, awards, portable, connectivity, importReview, dataSafety, credentials, workflows, faq
+    case start, stations, quickLog, dxCluster, radioBridge, contest, contestCalendar, dxpeditions, magicBand, syncCenter, qslHub, confirmations, qrzIncoming, logAssistant, awards, portable, connectivity, importReview, dataSafety, credentials, workflows, faq
     var id: String { rawValue }
 
     var title: String {
@@ -18,9 +18,13 @@ private enum HelpTopic: String, CaseIterable, Identifiable {
         case .radioBridge: return "Radio & Digital Bridge"
         case .contest: return "Contest Workspace"
         case .contestCalendar: return "Contest Calendar"
+        case .dxpeditions: return "DXpedition Watch"
         case .magicBand: return "6m & Propagation"
         case .syncCenter: return "Sync Center"
         case .qslHub: return "QSL Hub"
+        case .confirmations: return "Confirmation Reconciliation"
+        case .qrzIncoming: return "QRZ Incoming Requests"
+        case .logAssistant: return "Log Assistant"
         case .awards: return "Award Engine"
         case .portable: return "Portable Activities"
         case .connectivity: return "Cloud & Mobile"
@@ -41,9 +45,13 @@ private enum HelpTopic: String, CaseIterable, Identifiable {
         case .radioBridge: return "wave.3.right.circle"
         case .contest: return "flag.checkered"
         case .contestCalendar: return "calendar.badge.clock"
+        case .dxpeditions: return "binoculars.fill"
         case .magicBand: return "dot.radiowaves.left.and.right"
         case .syncCenter: return "arrow.triangle.2.circlepath"
         case .qslHub: return "arrow.left.arrow.right.circle"
+        case .confirmations: return "checklist"
+        case .qrzIncoming: return "tray.and.arrow.down.fill"
+        case .logAssistant: return "bubble.left.and.text.bubble.right.fill"
         case .awards: return "medal"
         case .portable: return "figure.hiking"
         case .connectivity: return "network"
@@ -90,9 +98,13 @@ struct HelpView: View {
         case .radioBridge: radioBridge
         case .contest: contest
         case .contestCalendar: contestCalendar
+        case .dxpeditions: dxpeditions
         case .magicBand: magicBand
         case .syncCenter: syncCenter
         case .qslHub: qslHub
+        case .confirmations: confirmations
+        case .qrzIncoming: qrzIncoming
+        case .logAssistant: logAssistant
         case .awards: awards
         case .portable: portable
         case .connectivity: connectivity
@@ -294,6 +306,76 @@ struct HelpView: View {
                 HelpDefinition(icon: "sparkles", title: "E-skip context", text: "HamQSL VHF propagation values are used as supporting context, not as a replacement for live reception reports.")
             }
             helpCallout(icon: "exclamationmark.triangle.fill", title: "Opening alerts are advisory", text: "6m can open and close quickly. Treat YAAM's alert as a strong prompt to listen and transmit, not as a guarantee of propagation.", color: .orange)
+        }
+    }
+
+    private var dxpeditions: some View {
+        Group {
+            helpHeader(title: "DXpedition Watch", subtitle: "Keep announced operations visible, then distinguish a planned operation from a live spot before changing the radio.", icon: "binoculars.fill", color: .purple)
+            HelpFlow(steps: [
+                HelpFlowStep(icon: "calendar", title: "Load", detail: "Open Operator Desk > Calendar / 6m. YAAM caches the announced DXpedition list so the most recent successful list remains available offline."),
+                HelpFlowStep(icon: "dot.radiowaves.left.and.right", title: "Verify live activity", detail: "A green on-air indicator appears only when the same callsign is currently present in the DX Cluster feed."),
+                HelpFlowStep(icon: "scope", title: "Check need", detail: "YAAM compares the spot with the active station's worked history and labels it as already worked or a good chance to work."),
+                HelpFlowStep(icon: "bell.badge", title: "Notify", detail: "Enable DXpedition spot notifications in Contest Interests to receive a one-time alert when a listed callsign is spotted.")
+            ])
+            helpSection("How to Read the Watch") {
+                HelpDefinition(icon: "clock", title: "Planned or active window", text: "Dates describe the announcement window. They do not prove that an operator is transmitting now.")
+                HelpDefinition(icon: "dot.radiowaves.left.and.right", title: "On air", text: "This requires current DX Cluster evidence for the exact listed callsign, including band and frequency.", color: .green)
+                HelpDefinition(icon: "checkmark.circle", title: "Worked status", text: "A worked marker comes from the active local log. It is not a confirmation or an award credit.")
+            }
+            helpCallout(icon: "antenna.radiowaves.left.and.right", title: "A timely nudge, not a promise", text: "Cluster spots can be old, mistaken, or unavailable. Tune and verify the callsign before logging a QSO.", color: .orange)
+        }
+    }
+
+    private var confirmations: some View {
+        Group {
+            helpHeader(title: "Confirmation Reconciliation", subtitle: "Compare service totals with the local Master Log without hiding records that could not be matched safely.", icon: "checklist", color: .green)
+            HelpFlow(steps: [
+                HelpFlowStep(icon: "arrow.triangle.2.circlepath", title: "Sync", detail: "Use Sync QSLs for incremental updates, or Tools > Confirmation Reconciliation > Full History for a complete rebuild."),
+                HelpFlowStep(icon: "arrow.left.arrow.right", title: "Match", detail: "YAAM matches callsign, date, band, mode when available, and provider-specific time rules."),
+                HelpFlowStep(icon: "checkmark.seal", title: "Import safely", detail: "A confirmed remote record absent from the local log can be imported only when its identity is unambiguous."),
+                HelpFlowStep(icon: "exclamationmark.triangle", title: "Investigate", detail: "Ambiguous records stay in the unmatched count instead of being attached to a possibly wrong QSO.")
+            ])
+            helpSection("Why Counts Can Differ") {
+                HelpDefinition(icon: "person.crop.circle.badge.exclamationmark", title: "Station identity", text: "A provider may include a different callsign, portable suffix, or station location than the active YAAM profile.")
+                HelpDefinition(icon: "clock.badge.exclamationmark", title: "QSO timing", text: "A clock or UTC-date discrepancy can prevent a safe match even when the callsign is correct.")
+                HelpDefinition(icon: "doc.on.doc", title: "Local duplicates and gaps", text: "Provider totals count their confirmations. YAAM's total counts confirmed local QSOs, so duplicates, missing imports, and unmatched contacts remain visible separately.")
+            }
+            helpCallout(icon: "checkmark.shield", title: "No silent guessing", text: "The reconciliation report shows downloaded, matched, and unmatched items per provider. Use Full History after changing credentials or station identity.", color: .green)
+        }
+    }
+
+    private var qrzIncoming: some View {
+        Group {
+            helpHeader(title: "QRZ Incoming Requests", subtitle: "Review confirmation requests from QRZ Logbook and politely collect missing details before creating any local contact.", icon: "tray.and.arrow.down.fill", color: .blue)
+            HelpFlow(steps: [
+                HelpFlowStep(icon: "key.fill", title: "Sign in", detail: "Use QRZ Login once to create the protected browser session used by QRZ Logbook."),
+                HelpFlowStep(icon: "tray.and.arrow.down", title: "Load requests", detail: "Open Log Table > Tools > QRZ Incoming Requests. YAAM loads QRZ's Confirmation Requests page."),
+                HelpFlowStep(icon: "magnifyingglass", title: "Check the local log", detail: "Each request is marked when a matching local QSO already exists."),
+                HelpFlowStep(icon: "envelope", title: "Request details", detail: "For an unmatched request, select Request Details to prepare a respectful email using the QSL template.")
+            ])
+            helpSection("Safe Completion") {
+                HelpDefinition(icon: "doc.text", title: "Review before creating", text: "The email asks the operator for the QSO date, UTC time, band, mode, reports, and confirmation method. Add a local QSO only after the details are credible.")
+                HelpDefinition(icon: "person.badge.key", title: "QRZ session", text: "Incoming requests are read through the user-approved QRZ browser session. If QRZ requires MFA or a browser check, complete it in QRZ Login and refresh.")
+                HelpDefinition(icon: "paperplane", title: "Your mail account", text: "YAAM drafts the email with your configured QSL signature and a short yaam.app reference; it does not send mail silently.")
+            }
+        }
+    }
+
+    private var logAssistant: some View {
+        Group {
+            helpHeader(title: "Log Assistant", subtitle: "Ask practical questions about the active log while keeping external accounts optional and every write operation explicit.", icon: "bubble.left.and.text.bubble.right.fill", color: .indigo)
+            HelpFlow(steps: [
+                HelpFlowStep(icon: "bubble.left", title: "Ask", detail: "Open Log Table > Tools > Log Assistant and enter a direct question or choose a suggested prompt."),
+                HelpFlowStep(icon: "sparkles", title: "Understand", detail: "Without an account, YAAM handles supported local requests. With an OpenAI-compatible account, it also produces a concise explanation from aggregate log context."),
+                HelpFlowStep(icon: "hand.raised", title: "Review", detail: "The assistant presents a proposed action such as opening reconciliation or applying an unconfirmed filter."),
+                HelpFlowStep(icon: "checkmark.circle", title: "Confirm", detail: "Nothing changes until you press the shown action button.")
+            ])
+            helpSection("Privacy & Scope") {
+                HelpDefinition(icon: "chart.bar", title: "Aggregate context", text: "Remote assistant requests contain station name and totals, not the QSO table, contact emails, or credentials.")
+                HelpDefinition(icon: "key.horizontal", title: "Optional account", text: "Configure a compatible HTTPS endpoint, model, and key in Settings > Log Assistant. The key stays in macOS Keychain.")
+                HelpDefinition(icon: "lock.shield", title: "Controlled actions", text: "Filtering, synchronizing, and opening views remain YAAM actions with visible confirmation. The assistant cannot independently edit or send your log.")
+            }
         }
     }
 

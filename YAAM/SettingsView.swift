@@ -11,7 +11,7 @@ import AppKit
 // MARK: - macOS Preferences & Credentials Settings Sheet
 struct SettingsView: View {
     private enum Tabs: Hashable {
-        case stations, dataSafety, qrz, qrzRank, lotw, hamqth, smtp, externalADIF, sdrControl
+        case stations, dataSafety, qrz, qrzRank, lotw, hamqth, smtp, externalADIF, sdrControl, assistant
     }
 
     @EnvironmentObject var appState: AppState
@@ -38,6 +38,10 @@ struct SettingsView: View {
     @AppStorage("sdrControlLogbookPath") private var sdrControlLogbookPath = ""
     @AppStorage("sdrControlPeriodicSyncEnabled") private var sdrControlPeriodicSyncEnabled = false
     @AppStorage("sdrControlPeriodicSyncIntervalMinutes") private var sdrControlPeriodicSyncIntervalMinutes = 15.0
+    @AppStorage("logAssistantEndpoint") private var logAssistantEndpoint = "https://api.openai.com/v1/chat/completions"
+    @AppStorage("logAssistantModel") private var logAssistantModel = "gpt-5-mini"
+    @State private var logAssistantAPIKey = ""
+    @State private var logAssistantCredentialStatus = ""
 
     var body: some View {
         TabView {
@@ -274,6 +278,40 @@ struct SettingsView: View {
                     Label("Email", systemImage: "envelope")
                 }
                 .tag(Tabs.smtp)
+
+            Form {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("Log Assistant")
+                        .font(.headline)
+                    Text("The assistant can explain the active log and propose safe actions. It never sends mail, deletes QSOs, or syncs a cloud service without your confirmation.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    TextField("OpenAI-compatible endpoint", text: $logAssistantEndpoint)
+                        .textFieldStyle(.roundedBorder)
+                    TextField("Model", text: $logAssistantModel)
+                        .textFieldStyle(.roundedBorder)
+                    SecureField("API key (blank keeps the saved key)", text: $logAssistantAPIKey)
+                        .textFieldStyle(.roundedBorder)
+                    HStack {
+                        Button("Save Assistant Key") {
+                            saveCredential(logAssistantAPIKey, as: .logAssistantAPIKey, status: $logAssistantCredentialStatus)
+                        }
+                        .disabled(logAssistantAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        Button("Remove Key", role: .destructive) {
+                            removeCredential(.logAssistantAPIKey, value: $logAssistantAPIKey, status: $logAssistantCredentialStatus)
+                        }
+                        credentialStatus(logAssistantCredentialStatus)
+                    }
+                    Label("Use an account you control. The key stays in macOS Keychain and is only used when you explicitly ask the assistant to analyse a prompt.", systemImage: "lock.fill")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding()
+            }
+            .tabItem {
+                Label("Assistant", systemImage: "bubble.left.and.text.bubble.right")
+            }
+            .tag(Tabs.assistant)
 
             // MARK: - External ADIF Sync Tab
             Form {

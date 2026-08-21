@@ -33,7 +33,7 @@ Warm 73,
     @State private var showDebugLog: Bool = false
     @State private var smtpDebugOutput: String = ""
     
-    let templates = ["QSL Card Request", "Sked Request", "LoTW/QRZ Confirmation", "QSL Card Delivery"]
+    let templates = ["QSL Card Request", "Sked Request", "LoTW/QRZ Confirmation", "QRZ Incoming Details", "QSL Card Delivery"]
     
     // DIRECT RESOLVER: Always prioritize the exact clicked row record!
     private var currentQSO: QSORecordModel? {
@@ -273,6 +273,23 @@ Warm 73,
 
             Thank you & 73,
             \(myCall)
+            """
+
+        case "QRZ Incoming Details":
+            let incoming = appState.selectedEmailIncomingRequest
+            let requestedDate = incoming?.qsoDate.isEmpty == false ? incoming!.qsoDate : "the date shown in QRZ Logbook"
+            emailSubject = "QRZ Logbook QSO Details Request - \(myCall)"
+            emailBody = """
+            Hello \(targetCall),
+
+            QRZ Logbook shows an incoming confirmation request for a QSO on \(requestedDate), but I cannot find the matching contact in my local log.
+
+            Could you please send me the QSO time (UTC), band, mode, and report? Once I have the details I will add the contact and confirm it in QRZ.
+
+            Thank you for your help and 73,
+            \(myCall)
+
+            Sent with yaam.app
             """
             
         case "QSL Card Delivery":

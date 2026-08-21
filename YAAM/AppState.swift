@@ -1656,6 +1656,10 @@ class AppState: NSObject, ObservableObject {
     @Published var contestCalendarStatus: String = "Calendar not loaded yet"
     @Published var contestCalendarLastUpdated: Date?
     @Published var isFetchingContestCalendar: Bool = false
+    @Published var dxpeditionEntries: [DXpeditionEntry] = []
+    @Published var dxpeditionStatus: String = "DXpedition watch not loaded yet"
+    @Published var dxpeditionLastUpdated: Date?
+    @Published var isFetchingDXpeditions: Bool = false
     
     // Row Selection State
     @Published var selectedRecordIDs: Set<UUID> = []
@@ -1677,6 +1681,7 @@ class AppState: NSObject, ObservableObject {
     @Published var selectedEmailQSO: QSORecordModel? = nil
     @Published var selectedEmailTemplate: String? = nil
     @Published var selectedEmailUnconfirmedQSOs: [QSORecordModel] = []
+    @Published var selectedEmailIncomingRequest: QRZIncomingConfirmation? = nil
     @Published var emailHistory: [EmailHistoryEntry] = []
     @Published var showQSLCardComposer: Bool = false
     @Published var selectedQSLCardQSO: QSORecordModel? = nil
@@ -1703,6 +1708,13 @@ class AppState: NSObject, ObservableObject {
     @Published var isFetchingQRZAwards: Bool = false
     @Published var qrzAwardsStatus: String = ""
     @Published var qrzAwardsLastUpdated: Date? = nil
+    @Published var qrzIncomingRequests: [QRZIncomingConfirmation] = []
+    @Published var isFetchingQRZIncoming = false
+    @Published var qrzIncomingStatus = "No QRZ incoming requests loaded"
+    @Published var showQRZIncomingSheet = false
+    @Published var showConfirmationReconciliationSheet = false
+    @Published var confirmationReconciliation = ConfirmationReconciliationSnapshot.empty
+    @Published var showLogAssistantSheet = false
 
     private let trackedRankCallsignsKey = "trackedRankCallsigns"
     private let qrzRankHistorySnapshotsKey = "qrzRankHistorySnapshots"
@@ -1835,6 +1847,7 @@ class AppState: NSObject, ObservableObject {
         loadQSLHubState()
         loadConnectivityState()
         loadContestCalendarCache()
+        loadDXpeditionCache()
         configureOperatorFeatureBridges()
         DispatchQueue.main.async {
             CredentialVault.migrateLegacyCredentials()
@@ -4555,7 +4568,7 @@ class AppState: NSObject, ObservableObject {
         return !username.isEmpty && CredentialVault.hasStoredValueHint(for: .hamqthPassword)
     }
 
-    private func fetchContactInfo(
+    func fetchContactInfo(
         for callsign: String,
         allowQRZWebKitFallback: Bool = false,
         allowCredentialPrompt: Bool = true

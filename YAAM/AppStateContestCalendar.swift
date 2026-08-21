@@ -4,6 +4,7 @@
 //
 
 import Foundation
+import UserNotifications
 
 extension AppState {
     private static let contestCalendarCacheKey = "contestCalendarCache.v1"
@@ -53,10 +54,39 @@ extension AppState {
                 self.contestCalendarEntries = entries
                 self.contestCalendarLastUpdated = now
                 self.contestCalendarStatus = "Loaded \(entries.count) contests from WA7BNM"
+                self.scheduleContestInterestNotifications(entries)
                 if let encoded = try? JSONEncoder().encode(ContestCalendarCache(entries: entries, updatedAt: now)) {
                     UserDefaults.standard.set(encoded, forKey: Self.contestCalendarCacheKey)
                 }
             }
         }.resume()
+    }
+
+    private func scheduleContestInterestNotifications(_ entries: [ContestCalendarEntry]) {
+        guard UserDefaults.standard.bool(forKey: "contestInterestNotifications") else { return }
+        let tokens = (UserDefaults.standard.string(forKey: "contestPreferredModes") ?? "") + "," +
+            (UserDefaults.standard.string(forKey: "contestInterestKeywords") ?? "")
+        let interests = tokens.split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() }
+            .filter { !$0.isEmpty }
+        guard !interests.isEmpty else { return }
+
+        let delivered = Set(UserDefaults.standard.stringArray(forKey: "contestInterestNotificationIDs") ?? [])
+        let matches = entries.filter { entry in
+            let context = "\(entry.title) \(entry.modes) \(entry.bands) \(entry.geographicFocus)".uppercased()
+            return !delivered.contains(entry.id) && interests.contains(where: context.contains)
+        }
+        guard !matches.isEmpty else { return }
+
+        for entry in matches.prefix(3) {
+            let content = UNMutableNotificationContent()
+            content.title = "Contest match: \(entry.title)"
+            content.body = entry.utcWindow
+            content.sound = .default
+            let request = UNNotificationRequest(identifier: "contest.\(entry.id)", content: content, trigger: nil)
+            UNUserNotificationCenter.current().add(request)
+        }
+        let rememberedIDs = Array(Array(delivered.union(matches.map(\.id))).suffix(120))
+        UserDefaults.standard.set(rememberedIDs, forKey: "contestInterestNotificationIDs")
     }
 }

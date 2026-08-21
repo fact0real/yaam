@@ -799,6 +799,7 @@ extension AppState {
                 lotwFailed: lotwFailed,
                 qrzFailed: qrzFailed
             )
+            self.updateConfirmationReconciliation(with: summary)
             self.isSyncingAPI = false
 
             if showCompletionAlert {

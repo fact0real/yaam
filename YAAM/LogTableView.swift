@@ -182,6 +182,24 @@ struct LogTableView: View {
                     } label: {
                         Label("QRZ Login", systemImage: "key.fill")
                     }
+
+                    Button {
+                        appState.showQRZIncomingSheet = true
+                    } label: {
+                        Label("QRZ Incoming Requests", systemImage: "tray.and.arrow.down")
+                    }
+
+                    Button {
+                        appState.showConfirmationReconciliationSheet = true
+                    } label: {
+                        Label("Confirmation Reconciliation", systemImage: "checklist")
+                    }
+
+                    Button {
+                        appState.showLogAssistantSheet = true
+                    } label: {
+                        Label("Log Assistant", systemImage: "bubble.left.and.text.bubble.right")
+                    }
                 } label: {
                     HStack(spacing: 5) {
                         if appState.isEnriching || appState.isSendingBatchMail {
@@ -197,7 +215,7 @@ struct LogTableView: View {
                     }
                 }
                 .menuStyle(.borderlessButton)
-                .disabled(appState.qsoRecords.isEmpty && !appState.isEnriching && !appState.isSendingBatchMail)
+                .disabled(appState.isEnriching || appState.isSendingBatchMail)
                 .help("Cloud logbook, enrichment, rank backfill, batch mail, and QRZ login")
                 
                 Divider().frame(height: 14)
@@ -504,6 +522,15 @@ struct LogTableView: View {
         }
         .sheet(isPresented: $appState.showDuplicateReviewSheet) {
             DuplicateReviewView().environmentObject(appState)
+        }
+        .sheet(isPresented: $appState.showQRZIncomingSheet) {
+            QRZIncomingRequestsView().environmentObject(appState)
+        }
+        .sheet(isPresented: $appState.showConfirmationReconciliationSheet) {
+            ConfirmationReconciliationView().environmentObject(appState)
+        }
+        .sheet(isPresented: $appState.showLogAssistantSheet) {
+            LogAssistantView().environmentObject(appState)
         }
         .confirmationDialog(
             "Rebuild the complete confirmation history?",
