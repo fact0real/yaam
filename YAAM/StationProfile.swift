@@ -102,7 +102,7 @@ nonisolated struct StationProfile: Identifiable, Codable, Equatable, Sendable {
         latitude = latitude.trimmingCharacters(in: .whitespacesAndNewlines)
         longitude = longitude.trimmingCharacters(in: .whitespacesAndNewlines)
         dxccCode = dxccCode.trimmingCharacters(in: .whitespacesAndNewlines)
-        country = country.trimmingCharacters(in: .whitespacesAndNewlines)
+        country = canonicalCountryName(country)
         cqZone = cqZone.trimmingCharacters(in: .whitespacesAndNewlines)
         ituZone = ituZone.trimmingCharacters(in: .whitespacesAndNewlines)
         radioModel = radioModel.trimmingCharacters(in: .whitespacesAndNewlines)

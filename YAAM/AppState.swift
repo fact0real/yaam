@@ -401,16 +401,6 @@ struct CountryStatModel: Identifiable {
 }
 
 // MARK: - Comprehensive DXCC & Country/Territory Flag Lookup Engine
-nonisolated func canonicalCountryName(_ country: String) -> String {
-    let trimmed = country.trimmingCharacters(in: .whitespacesAndNewlines)
-    switch trimmed.lowercased() {
-    case "republic of south africa", "south africa":
-        return "South Africa"
-    default:
-        return trimmed
-    }
-}
-
 func countryToFlag(_ country: String) -> String {
     let clean = canonicalCountryName(country).lowercased()
     if clean.isEmpty { return "🌐" }
@@ -510,7 +500,8 @@ func countryToFlag(_ country: String) -> String {
     // MARK: - Africa
     case "chad": return "🇹🇩"
     case "cameroon": return "🇨🇲"
-    case "congo", "republic of congo", "democratic republic of congo", "dr congo", "dr congo / zaire": return "🇨🇬"
+    case "congo", "republic of congo", "republic of the congo": return "🇨🇬"
+    case "democratic republic of congo", "democratic republic of the congo", "dr congo", "dr congo / zaire": return "🇨🇩"
     case "malawi": return "🇲🇼"
     case "benin": return "🇧🇯"
     case "south africa": return "🇿🇦"
@@ -532,6 +523,9 @@ func countryToFlag(_ country: String) -> String {
     case "angola": return "🇦🇴"
     case "madagascar": return "🇲🇬"
     case "mauritius": return "🇲🇺"
+    case "cape verde": return "🇨🇻"
+    case "eswatini": return "🇸🇿"
+    case "sao tome and principe": return "🇸🇹"
 
     // MARK: - Europe
     case "republic of kosovo", "kosovo": return "🇽🇰"
@@ -566,7 +560,7 @@ func countryToFlag(_ country: String) -> String {
     case "croatia": return "🇭🇷"
     case "serbia": return "🇷🇸"
     case "slovenia": return "🇸🇮"
-    case "bosnia-herzegovina", "bosnia & herzegovina", "bosnia": return "🇧🇦"
+    case "bosnia and herzegovina", "bosnia-herzegovina", "bosnia & herzegovina", "bosnia": return "🇧🇦"
     case "north macedonia", "macedonia": return "🇲🇰"
     case "albania": return "🇦🇱"
     case "montenegro": return "🇲🇪"
@@ -632,6 +626,7 @@ func countryToFlag(_ country: String) -> String {
     case "brunei", "brunei darussalam": return "🇧🇳"
     case "maldives": return "🇲🇻"
     case "afghanistan": return "🇦🇫"
+    case "palestine": return "🇵🇸"
 
     // MARK: - Oceania & Pacific
     case "australia": return "🇦🇺"
@@ -648,6 +643,7 @@ func countryToFlag(_ country: String) -> String {
     case "tuvalu": return "🇹🇻"
     case "nauru": return "🇳🇷"
     case "tonga": return "🇹🇴"
+    case "timor-leste": return "🇹🇱"
 
     default: break
     }
@@ -662,6 +658,7 @@ func countryToFlag(_ country: String) -> String {
     if clean.contains("fiji") { return "🇫🇯" }
     if clean.contains("chad") { return "🇹🇩" }
     if clean.contains("cameroon") { return "🇨🇲" }
+    if clean.contains("democratic") && clean.contains("congo") { return "🇨🇩" }
     if clean.contains("congo") { return "🇨🇬" }
     if clean.contains("kosovo") { return "🇽🇰" }
     if clean.contains("armenia") { return "🇦🇲" }
@@ -759,11 +756,7 @@ nonisolated struct QSORecordModel: Identifiable, Sendable {
     init(id: UUID = UUID(), index: Int, fields: [String: String]) {
         self.id = id
         self.index = index
-        var normalizedFields = fields
-        if let country = fields["COUNTRY"], !country.isEmpty {
-            normalizedFields["COUNTRY"] = canonicalCountryName(country)
-        }
-        self.fields = normalizedFields
+        self.fields = CountryNameNormalizer.normalizedFields(fields).fields
     }
     
     var isConfirmed: Bool {
@@ -787,10 +780,10 @@ nonisolated struct QSORecordModel: Identifiable, Sendable {
     subscript(key: String) -> String {
         get {
             let value = fields[key] ?? ""
-            return key == "COUNTRY" ? canonicalCountryName(value) : value
+            return ["COUNTRY", "MY_COUNTRY"].contains(key.uppercased()) ? canonicalCountryName(value) : value
         }
         set {
-            fields[key] = key == "COUNTRY" ? canonicalCountryName(newValue) : newValue
+            fields[key] = ["COUNTRY", "MY_COUNTRY"].contains(key.uppercased()) ? canonicalCountryName(newValue) : newValue
         }
     }
 }

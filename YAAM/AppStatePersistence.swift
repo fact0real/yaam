@@ -66,6 +66,7 @@ extension AppState {
             }
 
             try migrateLegacyMasterLogsIfNeeded(using: database)
+            try migrateCountryNamesIfNeeded(using: database)
             stationProfiles = try database.loadStationProfiles()
             if !stationProfiles.contains(where: { $0.id == activeStationProfileID }) {
                 activeStationProfileID = stationProfiles.first?.id
@@ -505,6 +506,61 @@ extension AppState {
         }
     }
 
+    private func migrateCountryNamesIfNeeded(using database: LogbookDatabase) throws {
+        let migrationKey = "migration.country-name-normalization.v1"
+        guard try database.metadata(for: migrationKey) != "1" else { return }
+
+        var normalizedWorkspaces: [(profileID: UUID, headers: [String], records: [PersistedQSO])] = []
+        var normalizedProfiles: [StationProfile] = []
+        var changedQSOCount = 0
+
+        for profile in stationProfiles {
+            let workspace = try database.loadWorkspace(profileID: profile.id)
+            var profileChangedQSOCount = 0
+            let records = workspace.records.map { record -> PersistedQSO in
+                let normalized = CountryNameNormalizer.normalizedFields(record.fields)
+                if normalized.changed { profileChangedQSOCount += 1 }
+                return PersistedQSO(id: record.id, index: record.index, fields: normalized.fields)
+            }
+            if profileChangedQSOCount > 0 {
+                changedQSOCount += profileChangedQSOCount
+                normalizedWorkspaces.append((profile.id, workspace.headers, records))
+            }
+
+            let canonicalProfileCountry = canonicalCountryName(profile.country)
+            if canonicalProfileCountry != profile.country {
+                var normalizedProfile = profile
+                normalizedProfile.country = canonicalProfileCountry
+                normalizedProfile.updatedAt = Date()
+                normalizedProfiles.append(normalizedProfile)
+            }
+        }
+
+        guard !normalizedWorkspaces.isEmpty || !normalizedProfiles.isEmpty else {
+            try database.setMetadata("1", for: migrationKey)
+            return
+        }
+
+        _ = try database.createBackup(reason: "Before country name normalization")
+        for workspace in normalizedWorkspaces {
+            try database.saveWorkspace(
+                profileID: workspace.profileID,
+                headers: workspace.headers,
+                records: workspace.records
+            )
+        }
+        for profile in normalizedProfiles {
+            try database.saveStationProfile(profile)
+        }
+        try database.setMetadata("1", for: migrationKey)
+        try database.recordAudit(
+            action: "country-names-normalized",
+            detail: "Normalized (changedQSOCount) QSO country value(s) and (normalizedProfiles.count) station profile(s).",
+            profileID: nil
+        )
+        appendLog("Country names normalized safely in (changedQSOCount) saved QSO(s). A restore point was created first.")
+    }
+
     private func createDailyBackupIfNeeded(using database: LogbookDatabase) {
         guard (try? database.qsoCount()) ?? 0 > 0 else { return }
         let latest = database.listBackups().first?.createdAt ?? .distantPast
@@ -523,7 +579,7 @@ extension AppState {
         if (tagged["MY_DXCC"] ?? "").isEmpty, !profile.dxccCode.isEmpty { tagged["MY_DXCC"] = profile.dxccCode }
         if (tagged["MY_CQ_ZONE"] ?? "").isEmpty, !profile.cqZone.isEmpty { tagged["MY_CQ_ZONE"] = profile.cqZone }
         if (tagged["MY_ITU_ZONE"] ?? "").isEmpty, !profile.ituZone.isEmpty { tagged["MY_ITU_ZONE"] = profile.ituZone }
-        return tagged
+        return CountryNameNormalizer.normalizedFields(tagged).fields
     }
 
     private func presentPersistenceError(_ error: Error) {

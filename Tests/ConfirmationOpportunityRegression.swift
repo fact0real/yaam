@@ -1,12 +1,5 @@
 import Foundation
 
-nonisolated func canonicalCountryName(_ country: String) -> String {
-    switch country.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
-    case "republic of south africa", "south africa": return "South Africa"
-    default: return country.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-}
-
 nonisolated enum AmateurBandPlan {
     static func band(for rawValue: String) -> String? {
         guard let frequency = Double(rawValue) else { return nil }

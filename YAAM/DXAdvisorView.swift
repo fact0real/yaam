@@ -1340,10 +1340,7 @@ struct DXAdvisorView: View {
     }
 
     private func normalizedCountryName(_ country: String) -> String {
-        country.trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-            .replacingOccurrences(of: ".", with: "")
-            .replacingOccurrences(of: "&", with: "and")
+        CountryNameNormalizer.canonicalKey(country)
     }
 
     private func greatCircleDistanceKm(from origin: DXCoordinate, to target: DXCoordinate) -> Double {
@@ -1591,8 +1588,15 @@ struct DXAdvisorView: View {
             .cornerRadius(8)
     }
 
-    private static let countryCoordinates: [String: DXCoordinate] =
-        [
+    private static let countryCoordinates: [String: DXCoordinate] = {
+        var normalized: [String: DXCoordinate] = [:]
+        for (country, coordinate) in countryCoordinateSeeds {
+            normalized[CountryNameNormalizer.canonicalKey(country)] = coordinate
+        }
+        return normalized
+    }()
+
+    private static let countryCoordinateSeeds: [String: DXCoordinate] = [
             "afghanistan": DXCoordinate(latitude: 33.9, longitude: 67.7),
             "aland is": DXCoordinate(latitude: 60.2, longitude: 20.0),
             "alaska": DXCoordinate(latitude: 64.2, longitude: -149.5),

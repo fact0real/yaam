@@ -257,7 +257,7 @@ nonisolated final class LogbookDatabase: @unchecked Sendable {
                 for record in records {
                     sqlite3_reset(insertStatement)
                     sqlite3_clear_bindings(insertStatement)
-                    let fields = record.fields
+                    let fields = CountryNameNormalizer.normalizedFields(record.fields).fields
                     let uniqueKey = Self.uniqueKey(fields: fields)
                     let jsonData = try JSONEncoder().encode(fields)
                     guard let json = String(data: jsonData, encoding: .utf8) else { continue }
@@ -299,7 +299,7 @@ nonisolated final class LogbookDatabase: @unchecked Sendable {
         try queue.sync {
             try execute("BEGIN IMMEDIATE TRANSACTION;")
             do {
-                let fields = record.fields
+                let fields = CountryNameNormalizer.normalizedFields(record.fields).fields
                 let jsonData = try JSONEncoder().encode(fields)
                 guard let json = String(data: jsonData, encoding: .utf8) else {
                     throw LogbookDatabaseError.unavailable("Unable to encode the new QSO.")
