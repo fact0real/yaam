@@ -6,6 +6,11 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		A18000000000000000000001 /* FT8Codec in Frameworks */ = {isa = PBXBuildFile; productRef = A18000000000000000000004 /* FT8Codec */; };
+		A18000000000000000000002 /* FT8808Engine in Frameworks */ = {isa = PBXBuildFile; productRef = A18000000000000000000005 /* FT8808Engine */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		4C688219301A0511009C4F92 /* YAAM.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = YAAM.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -23,6 +28,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A18000000000000000000001 /* FT8Codec in Frameworks */,
+				A18000000000000000000002 /* FT8808Engine in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -65,6 +72,8 @@
 			);
 			name = YAAM;
 			packageProductDependencies = (
+				A18000000000000000000004 /* FT8Codec */,
+				A18000000000000000000005 /* FT8808Engine */,
 			);
 			productName = "ADIF to Excel";
 			productReference = 4C688219301A0511009C4F92 /* YAAM.app */;
@@ -94,6 +103,9 @@
 			);
 			mainGroup = 4C688210301A0511009C4F92;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				A18000000000000000000003 /* XCRemoteSwiftPackageReference "ft8-808" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 4C68821A301A0511009C4F92 /* Products */;
 			projectDirPath = "";
@@ -251,13 +263,13 @@
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 62;
+				CURRENT_PROJECT_VERSION = 64;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_FILE_ACCESS_DOWNLOADS_FOLDER = readwrite;
 				ENABLE_INCOMING_NETWORK_CONNECTIONS = YES;
 				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
 				ENABLE_PREVIEWS = YES;
-				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = NO;
+				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = YES;
 				ENABLE_RESOURCE_ACCESS_BLUETOOTH = NO;
 				ENABLE_RESOURCE_ACCESS_CALENDARS = NO;
 				ENABLE_RESOURCE_ACCESS_CAMERA = NO;
@@ -270,12 +282,13 @@
 				INFOPLIST_KEY_CFBundleDisplayName = YAAM;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "YAAM needs radio receive audio to decode FT8 signals.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 15.6;
-				MARKETING_VERSION = 1.17.4;
+				MARKETING_VERSION = 1.18.0;
 				PRODUCT_BUNDLE_IDENTIFIER = ASIS.YAAM;
 				PRODUCT_NAME = YAAM;
 				REGISTER_APP_GROUPS = YES;
@@ -296,13 +309,13 @@
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 62;
+				CURRENT_PROJECT_VERSION = 64;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_FILE_ACCESS_DOWNLOADS_FOLDER = readwrite;
 				ENABLE_INCOMING_NETWORK_CONNECTIONS = YES;
 				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
 				ENABLE_PREVIEWS = YES;
-				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = NO;
+				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = YES;
 				ENABLE_RESOURCE_ACCESS_BLUETOOTH = NO;
 				ENABLE_RESOURCE_ACCESS_CALENDARS = NO;
 				ENABLE_RESOURCE_ACCESS_CAMERA = NO;
@@ -315,12 +328,13 @@
 				INFOPLIST_KEY_CFBundleDisplayName = YAAM;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "YAAM needs radio receive audio to decode FT8 signals.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 15.6;
-				MARKETING_VERSION = 1.17.4;
+				MARKETING_VERSION = 1.18.0;
 				PRODUCT_BUNDLE_IDENTIFIER = ASIS.YAAM;
 				PRODUCT_NAME = YAAM;
 				REGISTER_APP_GROUPS = YES;
@@ -355,6 +369,30 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		A18000000000000000000003 /* XCRemoteSwiftPackageReference "ft8-808" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/mattackerman808/ft8-808";
+			requirement = {
+				kind = revision;
+				revision = efe779c6bab3c5ee7c359378614debfd14ae1e00;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		A18000000000000000000004 /* FT8Codec */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A18000000000000000000003 /* XCRemoteSwiftPackageReference "ft8-808" */;
+			productName = FT8Codec;
+		};
+		A18000000000000000000005 /* FT8808Engine */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A18000000000000000000003 /* XCRemoteSwiftPackageReference "ft8-808" */;
+			productName = FT8808Engine;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 4C688211301A0511009C4F92 /* Project object */;
 }

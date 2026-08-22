@@ -43,6 +43,30 @@ private struct VHFConditionDisplayItem: Identifiable {
     let systemImage: String
 }
 
+private struct DXAdvisorCallsignAccumulator {
+    var qsoCount = 0
+    var hasConfirmedQSO = false
+    var countries = Set<String>()
+    var bands = Set<String>()
+    var email = ""
+}
+
+private struct DXAdvisorLogSnapshot {
+    static let empty = DXAdvisorLogSnapshot(
+        workedCountries: [],
+        confirmedCountries: [],
+        unconfirmedBandTargets: [],
+        unconfirmedCallsigns: [],
+        bulkEmailRecipients: []
+    )
+
+    let workedCountries: Set<String>
+    let confirmedCountries: Set<String>
+    let unconfirmedBandTargets: [UnconfirmedBandCountryStatModel]
+    let unconfirmedCallsigns: [UnconfirmedCallsignStatModel]
+    let bulkEmailRecipients: [BulkEmailRecipient]
+}
+
 struct DXAdvisorView: View {
     @EnvironmentObject var appState: AppState
     @AppStorage("stationGrid") private var stationGrid = ""
@@ -57,6 +81,7 @@ struct DXAdvisorView: View {
     @State private var bulkEmailStatus = ""
     @State private var selectedBulkEmailCallsigns: Set<String> = []
     @State private var fetchingEmailCallsigns: Set<String> = []
+    @State private var logSnapshot = DXAdvisorLogSnapshot.empty
 
     private var utcHour: Int {
         Calendar(identifier: .gregorian).component(.hour, from: Date())
@@ -81,11 +106,11 @@ struct DXAdvisorView: View {
     }
 
     private var workedCountries: Set<String> {
-        Set(appState.qsoRecords.map { $0["COUNTRY"] }.filter { !$0.isEmpty })
+        logSnapshot.workedCountries
     }
 
     private var confirmedCountries: Set<String> {
-        Set(appState.qsoRecords.filter { $0.isConfirmed }.map { $0["COUNTRY"] }.filter { !$0.isEmpty })
+        logSnapshot.confirmedCountries
     }
 
     private var unconfirmedCountries: [String] {
@@ -93,7 +118,7 @@ struct DXAdvisorView: View {
     }
 
     private var bandTargets: [UnconfirmedBandCountryStatModel] {
-        appState.unconfirmedBandCountryStatistics.filter { recommendedBands.contains($0.band) }
+        logSnapshot.unconfirmedBandTargets.filter { recommendedBands.contains($0.band) }
     }
 
     private var emailDateFormatter: DateFormatter {
@@ -122,7 +147,7 @@ struct DXAdvisorView: View {
     }
 
     private var bulkEmailRecipients: [BulkEmailRecipient] {
-        appState.bulkEmailRecipients(limit: 25)
+        logSnapshot.bulkEmailRecipients
     }
 
     private var selectedBulkEmailRecipients: [BulkEmailRecipient] {
@@ -137,16 +162,12 @@ struct DXAdvisorView: View {
         guard let origin = stationCoordinate else { return [] }
 
         let unconfirmedBandMap = Dictionary(
-            uniqueKeysWithValues: appState.unconfirmedBandCountryStatistics.map { stat in
+            uniqueKeysWithValues: logSnapshot.unconfirmedBandTargets.map { stat in
                 (stat.band, Set(stat.countries.map { normalizedCountryName($0.country) }))
             }
         )
 
-        let targetCountries = Set(
-            appState.countryStatistics
-                .map { $0.country }
-                .filter { !$0.isEmpty && $0 != "Unknown" }
-        )
+        let targetCountries = workedCountries.filter { !$0.isEmpty && $0 != "Unknown" }
 
         return targetCountries.compactMap { country -> DXPathPrediction? in
             guard let target = coordinate(forCountry: country) else { return nil }
@@ -192,7 +213,7 @@ struct DXAdvisorView: View {
             Divider()
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
+                LazyVStack(alignment: .leading, spacing: 16) {
                     propagationSummary
                     voacapPlannerSection
                     bandOpportunityMatrixSection
@@ -211,13 +232,17 @@ struct DXAdvisorView: View {
                 appState.fetchPropagationSnapshot()
             }
             refreshPathPredictions()
+            refreshLogSnapshot()
             syncBulkEmailSelection()
         }
         .onChange(of: stationGrid) { _, _ in refreshPathPredictions() }
         .onChange(of: radioPowerWatts) { _, _ in refreshPathPredictions() }
         .onChange(of: antennaDescription) { _, _ in refreshPathPredictions() }
         .onChange(of: antennaHeightMeters) { _, _ in refreshPathPredictions() }
-        .onChange(of: appState.qsoRecords.count) { _, _ in refreshPathPredictions() }
+        .onChange(of: appState.qsoRecordsRevision) { _, _ in
+            refreshLogSnapshot()
+            refreshPathPredictions()
+        }
         .onChange(of: bulkEmailRecipients.count) { _, _ in syncBulkEmailSelection() }
     }
 
@@ -495,11 +520,11 @@ struct DXAdvisorView: View {
             Text("Callsigns With No Confirmed QSOs")
                 .font(.headline)
 
-            if appState.callsignsWithNoConfirmedQSOs.isEmpty {
+            if logSnapshot.unconfirmedCallsigns.isEmpty {
                 emptyText("No callsigns found with only unconfirmed QSOs.")
             } else {
                 VStack(spacing: 0) {
-                    ForEach(appState.callsignsWithNoConfirmedQSOs.prefix(40)) { item in
+                    ForEach(logSnapshot.unconfirmedCallsigns.prefix(40)) { item in
                         HStack(spacing: 8) {
                             Text(item.callsign)
                                 .font(.system(.caption, design: .monospaced))
@@ -686,7 +711,7 @@ struct DXAdvisorView: View {
                     .padding(.horizontal, 8)
 
                     ScrollView {
-                        VStack(spacing: 0) {
+                        LazyVStack(spacing: 0) {
                             ForEach(bulkEmailRecipients) { recipient in
                                 bulkEmailRecipientRow(recipient)
                                 Divider()
@@ -1358,6 +1383,110 @@ struct DXAdvisorView: View {
             cachedPathPredictions = makePathPredictions()
             isCalculatingPathPredictions = false
         }
+    }
+
+    private func refreshLogSnapshot() {
+        let records = appState.qsoRecords
+        var workedCountries = Set<String>()
+        var confirmedCountries = Set<String>()
+        var bandCountryMap: [String: [String: (total: Int, confirmed: Int)]] = [:]
+        var callsignMap: [String: DXAdvisorCallsignAccumulator] = [:]
+
+        for record in records {
+            let country = record["COUNTRY"].trimmingCharacters(in: .whitespacesAndNewlines)
+            let band = record["BAND"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            let callsign = record["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            let isConfirmed = record.isConfirmed
+
+            if !country.isEmpty {
+                workedCountries.insert(country)
+                if isConfirmed { confirmedCountries.insert(country) }
+            }
+
+            let bandKey = band.isEmpty ? "UNKNOWN" : band
+            let countryKey = country.isEmpty ? "Unknown" : country
+            var countriesForBand = bandCountryMap[bandKey] ?? [:]
+            var counts = countriesForBand[countryKey] ?? (total: 0, confirmed: 0)
+            counts.total += 1
+            if isConfirmed { counts.confirmed += 1 }
+            countriesForBand[countryKey] = counts
+            bandCountryMap[bandKey] = countriesForBand
+
+            guard !callsign.isEmpty else { continue }
+            var summary = callsignMap[callsign] ?? DXAdvisorCallsignAccumulator()
+            summary.qsoCount += 1
+            summary.hasConfirmedQSO = summary.hasConfirmedQSO || isConfirmed
+            if !country.isEmpty { summary.countries.insert(country) }
+            if !band.isEmpty { summary.bands.insert(band) }
+            if summary.email.isEmpty {
+                summary.email = record["EMAIL"].trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            callsignMap[callsign] = summary
+        }
+
+        let unconfirmedBandTargets = bandCountryMap.compactMap { band, countries -> UnconfirmedBandCountryStatModel? in
+            let unconfirmedCountries = countries.compactMap { country, counts -> UnconfirmedCountryStatModel? in
+                guard counts.total > 0, counts.confirmed == 0 else { return nil }
+                return UnconfirmedCountryStatModel(country: country, qsoCount: counts.total)
+            }
+            .sorted {
+                $0.qsoCount == $1.qsoCount ? $0.country < $1.country : $0.qsoCount > $1.qsoCount
+            }
+
+            guard !unconfirmedCountries.isEmpty else { return nil }
+            return UnconfirmedBandCountryStatModel(band: band, countries: unconfirmedCountries)
+        }
+        .sorted { $0.band.localizedStandardCompare($1.band) == .orderedAscending }
+
+        let unconfirmedSummaries = callsignMap.compactMap { callsign, summary -> (UnconfirmedCallsignStatModel, DXAdvisorCallsignAccumulator)? in
+            guard !summary.hasConfirmedQSO else { return nil }
+            let item = UnconfirmedCallsignStatModel(
+                callsign: callsign,
+                qsoCount: summary.qsoCount,
+                countries: summary.countries.sorted().joined(separator: ", "),
+                bands: summary.bands.sorted(by: bandSort).joined(separator: ", "),
+                email: summary.email
+            )
+            return (item, summary)
+        }
+        .sorted {
+            $0.0.qsoCount == $1.0.qsoCount ? $0.0.callsign < $1.0.callsign : $0.0.qsoCount > $1.0.qsoCount
+        }
+
+        let unconfirmedCallsigns = unconfirmedSummaries.map(\.0)
+        let recipientItems = unconfirmedSummaries
+            .filter { !$0.0.email.isEmpty }
+            .prefix(25)
+            .map(\.0)
+
+        let recipientCallsigns = Set(recipientItems.map(\.callsign))
+        var recipientQSOs: [String: [QSORecordModel]] = [:]
+        for record in records where !record.isConfirmed {
+            let callsign = record["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            guard recipientCallsigns.contains(callsign) else { continue }
+            recipientQSOs[callsign, default: []].append(record)
+        }
+
+        let recipients = recipientItems.map { item in
+            let unconfirmedQSOs = recipientQSOs[item.callsign] ?? []
+            return BulkEmailRecipient(
+                callsign: item.callsign,
+                email: item.email,
+                qsoCount: item.qsoCount,
+                bands: item.bands,
+                countries: item.countries,
+                qso: unconfirmedQSOs.first,
+                unconfirmedQSOs: unconfirmedQSOs
+            )
+        }
+
+        logSnapshot = DXAdvisorLogSnapshot(
+            workedCountries: workedCountries,
+            confirmedCountries: confirmedCountries,
+            unconfirmedBandTargets: unconfirmedBandTargets,
+            unconfirmedCallsigns: unconfirmedCallsigns,
+            bulkEmailRecipients: recipients
+        )
     }
 
     private func syncBulkEmailSelection() {

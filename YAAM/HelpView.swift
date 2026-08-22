@@ -16,7 +16,7 @@ private enum HelpTopic: String, CaseIterable, Identifiable {
         case .logTable: return "Log Table & Filters"
         case .quickLog: return "Quick Log"
         case .dxCluster: return "DX Cluster"
-        case .radioBridge: return "Radio & Digital Bridge"
+        case .radioBridge: return "Radio, Icom & FT8"
         case .contest: return "Contest Workspace"
         case .contestCalendar: return "Contest Calendar"
         case .dxpeditions: return "DXpedition Watch"
@@ -265,8 +265,8 @@ struct HelpView: View {
     private var radioBridge: some View {
         Group {
             helpHeader(
-                title: "Radio & Digital Bridge",
-                subtitle: "Keep rig frequency, digital-mode activity, and Quick Log aligned while retaining explicit control over what reaches the Master Log.",
+                title: "Radio, Icom & FT8",
+                subtitle: "Control a rig, monitor WSJT-X/JTDX, or operate YAAM's native FT8 station with explicit receive, sequencing, and transmit safety controls.",
                 icon: "wave.3.right.circle.fill",
                 color: .blue
             )
@@ -287,7 +287,26 @@ struct HelpView: View {
                 HelpDefinition(icon: "doc.badge.magnifyingglass", title: "Review-first queue", text: "Logged ADIF packets do not silently enter the Master Log. Exact duplicates are marked and blocked; new entries can be reviewed or imported.", color: .green)
                 HelpDefinition(icon: "rectangle.stack.badge.minus", title: "Bounded memory", text: "The listener retains at most 50 pending QSOs and coalesces identical packets so a long digital session stays responsive.")
             }
-            helpCallout(icon: "lock.shield", title: "Local-network safety", text: "rigctld has no built-in encryption or authentication. Keep it on localhost or a trusted private network and do not expose its port to the public Internet.", color: .orange)
+            helpSection("Native FT8 with IC-7300MKII or IC-705") {
+                HelpFlow(steps: [
+                    HelpFlowStep(icon: "network", title: "Enable Icom LAN", detail: "Enable Network Control, CI-V Transceive, and DATA MOD = WLAN, then create the Icom network user."),
+                    HelpFlowStep(icon: "link", title: "Connect", detail: "Choose the radio, enter its LAN address and control port, then connect from FT8 Station."),
+                    HelpFlowStep(icon: "waveform.path.ecg", title: "Monitor", detail: "Choose an FT8 dial frequency, set USB-D, and allow one complete 15-second UTC slot."),
+                    HelpFlowStep(icon: "paperplane.fill", title: "Reply safely", detail: "Select a decode, review the generated message, arm TX, and send in the opposite sequence.")
+                ])
+                HelpInstruction(number: 1, title: "Open Operator Desk > Radio Bridge > FT8 Station", text: "Direct Icom LAN carries login, CI-V control, and 48 kHz LPCM16 receive/transmit audio over separate UDP streams. Set DATA MOD to WLAN so keyed FT8 audio reaches the transmitter. The password is stored in macOS Keychain; it is not written into preferences or the log database.")
+                HelpInstruction(number: 2, title: "Verify the receive path", text: "Press Start Monitoring and watch the waterfall. Decode results appear after a full UTC slot. Use the audio passband from 200 to 3000 Hz and keep macOS time synchronization enabled.")
+                HelpInstruction(number: 3, title: "Prepare a standard exchange", text: "Prepare CQ or choose a decoded CQ/message addressed to your callsign. YAAM selects the opposite odd/even sequence and advances Grid, report, R-report, RR73, and 73 messages.")
+                HelpInstruction(number: 4, title: "Arm only when ready", text: "Check the callsign, Grid, dial frequency, audio offset, antenna path, and RF power before enabling Arm TX. Send at Next Slot schedules against the UTC slot boundary.")
+            }
+            helpSection("Audio, Timing & Safety") {
+                HelpDefinition(icon: "cable.connector.horizontal", title: "Two audio paths", text: "Direct Icom LAN is available for IC-7300MKII and IC-705. The rigctld + Audio path works with a selected Core Audio input/output and uses Hamlib only for frequency, mode, and PTT.", color: .blue)
+                HelpDefinition(icon: "clock.badge.checkmark", title: "UTC synchronization", text: "FT8 uses exact 15-second periods. A Mac clock error can prevent decoding or make transmissions overlap; leave automatic date and time enabled.", color: .orange)
+                HelpDefinition(icon: "checkmark.shield", title: "Offline self-test", text: "Run Offline Self-Test before RF operation. It verifies CI-V frequency encoding, 79 FT8 tones, 12 kHz waveform generation, loopback decode, and odd/even UTC slot timing.", color: .green)
+                HelpDefinition(icon: "stop.circle.fill", title: "Hard PTT release", text: "TX requires an explicit arm switch and a 16-second watchdog releases PTT after cancellation, network failure, audio failure, or a stalled task.", color: .red)
+            }
+            helpCallout(icon: "antenna.radiowaves.left.and.right", title: "First transmission", text: "Begin with a dummy load or minimum RF power. Keep ALC inactive, verify the selected audio device and frequency, and remain able to stop the radio locally before enabling automatic sequencing.", color: .orange)
+            helpCallout(icon: "lock.shield", title: "Local-network safety", text: "Keep rigctld and direct Icom LAN on localhost or a trusted private network. Do not expose either control port to the public Internet; use a trusted VPN when remote access is required.", color: .orange)
         }
     }
 

@@ -1,0 +1,14 @@
+{
+  "originHash" : "d31d0ee436953521130b5c33aa9ecbd2b803802ce12ccf2d4a0f2e34b457f48a",
+  "pins" : [
+    {
+      "identity" : "ft8-808",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/mattackerman808/ft8-808",
+      "state" : {
+        "revision" : "efe779c6bab3c5ee7c359378614debfd14ae1e00"
+      }
+    }
+  ],
+  "version" : 3
+}

@@ -6,6 +6,13 @@
 import SwiftUI
 
 struct RadioBridgePanel: View {
+    private enum Workspace: String, CaseIterable, Identifiable {
+        case bridge = "Bridge"
+        case ft8 = "FT8 Station"
+
+        var id: String { rawValue }
+    }
+
     @EnvironmentObject private var appState: AppState
     @ObservedObject var rig: RigControlClient
     @ObservedObject var wsjtx: WSJTXListener
@@ -15,17 +22,26 @@ struct RadioBridgePanel: View {
     @AppStorage("wsjtxUDPPort") private var wsjtxPort = 2237
     @AppStorage("wsjtxAutoFillQuickLog") private var wsjtxAutoFill = false
     @State private var actionStatus = ""
+    @State private var workspace: Workspace = .bridge
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 header
                 Divider()
-                rigSection
-                Divider()
-                wsjtxSection
-                Divider()
-                pendingSection
+                if workspace == .bridge {
+                    rigSection
+                    Divider()
+                    wsjtxSection
+                    Divider()
+                    pendingSection
+                } else {
+                    FT8StationView(
+                        engine: appState.ft8Engine,
+                        radio: appState.icomNetworkRadio,
+                        rig: rig
+                    )
+                }
             }
         }
     }
@@ -36,11 +52,21 @@ struct RadioBridgePanel: View {
                 .font(.system(size: 30))
                 .foregroundStyle(.blue)
             VStack(alignment: .leading, spacing: 3) {
-                Text("Radio & Digital Bridge").font(.title3.weight(.bold))
-                Text("One operating context for your radio, WSJT-X/JTDX, and Quick Log")
+                Text(workspace == .bridge ? "Radio & Digital Bridge" : "FT8 Station").font(.title3.weight(.bold))
+                Text(workspace == .bridge
+                     ? "One operating context for your radio, WSJT-X/JTDX, and Quick Log"
+                     : "Native FT8 receive, decode, sequencing, and guarded transmit")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
+            Picker("Radio workspace", selection: $workspace) {
+                ForEach(Workspace.allCases) { item in
+                    Text(item.rawValue).tag(item)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 230)
             if !actionStatus.isEmpty {
                 Text(actionStatus).font(.caption).foregroundStyle(.secondary).lineLimit(2)
             }

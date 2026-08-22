@@ -1804,6 +1804,8 @@ class AppState: NSObject, ObservableObject {
     let dxClusterClient = DXClusterClient()
     let rigControlClient = RigControlClient()
     let wsjtxListener = WSJTXListener()
+    let icomNetworkRadio = IcomNetworkRadio()
+    let ft8Engine = FT8EngineService()
     var operatorFeatureCancellables: Set<AnyCancellable> = []
     var cloudSyncTimer: Timer?
 
@@ -1814,7 +1816,7 @@ class AppState: NSObject, ObservableObject {
     var unifiedSyncTimer: Timer?
     var syncStartedAt: [SyncSource: Date] = [:]
     
-    private var qsoRecordsRevision = 0
+    @Published private(set) var qsoRecordsRevision = 0
     private var filteredRecordsCache: [QSORecordModel]?
     private var availableCountriesCache: [String]?
     private var rankCandidateCacheDay = ""

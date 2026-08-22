@@ -46,6 +46,7 @@ nonisolated struct RigSnapshot: Equatable, Sendable {
 final class RigControlClient: ObservableObject {
     @Published private(set) var state: RigConnectionState = .disconnected
     @Published private(set) var snapshot: RigSnapshot?
+    @Published private(set) var isTransmitting = false
     @Published private(set) var lastMessage = "Ready to connect to rigctld"
 
     private let queue = DispatchQueue(label: "app.yaam.rig-control", qos: .userInitiated)
@@ -56,8 +57,10 @@ final class RigControlClient: ObservableObject {
     private var pendingFrequency: UInt64?
     private var pendingMode = ""
     private var pendingPassband: Int?
+    private var pttWatchdog: DispatchWorkItem?
 
     deinit {
+        pttWatchdog?.cancel()
         pollTimer?.cancel()
         connection?.cancel()
     }
@@ -89,6 +92,10 @@ final class RigControlClient: ObservableObject {
     }
 
     func disconnect() {
+        if isTransmitting { send("T 0\n") }
+        pttWatchdog?.cancel()
+        pttWatchdog = nil
+        isTransmitting = false
         connectionID = UUID()
         pollTimer?.cancel()
         pollTimer = nil
@@ -116,6 +123,33 @@ final class RigControlClient: ObservableObject {
         guard state.isConnected, !cleanMode.isEmpty else { return }
         send("M \(cleanMode) \(passbandHz)\n")
         queue.asyncAfter(deadline: .now() + 0.15) { [weak self] in self?.refresh() }
+    }
+
+    /// Keys Hamlib PTT with a hard watchdog so a stalled FT8 task cannot leave
+    /// the transmitter on. Calling with `false` is always safe and idempotent.
+    func setPTT(_ enabled: Bool, maximumDuration: TimeInterval = 14) {
+        guard state.isConnected else {
+            if !enabled { isTransmitting = false }
+            return
+        }
+
+        pttWatchdog?.cancel()
+        pttWatchdog = nil
+        send(enabled ? "T 1\n" : "T 0\n")
+        isTransmitting = enabled
+        lastMessage = enabled ? "PTT active" : "PTT released"
+
+        guard enabled else { return }
+        let watchdog = DispatchWorkItem { [weak self] in
+            guard let self, self.isTransmitting else { return }
+            self.send("T 0\n")
+            DispatchQueue.main.async {
+                self.isTransmitting = false
+                self.lastMessage = "PTT released by safety timer"
+            }
+        }
+        pttWatchdog = watchdog
+        queue.asyncAfter(deadline: .now() + max(1, maximumDuration), execute: watchdog)
     }
 
     private func handle(_ newState: NWConnection.State, connectionID: UUID, host: String, port: Int) {
