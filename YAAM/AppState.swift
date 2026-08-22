@@ -1854,6 +1854,7 @@ class AppState: NSObject, ObservableObject {
     private var filteredRecordsCache: [QSORecordModel]?
     private var filteredChronologicalOrdinals: [UUID: Int] = [:]
     private var availableCountriesCache: [String]?
+    private var confirmationOpportunityIndexCache: ConfirmationOpportunityIndex?
     private var rankCandidateCacheDay = ""
     private var rankCandidateCacheRevision = -1
     private var rankCandidateCacheAvailable = 0
@@ -1865,6 +1866,7 @@ class AppState: NSObject, ObservableObject {
             filteredRecordsCache = nil
             filteredChronologicalOrdinals.removeAll(keepingCapacity: true)
             availableCountriesCache = nil
+            confirmationOpportunityIndexCache = nil
         }
     }
     @Published var recentLogFiles: [URL] = []
@@ -1953,6 +1955,16 @@ class AppState: NSObject, ObservableObject {
         let result = Array(countries).sorted()
         availableCountriesCache = result
         return result
+    }
+
+    var confirmationOpportunityIndex: ConfirmationOpportunityIndex {
+        if let confirmationOpportunityIndexCache {
+            return confirmationOpportunityIndexCache
+        }
+
+        let index = ConfirmationOpportunityIndex(records: qsoRecords)
+        confirmationOpportunityIndexCache = index
+        return index
     }
 
     var activeModesCount: Int {

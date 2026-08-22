@@ -14,6 +14,8 @@ struct StatisticsView: View {
     
     @State private var selectedTab = 0
     @State private var selectedUnconfirmedBand = "All Bands"
+    @State private var countryBandSearchText = ""
+    @State private var selectedCoverageCountry: String?
     @State private var snapshot: StatisticsSnapshot?
 
     private var currentSnapshot: StatisticsSnapshot {
@@ -34,6 +36,19 @@ struct StatisticsView: View {
 
     private var progressSummary: ConfirmedProgressSummary {
         currentSnapshot.progressSummary
+    }
+
+    private var visibleCountryBandCoverage: [CountryBandCoverage] {
+        let query = countryBandSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return currentSnapshot.countryBandCoverage }
+        return currentSnapshot.countryBandCoverage.filter {
+            $0.country.localizedCaseInsensitiveContains(query)
+        }
+    }
+
+    private var selectedCountryBandCoverage: CountryBandCoverage? {
+        let selectedCountry = selectedCoverageCountry ?? visibleCountryBandCoverage.first?.country
+        return currentSnapshot.countryBandCoverage.first { $0.country == selectedCountry }
     }
 
     var body: some View {
@@ -84,7 +99,8 @@ struct StatisticsView: View {
                 Text("Band Breakdown").tag(0)
                 Text("Country Breakdown").tag(1)
                 Text("Unconfirmed DXCC").tag(2)
-                Text("Progress").tag(3)
+                Text("Country Bands").tag(3)
+                Text("Progress").tag(4)
             }
             .pickerStyle(.segmented)
             .padding(.vertical, 2)
@@ -334,6 +350,8 @@ struct StatisticsView: View {
                     .cornerRadius(6)
                     .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.gray.opacity(0.3), lineWidth: 1))
                 }
+            } else if selectedTab == 3 {
+                countryBandCoverageView
             } else {
                 confirmedProgressView
             }
@@ -354,7 +372,145 @@ struct StatisticsView: View {
             appState.refreshOwnerQRZRankIfNeeded()
             appState.populateMissingGridSquaresFromCoordinates()
             snapshot = StatisticsSnapshot.make(from: appState)
+            if selectedCoverageCountry == nil {
+                selectedCoverageCountry = snapshot?.countryBandCoverage.first?.country
+            }
         }
+    }
+
+    private var countryBandCoverageView: some View {
+        HStack(spacing: 0) {
+            VStack(spacing: 8) {
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(.secondary)
+                    TextField("Find country", text: $countryBandSearchText)
+                        .textFieldStyle(.plain)
+                    if !countryBandSearchText.isEmpty {
+                        Button {
+                            countryBandSearchText = ""
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 8)
+                .frame(height: 30)
+                .background(Color(NSColor.controlBackgroundColor))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+
+                ScrollView {
+                    LazyVStack(spacing: 2) {
+                        ForEach(visibleCountryBandCoverage) { coverage in
+                            Button {
+                                selectedCoverageCountry = coverage.country
+                            } label: {
+                                HStack(spacing: 7) {
+                                    Text(countryToFlag(coverage.country))
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(coverage.country)
+                                            .font(.caption.weight(.semibold))
+                                            .lineLimit(1)
+                                        Text("\(coverage.confirmedBandCount) confirmed · \(coverage.workedUnconfirmedBandCount) pending")
+                                            .font(.caption2.monospacedDigit())
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Spacer(minLength: 0)
+                                    if selectedCountryBandCoverage?.country == coverage.country {
+                                        Image(systemName: "chevron.right")
+                                            .font(.caption.bold())
+                                            .foregroundStyle(Color.accentColor)
+                                    }
+                                }
+                                .padding(.horizontal, 8)
+                                .frame(height: 43)
+                                .background(
+                                    selectedCountryBandCoverage?.country == coverage.country
+                                        ? Color.accentColor.opacity(0.12)
+                                        : Color.clear
+                                )
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+            .padding(8)
+            .frame(width: 238)
+            .background(Color(NSColor.textBackgroundColor))
+
+            Divider()
+
+            if let coverage = selectedCountryBandCoverage {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(spacing: 10) {
+                        Text(countryToFlag(coverage.country))
+                            .font(.title2)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(coverage.country)
+                                .font(.headline)
+                            Text("Band confirmation coverage")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Spacer()
+
+                        CountryBandSummaryChip(
+                            title: "Confirmed",
+                            value: coverage.confirmedBandCount,
+                            icon: "checkmark.circle.fill",
+                            color: .green
+                        )
+                        CountryBandSummaryChip(
+                            title: "Pending",
+                            value: coverage.workedUnconfirmedBandCount,
+                            icon: "clock.fill",
+                            color: .orange
+                        )
+                        CountryBandSummaryChip(
+                            title: "Needed",
+                            value: coverage.neededBandCount,
+                            icon: "scope",
+                            color: .secondary
+                        )
+                    }
+
+                    ScrollView {
+                        LazyVGrid(
+                            columns: [GridItem(.adaptive(minimum: 118, maximum: 150), spacing: 8)],
+                            alignment: .leading,
+                            spacing: 8
+                        ) {
+                            ForEach(coverage.bands) { band in
+                                CountryBandCoverageTile(item: band) {
+                                    showCountryBandQSOs(country: coverage.country, band: band)
+                                }
+                            }
+                        }
+                        .padding(.bottom, 4)
+                    }
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            } else {
+                VStack(spacing: 10) {
+                    Image(systemName: "globe.desk.fill")
+                        .font(.largeTitle)
+                        .foregroundStyle(.secondary)
+                    Text("No confirmed country matches this search.")
+                        .font(.headline)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .background(Color(NSColor.textBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.gray.opacity(0.3), lineWidth: 1))
     }
 
     private var confirmedProgressView: some View {
@@ -439,6 +595,25 @@ struct StatisticsView: View {
         }
     }
 
+    private func showCountryBandQSOs(country: String, band: CountryBandCoverageItem) {
+        guard band.state != .needed else { return }
+
+        var criteria = FilterCriteria()
+        criteria.useBand = true
+        criteria.band = band.band
+        criteria.useCountry = true
+        criteria.selectedCountries = [country]
+        criteria.useConfirmation = true
+        criteria.confirmationState = band.state == .confirmed ? "Confirmed (Y)" : "Unconfirmed (N/Blank)"
+
+        appState.filterCriteria = criteria
+        appState.searchText = ""
+        appState.clearSelection()
+        appState.selectedTab = 0
+        appState.appendLog("Showing \(band.state == .confirmed ? "confirmed" : "unconfirmed") QSOs for \(country) on \(band.band).")
+        dismiss()
+    }
+
     private func showUnconfirmedQSOs(band: String, country: String) {
         var criteria = FilterCriteria()
         criteria.useBand = true
@@ -454,6 +629,98 @@ struct StatisticsView: View {
         appState.selectedTab = 0
         appState.appendLog("Showing unconfirmed QSOs for \(country) on \(band).")
         dismiss()
+    }
+}
+
+struct CountryBandSummaryChip: View {
+    let title: String
+    let value: Int
+    let icon: String
+    let color: Color
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: icon)
+                .foregroundStyle(color)
+            Text(value.formatted())
+                .font(.caption.monospacedDigit().bold())
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 8)
+        .frame(height: 28)
+        .background(color.opacity(0.10))
+        .clipShape(RoundedRectangle(cornerRadius: 5))
+    }
+}
+
+struct CountryBandCoverageTile: View {
+    let item: CountryBandCoverageItem
+    let action: () -> Void
+
+    private var color: Color {
+        switch item.state {
+        case .confirmed: return .green
+        case .worked: return .orange
+        case .needed: return .secondary
+        }
+    }
+
+    private var icon: String {
+        switch item.state {
+        case .confirmed: return "checkmark.circle.fill"
+        case .worked: return "clock.fill"
+        case .needed: return "scope"
+        }
+    }
+
+    private var status: String {
+        switch item.state {
+        case .confirmed: return "Confirmed"
+        case .worked: return "Pending"
+        case .needed: return "Needed"
+        }
+    }
+
+    private var detail: String {
+        switch item.state {
+        case .confirmed:
+            return "\(item.confirmedCount) of \(item.qsoCount) QSO(s) confirmed"
+        case .worked:
+            return "\(item.qsoCount) QSO(s), none confirmed"
+        case .needed:
+            return "No QSO"
+        }
+    }
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 7) {
+                HStack {
+                    Text(item.band.uppercased())
+                        .font(.system(.headline, design: .monospaced))
+                    Spacer(minLength: 4)
+                    Image(systemName: icon)
+                        .foregroundStyle(color)
+                }
+                Text(status)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(color)
+                Text(detail)
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .padding(9)
+            .frame(maxWidth: .infinity, minHeight: 82, alignment: .topLeading)
+            .background(color.opacity(item.state == .needed ? 0.04 : 0.10))
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(color.opacity(0.24), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .disabled(item.state == .needed)
+        .help(item.state == .needed ? "No QSO is recorded on this band." : "Show \(status.lowercased()) QSOs on \(item.band).")
     }
 }
 
@@ -566,6 +833,7 @@ struct StatisticsSnapshot {
     let bandStatistics: [BandStatModel]
     let countryStatistics: [CountryStatModel]
     let unconfirmedBandCountryStatistics: [UnconfirmedBandCountryStatModel]
+    let countryBandCoverage: [CountryBandCoverage]
     let progressSummary: ConfirmedProgressSummary
 
     static func make(from appState: AppState) -> StatisticsSnapshot {
@@ -599,13 +867,13 @@ struct StatisticsSnapshot {
             bandStatistics: appState.bandStatistics,
             countryStatistics: appState.countryStatistics,
             unconfirmedBandCountryStatistics: appState.unconfirmedBandCountryStatistics,
+            countryBandCoverage: appState.confirmationOpportunityIndex.countryBandCoverage,
             progressSummary: ConfirmedProgressAnalyzer.makeSummary(records: appState.qsoRecords, ownerRankData: appState.ownerRankData)
         )
     }
 
     private static func fourCharacterGrid(for record: QSORecordModel) -> String? {
-        GridLocator.fourCharacterGrid(from: record["GRIDSQUARE"])
-            ?? GridLocator.fourCharacterGrid(from: record["GRID"])
+        ConfirmationOpportunityIndex.fourCharacterGrid(for: record)
     }
 }
 

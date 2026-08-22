@@ -30,12 +30,15 @@ struct LogTableView: View {
         "MODE",
         "CONT",
         "RST_SENT",
-        "RST_RCVD"
+        "RST_RCVD",
+        ConfirmationCreditColumn.countryBand,
+        ConfirmationCreditColumn.grid
     ]
 
     private let preferredColumnOrder = [
         "QSO_DATE", "TIME_ON", "CALL", "FREQ", "BAND", "MODE", "RST_SENT", "RST_RCVD",
-        "NAME", "QTH", "CONT", "COUNTRY", "DXCC", "CQZ", "ITUZ"
+        "NAME", "QTH", "CONT", "COUNTRY", ConfirmationCreditColumn.countryBand,
+        ConfirmationCreditColumn.grid, "DXCC", "CQZ", "ITUZ"
     ]
 
     private var utilityColumnWidth: CGFloat {
@@ -582,7 +585,8 @@ struct LogTableView: View {
             
             ForEach(displayedHeaders, id: \.self) { header in
                 let w = columnWidths[header] ?? defaultColumnWidth(for: header)
-                let isSorted = appState.sortHeader == header
+                let isDerived = ConfirmationCreditColumn.isDerived(header)
+                let isSorted = !isDerived && appState.sortHeader == header
                 
                 HStack(spacing: 0) {
                     HStack(spacing: 4) {
@@ -599,18 +603,22 @@ struct LogTableView: View {
                         
                         Spacer(minLength: 0)
                         
-                        Button(action: { appState.deleteColumn(header: header) }) {
-                            Image(systemName: "xmark")
-                                .font(.system(size: 8, weight: .bold))
-                                .foregroundColor(.white.opacity(0.8))
+                        if !isDerived {
+                            Button(action: { appState.deleteColumn(header: header) }) {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 8, weight: .bold))
+                                    .foregroundColor(.white.opacity(0.8))
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
                     }
                     .padding(.horizontal, 6)
                     .frame(width: max(0, w - 6), height: 28, alignment: tableAlignment(for: header))
                     .contentShape(Rectangle())
                     .onTapGesture {
-                        appState.toggleSort(for: header)
+                        if !isDerived {
+                            appState.toggleSort(for: header)
+                        }
                     }
                     
                     Rectangle()
@@ -638,18 +646,23 @@ struct LogTableView: View {
                 .frame(width: w, height: 28)
                 .background(isSorted ? Color.accentColor.opacity(0.85) : Color.accentColor)
                 .border(Color.black.opacity(0.3), width: 0.5)
+                .help(headerHelp(for: header))
                 .contextMenu {
-                    Button("Sort Ascending") {
-                        appState.sortHeader = header
-                        appState.sortAscending = true
-                    }
-                    Button("Sort Descending") {
-                        appState.sortHeader = header
-                        appState.sortAscending = false
-                    }
-                    Divider()
-                    Button("Delete Column '\(header)'") {
-                        appState.deleteColumn(header: header)
+                    if isDerived {
+                        Text(headerHelp(for: header))
+                    } else {
+                        Button("Sort Ascending") {
+                            appState.sortHeader = header
+                            appState.sortAscending = true
+                        }
+                        Button("Sort Descending") {
+                            appState.sortHeader = header
+                            appState.sortAscending = false
+                        }
+                        Divider()
+                        Button("Delete Column '\(header)'") {
+                            appState.deleteColumn(header: header)
+                        }
                     }
                 }
             }
@@ -696,9 +709,15 @@ struct LogTableView: View {
             ForEach(displayedHeaders, id: \.self) { header in
                 let w = columnWidths[header] ?? defaultColumnWidth(for: header)
                 let val = record[header]
+                let isDerived = ConfirmationCreditColumn.isDerived(header)
                 
                 ZStack {
-                    if editingCellID == record.id && editingHeader == header {
+                    if isDerived {
+                        confirmationCreditCell(
+                            header: header,
+                            opportunity: appState.confirmationOpportunityIndex.opportunity(for: record.id)
+                        )
+                    } else if editingCellID == record.id && editingHeader == header {
                         TextField("", text: $editingText, onCommit: {
                             appState.updateCell(recordID: record.id, header: header, newValue: editingText)
                             editingCellID = nil
@@ -772,14 +791,16 @@ struct LogTableView: View {
                 .border(Color.gray.opacity(0.2), width: 0.5)
                 .contentShape(Rectangle())
                 .onTapGesture {
-                    if header == "EMAIL" && val.isEmpty {
+                    if isDerived {
+                        return
+                    } else if header == "EMAIL" && val.isEmpty {
                         startEditing(record: record, header: header, value: val)
                     } else if header != "EMAIL" && header != "QRZ_URL" && header != "QRZ" {
                         startEditing(record: record, header: header, value: val)
                     }
                 }
                 .contextMenu {
-                    if header != "QRZ_URL" && header != "QRZ" {
+                    if !isDerived && header != "QRZ_URL" && header != "QRZ" {
                         Button("Edit \(header)") {
                             startEditing(record: record, header: header, value: val)
                         }
@@ -826,11 +847,112 @@ struct LogTableView: View {
                     Button("Delete QSO") {
                         appState.deleteRecord(id: record.id)
                     }
-                    Button("Delete Column '\(header)'") {
-                        appState.deleteColumn(header: header)
+                    if !isDerived {
+                        Button("Delete Column '\(header)'") {
+                            appState.deleteColumn(header: header)
+                        }
                     }
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private func confirmationCreditCell(
+        header: String,
+        opportunity: QSOConfirmationOpportunity?
+    ) -> some View {
+        if let opportunity {
+            if opportunity.isConfirmed {
+                confirmationCreditBadge(
+                    title: "DONE",
+                    icon: "checkmark.seal.fill",
+                    color: .green,
+                    help: "This QSO is already confirmed."
+                )
+            } else if header == ConfirmationCreditColumn.countryBand {
+                if !opportunity.hasCountryBandData {
+                    confirmationCreditBadge(
+                        title: "N/A",
+                        icon: "questionmark.circle",
+                        color: .secondary,
+                        help: "Country or band data is missing, so YAAM cannot calculate this credit."
+                    )
+                } else if opportunity.addsCountryBandCredit {
+                    confirmationCreditBadge(
+                        title: "NEW",
+                        icon: "sparkles",
+                        color: .blue,
+                        help: "Confirming this QSO adds \(opportunity.band) as a confirmed band for \(opportunity.country)."
+                    )
+                } else {
+                    confirmationCreditBadge(
+                        title: "HAVE",
+                        icon: "checkmark.circle",
+                        color: .secondary,
+                        help: "\(opportunity.country) is already confirmed on \(opportunity.band)."
+                    )
+                }
+            } else if let grid = opportunity.grid {
+                if opportunity.addsGridCredit {
+                    confirmationCreditBadge(
+                        title: "NEW",
+                        icon: "square.grid.3x3.fill",
+                        color: .mint,
+                        help: "Confirming this QSO adds the four-character grid \(grid)."
+                    )
+                } else {
+                    confirmationCreditBadge(
+                        title: "HAVE",
+                        icon: "checkmark.circle",
+                        color: .secondary,
+                        help: "The four-character grid \(grid) is already confirmed."
+                    )
+                }
+            } else {
+                confirmationCreditBadge(
+                    title: "N/A",
+                    icon: "questionmark.circle",
+                    color: .secondary,
+                    help: "No valid grid or coordinates are available for this QSO."
+                )
+            }
+        } else {
+            confirmationCreditBadge(
+                title: "N/A",
+                icon: "questionmark.circle",
+                color: .secondary,
+                help: "Confirmation opportunity data is unavailable."
+            )
+        }
+    }
+
+    private func confirmationCreditBadge(
+        title: String,
+        icon: String,
+        color: Color,
+        help: String
+    ) -> some View {
+        Label(title, systemImage: icon)
+            .font(.system(size: 9, weight: .bold))
+            .foregroundStyle(color)
+            .lineLimit(1)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(color.opacity(0.12))
+            .clipShape(RoundedRectangle(cornerRadius: 4))
+            .frame(maxWidth: .infinity, alignment: .center)
+            .help(help)
+    }
+
+    private func headerHelp(for header: String) -> String {
+        switch header {
+        case ConfirmationCreditColumn.countryBand:
+            return "Shows whether confirming an unconfirmed QSO adds a new confirmed band for that country."
+        case ConfirmationCreditColumn.grid:
+            return "Shows whether confirming an unconfirmed QSO adds a new four-character Maidenhead grid."
+        default:
+            return "Click to sort by \(displayTitle(for: header)); drag the right edge to resize."
         }
     }
 
@@ -846,6 +968,7 @@ struct LogTableView: View {
         case "APP_YAAM_LAST_EMAIL": return 260
         case "QRZ_URL", "QRZ": return 34
         case "RANK_QSO", "RANK_BAND", "RANK_DXCC": return 90
+        case ConfirmationCreditColumn.countryBand, ConfirmationCreditColumn.grid: return 94
         case "QSO_DATE": return 90
         case "TIME", "TIME_ON", "TIME_OFF": return 58
         case "CALL": return 74
@@ -869,7 +992,12 @@ struct LogTableView: View {
     }
 
     private func displayTitle(for header: String) -> String {
-        header == "TIME_ON" ? "TIME" : header
+        switch header {
+        case "TIME_ON": return "TIME"
+        case ConfirmationCreditColumn.countryBand: return "BAND CREDIT"
+        case ConfirmationCreditColumn.grid: return "GRID CREDIT"
+        default: return header
+        }
     }
 
     private var hiddenColumnCount: Int {
@@ -877,9 +1005,10 @@ struct LogTableView: View {
     }
 
     private var displayedHeaders: [String] {
-        orderedHeaders(appState.tableHeaders).filter { header in
+        let visibleStoredHeaders = appState.tableHeaders.filter { header in
             !isHiddenByDefault(header) || explicitlyShownColumns.contains(header)
         }
+        return orderedHeaders(visibleStoredHeaders + ConfirmationCreditColumn.headers)
     }
 
     private func orderedHeaders(_ headers: [String]) -> [String] {
