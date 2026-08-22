@@ -463,7 +463,15 @@ struct QSLCardComposerView: View {
             }
         }
         .padding(18)
-        .frame(width: 980, height: 720)
+        .frame(
+            minWidth: 840,
+            idealWidth: 1080,
+            maxWidth: .infinity,
+            minHeight: 620,
+            idealHeight: 780,
+            maxHeight: .infinity
+        )
+        .resizablePresentation(minWidth: 840, minHeight: 620)
         .onAppear(perform: renderPreview)
         .onChange(of: appState.selectedQSLCardQSO?.id) { _, _ in renderPreview() }
     }

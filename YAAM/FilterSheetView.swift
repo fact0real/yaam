@@ -346,7 +346,15 @@ struct FilterSheetView: View {
             }
         }
         .padding(16)
-        .frame(width: 630, height: 600)
+        .frame(
+            minWidth: 560,
+            idealWidth: 700,
+            maxWidth: .infinity,
+            minHeight: 500,
+            idealHeight: 680,
+            maxHeight: .infinity
+        )
+        .resizablePresentation(minWidth: 560, minHeight: 500)
         .onAppear {
             tempCriteria = appState.filterCriteria
         }

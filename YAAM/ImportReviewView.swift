@@ -38,7 +38,15 @@ struct ImportReviewView: View {
                 )
             }
         }
-        .frame(minWidth: 900, idealWidth: 980, minHeight: 600, idealHeight: 680)
+        .frame(
+            minWidth: 900,
+            idealWidth: 1040,
+            maxWidth: .infinity,
+            minHeight: 600,
+            idealHeight: 720,
+            maxHeight: .infinity
+        )
+        .resizablePresentation(minWidth: 900, minHeight: 600)
     }
 
     private var header: some View {

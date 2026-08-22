@@ -521,9 +521,6 @@ struct LogTableView: View {
         .sheet(isPresented: $appState.showFilterSheet) {
             FilterSheetView().environmentObject(appState)
         }
-        .sheet(isPresented: $appState.showStatsSheet) {
-            StatisticsView().environmentObject(appState)
-        }
         .sheet(isPresented: $appState.showQRZLoginSheet) {
             QRZLoginView().environmentObject(appState)
         }

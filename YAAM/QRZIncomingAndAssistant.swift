@@ -509,7 +509,15 @@ struct QRZIncomingRequestsView: View {
             }
         }
         .padding(20)
-        .frame(minWidth: 760, minHeight: 500)
+        .frame(
+            minWidth: 760,
+            idealWidth: 980,
+            maxWidth: .infinity,
+            minHeight: 500,
+            idealHeight: 680,
+            maxHeight: .infinity
+        )
+        .resizablePresentation(minWidth: 760, minHeight: 500)
         .onAppear {
             if appState.qrzIncomingRequests.isEmpty { appState.fetchQRZIncomingRequests() }
         }
@@ -599,7 +607,15 @@ struct ConfirmationReconciliationView: View {
             }
         }
         .padding(20)
-        .frame(width: 760, height: 470)
+        .frame(
+            minWidth: 720,
+            idealWidth: 900,
+            maxWidth: .infinity,
+            minHeight: 440,
+            idealHeight: 600,
+            maxHeight: .infinity
+        )
+        .resizablePresentation(minWidth: 720, minHeight: 440)
         .confirmationDialog("Rebuild complete confirmation history?", isPresented: $showFullSyncPrompt, titleVisibility: .visible) {
             Button("Download Full LoTW & QRZ History") {
                 appState.syncConfirmations(forceFullSync: true)
@@ -696,7 +712,15 @@ struct LogAssistantView: View {
             HStack { Spacer(); Button("Done") { dismiss() } }
         }
         .padding(20)
-        .frame(width: 720, height: 480)
+        .frame(
+            minWidth: 680,
+            idealWidth: 860,
+            maxWidth: .infinity,
+            minHeight: 440,
+            idealHeight: 600,
+            maxHeight: .infinity
+        )
+        .resizablePresentation(minWidth: 680, minHeight: 440)
     }
 
     private func understandPrompt() {

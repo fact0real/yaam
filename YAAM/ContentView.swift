@@ -12,6 +12,7 @@ import UniformTypeIdentifiers
 // MARK: - Main User Interface
 struct ContentView: View {
     @EnvironmentObject var appState: AppState
+    @Environment(\.openWindow) private var openWindow
     
     @State private var inputPath: String = ""
     @State private var outputPath: String = ""
@@ -311,6 +312,11 @@ struct ContentView: View {
             if appState.isMasterMode {
                 try? appState.persistCurrentWorkspace(reason: "Application exit")
             }
+        }
+        .onChange(of: appState.showStatsSheet) { _, shouldOpen in
+            guard shouldOpen else { return }
+            appState.showStatsSheet = false
+            openWindow(id: YAAMWindowID.statistics)
         }
     }
 

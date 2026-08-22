@@ -7,6 +7,11 @@
 import SwiftUI
 import Combine
 
+enum YAAMWindowID {
+    static let statistics = "statistics-window"
+    static let help = "help-window"
+}
+
 // MARK: - Main Application Entry Point & Global Menu Commands
 @main
 struct YAAMApp: App {
@@ -57,7 +62,7 @@ struct YAAMApp: App {
 
                 Divider()
 
-                Button("Log Statistics...") { appState.showStatsSheet = true }
+                Button("Log Statistics...") { openWindow(id: YAAMWindowID.statistics) }
                     .keyboardShortcut("t", modifiers: .command)
                 
                 Button("Sync Confirmations (LoTW & QRZ)") { appState.syncConfirmations() }
@@ -72,7 +77,7 @@ struct YAAMApp: App {
                 Button("Check for Updates...") { appState.checkForUpdates() }
             }
             CommandGroup(replacing: .help) {
-                Button("ADIF Log Processor Help") { openWindow(id: "help-window") }
+                Button("ADIF Log Processor Help") { openWindow(id: YAAMWindowID.help) }
             }
         }
         
@@ -81,14 +86,44 @@ struct YAAMApp: App {
         Settings {
             SettingsView()
                 .environmentObject(appState)
-                .frame(width: 980, height: 700)
+                .frame(
+                    minWidth: 820,
+                    idealWidth: 980,
+                    maxWidth: .infinity,
+                    minHeight: 620,
+                    idealHeight: 700,
+                    maxHeight: .infinity
+                )
+                .resizablePresentation(minWidth: 820, minHeight: 620)
         }
         #endif
 
+        Window("Log Statistics & Confirmation Breakdown", id: YAAMWindowID.statistics) {
+            StatisticsView()
+                .environmentObject(appState)
+                .frame(
+                    minWidth: 900,
+                    idealWidth: 1180,
+                    maxWidth: .infinity,
+                    minHeight: 620,
+                    idealHeight: 780,
+                    maxHeight: .infinity
+                )
+        }
+        .defaultSize(width: 1180, height: 780)
+        .windowResizability(.contentMinSize)
+
         // MARK: - Help Secondary Window Scene
-        Window("ADIF Processor Help & FAQ", id: "help-window") {
+        Window("ADIF Processor Help & FAQ", id: YAAMWindowID.help) {
             HelpView()
-                .frame(minWidth: 820, idealWidth: 980, minHeight: 600, idealHeight: 700)
+                .frame(
+                    minWidth: 820,
+                    idealWidth: 980,
+                    maxWidth: .infinity,
+                    minHeight: 600,
+                    idealHeight: 700,
+                    maxHeight: .infinity
+                )
         }
         .defaultSize(width: 980, height: 700)
         .windowResizability(.contentMinSize)

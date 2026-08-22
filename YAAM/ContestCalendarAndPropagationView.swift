@@ -515,6 +515,14 @@ private struct ContestInterestSettingsView: View {
             Spacer(minLength: 0)
         }
         .padding(22)
-        .frame(width: 520, height: 330)
+        .frame(
+            minWidth: 520,
+            idealWidth: 620,
+            maxWidth: .infinity,
+            minHeight: 330,
+            idealHeight: 420,
+            maxHeight: .infinity
+        )
+        .resizablePresentation(minWidth: 520, minHeight: 330)
     }
 }

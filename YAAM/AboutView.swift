@@ -96,7 +96,15 @@ struct AboutView: View {
             .padding(.top, 4)
         }
         .padding(20)
-        .frame(width: 380, height: 480)
+        .frame(
+            minWidth: 360,
+            idealWidth: 420,
+            maxWidth: .infinity,
+            minHeight: 450,
+            idealHeight: 520,
+            maxHeight: .infinity
+        )
+        .resizablePresentation(minWidth: 360, minHeight: 450)
         .background(Color(NSColor.windowBackgroundColor))
     }
 }

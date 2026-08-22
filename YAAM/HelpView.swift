@@ -6,7 +6,7 @@
 import SwiftUI
 
 private enum HelpTopic: String, CaseIterable, Identifiable {
-    case start, stations, logTable, quickLog, dxCluster, radioBridge, contest, contestCalendar, dxpeditions, magicBand, syncCenter, qslHub, confirmations, qrzIncoming, logAssistant, awards, portable, connectivity, importReview, dataSafety, credentials, workflows, faq
+    case start, stations, logTable, quickLog, dxCluster, radioBridge, contest, contestCalendar, dxpeditions, magicBand, syncCenter, qslHub, confirmations, statistics, qrzIncoming, logAssistant, awards, portable, connectivity, importReview, dataSafety, credentials, workflows, faq
     var id: String { rawValue }
 
     var title: String {
@@ -24,6 +24,7 @@ private enum HelpTopic: String, CaseIterable, Identifiable {
         case .syncCenter: return "Sync Center"
         case .qslHub: return "QSL Hub"
         case .confirmations: return "Confirmation Reconciliation"
+        case .statistics: return "Statistics & Action Center"
         case .qrzIncoming: return "QRZ Incoming Requests"
         case .logAssistant: return "Log Assistant"
         case .awards: return "Awards"
@@ -52,6 +53,7 @@ private enum HelpTopic: String, CaseIterable, Identifiable {
         case .syncCenter: return "arrow.triangle.2.circlepath"
         case .qslHub: return "arrow.left.arrow.right.circle"
         case .confirmations: return "checklist"
+        case .statistics: return "chart.bar.doc.horizontal.fill"
         case .qrzIncoming: return "tray.and.arrow.down.fill"
         case .logAssistant: return "bubble.left.and.text.bubble.right.fill"
         case .awards: return "medal"
@@ -75,6 +77,8 @@ private enum HelpTopic: String, CaseIterable, Identifiable {
             return "\(title) QRZ LoTW local progress achievement granted DXCC WAS VUCC WAC"
         case .confirmations:
             return "\(title) QRZ LoTW QSL full history counts unmatched reconciliation"
+        case .statistics:
+            return "\(title) analytics totals providers LoTW QRZ eQSL confirmation rate follow up email QSL country band grid progress"
         case .contestCalendar:
             return "\(title) WA7BNM schedule preferences modes reminders"
         default:
@@ -138,6 +142,7 @@ struct HelpView: View {
         case .syncCenter: syncCenter
         case .qslHub: qslHub
         case .confirmations: confirmations
+        case .statistics: statistics
         case .qrzIncoming: qrzIncoming
         case .logAssistant: logAssistant
         case .awards: awards
@@ -442,6 +447,42 @@ struct HelpView: View {
                 HelpDefinition(icon: "doc.on.doc", title: "Local duplicates and gaps", text: "Provider totals count their confirmations. YAAM's total counts confirmed local QSOs, so duplicates, missing imports, and unmatched contacts remain visible separately.")
             }
             helpCallout(icon: "checkmark.shield", title: "No silent guessing", text: "The reconciliation report shows downloaded, matched, and unmatched items per provider. Use Full History after changing credentials or station identity.", color: .green)
+        }
+    }
+
+    private var statistics: some View {
+        Group {
+            helpHeader(
+                title: "Statistics & Action Center",
+                subtitle: "Keep the full confirmation picture in a separate, resizable workspace and turn useful gaps into concrete follow-up actions.",
+                icon: "chart.bar.doc.horizontal.fill",
+                color: .purple
+            )
+            HelpFlow(steps: [
+                HelpFlowStep(icon: "macwindow", title: "Open", detail: "Choose Tools > Log Statistics or press Command-T. Statistics opens as an independent window, so it can stay beside the Log Table and be resized for the amount of detail you need."),
+                HelpFlowStep(icon: "chart.bar.xaxis", title: "Analyze", detail: "Review confirmation rate, unique callsigns and modes, provider coverage, countries, bands, grids, and progress over time."),
+                HelpFlowStep(icon: "scope", title: "Prioritize", detail: "The Action Center ranks unconfirmed QSOs that could add a new country-band or a new four-character grid."),
+                HelpFlowStep(icon: "paperplane", title: "Act", detail: "Open the contact in the Log Table, find an address, compose a confirmation request, preview a QSL card, or open the operator's QRZ page without rebuilding the search manually.")
+            ])
+            helpSection("Reading the Summary") {
+                HelpDefinition(icon: "percent", title: "Confirmation rate", text: "Confirmed local QSOs divided by all QSOs in the active station log. Any recognized LoTW, QRZ, eQSL, or paper/direct confirmation can satisfy a local QSO.", color: .green)
+                HelpDefinition(icon: "person.2.fill", title: "Unique activity", text: "Unique callsigns and active modes describe the breadth of the current log rather than the number of rows.")
+                HelpDefinition(icon: "checkmark.seal.fill", title: "Provider coverage", text: "LoTW, QRZ, eQSL, and paper/direct cards count local QSOs confirmed by that source. One QSO can be confirmed by several providers, so provider cards intentionally overlap and should not be added together.", color: .blue)
+                HelpDefinition(icon: "square.grid.3x3.fill", title: "Four-character grids", text: "Grid statistics normalize longer Maidenhead locators to their first four characters. Confirmation credit still belongs to the underlying QSO.")
+            }
+            helpSection("Action Center") {
+                HelpDefinition(icon: "flag.checkered", title: "New country-band", text: "The QSO is currently unconfirmed and its confirmation would add the first confirmed credit for that DXCC entity on that band.", color: .orange)
+                HelpDefinition(icon: "square.grid.3x3", title: "New grid", text: "The QSO is currently unconfirmed and its four-character grid does not yet appear among confirmed grids.", color: .cyan)
+                HelpDefinition(icon: "envelope", title: "Editable email", text: "Compose opens YAAM's normal mail editor. When no address is stored, Find Email checks the configured callsign sources first; YAAM never sends a message silently.")
+                HelpDefinition(icon: "rectangle.portrait.and.arrow.right", title: "QSL workflow", text: "Preview QSL renders the same card and message flow used elsewhere in YAAM. Review the recipient, text, and attachment before sending.")
+            }
+            helpSection("Focused Analysis") {
+                HelpDefinition(icon: "waveform.path", title: "Band breakdown", text: "Compare QSO volume, confirmations, unconfirmed contacts, DXCC reach, and confirmed DXCC by band.")
+                HelpDefinition(icon: "globe", title: "Country and country-band views", text: "Inspect worked and confirmed countries, then drill into the bands still missing confirmation for a specific entity.")
+                HelpDefinition(icon: "clock.badge.questionmark", title: "Unconfirmed DXCC", text: "Find entities with worked QSOs but no confirmation and send the resulting set back to the Log Table as a filter.")
+                HelpDefinition(icon: "chart.xyaxis.line", title: "Progress", text: "Use the chronological view to distinguish growth in activity from growth in confirmations.")
+            }
+            helpCallout(icon: "rectangle.inset.filled.and.person.filled", title: "A companion window", text: "Keep Statistics open while working in the main window. Actions that filter or reveal a QSO activate the Log Table; the statistics window remains available for the next comparison.", color: .purple)
         }
     }
 

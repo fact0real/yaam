@@ -20,7 +20,15 @@ struct DuplicateReviewView: View {
                 actions(review)
             }
         }
-        .frame(minWidth: 760, idealWidth: 860, minHeight: 520, idealHeight: 620)
+        .frame(
+            minWidth: 760,
+            idealWidth: 900,
+            maxWidth: .infinity,
+            minHeight: 520,
+            idealHeight: 660,
+            maxHeight: .infinity
+        )
+        .resizablePresentation(minWidth: 760, minHeight: 520)
     }
 
     private var header: some View {

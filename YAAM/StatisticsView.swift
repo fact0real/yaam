@@ -6,17 +6,20 @@
 //
 
 import SwiftUI
+import AppKit
 
 // MARK: - Interactive Log Statistics Window
 struct StatisticsView: View {
     @EnvironmentObject var appState: AppState
-    @Environment(\.dismiss) private var dismiss
+    @Environment(\.dismissWindow) private var dismissWindow
     
     @State private var selectedTab = 0
     @State private var selectedUnconfirmedBand = "All Bands"
     @State private var countryBandSearchText = ""
     @State private var selectedCoverageCountry: String?
     @State private var snapshot: StatisticsSnapshot?
+    @State private var followUpScope: StatisticsFollowUpScope = .creditOpportunities
+    @State private var emailLookupRecordID: UUID?
 
     private var currentSnapshot: StatisticsSnapshot {
         snapshot ?? StatisticsSnapshot.make(from: appState)
@@ -51,6 +54,21 @@ struct StatisticsView: View {
         return currentSnapshot.countryBandCoverage.first { $0.country == selectedCountry }
     }
 
+    private var visibleFollowUpCandidates: [StatisticsFollowUpCandidate] {
+        currentSnapshot.followUpCandidates.filter { candidate in
+            switch followUpScope {
+            case .creditOpportunities:
+                return candidate.opportunity.addsCountryBandCredit || candidate.opportunity.addsGridCredit
+            case .countryBand:
+                return candidate.opportunity.addsCountryBandCredit
+            case .grid:
+                return candidate.opportunity.addsGridCredit
+            case .allUnconfirmed:
+                return true
+            }
+        }
+    }
+
     var body: some View {
         let stats = currentSnapshot
 
@@ -70,21 +88,48 @@ struct StatisticsView: View {
                         .foregroundColor(.secondary)
                 }
                 Spacer()
+
+                Button {
+                    refreshSnapshot()
+                } label: {
+                    Label("Refresh", systemImage: "arrow.clockwise")
+                }
+                .help("Recalculate statistics from the active log")
+
+                Button {
+                    appState.syncConfirmations(completion: { _ in
+                        refreshSnapshot()
+                    })
+                } label: {
+                    Label(appState.isSyncingAPI ? "Syncing" : "Sync QSLs", systemImage: "icloud.and.arrow.down")
+                }
+                .disabled(appState.isSyncingAPI || appState.qsoRecords.isEmpty)
+                .help("Download new LoTW and QRZ confirmations")
+
+                Button {
+                    appState.selectedTab = 0
+                    appState.showConfirmationReconciliationSheet = true
+                    NSApp.activate(ignoringOtherApps: true)
+                } label: {
+                    Label("Reconcile", systemImage: "arrow.triangle.2.circlepath")
+                }
+                .help("Compare local, LoTW, and QRZ confirmation totals")
             }
             .padding(.top, 4)
             
             Divider()
             
             // Analytics Summary Badges Cards
-            HStack(spacing: 10) {
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 135, maximum: 220), spacing: 10)],
+                spacing: 10
+            ) {
                 StatBadgeCard(title: "Total QSOs", value: "\(stats.totalQSOCount)", icon: "antenna.radiowaves.left.and.right", color: .blue)
                 StatBadgeCard(title: "Confirmed", value: "\(stats.confirmedCount)", icon: "checkmark.seal.fill", color: .green)
                 StatBadgeCard(title: "Unconfirmed", value: "\(stats.unconfirmedCount)", icon: "clock.fill", color: .orange)
+                StatBadgeCard(title: "Confirmation Rate", value: String(format: "%.1f%%", stats.confirmationPercentage), icon: "percent", color: .teal)
                 StatBadgeCard(title: "DXCC Countries", value: "\(stats.dxccCountryCount)", icon: "globe.americas.fill", color: .purple)
                 StatBadgeCard(title: "Confirmed DXCC", value: "\(stats.confirmedDxccCountryCount)", icon: "checkmark.circle.fill", color: .mint)
-            }
-
-            HStack(spacing: 10) {
                 StatBadgeCard(title: "Worked 4-char Grids", value: "\(stats.workedGridCount)", icon: "square.grid.3x3.fill", color: .cyan)
                 StatBadgeCard(title: "Confirmed Grids", value: "\(stats.confirmedGridCount)", icon: "checkmark.square.fill", color: .green)
                 StatBadgeCard(
@@ -93,20 +138,26 @@ struct StatisticsView: View {
                     icon: "percent",
                     color: .orange
                 )
+                StatBadgeCard(title: "Unique Callsigns", value: "\(stats.uniqueCallsignCount)", icon: "person.2.fill", color: .indigo)
+                StatBadgeCard(title: "Active Modes", value: "\(stats.uniqueModeCount)", icon: "waveform", color: .pink)
             }
             
             Picker("", selection: $selectedTab) {
-                Text("Band Breakdown").tag(0)
-                Text("Country Breakdown").tag(1)
-                Text("Unconfirmed DXCC").tag(2)
-                Text("Country Bands").tag(3)
-                Text("Progress").tag(4)
+                Text("Action Center").tag(0)
+                Text("Band Breakdown").tag(1)
+                Text("Country Breakdown").tag(2)
+                Text("Unconfirmed DXCC").tag(3)
+                Text("Country Bands").tag(4)
+                Text("Progress").tag(5)
             }
             .pickerStyle(.segmented)
             .padding(.vertical, 2)
             
-            // Tab 0: Band Breakdown Table
+            // Tab 0: actionable confirmation workbench
             if selectedTab == 0 {
+                actionCenterView
+            } else if selectedTab == 1 {
+                // Tab 1: Band Breakdown Table
                 VStack(alignment: .leading, spacing: 6) {
                     ScrollView {
                         VStack(spacing: 0) {
@@ -202,8 +253,8 @@ struct StatisticsView: View {
                     .cornerRadius(6)
                     .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.gray.opacity(0.3), lineWidth: 1))
                 }
-            } else if selectedTab == 1 {
-                // Tab 1: Country Breakdown Table
+            } else if selectedTab == 2 {
+                // Tab 2: Country Breakdown Table
                 VStack(alignment: .leading, spacing: 6) {
                     ScrollView {
                         VStack(spacing: 0) {
@@ -280,8 +331,8 @@ struct StatisticsView: View {
                     .cornerRadius(6)
                     .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.gray.opacity(0.3), lineWidth: 1))
                 }
-            } else if selectedTab == 2 {
-                // Tab 2: Worked countries that are not confirmed on each band
+            } else if selectedTab == 3 {
+                // Tab 3: Worked countries that are not confirmed on each band
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
                         Text("Band:")
@@ -350,7 +401,7 @@ struct StatisticsView: View {
                     .cornerRadius(6)
                     .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.gray.opacity(0.3), lineWidth: 1))
                 }
-            } else if selectedTab == 3 {
+            } else if selectedTab == 4 {
                 countryBandCoverageView
             } else {
                 confirmedProgressView
@@ -361,21 +412,243 @@ struct StatisticsView: View {
             
             HStack {
                 Spacer()
-                Button("OK") { dismiss() }
+                Button("Close") { dismissWindow(id: YAAMWindowID.statistics) }
                     .keyboardShortcut(.defaultAction)
                     .frame(width: 90)
             }
         }
         .padding(16)
-        .frame(width: 900, height: 680)
+        .frame(
+            minWidth: 900,
+            idealWidth: 1180,
+            maxWidth: .infinity,
+            minHeight: 620,
+            idealHeight: 780,
+            maxHeight: .infinity
+        )
         .onAppear {
             appState.refreshOwnerQRZRankIfNeeded()
             appState.populateMissingGridSquaresFromCoordinates()
-            snapshot = StatisticsSnapshot.make(from: appState)
+            refreshSnapshot()
             if selectedCoverageCountry == nil {
                 selectedCoverageCountry = snapshot?.countryBandCoverage.first?.country
             }
         }
+    }
+
+    private var actionCenterView: some View {
+        let stats = currentSnapshot
+        let countryBandOpportunityCount = stats.followUpCandidates.filter(\.opportunity.addsCountryBandCredit).count
+        let gridOpportunityCount = stats.followUpCandidates.filter(\.opportunity.addsGridCredit).count
+
+        return ScrollView {
+            LazyVStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Confirmation Sources")
+                                .font(.headline)
+                            Text("Provider counts can overlap when the same QSO is confirmed by more than one service.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                    }
+
+                    LazyVGrid(
+                        columns: [GridItem(.adaptive(minimum: 180, maximum: 280), spacing: 10)],
+                        spacing: 10
+                    ) {
+                        ForEach(stats.providerStatistics) { provider in
+                            StatisticsProviderCard(stat: provider)
+                        }
+                    }
+                }
+
+                HStack(spacing: 8) {
+                    StatisticsPriorityChip(
+                        title: "New country-band",
+                        value: countryBandOpportunityCount,
+                        icon: "flag.checkered",
+                        color: .orange
+                    )
+                    StatisticsPriorityChip(
+                        title: "New 4-char grid",
+                        value: gridOpportunityCount,
+                        icon: "square.grid.3x3.fill",
+                        color: .cyan
+                    )
+                    StatisticsPriorityChip(
+                        title: "Needs confirmation",
+                        value: stats.followUpCandidates.count,
+                        icon: "envelope.badge",
+                        color: .blue
+                    )
+                }
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Confirmation Follow-up")
+                                .font(.headline)
+                            Text("Prioritized contacts where a confirmation can add useful award credit.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Picker("", selection: $followUpScope) {
+                            ForEach(StatisticsFollowUpScope.allCases) { scope in
+                                Text(scope.title).tag(scope)
+                            }
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.segmented)
+                        .frame(maxWidth: 560)
+                    }
+
+                    if visibleFollowUpCandidates.isEmpty {
+                        ContentUnavailableView(
+                            "No Follow-up Needed",
+                            systemImage: "checkmark.seal.fill",
+                            description: Text("No unconfirmed QSO matches the selected priority.")
+                        )
+                        .frame(maxWidth: .infinity, minHeight: 150)
+                    } else {
+                        LazyVStack(spacing: 6) {
+                            ForEach(Array(visibleFollowUpCandidates.prefix(80))) { candidate in
+                                StatisticsQSOActionRow(
+                                    record: candidate.record,
+                                    opportunity: candidate.opportunity,
+                                    kind: .confirmationFollowUp,
+                                    isLookingUpEmail: emailLookupRecordID == candidate.record.id,
+                                    onShowInLog: { showRecordInLog(candidate.record) },
+                                    onEmail: { prepareEmail(for: candidate.record, qslDelivery: false) },
+                                    onFindEmail: { lookupEmail(for: candidate.record, qslDelivery: false) },
+                                    onPreviewQSL: {},
+                                    onOpenQRZ: { openQRZ(for: candidate.record) }
+                                )
+                            }
+                        }
+
+                        if visibleFollowUpCandidates.count > 80 {
+                            Text("Showing the 80 highest-value contacts of \(visibleFollowUpCandidates.count). Use Show in Log to continue with the active filters.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Recently Confirmed")
+                            .font(.headline)
+                        Text("Open the QSO, send its QSL card by email, or preview the card before delivery.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if stats.recentConfirmedRecords.isEmpty {
+                        Text("No confirmed contacts are available in the active log.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, minHeight: 80)
+                    } else {
+                        LazyVStack(spacing: 6) {
+                            ForEach(stats.recentConfirmedRecords) { record in
+                                StatisticsQSOActionRow(
+                                    record: record,
+                                    opportunity: nil,
+                                    kind: .confirmedQSL,
+                                    isLookingUpEmail: emailLookupRecordID == record.id,
+                                    onShowInLog: { showRecordInLog(record) },
+                                    onEmail: { prepareEmail(for: record, qslDelivery: true) },
+                                    onFindEmail: { lookupEmail(for: record, qslDelivery: true) },
+                                    onPreviewQSL: { previewQSL(for: record) },
+                                    onOpenQRZ: { openQRZ(for: record) }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(10)
+        }
+        .background(Color(NSColor.textBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.gray.opacity(0.3), lineWidth: 1))
+    }
+
+    private func refreshSnapshot() {
+        snapshot = StatisticsSnapshot.make(from: appState)
+    }
+
+    private func showRecordInLog(_ record: QSORecordModel) {
+        let callsign = record["CALL"].trimmingCharacters(in: .whitespacesAndNewlines)
+        var criteria = FilterCriteria()
+        criteria.useCallsign = !callsign.isEmpty
+        criteria.callsign = callsign
+        appState.filterCriteria = criteria
+        appState.searchText = ""
+        appState.selectedRecordIDs = [record.id]
+        appState.selectedTab = 0
+        appState.appendLog("Showing \(callsign.isEmpty ? "selected QSO" : callsign) in the Log Table from Statistics.")
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func prepareEmail(for record: QSORecordModel, qslDelivery: Bool) {
+        let email = record["EMAIL"].trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !email.isEmpty else {
+            lookupEmail(for: record, qslDelivery: qslDelivery)
+            return
+        }
+
+        appState.selectedTab = 0
+        if qslDelivery {
+            appState.openQSLCardEmailComposer(for: record)
+        } else {
+            appState.selectedEmailCallsign = record["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            appState.selectedEmailAddress = email
+            appState.selectedEmailQSO = record
+            appState.selectedEmailTemplate = "LoTW/QRZ Confirmation"
+            appState.selectedEmailUnconfirmedQSOs = [record]
+            appState.selectedEmailIncomingRequest = nil
+            appState.showEmailComposer = true
+        }
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func lookupEmail(for record: QSORecordModel, qslDelivery: Bool) {
+        let callsign = record["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard !callsign.isEmpty, emailLookupRecordID == nil else { return }
+
+        Task { @MainActor in
+            emailLookupRecordID = record.id
+            defer { emailLookupRecordID = nil }
+            guard let email = await appState.fetchAndStoreQRZEmail(for: callsign), !email.isEmpty else { return }
+            var enrichedRecord = record
+            enrichedRecord.fields["EMAIL"] = email
+            refreshSnapshot()
+            prepareEmail(for: enrichedRecord, qslDelivery: qslDelivery)
+        }
+    }
+
+    private func previewQSL(for record: QSORecordModel) {
+        appState.selectedTab = 0
+        appState.selectedQSLCardQSO = record
+        appState.showQSLCardComposer = true
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func openQRZ(for record: QSORecordModel) {
+        let callsign = record["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let rawURL = record["QRZ_URL"].trimmingCharacters(in: .whitespacesAndNewlines)
+        let urlString = rawURL.isEmpty ? "https://www.qrz.com/db/\(callsign)" : rawURL
+        guard !callsign.isEmpty, let url = URL(string: urlString) else { return }
+        NSWorkspace.shared.open(url)
     }
 
     private var countryBandCoverageView: some View {
@@ -611,7 +884,7 @@ struct StatisticsView: View {
         appState.clearSelection()
         appState.selectedTab = 0
         appState.appendLog("Showing \(band.state == .confirmed ? "confirmed" : "unconfirmed") QSOs for \(country) on \(band.band).")
-        dismiss()
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     private func showUnconfirmedQSOs(band: String, country: String) {
@@ -628,7 +901,272 @@ struct StatisticsView: View {
         appState.clearSelection()
         appState.selectedTab = 0
         appState.appendLog("Showing unconfirmed QSOs for \(country) on \(band).")
-        dismiss()
+        NSApp.activate(ignoringOtherApps: true)
+    }
+}
+
+enum StatisticsFollowUpScope: String, CaseIterable, Identifiable {
+    case creditOpportunities
+    case countryBand
+    case grid
+    case allUnconfirmed
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .creditOpportunities: return "Best Opportunities"
+        case .countryBand: return "Country-Band"
+        case .grid: return "New Grid"
+        case .allUnconfirmed: return "All Unconfirmed"
+        }
+    }
+}
+
+enum StatisticsConfirmationProvider: String, CaseIterable, Identifiable {
+    case lotw
+    case qrz
+    case eqsl
+    case direct
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .lotw: return "LoTW"
+        case .qrz: return "QRZ Logbook"
+        case .eqsl: return "eQSL"
+        case .direct: return "Paper / Direct"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .lotw: return "checkmark.icloud.fill"
+        case .qrz: return "globe.badge.chevron.backward"
+        case .eqsl: return "envelope.badge.fill"
+        case .direct: return "mail.stack.fill"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .lotw: return .blue
+        case .qrz: return .green
+        case .eqsl: return .purple
+        case .direct: return .orange
+        }
+    }
+}
+
+struct StatisticsConfirmationProviderStat: Identifiable {
+    var id: String { provider.id }
+    let provider: StatisticsConfirmationProvider
+    let count: Int
+    let percentage: Double
+}
+
+struct StatisticsFollowUpCandidate: Identifiable {
+    var id: UUID { record.id }
+    let record: QSORecordModel
+    let opportunity: QSOConfirmationOpportunity
+    let priorityScore: Int
+}
+
+private enum StatisticsQSOActionKind {
+    case confirmationFollowUp
+    case confirmedQSL
+}
+
+private struct StatisticsProviderCard: View {
+    let stat: StatisticsConfirmationProviderStat
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Image(systemName: stat.provider.icon)
+                    .foregroundStyle(stat.provider.color)
+                Text(stat.provider.title)
+                    .font(.caption.weight(.semibold))
+                Spacer()
+                Text(String(format: "%.1f%%", stat.percentage))
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+
+            Text(stat.count.formatted())
+                .font(.title3.monospacedDigit().bold())
+
+            GeometryReader { geometry in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.secondary.opacity(0.14))
+                    Capsule()
+                        .fill(stat.provider.color)
+                        .frame(width: max(3, geometry.size.width * min(1, stat.percentage / 100)))
+                }
+            }
+            .frame(height: 6)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, minHeight: 78, alignment: .leading)
+        .background(stat.provider.color.opacity(0.07))
+        .clipShape(RoundedRectangle(cornerRadius: 7))
+        .overlay(RoundedRectangle(cornerRadius: 7).stroke(stat.provider.color.opacity(0.24)))
+    }
+}
+
+private struct StatisticsPriorityChip: View {
+    let title: String
+    let value: Int
+    let icon: String
+    let color: Color
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Image(systemName: icon)
+                .foregroundStyle(color)
+            Text(value.formatted())
+                .font(.caption.monospacedDigit().bold())
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 30)
+        .background(color.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(color.opacity(0.22)))
+    }
+}
+
+private struct StatisticsQSOActionRow: View {
+    let record: QSORecordModel
+    let opportunity: QSOConfirmationOpportunity?
+    let kind: StatisticsQSOActionKind
+    let isLookingUpEmail: Bool
+    let onShowInLog: () -> Void
+    let onEmail: () -> Void
+    let onFindEmail: () -> Void
+    let onPreviewQSL: () -> Void
+    let onOpenQRZ: () -> Void
+
+    private var callsign: String {
+        record["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+    }
+
+    private var email: String {
+        record["EMAIL"].trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var country: String {
+        let value = record["COUNTRY"].trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? "Unknown country" : value
+    }
+
+    private var detail: String {
+        let date = record["QSO_DATE"].trimmingCharacters(in: .whitespacesAndNewlines)
+        let time = String(record["TIME_ON"].filter(\.isNumber).prefix(4))
+        let band = ConfirmationOpportunityIndex.normalizedBand(for: record).uppercased()
+        let mode = record["SUBMODE"].isEmpty ? record["MODE"] : record["SUBMODE"]
+        return [date, time.isEmpty ? "" : "\(time) UTC", band, mode.uppercased()]
+            .filter { !$0.isEmpty }
+            .joined(separator: " · ")
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(countryToFlag(country))
+                    Text(callsign.isEmpty ? "Unknown callsign" : callsign)
+                        .font(.system(.body, design: .monospaced).weight(.bold))
+                    Text(country)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Text(detail)
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .frame(minWidth: 260, maxWidth: .infinity, alignment: .leading)
+
+            HStack(spacing: 5) {
+                if opportunity?.addsCountryBandCredit == true {
+                    StatisticsCreditBadge(title: "New country-band", icon: "flag.checkered", color: .orange)
+                }
+                if opportunity?.addsGridCredit == true {
+                    StatisticsCreditBadge(title: "New grid", icon: "square.grid.3x3.fill", color: .cyan)
+                }
+                if kind == .confirmedQSL {
+                    StatisticsCreditBadge(title: "Confirmed", icon: "checkmark.seal.fill", color: .green)
+                }
+            }
+
+            HStack(spacing: 5) {
+                Button(action: onShowInLog) {
+                    Image(systemName: "tablecells")
+                        .frame(width: 22)
+                }
+                .help("Show this callsign in the Log Table")
+
+                if email.isEmpty {
+                    Button(action: onFindEmail) {
+                        if isLookingUpEmail {
+                            ProgressView().controlSize(.small).frame(width: 22)
+                        } else {
+                            Image(systemName: "magnifyingglass").frame(width: 22)
+                        }
+                    }
+                    .disabled(isLookingUpEmail)
+                    .help("Find the operator email using QRZ and HAMQTH, then prepare the message")
+                } else {
+                    Button(action: onEmail) {
+                        Image(systemName: kind == .confirmedQSL ? "envelope.badge.fill" : "envelope.fill")
+                            .frame(width: 22)
+                    }
+                    .help(kind == .confirmedQSL ? "Compose an email with this QSL card" : "Compose a confirmation request")
+                }
+
+                if kind == .confirmedQSL {
+                    Button(action: onPreviewQSL) {
+                        Image(systemName: "photo.on.rectangle.angled")
+                            .frame(width: 22)
+                    }
+                    .help("Preview or export the QSL card")
+                }
+
+                Button(action: onOpenQRZ) {
+                    Image(systemName: "safari")
+                        .frame(width: 22)
+                }
+                .help("Open the callsign on QRZ.com")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        }
+        .padding(.horizontal, 10)
+        .frame(minHeight: 58)
+        .background(Color(NSColor.controlBackgroundColor).opacity(0.55))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.14)))
+    }
+}
+
+private struct StatisticsCreditBadge: View {
+    let title: String
+    let icon: String
+    let color: Color
+
+    var body: some View {
+        Label(title, systemImage: icon)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(color)
+            .padding(.horizontal, 7)
+            .frame(height: 24)
+            .background(color.opacity(0.10))
+            .clipShape(RoundedRectangle(cornerRadius: 5))
     }
 }
 
@@ -825,11 +1363,17 @@ struct StatisticsSnapshot {
     let totalQSOCount: Int
     let confirmedCount: Int
     let unconfirmedCount: Int
+    let confirmationPercentage: Double
     let dxccCountryCount: Int
     let confirmedDxccCountryCount: Int
     let workedGridCount: Int
     let confirmedGridCount: Int
     let gridConfirmationPercentage: Double
+    let uniqueCallsignCount: Int
+    let uniqueModeCount: Int
+    let providerStatistics: [StatisticsConfirmationProviderStat]
+    let followUpCandidates: [StatisticsFollowUpCandidate]
+    let recentConfirmedRecords: [QSORecordModel]
     let bandStatistics: [BandStatModel]
     let countryStatistics: [CountryStatModel]
     let unconfirmedBandCountryStatistics: [UnconfirmedBandCountryStatModel]
@@ -854,16 +1398,48 @@ struct StatisticsSnapshot {
         let gridConfirmationPercentage = workedGrids.isEmpty
             ? 0
             : Double(confirmedGrids.count) / Double(workedGrids.count) * 100
+        let totalCount = appState.qsoRecords.count
+        let confirmedCount = appState.totalConfirmedCount
+        let confirmationPercentage = totalCount == 0
+            ? 0
+            : Double(confirmedCount) / Double(totalCount) * 100
+        let providerStatistics = makeProviderStatistics(records: appState.qsoRecords)
+        let opportunityIndex = appState.confirmationOpportunityIndex
+        let followUpCandidates = appState.qsoRecords.compactMap { record -> StatisticsFollowUpCandidate? in
+            guard !record.isConfirmed,
+                  let opportunity = opportunityIndex.opportunity(for: record.id) else { return nil }
+
+            var score = 0
+            if opportunity.addsCountryBandCredit { score += 100 }
+            if opportunity.addsGridCredit { score += 80 }
+            if !record["EMAIL"].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { score += 20 }
+            if !record["QRZ_URL"].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { score += 5 }
+            return StatisticsFollowUpCandidate(record: record, opportunity: opportunity, priorityScore: score)
+        }
+        .sorted { lhs, rhs in
+            if lhs.priorityScore != rhs.priorityScore { return lhs.priorityScore > rhs.priorityScore }
+            return chronologicalKey(for: lhs.record) > chronologicalKey(for: rhs.record)
+        }
+        let recentConfirmedRecords = appState.qsoRecords
+            .filter(\.isConfirmed)
+            .sorted { chronologicalKey(for: $0) > chronologicalKey(for: $1) }
+            .prefix(20)
 
         return StatisticsSnapshot(
-            totalQSOCount: appState.qsoRecords.count,
-            confirmedCount: appState.totalConfirmedCount,
+            totalQSOCount: totalCount,
+            confirmedCount: confirmedCount,
             unconfirmedCount: appState.totalUnconfirmedCount,
+            confirmationPercentage: confirmationPercentage,
             dxccCountryCount: appState.availableCountries.count,
             confirmedDxccCountryCount: confirmedDxccCountries.count,
             workedGridCount: workedGrids.count,
             confirmedGridCount: confirmedGrids.count,
             gridConfirmationPercentage: gridConfirmationPercentage,
+            uniqueCallsignCount: appState.uniqueCallsignCount,
+            uniqueModeCount: appState.activeModesCount,
+            providerStatistics: providerStatistics,
+            followUpCandidates: followUpCandidates,
+            recentConfirmedRecords: Array(recentConfirmedRecords),
             bandStatistics: appState.bandStatistics,
             countryStatistics: appState.countryStatistics,
             unconfirmedBandCountryStatistics: appState.unconfirmedBandCountryStatistics,
@@ -874,6 +1450,46 @@ struct StatisticsSnapshot {
 
     private static func fourCharacterGrid(for record: QSORecordModel) -> String? {
         ConfirmationOpportunityIndex.fourCharacterGrid(for: record)
+    }
+
+    private static func makeProviderStatistics(records: [QSORecordModel]) -> [StatisticsConfirmationProviderStat] {
+        let total = records.count
+        return StatisticsConfirmationProvider.allCases.map { provider in
+            let fields: [String]
+            switch provider {
+            case .lotw:
+                fields = ["LOTW_QSL_RCVD", "APP_LOTW_QSL_RCVD"]
+            case .qrz:
+                fields = ["QRZLOG_QSL_RCVD", "QRZCOM_QSL_RCVD", "APP_QRZLOG_STATUS"]
+            case .eqsl:
+                fields = ["EQSL_QSL_RCVD", "APP_EQSL_QSL_RCVD"]
+            case .direct:
+                fields = ["QSL_RCVD"]
+            }
+
+            let count = records.filter { record in
+                fields.contains { field in
+                    isAffirmative(record[field])
+                }
+            }.count
+            let percentage = total == 0 ? 0 : Double(count) / Double(total) * 100
+            return StatisticsConfirmationProviderStat(
+                provider: provider,
+                count: count,
+                percentage: percentage
+            )
+        }
+    }
+
+    private static func isAffirmative(_ rawValue: String) -> Bool {
+        let value = rawValue.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        return ["Y", "V", "C", "CONFIRMED", "VERIFIED"].contains(value)
+    }
+
+    private static func chronologicalKey(for record: QSORecordModel) -> String {
+        let date = record["QSO_DATE"].filter(\.isNumber)
+        let time = record["TIME_ON"].filter(\.isNumber)
+        return "\(date)\(time.padding(toLength: 6, withPad: "0", startingAt: 0))\(String(format: "%012d", record.index))"
     }
 }
 

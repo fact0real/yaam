@@ -244,7 +244,15 @@ Warm 73,
             }
         }
         .padding(20)
-        .frame(width: 640, height: showDebugLog ? 560 : (isIncomingDetailsDraft ? 520 : 470))
+        .frame(
+            minWidth: 580,
+            idealWidth: 760,
+            maxWidth: .infinity,
+            minHeight: 430,
+            idealHeight: showDebugLog ? 620 : (isIncomingDetailsDraft ? 560 : 500),
+            maxHeight: .infinity
+        )
+        .resizablePresentation(minWidth: 580, minHeight: 430)
         .onAppear {
             if let requestedTemplate = appState.selectedEmailTemplate, templates.contains(requestedTemplate) {
                 selectedTemplate = requestedTemplate

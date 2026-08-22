@@ -64,7 +64,15 @@ struct QRZLoginView: View {
             .padding(8)
             .background(Color(NSColor.controlBackgroundColor))
         }
-        .frame(width: 600, height: 650)
+        .frame(
+            minWidth: 540,
+            idealWidth: 760,
+            maxWidth: .infinity,
+            minHeight: 520,
+            idealHeight: 760,
+            maxHeight: .infinity
+        )
+        .resizablePresentation(minWidth: 540, minHeight: 520)
     }
 }
 
