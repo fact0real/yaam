@@ -65,6 +65,20 @@ Warm 73,
             !$0.isConfirmed
         }
     }
+
+    private var isIncomingDetailsDraft: Bool {
+        selectedTemplate == "QRZ Incoming Details"
+    }
+
+    private var hasUsableRecipient: Bool {
+        let address = appState.selectedEmailAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+        let parts = address.split(separator: "@", omittingEmptySubsequences: false)
+        return parts.count == 2 && !parts[0].isEmpty && parts[1].contains(".")
+    }
+
+    private var isLookingUpIncomingRecipient: Bool {
+        isIncomingDetailsDraft && appState.incomingEmailLookupCallsign == appState.selectedEmailCallsign
+    }
     
     // Strict Callsign Resolver for My Station
     private var resolvedMyCallsign: String {
@@ -90,14 +104,47 @@ Warm 73,
     
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Send Email to \(appState.selectedEmailCallsign)")
-                .font(.headline)
-            
-            HStack {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(isIncomingDetailsDraft ? "Request Missing QSO Details" : "Send Email to \(appState.selectedEmailCallsign)")
+                        .font(.headline)
+                    if isIncomingDetailsDraft, let incoming = appState.selectedEmailIncomingRequest {
+                        Text("\(incoming.callsign) · QSO \(incoming.qsoDate.isEmpty ? "date not reported" : incoming.qsoDate)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Spacer()
+
+                Picker("Template:", selection: $selectedTemplate) {
+                    ForEach(templates, id: \.self) { tmpl in
+                        Text(tmpl).tag(tmpl)
+                    }
+                }
+                .pickerStyle(.menu)
+                .frame(width: 250)
+                .onChange(of: selectedTemplate) { _, newValue in
+                    loadTemplate(newValue)
+                }
+            }
+
+            HStack(spacing: 8) {
                 Text("To:")
                     .fontWeight(.bold)
-                Text(appState.selectedEmailAddress)
-                    .foregroundColor(.secondary)
+
+                TextField("operator@example.com", text: $appState.selectedEmailAddress)
+                    .textFieldStyle(.roundedBorder)
+
+                if isIncomingDetailsDraft {
+                    Button {
+                        openQRZProfile()
+                    } label: {
+                        Image(systemName: "safari")
+                    }
+                    .buttonStyle(.bordered)
+                    .help("Open \(appState.selectedEmailCallsign) on QRZ.com")
+                }
                 
                 // Show exact clicked QSO details badge
                 if let qso = currentQSO {
@@ -114,19 +161,28 @@ Warm 73,
                     .background(Color.blue.opacity(0.12))
                     .cornerRadius(4)
                 }
-                
-                Spacer()
-                
-                Picker("Template:", selection: $selectedTemplate) {
-                    ForEach(templates, id: \.self) { tmpl in
-                        Text(tmpl).tag(tmpl)
+            }
+
+            if isIncomingDetailsDraft {
+                HStack(spacing: 8) {
+                    if isLookingUpIncomingRecipient {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Image(systemName: hasUsableRecipient ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                            .foregroundStyle(hasUsableRecipient ? .green : .orange)
                     }
+                    Text(appState.incomingEmailDraftNotice)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text("Draft · Not sent")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.blue)
                 }
-                .pickerStyle(.menu)
-                .frame(width: 250) // ⭐️ FIX: Expanded width to fit long template names
-                .onChange(of: selectedTemplate) { _, newValue in
-                    loadTemplate(newValue)
-                }
+                .padding(10)
+                .background(Color.blue.opacity(0.06), in: RoundedRectangle(cornerRadius: 7))
+                .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.blue.opacity(0.16)))
             }
             
             Divider()
@@ -166,9 +222,7 @@ Warm 73,
                 Spacer()
                 
                 Button("Cancel") {
-                    appState.selectedEmailQSO = nil
-                    appState.selectedEmailTemplate = nil
-                    appState.selectedEmailUnconfirmedQSOs = []
+                    resetDraftContext()
                     dismiss()
                 }
                 .disabled(isSending)
@@ -181,11 +235,16 @@ Warm 73,
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.blue)
-                .disabled(isSending || appState.selectedEmailAddress.isEmpty)
+                .disabled(
+                    isSending ||
+                    !hasUsableRecipient ||
+                    emailSubject.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                    emailBody.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                )
             }
         }
         .padding(20)
-        .frame(width: 580, height: showDebugLog ? 500 : 450)
+        .frame(width: 640, height: showDebugLog ? 560 : (isIncomingDetailsDraft ? 520 : 470))
         .onAppear {
             if let requestedTemplate = appState.selectedEmailTemplate, templates.contains(requestedTemplate) {
                 selectedTemplate = requestedTemplate
@@ -196,6 +255,9 @@ Warm 73,
         }
         .onChange(of: appState.selectedEmailCallsign) { _, _ in
             loadTemplate(selectedTemplate)
+        }
+        .onDisappear {
+            resetDraftContext()
         }
     }
     
@@ -493,9 +555,7 @@ Warm 73,
                     self.appState.alertTitle = "Email Sent Successfully 🚀"
                     self.appState.alertMessage = "Your email has been dispatched via SMTP."
                     self.appState.showAlert = true
-                    self.appState.selectedEmailQSO = nil
-                    self.appState.selectedEmailTemplate = nil
-                    self.appState.selectedEmailUnconfirmedQSOs = []
+                    self.resetDraftContext()
                     self.dismiss()
                 } else {
                     self.smtpDebugOutput = log
@@ -503,6 +563,21 @@ Warm 73,
                 }
             }
         }
+    }
+
+    private func openQRZProfile() {
+        let callsign = appState.selectedEmailCallsign.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !callsign.isEmpty,
+              let url = URL(string: "https://www.qrz.com/db/\(callsign)") else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    private func resetDraftContext() {
+        appState.selectedEmailQSO = nil
+        appState.selectedEmailTemplate = nil
+        appState.selectedEmailUnconfirmedQSOs = []
+        appState.selectedEmailIncomingRequest = nil
+        appState.incomingEmailDraftNotice = ""
     }
 }
 

@@ -330,23 +330,60 @@ extension AppState {
 
     func draftIncomingQRZDetailsEmail(for incoming: QRZIncomingConfirmation) {
         let call = incoming.callsign
+        guard incomingEmailLookupCallsign == nil else { return }
+
+        let cachedEmail = qsoRecords.lazy
+            .filter { $0["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == call }
+            .map { $0["EMAIL"].trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first(where: { address in
+                let parts = address.split(separator: "@", omittingEmptySubsequences: false)
+                return parts.count == 2 && !parts[0].isEmpty && parts[1].contains(".")
+            }) ?? ""
+
+        selectedEmailCallsign = call
+        selectedEmailAddress = cachedEmail
+        selectedEmailQSO = nil
+        selectedEmailUnconfirmedQSOs = []
+        selectedEmailTemplate = "QRZ Incoming Details"
+        selectedEmailIncomingRequest = incoming
+        incomingEmailDraftNotice = cachedEmail.isEmpty
+            ? "Looking for a published address on QRZ and HAMQTH..."
+            : "Using the saved address for \(call). Review the draft before sending."
+        showIncomingEmailComposer = true
+
+        guard cachedEmail.isEmpty else {
+            appendLog("QRZ Incoming: prepared an editable details request for \(call) using its saved email address.")
+            return
+        }
+
         incomingEmailLookupCallsign = call
         Task { @MainActor in
             defer { self.incomingEmailLookupCallsign = nil }
             let contact = await self.fetchContactInfo(for: call, allowQRZWebKitFallback: true)
-            guard let email = contact.email, !email.isEmpty else {
-                self.alertTitle = "No Email Address Published"
-                self.alertMessage = "QRZ/HAMQTH did not return a published email for \(call). The request remains available in QRZ Incoming for manual review."
-                self.showAlert = true
+
+            guard self.showIncomingEmailComposer,
+                  self.selectedEmailIncomingRequest?.id == incoming.id else {
                 return
             }
-            self.selectedEmailCallsign = call
-            self.selectedEmailAddress = email
-            self.selectedEmailQSO = nil
-            self.selectedEmailUnconfirmedQSOs = []
-            self.selectedEmailTemplate = "QRZ Incoming Details"
-            self.selectedEmailIncomingRequest = incoming
-            self.showEmailComposer = true
+
+            if let email = contact.email?.trimmingCharacters(in: .whitespacesAndNewlines), !email.isEmpty {
+                let hadManualAddress = !self.selectedEmailAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                if !hadManualAddress {
+                    self.selectedEmailAddress = email
+                }
+                self.incomingEmailDraftNotice = hadManualAddress
+                    ? "A published address was found, but the address you entered manually was kept. Review it before sending."
+                    : "Published address found for \(call). Review the recipient and message before sending."
+                self.appendLog("QRZ Incoming: prepared an editable details request for \(call); recipient resolved from QRZ/HAMQTH.")
+            } else {
+                let hasManualAddress = !self.selectedEmailAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                self.incomingEmailDraftNotice = hasManualAddress
+                    ? "No published address was found. The address you entered manually was kept for your review."
+                    : "No published email was found for \(call). Enter an address manually or open the QRZ profile."
+                self.appendLog(hasManualAddress
+                    ? "QRZ Incoming: no published email was found for \(call); keeping the manually entered recipient."
+                    : "QRZ Incoming: no published email was found for \(call); the editable draft remains open for manual addressing.")
+            }
         }
     }
 
@@ -441,11 +478,12 @@ struct QRZIncomingRequestsView: View {
                                     ProgressView()
                                         .controlSize(.small)
                                 } else {
-                                    Label("Email for Details", systemImage: "envelope.fill")
+                                    Label("Compose Email", systemImage: "square.and.pencil")
                                 }
                             }
                             .buttonStyle(.borderedProminent)
                             .disabled(appState.incomingEmailLookupCallsign != nil)
+                            .help("Prepare an editable email requesting the missing QSO details")
                         }
 
                         Button {
@@ -474,6 +512,10 @@ struct QRZIncomingRequestsView: View {
         .frame(minWidth: 760, minHeight: 500)
         .onAppear {
             if appState.qrzIncomingRequests.isEmpty { appState.fetchQRZIncomingRequests() }
+        }
+        .sheet(isPresented: $appState.showIncomingEmailComposer) {
+            EmailComposerView()
+                .environmentObject(appState)
         }
     }
 

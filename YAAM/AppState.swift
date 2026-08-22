@@ -1699,6 +1699,7 @@ class AppState: NSObject, ObservableObject {
     private var hamqthSessionID: String?
     
     @Published var showEmailComposer: Bool = false
+    @Published var showIncomingEmailComposer: Bool = false
     @Published var showSMTPSettings: Bool = false
     @Published var selectedEmailCallsign: String = ""
     @Published var selectedEmailAddress: String = ""
@@ -1706,6 +1707,7 @@ class AppState: NSObject, ObservableObject {
     @Published var selectedEmailTemplate: String? = nil
     @Published var selectedEmailUnconfirmedQSOs: [QSORecordModel] = []
     @Published var selectedEmailIncomingRequest: QRZIncomingConfirmation? = nil
+    @Published var incomingEmailDraftNotice: String = ""
     @Published var emailHistory: [EmailHistoryEntry] = []
     @Published var showQSLCardComposer: Bool = false
     @Published var selectedQSLCardQSO: QSORecordModel? = nil

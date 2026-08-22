@@ -444,11 +444,12 @@ struct HelpView: View {
                 HelpFlowStep(icon: "key.fill", title: "Sign in", detail: "Use QRZ Login once to create the protected browser session used by QRZ Logbook."),
                 HelpFlowStep(icon: "tray.and.arrow.down", title: "Load requests", detail: "Open Log Table > Tools > QRZ Incoming Requests. YAAM opens QRZ's Confirmation Requests view and keeps the last successful result available between launches."),
                 HelpFlowStep(icon: "magnifyingglass", title: "Check the local log", detail: "Each request is marked when a matching local QSO already exists."),
-                HelpFlowStep(icon: "envelope", title: "Request details", detail: "For an unmatched request, select Email for Details. YAAM looks up the operator's published address and prepares a respectful recovery email for your review.")
+                HelpFlowStep(icon: "square.and.pencil", title: "Compose a request", detail: "For an unmatched request, select Compose Email. YAAM immediately opens an editable recovery draft while it looks for the operator's published QRZ or HAMQTH address.")
             ])
             helpSection("Safe Completion") {
                 HelpDefinition(icon: "doc.text", title: "Review before creating", text: "The email asks the operator for the QSO date, UTC time, band, mode, reports, and confirmation method. Add a local QSO only after the details are credible.")
                 HelpDefinition(icon: "person.badge.key", title: "QRZ session", text: "Incoming requests are read through the user-approved QRZ browser session. If QRZ requires MFA or a browser check, complete it in QRZ Login and refresh.")
+                HelpDefinition(icon: "at", title: "Missing email address", text: "If neither QRZ nor HAMQTH publishes an address, the draft stays open. Enter a recipient manually or use the QRZ profile button to continue your review.", color: .orange)
                 HelpDefinition(icon: "paperplane", title: "Your mail account", text: "YAAM prepares the message in the mail composer for your review; it never sends the request silently.")
             }
         }
