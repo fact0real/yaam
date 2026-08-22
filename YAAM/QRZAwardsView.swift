@@ -109,10 +109,10 @@ struct QRZAwardsView: View {
             .frame(width: 46, height: 46)
 
             VStack(alignment: .leading, spacing: 3) {
-                Text("QRZ Awards")
+                Text("Awards")
                     .font(.title2)
                     .bold()
-                Text("Live achievement and progress from QRZ Logbook Awards")
+                Text("QRZ achievements, LoTW confirmations, and local award progress")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -250,7 +250,7 @@ struct QRZAwardsView: View {
             Image(systemName: "trophy.circle")
                 .font(.system(size: 56))
                 .foregroundColor(.orange.opacity(0.6))
-            Text("No QRZ awards loaded yet")
+            Text("No online awards loaded yet")
                 .font(.headline)
             Text(appState.qrzAwardsStatus.isEmpty ? "Use Refresh to sign in with your saved QRZ settings and inspect Logbook Awards." : appState.qrzAwardsStatus)
                 .font(.subheadline)

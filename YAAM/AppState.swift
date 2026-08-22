@@ -101,18 +101,21 @@ struct QRZRankHistorySnapshot: Identifiable, Codable {
 }
 
 struct RankTrendPoint: Identifiable {
-    let id = UUID()
+    var id: String { "\(date.timeIntervalSince1970)-\(rank)" }
     let date: Date
     let label: String
-    let gap: Int
+    let rank: Int
 }
 
 struct RankTrendSeries: Identifiable {
     var id: String { callsign }
     let callsign: String
     let countryIso: String?
+    let isOwner: Bool
+    let latestRank: Int?
     let latestGap: Int?
     let latestMovement: Int?
+    let latestGapMovement: Int?
     let points: [RankTrendPoint]
 }
 
@@ -398,8 +401,18 @@ struct CountryStatModel: Identifiable {
 }
 
 // MARK: - Comprehensive DXCC & Country/Territory Flag Lookup Engine
+nonisolated func canonicalCountryName(_ country: String) -> String {
+    let trimmed = country.trimmingCharacters(in: .whitespacesAndNewlines)
+    switch trimmed.lowercased() {
+    case "republic of south africa", "south africa":
+        return "South Africa"
+    default:
+        return trimmed
+    }
+}
+
 func countryToFlag(_ country: String) -> String {
-    let clean = country.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    let clean = canonicalCountryName(country).lowercased()
     if clean.isEmpty { return "🌐" }
     
     switch clean {
@@ -746,7 +759,11 @@ nonisolated struct QSORecordModel: Identifiable, Sendable {
     init(id: UUID = UUID(), index: Int, fields: [String: String]) {
         self.id = id
         self.index = index
-        self.fields = fields
+        var normalizedFields = fields
+        if let country = fields["COUNTRY"], !country.isEmpty {
+            normalizedFields["COUNTRY"] = canonicalCountryName(country)
+        }
+        self.fields = normalizedFields
     }
     
     var isConfirmed: Bool {
@@ -768,8 +785,13 @@ nonisolated struct QSORecordModel: Identifiable, Sendable {
     }
     
     subscript(key: String) -> String {
-        get { return fields[key] ?? "" }
-        set { fields[key] = newValue }
+        get {
+            let value = fields[key] ?? ""
+            return key == "COUNTRY" ? canonicalCountryName(value) : value
+        }
+        set {
+            fields[key] = key == "COUNTRY" ? canonicalCountryName(newValue) : newValue
+        }
     }
 }
 
@@ -1730,6 +1752,7 @@ class AppState: NSObject, ObservableObject {
     @Published var qrzAwardsLastUpdated: Date? = nil
     @Published var qrzIncomingRequests: [QRZIncomingConfirmation] = []
     @Published var isFetchingQRZIncoming = false
+    @Published var incomingEmailLookupCallsign: String? = nil
     @Published var qrzIncomingStatus = "No QRZ incoming requests loaded"
     @Published var showQRZIncomingSheet = false
     @Published var showConfirmationReconciliationSheet = false
@@ -1744,13 +1767,22 @@ class AppState: NSObject, ObservableObject {
     
     // Search & Smart Sorting States
     @Published var searchText: String = "" {
-        didSet { filteredRecordsCache = nil }
+        didSet {
+            filteredRecordsCache = nil
+            filteredChronologicalOrdinals.removeAll(keepingCapacity: true)
+        }
     }
     @Published var sortHeader: String? = "QSO_DATE" {
-        didSet { filteredRecordsCache = nil }
+        didSet {
+            filteredRecordsCache = nil
+            filteredChronologicalOrdinals.removeAll(keepingCapacity: true)
+        }
     }
     @Published var sortAscending: Bool = false {
-        didSet { filteredRecordsCache = nil }
+        didSet {
+            filteredRecordsCache = nil
+            filteredChronologicalOrdinals.removeAll(keepingCapacity: true)
+        }
     }
     
     // Workspace File Tracking
@@ -1818,6 +1850,7 @@ class AppState: NSObject, ObservableObject {
     
     @Published private(set) var qsoRecordsRevision = 0
     private var filteredRecordsCache: [QSORecordModel]?
+    private var filteredChronologicalOrdinals: [UUID: Int] = [:]
     private var availableCountriesCache: [String]?
     private var rankCandidateCacheDay = ""
     private var rankCandidateCacheRevision = -1
@@ -1828,6 +1861,7 @@ class AppState: NSObject, ObservableObject {
         didSet {
             qsoRecordsRevision &+= 1
             filteredRecordsCache = nil
+            filteredChronologicalOrdinals.removeAll(keepingCapacity: true)
             availableCountriesCache = nil
         }
     }
@@ -1839,7 +1873,10 @@ class AppState: NSObject, ObservableObject {
     
     // Filter & Modal Sheet States
     @Published var filterCriteria = FilterCriteria() {
-        didSet { filteredRecordsCache = nil }
+        didSet {
+            filteredRecordsCache = nil
+            filteredChronologicalOrdinals.removeAll(keepingCapacity: true)
+        }
     }
     @Published var showFilterSheet: Bool = false
     @Published var showStatsSheet: Bool = false
@@ -1857,6 +1894,7 @@ class AppState: NSObject, ObservableObject {
         configurePersistentStorage()
         loadMasterLogbook()
         loadRankHistory()
+        loadQRZIncomingCache()
         loadDailyRankQuota()
         loadPersistentConfirmationCache()
         loadRecentLogsFromDatabase()
@@ -2128,6 +2166,20 @@ class AppState: NSObject, ObservableObject {
                 tableHeaders.contains { $0.lowercased().contains(query) }
             }
         }
+
+        if filterCriteria.isActive {
+            let chronologicalRecords = records.sorted { lhs, rhs in
+                let left = "\(lhs["QSO_DATE"])\(lhs["TIME_ON"])"
+                let right = "\(rhs["QSO_DATE"])\(rhs["TIME_ON"])"
+                if left != right { return left > right }
+                return lhs.index > rhs.index
+            }
+            filteredChronologicalOrdinals = Dictionary(
+                uniqueKeysWithValues: chronologicalRecords.enumerated().map { ($0.element.id, $0.offset + 1) }
+            )
+        } else {
+            filteredChronologicalOrdinals.removeAll(keepingCapacity: true)
+        }
         
         if let sortKey = sortHeader {
             records.sort { r1, r2 in
@@ -2157,6 +2209,14 @@ class AppState: NSObject, ObservableObject {
 
         filteredRecordsCache = records
         return records
+    }
+
+    func filteredChronologicalOrdinal(for recordID: UUID) -> Int? {
+        guard filterCriteria.isActive else { return nil }
+        if filteredRecordsCache == nil {
+            _ = filteredRecords
+        }
+        return filteredChronologicalOrdinals[recordID]
     }
 
     func toggleRecordSelection(_ id: UUID) {
@@ -2528,43 +2588,60 @@ class AppState: NSObject, ObservableObject {
 
     func rankTrendSeries(metric: RankHistoryMetric) -> [RankTrendSeries] {
         let ownerCall = currentStationCallsign
+        let ownerSnapshots = rankHistorySnapshots
+            .filter { $0.callsign == ownerCall }
+            .sorted { $0.date < $1.date }
         let ownerByDay = Dictionary(
-            rankHistorySnapshots
-                .filter { $0.callsign == ownerCall }
-                .map { (QRZRankHistorySnapshot.dayKey(for: $0.date), $0) },
+            ownerSnapshots.map { (QRZRankHistorySnapshot.dayKey(for: $0.date), $0) },
             uniquingKeysWith: { _, latest in latest }
         )
 
-        return trackedRankCallsigns.compactMap { callsign in
-            let rivalSnapshots = rankHistorySnapshots
+        func makeSeries(callsign: String, isOwner: Bool) -> RankTrendSeries {
+            let snapshots = rankHistorySnapshots
                 .filter { $0.callsign == callsign }
                 .sorted { $0.date < $1.date }
-
-            let points = rivalSnapshots.compactMap { rival -> RankTrendPoint? in
-                let day = QRZRankHistorySnapshot.dayKey(for: rival.date)
-                guard let ownerRank = ownerByDay[day]?.rank(for: metric),
-                      let rivalRank = rival.rank(for: metric) else { return nil }
-
+            let points = snapshots.compactMap { snapshot -> RankTrendPoint? in
+                guard let rank = snapshot.rank(for: metric) else { return nil }
                 return RankTrendPoint(
-                    date: rival.date,
-                    label: shortRankHistoryDateFormatter.string(from: rival.date),
-                    gap: rivalRank - ownerRank
+                    date: snapshot.date,
+                    label: shortRankHistoryDateFormatter.string(from: snapshot.date),
+                    rank: rank
                 )
             }
-
-            let latestGap = points.last?.gap
-            let latestMovement: Int? = points.count >= 2
-                ? (points[points.count - 1].gap - points[points.count - 2].gap)
+            let latestRank = points.last?.rank
+            let latestMovement = points.count >= 2
+                ? points[points.count - 2].rank - points[points.count - 1].rank
                 : nil
-            let countryIso = rivalSnapshots.last?.countryIso
+
+            let comparisonGaps: [Int] = isOwner ? [] : snapshots.compactMap { snapshot in
+                let day = QRZRankHistorySnapshot.dayKey(for: snapshot.date)
+                guard let ownerRank = ownerByDay[day]?.rank(for: metric),
+                      let rivalRank = snapshot.rank(for: metric) else { return nil }
+                return rivalRank - ownerRank
+            }
+            let latestGap = comparisonGaps.last
+            let latestGapMovement = comparisonGaps.count >= 2
+                ? comparisonGaps[comparisonGaps.count - 1] - comparisonGaps[comparisonGaps.count - 2]
+                : nil
+
             return RankTrendSeries(
                 callsign: callsign,
-                countryIso: countryIso,
+                countryIso: snapshots.last?.countryIso,
+                isOwner: isOwner,
+                latestRank: latestRank,
                 latestGap: latestGap,
                 latestMovement: latestMovement,
+                latestGapMovement: latestGapMovement,
                 points: points
             )
         }
+
+        var result: [RankTrendSeries] = []
+        if !ownerCall.isEmpty, ownerCall != "DEFAULT" {
+            result.append(makeSeries(callsign: ownerCall, isOwner: true))
+        }
+        result.append(contentsOf: trackedRankCallsigns.map { makeSeries(callsign: $0, isOwner: false) })
+        return result
     }
 
     private func loadRankHistory() {
@@ -6568,8 +6645,8 @@ class AppState: NSObject, ObservableObject {
 
     func updateCell(recordID: UUID, header: String, newValue: String) {
         if let idx = qsoRecords.firstIndex(where: { $0.id == recordID }) {
-            qsoRecords[idx].fields[header] = newValue
-            appendLog("Updated record #\(qsoRecords[idx].index) [\(header)] ➔ '\(newValue)'")
+            qsoRecords[idx][header] = newValue
+            appendLog("Updated record #\(qsoRecords[idx].index) [\(header)] ➔ '\(qsoRecords[idx][header])'")
             autoSaveActiveWorkspace()
         }
     }

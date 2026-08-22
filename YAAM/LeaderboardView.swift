@@ -352,6 +352,8 @@ struct LeaderboardView: View {
     }
 }
 
+private let rankTrendPalette: [Color] = [.blue, .purple, .orange, .green, .pink, .cyan, .red, .indigo, .mint]
+
 struct RankPerformanceMonitor: View {
     @Binding var metric: RankHistoryMetric
     let series: [RankTrendSeries]
@@ -403,23 +405,32 @@ struct RankPerformanceMonitor: View {
                 .frame(maxWidth: .infinity, minHeight: 150)
             } else {
                 HStack(alignment: .top, spacing: 14) {
-                    RankGapTrendChart(series: series)
-                        .frame(minHeight: 240)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Daily QRZ rank movement")
+                            .font(.subheadline.weight(.semibold))
+                        Text("Every line starts at zero. Above the center line means that operator climbed; below it means they slipped.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        RankMovementTrendChart(series: series)
+                            .frame(minHeight: 220)
+                    }
 
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Tracked Rivals")
+                        Text("Current Position")
                             .font(.caption)
                             .fontWeight(.bold)
                             .foregroundColor(.secondary)
 
-                        ForEach(trackedCallsigns, id: \.self) { callsign in
-                            let rivalSeries = series.first { $0.callsign == callsign }
+                        ForEach(Array(series.enumerated()), id: \.element.id) { index, item in
                             TrackedRivalRow(
-                                callsign: callsign,
-                                countryIso: rivalSeries?.countryIso,
-                                latestGap: rivalSeries?.latestGap,
-                                latestMovement: rivalSeries?.latestMovement,
-                                removeAction: { removeAction(callsign) }
+                                callsign: item.callsign,
+                                countryIso: item.countryIso,
+                                isOwner: item.isOwner,
+                                latestRank: item.latestRank,
+                                latestGap: item.latestGap,
+                                latestMovement: item.latestMovement,
+                                trendColor: rankTrendPalette[index % rankTrendPalette.count],
+                                removeAction: item.isOwner ? nil : { removeAction(item.callsign) }
                             )
                         }
 
@@ -430,7 +441,7 @@ struct RankPerformanceMonitor: View {
                                 .padding(.top, 4)
                         }
                     }
-                    .frame(width: 230, alignment: .topLeading)
+                    .frame(width: 280, alignment: .topLeading)
                 }
             }
         }
@@ -445,16 +456,13 @@ private struct LeaderboardMomentumBanner: View {
     let series: [RankTrendSeries]
 
     private var momentum: (title: String, detail: String, icon: String, color: Color) {
-        let deltas = series.compactMap { item -> Int? in
-            guard item.points.count >= 2,
-                  let previous = item.points.dropLast().last?.gap,
-                  let latest = item.points.last?.gap else { return nil }
-            return latest - previous
-        }
+        let owner = series.first(where: \.isOwner)
+        let rivals = series.filter { !$0.isOwner }
+        let deltas = rivals.compactMap(\.latestGapMovement)
         guard !deltas.isEmpty else {
             return (
                 "Need one more day of rank snapshots",
-                "Track rivals and refresh daily; tomorrow YAAM can compare today against yesterday.",
+                "Track rivals and refresh once per day. The next snapshot will show each operator's climb or fall and your relative change.",
                 "calendar.badge.plus",
                 .secondary
             )
@@ -464,10 +472,20 @@ private struct LeaderboardMomentumBanner: View {
         let slipped = deltas.filter { $0 < 0 }.count
         let net = deltas.reduce(0, +)
         let formatted = NumberFormatter.localizedString(from: NSNumber(value: abs(net)), number: .decimal)
+        let ownerMove: String
+        if let movement = owner?.latestMovement, movement > 0 {
+            ownerMove = "You climbed \(movement.formatted()) rank(s) today. "
+        } else if let movement = owner?.latestMovement, movement < 0 {
+            ownerMove = "You slipped \(abs(movement).formatted()) rank(s) today. "
+        } else if owner?.latestMovement != nil {
+            ownerMove = "Your rank was unchanged today. "
+        } else {
+            ownerMove = ""
+        }
         if net > 0 {
             return (
                 "Good day against tracked rivals",
-                "Your relative gap improved by \(formatted) rank point(s) across \(improved) tracked comparison(s). Keep investing in the category selected above.",
+                "\(ownerMove)Your relative position improved by \(formatted) rank point(s); you gained ground against \(improved) of \(deltas.count) comparable rival(s).",
                 "hand.thumbsup.fill",
                 .green
             )
@@ -475,14 +493,14 @@ private struct LeaderboardMomentumBanner: View {
         if net < 0 {
             return (
                 "You lost ground today",
-                "Tracked rivals gained \(formatted) net rank point(s). Prioritize fresh QSOs and bands where your QRZ score trails.",
+                "\(ownerMove)Tracked rivals gained \(formatted) net rank point(s); \(slipped) comparison(s) moved against you today.",
                 "exclamationmark.triangle.fill",
                 .orange
             )
         }
         return (
             "Stable versus rivals",
-            "Your relative position is unchanged across \(improved + slipped) tracked comparison(s). A targeted band or DXCC push is the fastest way to move.",
+            "\(ownerMove)Your combined relative position is unchanged across \(improved + slipped) tracked comparison(s).",
             "equal.circle.fill",
             .blue
         )
@@ -590,16 +608,20 @@ private struct LeaderboardInvestmentPanel: View {
 struct TrackedRivalRow: View {
     let callsign: String
     let countryIso: String?
+    let isOwner: Bool
+    let latestRank: Int?
     let latestGap: Int?
     let latestMovement: Int?
-    let removeAction: () -> Void
+    let trendColor: Color
+    let removeAction: (() -> Void)?
 
     private var gapText: String {
-        guard let latestGap else { return "No trend yet" }
+        if isOwner { return "Your station" }
+        guard let latestGap else { return "No same-day comparison yet" }
         let formatted = NumberFormatter.localizedString(from: NSNumber(value: abs(latestGap)), number: .decimal)
-        if latestGap > 0 { return "Lead \(formatted)" }
-        if latestGap < 0 { return "Behind \(formatted)" }
-        return "Tied"
+        if latestGap > 0 { return "You lead by \(formatted)" }
+        if latestGap < 0 { return "You trail by \(formatted)" }
+        return "Tied with you"
     }
 
     private var gapColor: Color {
@@ -611,19 +633,34 @@ struct TrackedRivalRow: View {
 
     private var movementText: String? {
         guard let latestMovement else { return nil }
-        if latestMovement > 0 { return "Today +\(latestMovement.formatted())" }
-        if latestMovement < 0 { return "Today \(latestMovement.formatted())" }
-        return "Today unchanged"
+        if latestMovement > 0 { return "▲ Climbed \(latestMovement.formatted())" }
+        if latestMovement < 0 { return "▼ Slipped \(abs(latestMovement).formatted())" }
+        return "● Unchanged"
     }
 
     var body: some View {
         HStack(spacing: 8) {
+            Circle()
+                .fill(trendColor)
+                .frame(width: 8, height: 8)
             Text(countryToFlag(countryIso ?? ""))
                 .font(.title3)
             VStack(alignment: .leading, spacing: 1) {
-                Text(callsign)
-                    .font(.system(.subheadline, design: .monospaced))
-                    .bold()
+                HStack(spacing: 5) {
+                    Text(callsign)
+                        .font(.system(.subheadline, design: .monospaced))
+                        .bold()
+                    if isOwner {
+                        Text("YOU")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(.blue)
+                    }
+                    if let latestRank {
+                        Text("#\(latestRank.formatted())")
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                }
                 Text(gapText)
                     .font(.caption2)
                     .foregroundColor(gapColor)
@@ -634,12 +671,14 @@ struct TrackedRivalRow: View {
                 }
             }
             Spacer()
-            Button(action: removeAction) {
-                Image(systemName: "xmark")
+            if let removeAction {
+                Button(action: removeAction) {
+                    Image(systemName: "xmark")
+                }
+                .buttonStyle(.plain)
+                .foregroundColor(.secondary)
+                .help("Stop tracking \(callsign)")
             }
-            .buttonStyle(.plain)
-            .foregroundColor(.secondary)
-            .help("Stop tracking \(callsign)")
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
@@ -648,23 +687,38 @@ struct TrackedRivalRow: View {
     }
 }
 
-struct RankGapTrendChart: View {
+struct RankMovementTrendChart: View {
     let series: [RankTrendSeries]
 
-    private let colors: [Color] = [.blue, .purple, .orange, .green, .pink, .cyan, .red, .indigo]
     private let maximumVisibleDays = 90
 
-    private var allPoints: [RankTrendPoint] {
-        series.flatMap(\.points)
+    private struct PlottedPoint: Identifiable {
+        var id: String { point.id }
+        let point: RankTrendPoint
+        let movement: Int
+        let position: CGPoint
     }
 
-    private var maxAbsGap: Int {
-        max(allPoints.map { abs($0.gap) }.max() ?? 1, 1)
+    private var visibleDates: [Date] {
+        let days = Set(series.flatMap(\.points).map { Calendar.current.startOfDay(for: $0.date) })
+        return Array(days.sorted().suffix(maximumVisibleDays))
+    }
+
+    private var allMovements: [Int] {
+        series.flatMap { item -> [Int] in
+            let points = visiblePoints(item.points)
+            guard let startingRank = points.first?.rank else { return [] }
+            return points.map { startingRank - $0.rank }
+        }
+    }
+
+    private var maxAbsMovement: Int {
+        max(allMovements.map(abs).max() ?? 1, 1)
     }
 
     var body: some View {
         GeometryReader { geometry in
-            if allPoints.isEmpty {
+            if series.flatMap(\.points).isEmpty {
                 VStack(spacing: 8) {
                     Image(systemName: "chart.xyaxis.line")
                         .font(.largeTitle)
@@ -675,75 +729,102 @@ struct RankGapTrendChart: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                let plotWidth = max(1, geometry.size.width - 58)
-                let plotHeight = max(1, geometry.size.height - 42)
-                let origin = CGPoint(x: 44, y: 18 + plotHeight / 2)
-                let datedPoints = Array(uniqueSortedDates().suffix(maximumVisibleDays))
-                let step = datedPoints.count > 1 ? plotWidth / CGFloat(datedPoints.count - 1) : plotWidth
-                let yScale = (plotHeight / 2 - 10) / CGFloat(maxAbsGap)
+                let plotWidth = max(1, geometry.size.width - 68)
+                let plotHeight = max(1, geometry.size.height - 44)
+                let origin = CGPoint(x: 54, y: 12 + plotHeight / 2)
+                let step = visibleDates.count > 1
+                    ? plotWidth / CGFloat(visibleDates.count - 1)
+                    : 0
+                let yScale = max(1, plotHeight / 2 - 12) / CGFloat(maxAbsMovement)
 
                 ZStack(alignment: .topLeading) {
                     chartGrid(width: geometry.size.width, height: plotHeight, origin: origin)
 
                     ForEach(Array(series.enumerated()), id: \.element.id) { index, item in
-                        let coordinates = coordinates(for: item.points, dates: datedPoints, origin: origin, step: step, yScale: yScale)
-                        linePath(coordinates)
-                            .stroke(colors[index % colors.count], style: StrokeStyle(lineWidth: 2.8, lineCap: .round, lineJoin: .round))
+                        let color = rankTrendPalette[index % rankTrendPalette.count]
+                        let plotted = plottedPoints(
+                            for: item.points,
+                            origin: origin,
+                            plotWidth: plotWidth,
+                            step: step,
+                            yScale: yScale
+                        )
 
-                        ForEach(Array(coordinates.enumerated()), id: \.offset) { pointIndex, coordinate in
+                        linePath(plotted.map(\.position))
+                            .stroke(
+                                color,
+                                style: StrokeStyle(
+                                    lineWidth: item.isOwner ? 3.6 : 2.5,
+                                    lineCap: .round,
+                                    lineJoin: .round
+                                )
+                            )
+
+                        ForEach(plotted) { plottedPoint in
                             Circle()
-                                .fill(colors[index % colors.count])
-                                .frame(width: 6, height: 6)
-                                .position(coordinate)
-                                .help("\(item.callsign) \(item.points[pointIndex].label): \(gapHelp(item.points[pointIndex].gap))")
+                                .fill(color)
+                                .overlay {
+                                    if item.isOwner {
+                                        Circle().stroke(Color.white.opacity(0.8), lineWidth: 1)
+                                    }
+                                }
+                                .frame(width: item.isOwner ? 8 : 7, height: item.isOwner ? 8 : 7)
+                                .position(plottedPoint.position)
+                                .help(pointHelp(item: item, plottedPoint: plottedPoint))
                         }
                     }
 
-                    Text("+\(formattedNumber(maxAbsGap))")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                        .position(x: 20, y: 18)
-                    Text("-\(formattedNumber(maxAbsGap))")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                        .position(x: 20, y: plotHeight + 18)
-                    Text(datedPoints.first?.label ?? "")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                        .position(x: 54, y: geometry.size.height - 10)
-                    Text(datedPoints.last?.label ?? "")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                        .position(x: geometry.size.width - 28, y: geometry.size.height - 10)
+                    axisLabel("▲ +\(formattedNumber(maxAbsMovement))", color: .green)
+                        .position(x: 26, y: 14)
+                    axisLabel("0", color: .secondary)
+                        .position(x: 38, y: origin.y)
+                    axisLabel("▼ -\(formattedNumber(maxAbsMovement))", color: .orange)
+                        .position(x: 26, y: 12 + plotHeight)
+
+                    if let first = visibleDates.first {
+                        dateLabel(first)
+                            .position(x: 70, y: geometry.size.height - 10)
+                    }
+                    if visibleDates.count > 1, let last = visibleDates.last {
+                        dateLabel(last)
+                            .position(x: geometry.size.width - 38, y: geometry.size.height - 10)
+                    }
                 }
             }
         }
     }
 
-    private func uniqueSortedDates() -> [RankTrendPoint] {
-        let grouped = Dictionary(grouping: allPoints) { Calendar.current.startOfDay(for: $0.date) }
-        return grouped.keys.sorted().compactMap { key in
-            grouped[key]?.first
-        }
+    private func visiblePoints(_ points: [RankTrendPoint]) -> [RankTrendPoint] {
+        guard let firstVisibleDate = visibleDates.first else { return [] }
+        return points
+            .filter { Calendar.current.startOfDay(for: $0.date) >= firstVisibleDate }
+            .sorted { $0.date < $1.date }
     }
 
-    private func coordinates(
+    private func plottedPoints(
         for points: [RankTrendPoint],
-        dates: [RankTrendPoint],
         origin: CGPoint,
+        plotWidth: CGFloat,
         step: CGFloat,
         yScale: CGFloat
-    ) -> [CGPoint] {
-        let indexByDay = Dictionary(uniqueKeysWithValues: dates.enumerated().map {
-            (Calendar.current.startOfDay(for: $0.element.date), $0.offset)
+    ) -> [PlottedPoint] {
+        let points = visiblePoints(points)
+        guard let startingRank = points.first?.rank else { return [] }
+        let indexByDay = Dictionary(uniqueKeysWithValues: visibleDates.enumerated().map {
+            (Calendar.current.startOfDay(for: $0.element), $0.offset)
         })
 
         return points.compactMap { point in
             let day = Calendar.current.startOfDay(for: point.date)
-            guard let index = indexByDay[day] else { return nil }
-            return CGPoint(
-                x: origin.x + CGFloat(index) * step,
-                y: origin.y - CGFloat(point.gap) * yScale
+            guard let dayIndex = indexByDay[day] else { return nil }
+            let movement = startingRank - point.rank
+            let x = visibleDates.count > 1
+                ? origin.x + CGFloat(dayIndex) * step
+                : origin.x + plotWidth / 2
+            return PlottedPoint(
+                point: point,
+                movement: movement,
+                position: CGPoint(x: x, y: origin.y - CGFloat(movement) * yScale)
             )
         }
     }
@@ -751,35 +832,55 @@ struct RankGapTrendChart: View {
     private func chartGrid(width: CGFloat, height: CGFloat, origin: CGPoint) -> some View {
         Path { path in
             for row in 0...4 {
-                let y = 18 + CGFloat(row) * height / 4
+                let y = 12 + CGFloat(row) * height / 4
                 path.move(to: CGPoint(x: origin.x, y: y))
-                path.addLine(to: CGPoint(x: width, y: y))
+                path.addLine(to: CGPoint(x: width - 8, y: y))
             }
-            path.move(to: CGPoint(x: origin.x, y: 18))
-            path.addLine(to: CGPoint(x: origin.x, y: 18 + height))
-            path.move(to: CGPoint(x: origin.x, y: origin.y))
-            path.addLine(to: CGPoint(x: width, y: origin.y))
+            path.move(to: CGPoint(x: origin.x, y: 12))
+            path.addLine(to: CGPoint(x: origin.x, y: 12 + height))
         }
         .stroke(Color.gray.opacity(0.18), lineWidth: 1)
+        .overlay(alignment: .topLeading) {
+            Path { path in
+                path.move(to: CGPoint(x: origin.x, y: origin.y))
+                path.addLine(to: CGPoint(x: width - 8, y: origin.y))
+            }
+            .stroke(Color.secondary.opacity(0.45), style: StrokeStyle(lineWidth: 1.2, dash: [5, 4]))
+        }
     }
 
     private func linePath(_ coordinates: [CGPoint]) -> Path {
         Path { path in
             guard let first = coordinates.first else { return }
             path.move(to: first)
-            var previous = first
             for point in coordinates.dropFirst() {
-                path.addLine(to: CGPoint(x: point.x, y: previous.y))
                 path.addLine(to: point)
-                previous = point
             }
         }
     }
 
-    private func gapHelp(_ gap: Int) -> String {
-        if gap > 0 { return "You lead by \(formattedNumber(gap)) ranks" }
-        if gap < 0 { return "You are behind by \(formattedNumber(abs(gap))) ranks" }
-        return "Tied"
+    private func pointHelp(item: RankTrendSeries, plottedPoint: PlottedPoint) -> String {
+        let movement: String
+        if plottedPoint.movement > 0 {
+            movement = "climbed \(formattedNumber(plottedPoint.movement)) places"
+        } else if plottedPoint.movement < 0 {
+            movement = "slipped \(formattedNumber(abs(plottedPoint.movement))) places"
+        } else {
+            movement = "starting point"
+        }
+        return "\(item.callsign) · \(plottedPoint.point.label) · rank #\(formattedNumber(plottedPoint.point.rank)) · \(movement)"
+    }
+
+    private func axisLabel(_ value: String, color: Color) -> some View {
+        Text(value)
+            .font(.caption2.monospacedDigit())
+            .foregroundStyle(color)
+    }
+
+    private func dateLabel(_ date: Date) -> some View {
+        Text(date.formatted(.dateTime.month(.abbreviated).day()))
+            .font(.caption2)
+            .foregroundStyle(.secondary)
     }
 
     private func formattedNumber(_ value: Int) -> String {

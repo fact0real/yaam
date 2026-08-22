@@ -34,7 +34,7 @@ struct FilterSheetView: View {
                 Image(systemName: "line.3.horizontal.decrease.circle.fill")
                     .font(.title2)
                     .foregroundColor(.accentColor)
-                Text("ADIFMaster Advanced Filters")
+                Text("YAAM Advanced Filters")
                     .font(.title2)
                     .bold()
                 Spacer()
@@ -57,7 +57,7 @@ struct FilterSheetView: View {
                                 .disabled(!tempCriteria.useDate)
                         }
 
-                        Label("Applied results are ordered by UTC date and time, newest first.", systemImage: "clock.arrow.2.circlepath")
+                        Label("After Apply Filters, visible matches receive a temporary UTC row number, newest first. The number is not a database ID and disappears after Reset Filters.", systemImage: "clock.arrow.2.circlepath")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }

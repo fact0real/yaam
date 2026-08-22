@@ -26,14 +26,21 @@ struct LogTableView: View {
         "CALL",
         "FREQ",
         "BAND",
+        "BAND_RX",
         "MODE",
-        "CONT"
+        "CONT",
+        "RST_SENT",
+        "RST_RCVD"
     ]
 
     private let preferredColumnOrder = [
         "QSO_DATE", "TIME_ON", "CALL", "FREQ", "BAND", "MODE", "RST_SENT", "RST_RCVD",
         "NAME", "QTH", "CONT", "COUNTRY", "DXCC", "CQZ", "ITUZ"
     ]
+
+    private var utilityColumnWidth: CGFloat {
+        appState.filterCriteria.isActive ? 82 : 48
+    }
 
     var body: some View {
         let visibleRecords = appState.filteredRecords
@@ -561,9 +568,17 @@ struct LogTableView: View {
 
     private var headerRowView: some View {
         HStack(spacing: 0) {
-            Color.accentColor
-                .frame(width: 48, height: 28)
+            ZStack {
+                Color.accentColor
+                if appState.filterCriteria.isActive {
+                    Label("# UTC", systemImage: "clock")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.white)
+                }
+            }
+                .frame(width: utilityColumnWidth, height: 28)
                 .border(Color.black.opacity(0.3), width: 0.5)
+                .help(appState.filterCriteria.isActive ? "Temporary chronological number after filtering, newest QSO first" : "QSO actions")
             
             ForEach(displayedHeaders, id: \.self) { header in
                 let w = columnWidths[header] ?? defaultColumnWidth(for: header)
@@ -647,7 +662,17 @@ struct LogTableView: View {
         let call = record["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         
         return HStack(spacing: 0) {
-            HStack(spacing: 6) {
+            HStack(spacing: 5) {
+                if let ordinal = appState.filteredChronologicalOrdinal(for: record.id) {
+                    Text(ordinal.formatted())
+                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                        .frame(maxWidth: 31, alignment: .trailing)
+                        .help("Position by UTC date and time in the current filtered result")
+                }
+
                 Button(action: { appState.toggleRecordSelection(record.id) }) {
                     Image(systemName: isSelected ? "checkmark.square.fill" : "square")
                         .font(.system(size: 11))
@@ -664,7 +689,7 @@ struct LogTableView: View {
                 .buttonStyle(.plain)
                 .help("Delete QSO")
             }
-            .frame(width: 48, height: 28, alignment: .center)
+            .frame(width: utilityColumnWidth, height: 28, alignment: .center)
             .background(statusBgColor)
             .border(Color.gray.opacity(0.2), width: 0.5)
             
@@ -825,7 +850,7 @@ struct LogTableView: View {
         case "TIME", "TIME_ON", "TIME_OFF": return 58
         case "CALL": return 74
         case "FREQ", "FREQ_RX": return 68
-        case "BAND", "MODE", "SUBMODE": return 52
+        case "BAND", "BAND_RX", "MODE", "SUBMODE": return 52
         case "CONT": return 48
         case "RST_SENT", "RST_RCVD": return 70
         case "NAME": return 140

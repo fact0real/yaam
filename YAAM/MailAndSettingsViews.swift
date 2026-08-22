@@ -325,18 +325,21 @@ Warm 73,
         case "QRZ Incoming Details":
             let incoming = appState.selectedEmailIncomingRequest
             let requestedDate = incoming?.qsoDate.isEmpty == false ? incoming!.qsoDate : "the date shown in QRZ Logbook"
-            emailSubject = "QRZ Logbook QSO Details Request - \(myCall)"
+            let receivedNote = incoming?.requestedAt.isEmpty == false
+                ? " I received the QRZ request on \(incoming!.requestedAt)."
+                : ""
+            emailSubject = "Could you help me recover our QSO details? - \(myCall)"
             emailBody = """
             Hello \(targetCall),
 
-            QRZ Logbook shows an incoming confirmation request for a QSO on \(requestedDate), but I cannot find the matching contact in my local log.
+            I noticed your incoming QRZ Logbook confirmation request for our QSO on \(requestedDate).\(receivedNote) Unfortunately, that entry appears to be missing from my local log, and I would rather ask you than guess any of the details.
 
-            Could you please send me the QSO time (UTC), band, mode, and report? Once I have the details I will add the contact and confirm it in QRZ.
+            When you have a moment, would you please send me the time in UTC, band or frequency, mode, and the reports we exchanged? I will reconstruct the contact carefully and confirm it in QRZ as soon as I have the matching details.
 
-            Thank you for your help and 73,
+            I am sorry for the extra step, and I appreciate your help. I am glad you reached out.
+
+            Best 73,
             \(myCall)
-
-            Prepared with YAAM
             """
             
         case "QSL Card Delivery":

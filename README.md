@@ -8,7 +8,7 @@ YAAM, short for Yet Another ADIF Manager, is a native macOS amateur-radio logboo
 - Station profiles for home, portable, remote, club, and historical operating locations.
 - QRZ, LoTW, eQSL, Club Log, HAMQTH, SMTP, WSJT-X/JTDX, Hamlib rigctld, DX Cluster, and external ADIF workflow support.
 - QSL Hub for durable upload queues, retry handling, and confirmation downloads from LoTW and QRZ Logbook.
-- QRZ Awards dashboard with progress cards and continent-focused award visuals.
+- Awards dashboard combining QRZ achievements, LoTW confirmations, local progress, and continent-focused visuals.
 - LoTW-confirmed local award progress for DXCC-style entity count, WAS-style state count, and 6m grid progress.
 - QRZ Rank leaderboard with rival tracking, daily history, rank-gap trends, and performance momentum feedback.
 - Contest workspace with UTC session tracking, serial/exchange support, dupe checks, and Cabrillo 3.0 export.

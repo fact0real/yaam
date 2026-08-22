@@ -43,7 +43,7 @@ struct ContentView: View {
                 Text("Convert").tag(1)
                 Text("Leaderboard").tag(2)
                 Text("DX Advisor").tag(3)
-                Text("QRZ Awards").tag(4)
+                Text("Awards").tag(4)
             }
             .pickerStyle(.segmented)
             .padding(12)

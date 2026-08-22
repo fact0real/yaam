@@ -8,7 +8,7 @@ import Foundation
 import SwiftUI
 import WebKit
 
-nonisolated struct QRZIncomingConfirmation: Identifiable, Hashable, Sendable {
+nonisolated struct QRZIncomingConfirmation: Identifiable, Hashable, Codable, Sendable {
     let id: String
     let callsign: String
     let qsoDate: String
@@ -27,7 +27,10 @@ nonisolated struct QRZIncomingConfirmation: Identifiable, Hashable, Sendable {
 nonisolated struct QRZIncomingFetchResult: Sendable {
     let requests: [QRZIncomingConfirmation]
     let message: String
+    let succeeded: Bool
 }
+
+private let qrzIncomingRequestsCacheKey = "qrzIncomingRequests.v1"
 
 // QRZ Logbook intentionally has no public API for confirmation requests. This
 // small, session-bound reader only navigates the page the operator can open in a browser.
@@ -51,7 +54,7 @@ final class QRZIncomingScraper: NSObject, WKNavigationDelegate {
 
     func fetchIncoming() async -> QRZIncomingFetchResult {
         if continuation != nil {
-            finish(QRZIncomingFetchResult(requests: [], message: "The previous QRZ Incoming lookup was replaced."))
+            finish(QRZIncomingFetchResult(requests: [], message: "The previous QRZ Incoming lookup was replaced.", succeeded: false))
         }
 
         return await withCheckedContinuation { continuation in
@@ -64,14 +67,15 @@ final class QRZIncomingScraper: NSObject, WKNavigationDelegate {
                 self.webView.stopLoading()
                 self.finish(QRZIncomingFetchResult(
                     requests: [],
-                    message: "QRZ Incoming timed out. Open QRZ Login once if QRZ requires MFA or browser verification."
+                    message: "QRZ Incoming timed out. Open QRZ Login once if QRZ requires MFA or browser verification.",
+                    succeeded: false
                 ))
             }
 
             QRZSessionStore.restoreToWebKit { [weak self] in
                 guard let self else { return }
                 guard let url = URL(string: "https://logbook.qrz.com/logbook") else {
-                    self.finish(QRZIncomingFetchResult(requests: [], message: "Invalid QRZ Logbook URL."))
+                    self.finish(QRZIncomingFetchResult(requests: [], message: "Invalid QRZ Logbook URL.", succeeded: false))
                     return
                 }
                 self.webView.load(QRZWebKitSession.browserLikeRequest(url: url, timeoutInterval: 30))
@@ -86,23 +90,23 @@ final class QRZIncomingScraper: NSObject, WKNavigationDelegate {
     nonisolated func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         Task { @MainActor in
             guard (error as NSError).code != NSURLErrorCancelled else { return }
-            self.finish(QRZIncomingFetchResult(requests: [], message: "QRZ Incoming navigation failed: \(error.localizedDescription)"))
+            self.finish(QRZIncomingFetchResult(requests: [], message: "QRZ Incoming navigation failed: \(error.localizedDescription)", succeeded: false))
         }
     }
 
     nonisolated func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         Task { @MainActor in
             guard (error as NSError).code != NSURLErrorCancelled else { return }
-            self.finish(QRZIncomingFetchResult(requests: [], message: "QRZ Incoming navigation failed: \(error.localizedDescription)"))
+            self.finish(QRZIncomingFetchResult(requests: [], message: "QRZ Incoming navigation failed: \(error.localizedDescription)", succeeded: false))
         }
     }
 
     private func inspectPage() {
         guard continuation != nil else { return }
-        webView.evaluateJavaScript(Self.navigationScript) { [weak self] result, error in
+        webView.evaluateJavaScript(Self.navigationScript(shouldOpenRequests: !hasOpenedIncoming)) { [weak self] result, error in
             guard let self, self.continuation != nil else { return }
             if let error {
-                self.finish(QRZIncomingFetchResult(requests: [], message: "Unable to inspect QRZ Incoming: \(error.localizedDescription)"))
+                self.finish(QRZIncomingFetchResult(requests: [], message: "Unable to inspect QRZ Incoming: \(error.localizedDescription)", succeeded: false))
                 return
             }
             let payload = result as? [String: Any] ?? [:]
@@ -115,7 +119,8 @@ final class QRZIncomingScraper: NSObject, WKNavigationDelegate {
             case "login-required":
                 self.finish(QRZIncomingFetchResult(
                     requests: [],
-                    message: "QRZ Login is required. Open QRZ Login, finish any MFA step, then refresh Incoming Requests."
+                    message: "QRZ Login is required. Open QRZ Login, finish any MFA step, then refresh Incoming Requests.",
+                    succeeded: false
                 ))
             default:
                 self.poll(after: 0.5)
@@ -126,7 +131,7 @@ final class QRZIncomingScraper: NSObject, WKNavigationDelegate {
     private func poll(after delay: TimeInterval) {
         pollCount += 1
         guard pollCount <= 50 else {
-            finish(QRZIncomingFetchResult(requests: [], message: "QRZ Incoming did not finish loading. Open QRZ Login once, then retry."))
+            finish(QRZIncomingFetchResult(requests: [], message: "QRZ Incoming did not finish loading. Open QRZ Login once, then retry.", succeeded: false))
             return
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
@@ -138,7 +143,7 @@ final class QRZIncomingScraper: NSObject, WKNavigationDelegate {
         webView.evaluateJavaScript(Self.parseScript) { [weak self] result, error in
             guard let self, self.continuation != nil else { return }
             if let error {
-                self.finish(QRZIncomingFetchResult(requests: [], message: "QRZ Incoming could not be parsed: \(error.localizedDescription)"))
+                self.finish(QRZIncomingFetchResult(requests: [], message: "QRZ Incoming could not be parsed: \(error.localizedDescription)", succeeded: false))
                 return
             }
             let payload = result as? [String: Any] ?? [:]
@@ -157,7 +162,10 @@ final class QRZIncomingScraper: NSObject, WKNavigationDelegate {
                 .sorted { $0.requestedAt > $1.requestedAt }
             self.finish(QRZIncomingFetchResult(
                 requests: unique,
-                message: "Loaded \(unique.count) QRZ Incoming confirmation request(s)."
+                message: unique.isEmpty
+                    ? "QRZ Incoming is current; no confirmation requests were returned."
+                    : "Loaded \(unique.count) QRZ Incoming confirmation request(s).",
+                succeeded: true
             ))
         }
     }
@@ -172,7 +180,9 @@ final class QRZIncomingScraper: NSObject, WKNavigationDelegate {
         active?.resume(returning: result)
     }
 
-    private static let navigationScript = #"""
+    private static func navigationScript(shouldOpenRequests: Bool) -> String {
+        let shouldOpen = shouldOpenRequests ? "true" : "false"
+        return #"""
     (function() {
         function visible(el) {
             if (!el) return false;
@@ -183,16 +193,33 @@ final class QRZIncomingScraper: NSObject, WKNavigationDelegate {
         if (Array.from(document.querySelectorAll("input[type=password], input[name=password], #password")).some(visible)) {
             return { action: "login-required" };
         }
-        if (/Confirmation Requests|QSO[s]? that others are waiting for you to confirm/i.test(body)) {
+        var requestTableReady = Array.from(document.querySelectorAll("table")).some(function(table) {
+            var heading = (table.innerText || table.textContent || "").replace(/\s+/g, " ");
+            return /Request Received/i.test(heading) && /QSO Date/i.test(heading) && /Callsign/i.test(heading);
+        });
+        var emptyRequestsReady = /Confirmation Requests/i.test(body)
+            && /(?:no|0) (?:incoming |confirmation )?requests/i.test(body);
+        if (requestTableReady || emptyRequestsReady) {
             return { action: "incoming-ready" };
         }
-        if (typeof lb_go === "function") {
-            lb_go("incoming", "");
+        if (\#(shouldOpen) && typeof lb_go === "function") {
+            lb_go("requests", "");
             return { action: "open-incoming" };
+        }
+        if (\#(shouldOpen)) {
+            var incomingLink = Array.from(document.querySelectorAll("[onclick], a, button")).find(function(el) {
+                var handler = el.getAttribute("onclick") || "";
+                return /lb_go\s*\(\s*['\"]requests['\"]/i.test(handler) || /^incoming$/i.test((el.innerText || "").trim());
+            });
+            if (incomingLink) {
+                incomingLink.click();
+                return { action: "open-incoming" };
+            }
         }
         return { action: "waiting" };
     })();
     """#
+    }
 
     private static let parseScript = #"""
     (function() {
@@ -204,19 +231,30 @@ final class QRZIncomingScraper: NSObject, WKNavigationDelegate {
             return matches.length ? matches[matches.length - 1] : "";
         }
         var rows = [];
-        Array.from(document.querySelectorAll("table tr")).forEach(function(tr) {
+        var tables = Array.from(document.querySelectorAll("table"));
+        var requestTables = tables.filter(function(table) {
+            var heading = text(table.querySelector("tr"));
+            return /Request Received/i.test(heading) && /QSO Date/i.test(heading) && /Callsign/i.test(heading);
+        });
+        (requestTables.length ? requestTables : tables).forEach(function(table) {
+          var headings = Array.from(table.querySelectorAll("tr th, tr:first-child td")).map(text);
+          var requestedIndex = headings.findIndex(function(value) { return /Request Received/i.test(value); });
+          var qsoIndex = headings.findIndex(function(value) { return /QSO Date/i.test(value); });
+          var callIndex = headings.findIndex(function(value) { return /^Callsign$/i.test(value); });
+          Array.from(table.querySelectorAll("tr")).forEach(function(tr) {
             var cells = Array.from(tr.querySelectorAll("td")).map(text);
             var summary = cells.join(" | ");
             if (!summary || !/\b\d{4}-\d{2}-\d{2}\b/.test(summary)) return;
-            var call = callFrom(summary);
+            var call = callFrom(callIndex >= 0 ? cells[callIndex] : summary);
             if (!call) return;
             var dates = summary.match(/\b\d{4}-\d{2}-\d{2}(?:\s+\d{2}:\d{2}:\d{2})?\b/g) || [];
             rows.push({
                 callsign: call,
-                requestedAt: dates[0] || "",
-                qsoDate: dates.length > 1 ? firstDate(dates[1]) : firstDate(summary),
+                requestedAt: requestedIndex >= 0 ? (cells[requestedIndex] || "") : (dates[0] || ""),
+                qsoDate: qsoIndex >= 0 ? firstDate(cells[qsoIndex] || "") : (dates.length > 1 ? firstDate(dates[1]) : firstDate(summary)),
                 summary: summary
             });
+          });
         });
         return { rows: rows };
     })();
@@ -242,6 +280,20 @@ nonisolated struct ConfirmationReconciliationSnapshot: Codable, Equatable, Senda
 }
 
 extension AppState {
+    func loadQRZIncomingCache() {
+        guard let data = UserDefaults.standard.data(forKey: qrzIncomingRequestsCacheKey),
+              let cached = try? JSONDecoder().decode([QRZIncomingConfirmation].self, from: data) else { return }
+        qrzIncomingRequests = cached
+        if !cached.isEmpty {
+            qrzIncomingStatus = "Showing \(cached.count) saved QRZ Incoming request(s). Refresh to check for changes."
+        }
+    }
+
+    private func saveQRZIncomingCache() {
+        guard let data = try? JSONEncoder().encode(qrzIncomingRequests) else { return }
+        UserDefaults.standard.set(data, forKey: qrzIncomingRequestsCacheKey)
+    }
+
     func fetchQRZIncomingRequests() {
         guard !isFetchingQRZIncoming else { return }
         isFetchingQRZIncoming = true
@@ -249,8 +301,15 @@ extension AppState {
         Task { @MainActor in
             let result = await QRZIncomingScraper.shared.fetchIncoming()
             self.isFetchingQRZIncoming = false
-            self.qrzIncomingRequests = result.requests
-            self.qrzIncomingStatus = result.message
+            if result.succeeded {
+                self.qrzIncomingRequests = result.requests
+                self.saveQRZIncomingCache()
+                self.qrzIncomingStatus = result.message
+            } else if self.qrzIncomingRequests.isEmpty {
+                self.qrzIncomingStatus = result.message
+            } else {
+                self.qrzIncomingStatus = "\(result.message) Showing the last \(self.qrzIncomingRequests.count) saved request(s)."
+            }
             self.appendLog("QRZ Incoming: \(result.message)")
             if result.requests.isEmpty && result.message.localizedCaseInsensitiveContains("required") {
                 self.playActivitySound(.failure)
@@ -271,7 +330,9 @@ extension AppState {
 
     func draftIncomingQRZDetailsEmail(for incoming: QRZIncomingConfirmation) {
         let call = incoming.callsign
+        incomingEmailLookupCallsign = call
         Task { @MainActor in
+            defer { self.incomingEmailLookupCallsign = nil }
             let contact = await self.fetchContactInfo(for: call, allowQRZWebKitFallback: true)
             guard let email = contact.email, !email.isEmpty else {
                 self.alertTitle = "No Email Address Published"
@@ -340,6 +401,17 @@ struct QRZIncomingRequestsView: View {
                 .disabled(appState.isFetchingQRZIncoming)
             }
 
+            HStack(spacing: 10) {
+                incomingSummary(title: "Returned", value: appState.qrzIncomingRequests.count, color: .blue, icon: "tray.full.fill")
+                incomingSummary(title: "Need details", value: outstanding.count, color: .orange, icon: "envelope.badge.fill")
+                incomingSummary(
+                    title: "Matched locally",
+                    value: appState.qrzIncomingRequests.count - outstanding.count,
+                    color: .green,
+                    icon: "checkmark.circle.fill"
+                )
+            }
+
             if appState.isFetchingQRZIncoming {
                 ProgressView(appState.qrzIncomingStatus)
                     .frame(maxWidth: .infinity, minHeight: 220)
@@ -362,10 +434,28 @@ struct QRZIncomingRequestsView: View {
                         }
                         Spacer()
                         if !appState.hasLocalQSO(for: request) {
-                            Button("Request Details") {
+                            Button {
                                 appState.draftIncomingQRZDetailsEmail(for: request)
+                            } label: {
+                                if appState.incomingEmailLookupCallsign == request.callsign {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                } else {
+                                    Label("Email for Details", systemImage: "envelope.fill")
+                                }
                             }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(appState.incomingEmailLookupCallsign != nil)
                         }
+
+                        Button {
+                            guard let url = URL(string: "https://www.qrz.com/db/\(request.callsign)") else { return }
+                            NSWorkspace.shared.open(url)
+                        } label: {
+                            Image(systemName: "safari")
+                        }
+                        .buttonStyle(.bordered)
+                        .help("Open \(request.callsign) on QRZ.com")
                     }
                     .padding(.vertical, 4)
                 }
@@ -385,6 +475,24 @@ struct QRZIncomingRequestsView: View {
         .onAppear {
             if appState.qrzIncomingRequests.isEmpty { appState.fetchQRZIncomingRequests() }
         }
+    }
+
+    private func incomingSummary(title: String, value: Int, color: Color, icon: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .foregroundStyle(color)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(value.formatted())
+                    .font(.headline.monospacedDigit())
+                Text(title)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(color.opacity(0.08), in: RoundedRectangle(cornerRadius: 7))
+        .overlay(RoundedRectangle(cornerRadius: 7).stroke(color.opacity(0.2)))
     }
 }
 

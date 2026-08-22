@@ -7,6 +7,7 @@
 
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 
 // MARK: - macOS Preferences & Credentials Settings Sheet
 struct SettingsView: View {
@@ -488,7 +489,7 @@ struct SettingsView: View {
         panel.title = "Select LoTW Certificate Container"
         panel.message = "Choose the .p12 certificate container exported from TQSL."
         panel.prompt = "Choose Certificate"
-        panel.allowedFileTypes = ["p12", "pfx"]
+        panel.allowedContentTypes = ["p12", "pfx"].compactMap { UTType(filenameExtension: $0) }
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
         guard panel.runModal() == .OK, let url = panel.url else { return }

@@ -26,7 +26,7 @@ private enum HelpTopic: String, CaseIterable, Identifiable {
         case .confirmations: return "Confirmation Reconciliation"
         case .qrzIncoming: return "QRZ Incoming Requests"
         case .logAssistant: return "Log Assistant"
-        case .awards: return "Award Engine"
+        case .awards: return "Awards"
         case .portable: return "Portable Activities"
         case .connectivity: return "Cloud & Mobile"
         case .importReview: return "Import Review"
@@ -64,6 +64,23 @@ private enum HelpTopic: String, CaseIterable, Identifiable {
         case .faq: return "questionmark.circle"
         }
     }
+
+    var searchTerms: String {
+        switch self {
+        case .logTable:
+            return "\(title) chronological UTC row number numbering advanced filters columns hidden database ID"
+        case .dxpeditions:
+            return "\(title) DX-World weekly bulletin magazine 425 DX News DXPing source announcement expedition"
+        case .awards:
+            return "\(title) QRZ LoTW local progress achievement granted DXCC WAS VUCC WAC"
+        case .confirmations:
+            return "\(title) QRZ LoTW QSL full history counts unmatched reconciliation"
+        case .contestCalendar:
+            return "\(title) WA7BNM schedule preferences modes reminders"
+        default:
+            return title
+        }
+    }
 }
 
 struct HelpView: View {
@@ -74,7 +91,7 @@ struct HelpView: View {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return HelpTopic.allCases }
         return HelpTopic.allCases.filter {
-            $0.title.localizedCaseInsensitiveContains(query)
+            $0.searchTerms.localizedCaseInsensitiveContains(query)
         }
     }
 
@@ -189,14 +206,15 @@ struct HelpView: View {
             HelpFlow(steps: [
                 HelpFlowStep(icon: "magnifyingglass", title: "Find", detail: "Use the toolbar search to match a callsign, country, grid, email, or any visible ADIF value."),
                 HelpFlowStep(icon: "line.3.horizontal.decrease.circle", title: "Filter", detail: "Open Filters to narrow the log by UTC date, band, mode, callsign, country, confirmation state, and more."),
-                HelpFlowStep(icon: "arrow.up.arrow.down", title: "Order", detail: "Applying filters orders matching QSOs by QSO date and UTC time, newest first."),
+                HelpFlowStep(icon: "arrow.up.arrow.down", title: "Order", detail: "Applying Filters numbers matching QSOs by QSO date and UTC time, newest first, even if you later sort a visible column."),
                 HelpFlowStep(icon: "rectangle.3.group", title: "Focus", detail: "Use Columns to reveal an extra field temporarily or hide it again without removing any information from the Master Log.")
             ])
             helpSection("Columns and Stored Data") {
                 HelpDefinition(icon: "eye.slash", title: "Hidden is not deleted", text: "Operational and service fields can be hidden by default to keep the table readable. They remain in the protected database and are available from Columns whenever needed.")
                 HelpDefinition(icon: "envelope", title: "Contact and QRZ data", text: "EMAIL, QRZ_URL, and rank columns remain visible by default. Other service bookkeeping fields stay available without crowding daily operation.", color: .blue)
                 HelpDefinition(icon: "slider.horizontal.3", title: "Your layout persists", text: "Column visibility is saved for the active station profile and is restored when changing tabs or reopening YAAM.")
-                HelpDefinition(icon: "number.square", title: "No record-number column", text: "YAAM does not show its internal database row number in the table. Use date, time, callsign, and the search/filter tools to identify a QSO; the stable internal identifier remains protected in the database.", color: .secondary)
+                HelpDefinition(icon: "number.square", title: "Filtered UTC sequence", text: "A temporary number appears beside each row only while Advanced Filters are active. Number 1 is the newest visible QSO by UTC date and time; Reset Filters removes these view-only numbers.", color: .blue)
+                HelpDefinition(icon: "lock.shield", title: "Internal ID stays hidden", text: "The filtered number is not the database row or record identifier. YAAM keeps its stable internal identity protected so sorting, filtering, importing, and deleting another QSO cannot make the visible number misleading.", color: .secondary)
             }
             helpSection("Filtering Safely") {
                 HelpDefinition(icon: "clock", title: "UTC date range", text: "Date filters compare QSO_DATE in UTC. After Apply Filters, matching results are sorted by QSO_DATE and TIME_ON, newest first.", color: .green)
@@ -379,11 +397,19 @@ struct HelpView: View {
         Group {
             helpHeader(title: "DXpedition Watch", subtitle: "Keep announced operations visible, then distinguish a planned operation from a live spot before changing the radio.", icon: "binoculars.fill", color: .purple)
             HelpFlow(steps: [
-                HelpFlowStep(icon: "calendar", title: "Load", detail: "Open Operator Desk > Calendar / 6m. YAAM caches the announced DXpedition list so the most recent successful list remains available offline."),
+                HelpFlowStep(icon: "calendar", title: "Load", detail: "Open Operator Desk > Calendar / 6m. YAAM reads the newest DX-World and 425 DX News weekly bulletins alongside their current feeds/calendars and DXPing in parallel."),
+                HelpFlowStep(icon: "arrow.triangle.merge", title: "Cross-check", detail: "Matching callsigns are merged and source labels remain visible. If one service is unavailable, successful sources still update the watch."),
                 HelpFlowStep(icon: "dot.radiowaves.left.and.right", title: "Verify live activity", detail: "A green on-air indicator appears only when the same callsign is currently present in the DX Cluster feed."),
                 HelpFlowStep(icon: "scope", title: "Check need", detail: "YAAM compares the spot with the active station's worked history and labels it as already worked or a good chance to work."),
                 HelpFlowStep(icon: "bell.badge", title: "Notify", detail: "Enable DXpedition spot notifications in Contest Interests to receive a one-time alert when a listed callsign is spotted.")
             ])
+            helpSection("Weekly Sources and Provenance") {
+                HelpDefinition(icon: "newspaper.fill", title: "425 DX News", text: "YAAM reads the official operation calendar and bulletin archive together, downloads the newest weekly PDF, and extracts announced callsigns, destinations, and operating windows. The bulletin number and original calendar/PDF links remain available for verification.", color: .orange)
+                HelpDefinition(icon: "doc.text.image", title: "DX-World Weekly", text: "YAAM uses the official DX News feed to locate the newest weekly bulletin, downloads its linked PDF, and extracts announced callsigns, entities, and operating windows. The issue number and original bulletin links remain available for verification.", color: .blue)
+                HelpDefinition(icon: "network", title: "DXPing", text: "DXPing remains a complementary schedule source. Agreement between sources improves context, but YAAM preserves every source label instead of presenting a merged claim as certain.", color: .purple)
+                HelpDefinition(icon: "externaldrive.badge.checkmark", title: "Saved fallback", text: "The last successful multi-source list is cached. A temporary website failure does not erase the DXpeditions already available in YAAM.", color: .green)
+                HelpDefinition(icon: "checkmark.shield", title: "Verify free-form notices", text: "Weekly magazines contain prose and schedules can change. YAAM normalizes clear callsigns and date windows, while the linked source remains authoritative for frequencies, modes, QSL routes, and late changes.", color: .green)
+            }
             helpSection("How to Read the Watch") {
                 HelpDefinition(icon: "clock", title: "Planned or active window", text: "Dates describe the announcement window. They do not prove that an operator is transmitting now.")
                 HelpDefinition(icon: "dot.radiowaves.left.and.right", title: "On air", text: "This requires current DX Cluster evidence for the exact listed callsign, including band and frequency.", color: .green)
@@ -416,14 +442,14 @@ struct HelpView: View {
             helpHeader(title: "QRZ Incoming Requests", subtitle: "Review confirmation requests from QRZ Logbook and politely collect missing details before creating any local contact.", icon: "tray.and.arrow.down.fill", color: .blue)
             HelpFlow(steps: [
                 HelpFlowStep(icon: "key.fill", title: "Sign in", detail: "Use QRZ Login once to create the protected browser session used by QRZ Logbook."),
-                HelpFlowStep(icon: "tray.and.arrow.down", title: "Load requests", detail: "Open Log Table > Tools > QRZ Incoming Requests. YAAM loads QRZ's Confirmation Requests page."),
+                HelpFlowStep(icon: "tray.and.arrow.down", title: "Load requests", detail: "Open Log Table > Tools > QRZ Incoming Requests. YAAM opens QRZ's Confirmation Requests view and keeps the last successful result available between launches."),
                 HelpFlowStep(icon: "magnifyingglass", title: "Check the local log", detail: "Each request is marked when a matching local QSO already exists."),
-                HelpFlowStep(icon: "envelope", title: "Request details", detail: "For an unmatched request, select Request Details to prepare a respectful email using the QSL template.")
+                HelpFlowStep(icon: "envelope", title: "Request details", detail: "For an unmatched request, select Email for Details. YAAM looks up the operator's published address and prepares a respectful recovery email for your review.")
             ])
             helpSection("Safe Completion") {
                 HelpDefinition(icon: "doc.text", title: "Review before creating", text: "The email asks the operator for the QSO date, UTC time, band, mode, reports, and confirmation method. Add a local QSO only after the details are credible.")
                 HelpDefinition(icon: "person.badge.key", title: "QRZ session", text: "Incoming requests are read through the user-approved QRZ browser session. If QRZ requires MFA or a browser check, complete it in QRZ Login and refresh.")
-                HelpDefinition(icon: "paperplane", title: "Your mail account", text: "YAAM drafts the email with your configured QSL signature and a short YAAM reference; it does not send mail silently.")
+                HelpDefinition(icon: "paperplane", title: "Your mail account", text: "YAAM prepares the message in the mail composer for your review; it never sends the request silently.")
             }
         }
     }
@@ -502,7 +528,7 @@ struct HelpView: View {
 
     private var awards: some View {
         Group {
-            helpHeader(title: "Independent Award Engine", subtitle: "Use the Master Log for planning while preserving the difference between contact evidence and an officially issued award.", icon: "medal.fill", color: .orange)
+            helpHeader(title: "Awards: Online and Local Evidence", subtitle: "Review QRZ achievements, LoTW-confirmed progress, and YAAM's local planning estimates without confusing evidence with an issuer's final decision.", icon: "medal.fill", color: .orange)
             HelpFlow(steps: [
                 HelpFlowStep(icon: "antenna.radiowaves.left.and.right", title: "Worked", detail: "A unique entity, state, grid, park, island, or summit appears in the log."),
                 HelpFlowStep(icon: "checkmark.circle", title: "Confirmed", detail: "At least one accepted confirmation method exists in the QSO."),
@@ -515,6 +541,11 @@ struct HelpView: View {
                 HelpDefinition(icon: "water.waves", title: "IOTA", text: "Provides a 100-group local milestone from standard IOTA references.")
                 HelpDefinition(icon: "tree.fill", title: "POTA", text: "Tracks unique hunted parks and qualifying activator park-days with at least 10 QSOs on the same UTC date.")
                 HelpDefinition(icon: "mountain.2.fill", title: "SOTA", text: "Tracks unique references and activity. Official summit points are not guessed without the issuer's current summit database.")
+            }
+            helpSection("What the Awards Page Combines") {
+                HelpDefinition(icon: "trophy.fill", title: "QRZ achievements", text: "Issued QRZ awards and available progress are read from the authenticated QRZ Logbook Awards workflow. Achievement text and completion percentages stay provider-specific.", color: .orange)
+                HelpDefinition(icon: "checkmark.seal.fill", title: "LoTW evidence", text: "LoTW cards show practical DXCC, WAS, and VUCC-style counts calculated only from LoTW-confirmed QSOs already reconciled with the active Master Log.", color: .green)
+                HelpDefinition(icon: "chart.bar.doc.horizontal", title: "Local award planning", text: "YAAM can estimate what is worked or confirmed across the log. A local 100% result is a planning signal unless the issuing organization has also granted the award.", color: .blue)
             }
             helpCallout(icon: "building.columns", title: "Local estimate, official decision", text: "YAAM helps answer what remains. ARRL, POTA, SOTA, RSGB and other issuing organizations decide accepted credits and award grants.", color: .blue)
         }
@@ -657,7 +688,7 @@ struct HelpView: View {
             FAQItem(question: "What counts toward the 1,440 daily rank limit?", answer: "Every attempted QRZ Rank lookup from Leaderboard, Enrich Data, or Daily Rank uses one slot. The counter is stored locally, survives app restarts, and resets at local midnight. Failed attempts count because they still reached the lookup workflow.")
             FAQItem(question: "Why can I not delete a station?", answer: "The active station cannot be deleted, and a profile that owns QSOs is protected. Activate another profile and preserve or relocate its contacts first.")
             FAQItem(question: "What happens if a restore fails?", answer: "YAAM validates the selected SQLite file and creates a rollback version before replacement. If reopening fails, it attempts to restore the database that was active immediately before the operation.")
-            FAQItem(question: "How do I refresh QRZ Awards access?", answer: "Use QRZ Login in the Log Table toolbar, complete any QRZ browser challenge, then return to QRZ Awards and press Refresh.")
+            FAQItem(question: "How do I refresh QRZ award data in Awards?", answer: "Use QRZ Login in the Log Table toolbar, complete any QRZ browser challenge, then return to Awards and press Refresh. LoTW evidence is refreshed through Sync QSLs or Full QSL History.")
             FAQItem(question: "What password should Gmail SMTP use?", answer: "Use a Google App Password, not the normal Google account password. YAAM stores it in macOS Keychain.")
         }
     }

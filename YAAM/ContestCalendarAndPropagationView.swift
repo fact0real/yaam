@@ -77,13 +77,17 @@ struct ContestCalendarAndPropagationPanel: View {
                 ContentUnavailableView("DXpedition list unavailable", systemImage: "binoculars", description: Text(appState.dxpeditionStatus))
                     .frame(maxWidth: .infinity, minHeight: 110)
             } else {
-                Text(dxpeditionSummary(workIndex: workIndex))
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.secondary)
-                    .lineSpacing(5)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(10)
-                    .background(Color(nsColor: .controlBackgroundColor).opacity(0.55), in: RoundedRectangle(cornerRadius: 8))
+                let visibleEntries = Array(appState.dxpeditionEntries.prefix(10))
+                VStack(spacing: 0) {
+                    ForEach(Array(visibleEntries.enumerated()), id: \.element.id) { index, entry in
+                        dxpeditionRow(entry, workIndex: workIndex)
+                        if index < visibleEntries.count - 1 {
+                            Divider()
+                        }
+                    }
+                }
+                .padding(.horizontal, 12)
+                .background(Color(nsColor: .controlBackgroundColor).opacity(0.55), in: RoundedRectangle(cornerRadius: 8))
             }
 
             Text(appState.dxpeditionStatus)
@@ -93,15 +97,61 @@ struct ContestCalendarAndPropagationPanel: View {
         .contestOperationsBand(color: .purple)
     }
 
-    private func dxpeditionSummary(workIndex: LogWorkIndex) -> String {
-        appState.dxpeditionEntries.prefix(10).map { entry in
-            let spot = appState.dxClusterClient.spots.first { $0.callsign.uppercased() == entry.callsign.uppercased() }
-            if let spot {
-                let status = workIndex.status(for: entry.callsign, band: spot.band) == .worked ? "already worked" : "good chance to work"
-                return "● \(entry.callsign)  \(entry.entity)  ON AIR \(spot.band) \(String(format: "%.3f", spot.frequencyMHz)) MHz  \(status)"
+    private func dxpeditionRow(_ entry: DXpeditionEntry, workIndex: LogWorkIndex) -> some View {
+        let spot = appState.dxClusterClient.spots.first { $0.callsign.uppercased() == entry.callsign.uppercased() }
+        let isWorked = spot.map { workIndex.status(for: entry.callsign, band: $0.band) == .worked } ?? false
+
+        return HStack(alignment: .top, spacing: 12) {
+            Image(systemName: spot == nil ? (entry.isActive ? "clock.badge.checkmark" : "calendar") : "dot.radiowaves.left.and.right")
+                .font(.title3)
+                .foregroundStyle(spot == nil ? (entry.isActive ? Color.orange : Color.gray) : Color.green)
+                .frame(width: 24)
+
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 8) {
+                    Text(entry.callsign)
+                        .font(.headline.monospaced())
+                    Text(entry.entity)
+                        .font(.subheadline)
+                        .lineLimit(1)
+                    Spacer(minLength: 8)
+                    Text(entry.sourceSummary)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(Color.purple.opacity(0.11), in: RoundedRectangle(cornerRadius: 5))
+                    if let sourceURL = entry.primarySourceURL {
+                        Link(destination: sourceURL) {
+                            Image(systemName: "arrow.up.right.square")
+                        }
+                        .help("Open source announcement")
+                    }
+                }
+
+                HStack(spacing: 8) {
+                    Text(entry.scheduleText)
+                    if let spot {
+                        Text("ON AIR · \(spot.band) · \(String(format: "%.3f", spot.frequencyMHz)) MHz")
+                            .foregroundStyle(.green)
+                        Text(isWorked ? "Worked on this band" : "New opportunity")
+                            .foregroundStyle(isWorked ? Color.gray : Color.blue)
+                    } else {
+                        Text(entry.isActive ? "Within announced window" : "Planned")
+                            .foregroundStyle(entry.isActive ? .orange : .secondary)
+                    }
+                }
+                .font(.caption.monospaced())
+
+                if !entry.details.isEmpty {
+                    Text(entry.details)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
             }
-            return "○ \(entry.callsign)  \(entry.entity)  \(entry.start)-\(entry.end)  \(entry.isActive ? "active" : "planned")"
-        }.joined(separator: "\n")
+        }
+        .padding(.vertical, 10)
     }
 
     private var contestCalendar: some View {
