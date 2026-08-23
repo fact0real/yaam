@@ -7,6 +7,9 @@ struct ConfirmationSyncRegression {
         testHTMLEncodedQRZResponse()
         testPercentEncodedQRZResponse()
         testThirtyMinuteOneToOneMatching()
+        testReportedLoTWAndQRZConfirmationsRemainIndependent()
+        testIncrementalReplayWindow()
+        testCheckpointInvalidationAfterLateImport()
         print("Confirmation sync regression tests passed.")
     }
 
@@ -53,13 +56,122 @@ struct ConfirmationSyncRegression {
         precondition(result.records[2]["QRZLOG_QSL_RCVD"].isEmpty)
     }
 
-    private static func fields(call: String, time: String, mode: String) -> [String: String] {
-        [
+    private static func testReportedLoTWAndQRZConfirmationsRemainIndependent() {
+        let local = [
+            QSORecordModel(
+                index: 1,
+                fields: fields(
+                    call: "SM6CWP",
+                    date: "20260822",
+                    time: "113714",
+                    band: "15M",
+                    mode: "FT8"
+                )
+            ),
+            QSORecordModel(
+                index: 2,
+                fields: fields(
+                    call: "SP5IDR",
+                    date: "20260822",
+                    time: "111014",
+                    band: "15M",
+                    mode: "FT8"
+                )
+            )
+        ]
+        let lotw = [
+            fields(
+                call: "SM6CWP",
+                date: "20260822",
+                time: "113700",
+                band: "15M",
+                mode: "FT8",
+                extra: ["QSLRDATE": "20260822"]
+            )
+        ]
+        let qrz = [
+            fields(
+                call: "SP5IDR",
+                date: "20260822",
+                time: "111000",
+                band: "15M",
+                mode: "FT8",
+                extra: [
+                    "APP_QRZLOG_QSLDATE": "20260822",
+                    "APP_QRZLOG_STATUS": "C"
+                ]
+            )
+        ]
+
+        let result = ConfirmationMergeEngine.merge(
+            localRecords: local,
+            lotwRecords: lotw,
+            qrzRecords: qrz
+        )
+
+        precondition(result.lotwMatched == 1)
+        precondition(result.qrzMatched == 1)
+        precondition(result.lotwChanged == 1)
+        precondition(result.qrzChanged == 1)
+        precondition(result.records[0]["LOTW_QSL_RCVD"] == "Y")
+        precondition(result.records[0]["QRZLOG_QSL_RCVD"].isEmpty)
+        precondition(result.records[0]["QSL_RCVD"] == "Y")
+        precondition(result.records[1]["LOTW_QSL_RCVD"].isEmpty)
+        precondition(result.records[1]["QRZLOG_QSL_RCVD"] == "Y")
+        precondition(result.records[1]["QSL_RCVD"] == "Y")
+    }
+
+    private static func testIncrementalReplayWindow() {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+
+        let checkpoint = formatter.date(from: "2026-08-23 12:00:00")!
+        let replayDate = ConfirmationSyncPolicy.replayDate(checkpoint)!
+        precondition(formatter.string(from: replayDate) == "2026-08-09 12:00:00")
+        precondition(
+            ConfirmationSyncPolicy.replayLoTWCursor("2026-08-23 12:00:00")
+                == "2026-08-09 12:00:00"
+        )
+    }
+
+    private static func testCheckpointInvalidationAfterLateImport() {
+        let profileID = UUID()
+        let checkpoint = ConfirmationSyncCheckpoint(
+            baselineCompleted: true,
+            lotwCursor: "2026-08-23 12:00:00",
+            lastSuccess: Date()
+        )
+        ConfirmationSyncCheckpointStore.save(checkpoint, profileID: profileID, source: .lotw)
+        ConfirmationSyncCheckpointStore.save(checkpoint, profileID: profileID, source: .qrz)
+
+        precondition(ConfirmationSyncCheckpointStore.load(profileID: profileID, source: .lotw).baselineCompleted)
+        precondition(ConfirmationSyncCheckpointStore.load(profileID: profileID, source: .qrz).baselineCompleted)
+
+        ConfirmationSyncCheckpointStore.invalidate(profileID: profileID)
+
+        precondition(!ConfirmationSyncCheckpointStore.load(profileID: profileID, source: .lotw).baselineCompleted)
+        precondition(!ConfirmationSyncCheckpointStore.load(profileID: profileID, source: .qrz).baselineCompleted)
+    }
+
+    private static func fields(
+        call: String,
+        date: String = "20260820",
+        time: String,
+        band: String = "20M",
+        mode: String,
+        extra: [String: String] = [:]
+    ) -> [String: String] {
+        var result = [
             "CALL": call,
-            "QSO_DATE": "20260820",
+            "QSO_DATE": date,
             "TIME_ON": time,
-            "BAND": "20M",
+            "BAND": band,
             "MODE": mode
         ]
+        result.merge(extra) { _, new in new }
+        return result
     }
 }

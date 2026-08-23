@@ -12,8 +12,8 @@ nonisolated struct ConfirmationSyncCheckpoint: Codable, Equatable, Sendable {
 }
 
 nonisolated enum ConfirmationSyncCheckpointStore {
-    // v3 invalidates baselines created before QRZ ADIF payloads were parsed atomically.
-    private static let schema = "v3"
+    // v4 invalidates exact-cursor checkpoints that could skip late local imports.
+    private static let schema = "v4"
 
     static func load(profileID: UUID, source: SyncSource) -> ConfirmationSyncCheckpoint {
         guard let data = UserDefaults.standard.data(forKey: key(profileID: profileID, source: source)),
@@ -28,8 +28,56 @@ nonisolated enum ConfirmationSyncCheckpointStore {
         UserDefaults.standard.set(data, forKey: key(profileID: profileID, source: source))
     }
 
+    static func invalidate(profileID: UUID, sources: Set<SyncSource> = [.lotw, .qrz]) {
+        for source in sources {
+            UserDefaults.standard.removeObject(forKey: key(profileID: profileID, source: source))
+        }
+    }
+
     private static func key(profileID: UUID, source: SyncSource) -> String {
         "confirmationSync.\(schema).\(profileID.uuidString).\(source.rawValue)"
+    }
+}
+
+nonisolated enum ConfirmationSyncPolicy {
+    // Re-reading a small overlap makes incremental sync resilient to provider delays,
+    // clock boundaries, and QSOs imported after an earlier provider sync.
+    static let replayWindow: TimeInterval = 14 * 24 * 60 * 60
+
+    static func replayDate(_ date: Date?) -> Date? {
+        date?.addingTimeInterval(-replayWindow)
+    }
+
+    static func replayLoTWCursor(_ cursor: String?) -> String? {
+        guard let cursor,
+              let date = parseLoTWCursor(cursor) else { return cursor }
+        return formatLoTWCursor(date.addingTimeInterval(-replayWindow))
+    }
+
+    private static func parseLoTWCursor(_ value: String) -> Date? {
+        let formats = [
+            "yyyy-MM-dd HH:mm:ss",
+            "yyyy-MM-dd'T'HH:mm:ss",
+            "yyyy-MM-dd"
+        ]
+        for format in formats {
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.calendar = Calendar(identifier: .gregorian)
+            formatter.timeZone = TimeZone(secondsFromGMT: 0)
+            formatter.dateFormat = format
+            if let date = formatter.date(from: value) { return date }
+        }
+        return nil
+    }
+
+    private static func formatLoTWCursor(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return formatter.string(from: date)
     }
 }
 
@@ -676,10 +724,11 @@ extension AppState {
         let qrzCheckpoint = ConfirmationSyncCheckpointStore.load(profileID: profileID, source: .qrz)
         let fullLoTW = forceFullSync || !lotwCheckpoint.baselineCompleted
         let fullQRZ = forceFullSync || !qrzCheckpoint.baselineCompleted
-        let lotwCursor = fullLoTW ? nil : lotwCheckpoint.lotwCursor
-        let qrzModifiedSince = fullQRZ ? nil : qrzCheckpoint.lastSuccess
+        let lotwCursor = fullLoTW ? nil : ConfirmationSyncPolicy.replayLoTWCursor(lotwCheckpoint.lotwCursor)
+        let qrzModifiedSince = fullQRZ ? nil : ConfirmationSyncPolicy.replayDate(qrzCheckpoint.lastSuccess)
         let ownCallsign = currentStationCallsign
         let userAgent = "YAAM-macOS/\(currentVersion)"
+        let syncStartedAt = Date()
 
         if requestedLoTW, !syncLoTW {
             appendLog("LoTW confirmation sync skipped: add the LoTW username and password in Settings.")
@@ -766,55 +815,68 @@ extension AppState {
                 return
             }
 
-            let now = Date()
-            let lotwFailed = syncLoTW && lotw.errorMessage != nil
-            let qrzFailed = syncQRZ && qrz.errorMessage != nil
             let lotwFetched = lotw.outcome?.records.count ?? 0
             let qrzFetched = qrz.outcome?.records.count ?? 0
             let lotwReported = lotw.outcome?.reportedCount ?? lotwFetched
             let qrzReported = qrz.outcome?.reportedCount ?? qrzFetched
 
-            if let outcome = lotw.outcome {
+            var importedConfirmedRecords = 0
+            let hasMergeChanges = !mergeResult.changedRecordIDs.isEmpty
+                || !mergeResult.lotwUnmatchedRecords.isEmpty
+                || !mergeResult.qrzUnmatchedRecords.isEmpty
+            if hasMergeChanges {
+                self.qsoRecords = mergeResult.records
+                let changedRecords = mergeResult.records.filter { mergeResult.changedRecordIDs.contains($0.id) }
+                self.rememberConfirmedRecords(changedRecords)
+                importedConfirmedRecords = self.importRemoteConfirmationRecords(
+                    lotw: lotw.errorMessage == nil ? mergeResult.lotwUnmatchedRecords : [],
+                    qrz: qrz.errorMessage == nil ? mergeResult.qrzUnmatchedRecords : []
+                )
+            }
+
+            let persistenceError = hasMergeChanges
+                ? await self.persistConfirmationSyncSnapshot(profileID: profileID)
+                : nil
+            if hasMergeChanges, persistenceError == nil {
+                self.refreshAwardProgress()
+                self.updateMobileCompanionSnapshot()
+            }
+
+            let lotwFailed = syncLoTW && (lotw.errorMessage != nil || (lotw.outcome != nil && persistenceError != nil))
+            let qrzFailed = syncQRZ && (qrz.errorMessage != nil || (qrz.outcome != nil && persistenceError != nil))
+            let completedAt = Date()
+
+            if let outcome = lotw.outcome, persistenceError == nil {
                 var checkpoint = lotwCheckpoint
                 checkpoint.baselineCompleted = true
-                checkpoint.lastSuccess = now
-                checkpoint.lotwCursor = outcome.nextCursor ?? Self.lotwFallbackCursor(now)
+                checkpoint.lastSuccess = syncStartedAt
+                checkpoint.lotwCursor = outcome.nextCursor ?? Self.lotwFallbackCursor(syncStartedAt)
                 ConfirmationSyncCheckpointStore.save(checkpoint, profileID: profileID, source: .lotw)
-                UserDefaults.standard.set(now, forKey: "lastLoTWSyncDate")
+                UserDefaults.standard.set(completedAt, forKey: "lastLoTWSyncDate")
                 self.appendLog(outcome.detail)
             } else if let message = lotw.errorMessage {
                 self.appendLog("LoTW confirmation sync failed: \(message)")
             }
 
-            if let outcome = qrz.outcome {
+            if let outcome = qrz.outcome, persistenceError == nil {
                 var checkpoint = qrzCheckpoint
                 checkpoint.baselineCompleted = true
-                checkpoint.lastSuccess = now
+                checkpoint.lastSuccess = syncStartedAt
                 ConfirmationSyncCheckpointStore.save(checkpoint, profileID: profileID, source: .qrz)
-                UserDefaults.standard.set(now, forKey: "lastQRZSyncDate")
+                UserDefaults.standard.set(completedAt, forKey: "lastQRZSyncDate")
                 self.appendLog(outcome.detail)
             } else if let message = qrz.errorMessage {
                 self.appendLog("QRZ confirmation sync failed: \(message)")
             }
-
-            var importedConfirmedRecords = 0
-            if !mergeResult.changedRecordIDs.isEmpty || !mergeResult.lotwUnmatchedRecords.isEmpty || !mergeResult.qrzUnmatchedRecords.isEmpty {
-                self.qsoRecords = mergeResult.records
-                let changedRecords = mergeResult.records.filter { mergeResult.changedRecordIDs.contains($0.id) }
-                self.rememberConfirmedRecords(changedRecords)
-                importedConfirmedRecords = self.importRemoteConfirmationRecords(
-                    lotw: lotwFailed ? [] : mergeResult.lotwUnmatchedRecords,
-                    qrz: qrzFailed ? [] : mergeResult.qrzUnmatchedRecords
-                )
-                self.autoSaveActiveWorkspace()
-                self.refreshAwardProgress()
+            if let persistenceError {
+                self.appendLog("Confirmation sync was downloaded but not checkpointed because the local save failed: \(persistenceError)")
             }
 
             let lotwMessage = lotwFailed
-                ? (lotw.errorMessage ?? "LoTW synchronization failed")
+                ? (lotw.errorMessage ?? persistenceError ?? "LoTW synchronization failed")
                 : "\(lotwFetched) downloaded, \(mergeResult.lotwMatched) matched, \(mergeResult.lotwUnmatched) unmatched, \(mergeResult.lotwChanged) updated"
             let qrzMessage = qrzFailed
-                ? (qrz.errorMessage ?? "QRZ synchronization failed")
+                ? (qrz.errorMessage ?? persistenceError ?? "QRZ synchronization failed")
                 : "\(qrzFetched) downloaded, \(mergeResult.qrzMatched) matched, \(mergeResult.qrzUnmatched) unmatched, \(mergeResult.qrzChanged) updated"
 
             if syncLoTW {
@@ -890,6 +952,53 @@ extension AppState {
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
         formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
         return formatter.string(from: date)
+    }
+
+    private func persistConfirmationSyncSnapshot(profileID: UUID) async -> String? {
+        if isMasterMode {
+            guard let database = logbookDatabase else {
+                return YAAMPersistenceError.databaseUnavailable.localizedDescription
+            }
+            guard loadedWorkspaceProfileID == profileID else {
+                return YAAMPersistenceError.workspaceNotLoaded.localizedDescription
+            }
+            let headers = tableHeaders
+            let records = qsoRecords.map { PersistedQSO(id: $0.id, index: $0.index, fields: $0.fields) }
+            return await withCheckedContinuation { (continuation: CheckedContinuation<String?, Never>) in
+                workspaceSaveQueue.async {
+                    do {
+                        try database.saveWorkspace(
+                            profileID: profileID,
+                            headers: headers,
+                            records: records,
+                            replaceMissingRecords: false
+                        )
+                        try database.recordAudit(
+                            action: "confirmation-sync-saved",
+                            detail: "Saved \(records.count) QSOs after confirmation merge",
+                            profileID: profileID
+                        )
+                        continuation.resume(returning: nil)
+                    } catch {
+                        continuation.resume(returning: error.localizedDescription)
+                    }
+                }
+            }
+        }
+
+        guard let url = loadedFileURL else { return nil }
+        let records = qsoRecords.map(\.fields)
+        return await withCheckedContinuation { (continuation: CheckedContinuation<String?, Never>) in
+            workspaceSaveQueue.async {
+                do {
+                    let output = generateADIF(originalContent: "", records: records)
+                    try output.write(to: url, atomically: true, encoding: .utf8)
+                    continuation.resume(returning: nil)
+                } catch {
+                    continuation.resume(returning: error.localizedDescription)
+                }
+            }
+        }
     }
 
     /// Preserves a valid remote confirmation when the corresponding local QSO is absent.

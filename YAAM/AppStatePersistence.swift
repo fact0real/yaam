@@ -82,6 +82,7 @@ extension AppState {
                 UserDefaults.standard.set(populatedProfile.id.uuidString, forKey: "activeStationProfileID")
             }
             if let profile = activeStationProfile {
+                UserDefaults.standard.set(profile.id.uuidString, forKey: "activeStationProfileID")
                 syncLegacyStationDefaults(with: profile)
             }
 
@@ -266,7 +267,8 @@ extension AppState {
 
     func commitPendingImport() {
         guard let review = pendingImportReview else { return }
-        guard review.destinationProfileID == activeStationProfileID else {
+        guard let destinationProfileID = review.destinationProfileID,
+              destinationProfileID == activeStationProfileID else {
             presentPersistenceError(LogbookDatabaseError.unavailable("The active station changed after this review was prepared. Reopen the source log for the current station."))
             return
         }
@@ -309,6 +311,10 @@ extension AppState {
             }
 
             try persistCurrentWorkspace(reason: "Imported \(review.sourceName)")
+            if added > 0 {
+                ConfirmationSyncCheckpointStore.invalidate(profileID: destinationProfileID)
+                appendLog("Confirmation baseline will be rebuilt because the import added \(added) QSO(s).")
+            }
             refreshAwardProgress()
             updateMobileCompanionSnapshot()
             try logbookDatabase?.recordAudit(
@@ -366,6 +372,7 @@ extension AppState {
             if let profile = activeStationProfile {
                 UserDefaults.standard.set(profile.id.uuidString, forKey: "activeStationProfileID")
                 syncLegacyStationDefaults(with: profile)
+                ConfirmationSyncCheckpointStore.invalidate(profileID: profile.id)
             }
             loadMasterLogbook()
             loadQSLHubState()
