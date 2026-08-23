@@ -730,14 +730,41 @@ extension AppState {
                 return
             }
 
-            let recordsToMerge = self.qsoRecords
-            let mergeResult = await Task.detached(priority: .userInitiated) {
-                ConfirmationMergeEngine.merge(
-                    localRecords: recordsToMerge,
-                    lotwRecords: lotw.outcome?.records ?? [],
-                    qrzRecords: qrz.outcome?.records ?? []
-                )
-            }.value
+            var stableMergeResult: ConfirmationMergeResult?
+            for attempt in 1...3 {
+                let startingRevision = self.qsoRecordsRevision
+                let recordsToMerge = self.qsoRecords
+                let candidate = await Task.detached(priority: .userInitiated) {
+                    ConfirmationMergeEngine.merge(
+                        localRecords: recordsToMerge,
+                        lotwRecords: lotw.outcome?.records ?? [],
+                        qrzRecords: qrz.outcome?.records ?? []
+                    )
+                }.value
+
+                guard self.activeStationProfileID == profileID else {
+                    let message = "Confirmation sync stopped because the active station changed."
+                    if syncLoTW { self.finishSyncStatus(.lotw, state: .failure, detail: message, changed: 0) }
+                    if syncQRZ { self.finishSyncStatus(.qrz, state: .failure, detail: message, changed: 0) }
+                    self.appendLog(message)
+                    completion?(ConfirmationSyncSummary())
+                    return
+                }
+                if self.qsoRecordsRevision == startingRevision {
+                    stableMergeResult = candidate
+                    break
+                }
+                if attempt < 3 { await Task.yield() }
+            }
+
+            guard let mergeResult = stableMergeResult else {
+                let message = "The log changed while confirmations were being merged. YAAM kept the newer contacts; run Sync QSLs again."
+                if syncLoTW { self.finishSyncStatus(.lotw, state: .failure, detail: message, changed: 0) }
+                if syncQRZ { self.finishSyncStatus(.qrz, state: .failure, detail: message, changed: 0) }
+                self.appendLog(message)
+                completion?(ConfirmationSyncSummary())
+                return
+            }
 
             let now = Date()
             let lotwFailed = syncLoTW && lotw.errorMessage != nil
@@ -922,11 +949,6 @@ extension AppState {
     }
 
     private func remoteConfirmationIdentity(_ fields: [String: String]) -> String {
-        let call = fields["CALL"]?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
-        let date = (fields["QSO_DATE"] ?? "").filter(\.isNumber)
-        let time = (fields["TIME_ON"] ?? fields["TIME_OFF"] ?? "").filter(\.isNumber)
-        let band = (fields["BAND"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        let mode = (fields["MODE"] ?? fields["SUBMODE"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        return "\(call)|\(date)|\(time)|\(band)|\(mode)"
+        QSOIdentity.exactKey(fields: fields)
     }
 }

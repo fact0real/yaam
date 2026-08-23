@@ -52,7 +52,8 @@ nonisolated enum CloudSyncMerge {
         var indexByKey: [String: Int] = [:]
         for (index, record) in output.enumerated() {
             indexByID[record.id] = index
-            if indexByKey[record.uniqueKey] == nil { indexByKey[record.uniqueKey] = index }
+            let key = record.uniqueKey
+            if !key.isEmpty, indexByKey[key] == nil { indexByKey[key] = index }
         }
         var added = 0
         var updated = 0
@@ -60,7 +61,9 @@ nonisolated enum CloudSyncMerge {
 
         for cloud in incoming {
             let candidate = cloud.model
-            if let index = indexByID[candidate.id] ?? indexByKey[candidate.uniqueKey] {
+            let candidateKey = candidate.uniqueKey
+            let matchingIndex = indexByID[candidate.id] ?? (candidateKey.isEmpty ? nil : indexByKey[candidateKey])
+            if let index = matchingIndex {
                 let merged = ImportReviewAnalyzer.mergeUpdate(incoming: candidate.fields, into: output[index].fields)
                 if merged != output[index].fields {
                     output[index].fields = merged
@@ -72,7 +75,7 @@ nonisolated enum CloudSyncMerge {
                 output.append(candidate)
                 let index = output.count - 1
                 indexByID[candidate.id] = index
-                indexByKey[candidate.uniqueKey] = index
+                if !candidateKey.isEmpty { indexByKey[candidateKey] = index }
                 added += 1
             }
         }

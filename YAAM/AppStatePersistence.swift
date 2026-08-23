@@ -67,6 +67,7 @@ extension AppState {
 
             try migrateLegacyMasterLogsIfNeeded(using: database)
             try migrateCountryNamesIfNeeded(using: database)
+            let recoveredLegacyQSOCount = recoverLegacyNearDuplicateCleanupIfNeeded(using: database)
             stationProfiles = try database.loadStationProfiles()
             if !stationProfiles.contains(where: { $0.id == activeStationProfileID }) {
                 activeStationProfileID = stationProfiles.first?.id
@@ -86,7 +87,9 @@ extension AppState {
 
             createDailyBackupIfNeeded(using: database)
             refreshDatabaseSafetyState()
-            databaseStatus = "Protected database ready"
+            databaseStatus = recoveredLegacyQSOCount > 0
+                ? "Recovered \(recoveredLegacyQSOCount) QSOs safely"
+                : "Protected database ready"
         } catch {
             databaseStatus = error.localizedDescription
             appendLog("Protected database setup failed: \(error.localizedDescription)")
@@ -99,7 +102,12 @@ extension AppState {
         guard loadedWorkspaceProfileID == profileID else { throw YAAMPersistenceError.workspaceNotLoaded }
         let records = qsoRecords.map { PersistedQSO(id: $0.id, index: $0.index, fields: $0.fields) }
         try workspaceSaveQueue.sync {
-            try database.saveWorkspace(profileID: profileID, headers: tableHeaders, records: records)
+            try database.saveWorkspace(
+                profileID: profileID,
+                headers: tableHeaders,
+                records: records,
+                replaceMissingRecords: false
+            )
         }
         try database.recordAudit(action: "workspace-saved", detail: "\(reason): \(records.count) QSOs", profileID: profileID)
         databaseStatus = "Saved \(records.count) QSOs"
@@ -300,7 +308,6 @@ extension AppState {
                 tableHeaders.append(header)
             }
 
-            let cleanupResult = reconcileDuplicateQSOsAfterImport(sourceName: review.sourceName)
             try persistCurrentWorkspace(reason: "Imported \(review.sourceName)")
             refreshAwardProgress()
             updateMobileCompanionSnapshot()
@@ -313,8 +320,7 @@ extension AppState {
             showImportReviewSheet = false
             refreshDatabaseSafetyState()
             alertTitle = "Import Complete"
-            let cleanupMessage = cleanupResult.map { " Removed \($0.removedCount) extra duplicate row(s) after merging fuller data." } ?? ""
-            alertMessage = "Added \(added) new QSO(s) and updated \(updated) existing confirmation(s).\(cleanupMessage) A restore point was created first."
+            alertMessage = "Added \(added) new QSO(s) and updated \(updated) existing confirmation(s). A restore point was created first."
             showAlert = true
             playActivitySound(.success)
         } catch {
@@ -559,6 +565,46 @@ extension AppState {
             profileID: nil
         )
         appendLog("Country names normalized safely in (changedQSOCount) saved QSO(s). A restore point was created first.")
+    }
+
+    private func recoverLegacyNearDuplicateCleanupIfNeeded(using database: LogbookDatabase) -> Int {
+        let repairKey = "repair.legacy-near-duplicate-cleanup.v1"
+        guard (try? database.metadata(for: repairKey)) == nil else { return 0 }
+        guard let source = database.listBackups().first(where: {
+            $0.reason.localizedCaseInsensitiveContains("before automatic duplicate cleanup")
+        }) else {
+            return 0
+        }
+
+        do {
+            let retainedBackupCount = max(60, database.listBackups().count + 2)
+            _ = try database.createBackup(
+                reason: "Before recovering QSOs removed by legacy duplicate cleanup",
+                retainCount: retainedBackupCount
+            )
+            let report = try database.recoverQSOsRemovedByLegacyNearDuplicateCleanup(from: source)
+            try database.setMetadata(
+                "completed|\(source.id)|\(report.recoveredCount)",
+                for: repairKey
+            )
+            appendLog(
+                "Legacy duplicate-cleanup repair checked \(source.id): recovered \(report.recoveredCount) QSO(s) with distinct UTC times; current and exact-duplicate records were preserved."
+            )
+            guard report.recoveredCount > 0 else { return 0 }
+
+            alertTitle = "Logbook Recovered"
+            alertMessage = "YAAM safely restored \(report.recoveredCount) contacts with distinct UTC times that an older five-minute duplicate cleanup had removed. Your current contacts were preserved, exact duplicates were not restored, and a fresh restore point was created first."
+            showAlert = true
+            return report.recoveredCount
+        } catch {
+            appendLog("Legacy duplicate-cleanup repair was skipped safely: \(error.localizedDescription)")
+            try? database.recordAudit(
+                action: "legacy-near-duplicate-cleanup-recovery-failed",
+                detail: error.localizedDescription,
+                profileID: nil
+            )
+            return 0
+        }
     }
 
     private func createDailyBackupIfNeeded(using database: LogbookDatabase) {

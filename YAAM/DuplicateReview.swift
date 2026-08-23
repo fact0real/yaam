@@ -64,7 +64,11 @@ nonisolated enum DuplicateQSOAnalyzer {
         return DuplicateReview(
             stationProfileID: stationProfileID,
             groups: groups,
-            selectedGroupIDs: Set(groups.map(\.id))
+            selectedGroupIDs: Set(
+                groups
+                    .filter { $0.matchDescription == "Exact UTC match" }
+                    .map(\.id)
+            )
         )
     }
 
@@ -169,19 +173,11 @@ nonisolated enum DuplicateQSOAnalyzer {
     }
 
     private static func identityKey(_ fields: [String: String]) -> String {
-        let call = clean(fields["CALL"] ?? "")
-        let date = cleanDigits(fields["QSO_DATE"] ?? "")
-        let time = normalizeTime(fields["TIME_ON"] ?? fields["TIME_OFF"] ?? "")
-        guard !call.isEmpty, date.count == 8, time.count == 6 else { return "" }
-        return "\(relaxedIdentityKey(fields))|\(time)"
+        QSOIdentity.exactKey(fields: fields)
     }
 
     private static func relaxedIdentityKey(_ fields: [String: String]) -> String {
-        let call = clean(fields["CALL"] ?? "")
-        let date = cleanDigits(fields["QSO_DATE"] ?? "")
-        let band = resolvedBand(fields)
-        let mode = effectiveMode(fields)
-        return "\(call)|\(date)|\(band)|\(mode)"
+        QSOIdentity.relaxedKey(fields: fields)
     }
 
     private static func keeperScore(_ record: QSORecordModel) -> Int {
@@ -192,12 +188,11 @@ nonisolated enum DuplicateQSOAnalyzer {
     }
 
     private static func resolvedBand(_ fields: [String: String]) -> String {
-        ADIFConversionFilter.resolvedBand(for: fields).uppercased()
+        QSOIdentity.resolvedBand(fields)
     }
 
     private static func effectiveMode(_ fields: [String: String]) -> String {
-        let submode = clean(fields["SUBMODE"] ?? "")
-        return submode.isEmpty ? clean(fields["MODE"] ?? "") : submode
+        QSOIdentity.effectiveMode(fields)
     }
 
     private static func clean(_ value: String) -> String {
@@ -224,26 +219,6 @@ nonisolated enum DuplicateQSOAnalyzer {
 }
 
 extension AppState {
-    @discardableResult
-    func reconcileDuplicateQSOsAfterImport(sourceName: String) -> DuplicateCleanupResult? {
-        guard !qsoRecords.isEmpty else { return nil }
-        let review = DuplicateQSOAnalyzer.analyze(records: qsoRecords, stationProfileID: activeStationProfileID)
-        guard review.totalRemovalCount > 0 else { return nil }
-        guard createDestructiveCheckpointIfNeeded(reason: "Before automatic duplicate cleanup after \(sourceName)") else {
-            return nil
-        }
-
-        let result = DuplicateQSOAnalyzer.clean(records: qsoRecords, review: review)
-        guard result.removedCount > 0 else { return nil }
-        qsoRecords = result.records
-        selectedRecordIDs.subtract(Set(review.selectedGroups.flatMap(\.recordIDs)))
-        refreshAwardProgress()
-        updateMobileCompanionSnapshot()
-        refreshDatabaseSafetyState()
-        appendLog("Automatic duplicate cleanup after \(sourceName): merged \(result.mergedGroupCount) group(s), removed \(result.removedCount) extra QSO row(s).")
-        return result
-    }
-
     func prepareDuplicateReview() {
         guard !qsoRecords.isEmpty, !isAnalyzingDuplicates else { return }
         let records = qsoRecords
@@ -303,7 +278,7 @@ extension AppState {
         guard result.removedCount > 0 else { return }
         qsoRecords = result.records
         selectedRecordIDs.subtract(Set(review.selectedGroups.flatMap(\.recordIDs)))
-        autoSaveActiveWorkspace()
+        autoSaveActiveWorkspace(replaceMissingRecords: true)
         refreshAwardProgress()
         updateMobileCompanionSnapshot()
         duplicateReview = nil

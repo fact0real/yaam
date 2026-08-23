@@ -192,20 +192,11 @@ nonisolated enum ImportReviewAnalyzer {
     }
 
     private static func normalizedUniqueKey(_ fields: [String: String]) -> String {
-        let call = (fields["CALL"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        let date = cleanDigits(fields["QSO_DATE"] ?? "")
-        let time = normalizedTime(fields["TIME_ON"] ?? fields["TIME_OFF"] ?? "")
-        let band = (fields["BAND"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        let mode = (fields["MODE"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        return "\(call)_\(date)_\(String(time.prefix(6)))_\(band)_\(mode)"
+        QSOIdentity.exactKey(fields: fields)
     }
 
     private static func relaxedKey(_ fields: [String: String]) -> String {
-        let call = (fields["CALL"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        let date = cleanDigits(fields["QSO_DATE"] ?? "")
-        let band = (fields["BAND"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        let mode = (fields["MODE"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        return "\(call)_\(date)_\(band)_\(mode)"
+        QSOIdentity.relaxedKey(fields: fields)
     }
 
     private static func timeDistance(_ lhs: [String: String], _ rhs: [String: String]) -> Int {

@@ -75,18 +75,52 @@ nonisolated struct QRZRankAPIQuota: Decodable, Equatable, Sendable {
     let limit: Int?
     let used: Int?
     let remaining: Int?
+    let remainingRequests: Int?
     let unlimited: Bool
+    let canMakeRequest: Bool
+    let exhausted: Bool
+    let status: String?
+    let resetsAt: String?
+    let resetInSeconds: Int?
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         limit = container.decodeFlexibleInteger(forKey: .limit)
         used = container.decodeFlexibleInteger(forKey: .used)
         remaining = container.decodeFlexibleInteger(forKey: .remaining)
-        unlimited = (try? container.decode(Bool.self, forKey: .unlimited)) ?? false
+        remainingRequests = container.decodeFlexibleInteger(forKey: .remainingRequests) ?? remaining
+        unlimited = container.decodeFlexibleBool(forKey: .unlimited) ?? false
+        status = container.decodeFlexibleString(forKey: .status)
+        resetsAt = container.decodeFlexibleString(forKey: .resetsAt)
+        resetInSeconds = container.decodeFlexibleInteger(forKey: .resetInSeconds)
+
+        let effectiveRemaining = remainingRequests ?? remaining
+        canMakeRequest = container.decodeFlexibleBool(forKey: .canMakeRequest)
+            ?? (unlimited || effectiveRemaining.map { $0 > 0 } ?? true)
+        exhausted = container.decodeFlexibleBool(forKey: .exhausted)
+            ?? (!unlimited && effectiveRemaining == 0)
     }
 
     private enum CodingKeys: String, CodingKey {
-        case limit, used, remaining, unlimited
+        case limit, used, remaining, unlimited, exhausted, status
+        case remainingRequests = "remaining_requests"
+        case canMakeRequest = "can_make_request"
+        case resetsAt = "resets_at"
+        case resetInSeconds = "reset_in_seconds"
+    }
+
+    var effectiveRemaining: Int? {
+        remainingRequests ?? remaining
+    }
+
+    var isUnlimited: Bool {
+        unlimited || status?.lowercased() == "unlimited"
+    }
+
+    var allowsRequest: Bool {
+        if isUnlimited { return true }
+        if exhausted || !canMakeRequest { return false }
+        return effectiveRemaining.map { $0 > 0 } ?? true
     }
 }
 
@@ -98,6 +132,16 @@ nonisolated struct QRZRankAPIEnvelope: Decodable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case apiVersion = "api_version"
         case data, quota
+    }
+}
+
+nonisolated struct QRZRankAPIQuotaEnvelope: Decodable, Sendable {
+    let apiVersion: String?
+    let quota: QRZRankAPIQuota
+
+    private enum CodingKeys: String, CodingKey {
+        case apiVersion = "api_version"
+        case quota
     }
 }
 
@@ -173,34 +217,26 @@ nonisolated enum QRZRankAPIContract {
             throw QRZRankAPIContractError.invalidCallsign
         }
 
-        let token = normalizedToken(rawToken)
-        guard !token.isEmpty else {
-            throw QRZRankAPIContractError.missingToken
-        }
-        let forbiddenCharacters = CharacterSet.whitespacesAndNewlines.union(.controlCharacters)
-        guard token.unicodeScalars.allSatisfy({ !forbiddenCharacters.contains($0) }) else {
-            throw QRZRankAPIContractError.malformedToken
-        }
-
         let pathSegmentAllowed = CharacterSet.alphanumerics
-        guard let encodedCallsign = normalizedCallsign.addingPercentEncoding(withAllowedCharacters: pathSegmentAllowed),
-              var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
+        guard let encodedCallsign = normalizedCallsign.addingPercentEncoding(withAllowedCharacters: pathSegmentAllowed) else {
             throw QRZRankAPIContractError.invalidURL
         }
-        components.percentEncodedPath = "/api/v1/rank/\(encodedCallsign)"
-        guard let url = components.url else {
-            throw QRZRankAPIContractError.invalidURL
-        }
+        return try makeAuthorizedRequest(
+            path: "/api/v1/rank/\(encodedCallsign)",
+            token: rawToken,
+            userAgent: userAgent
+        )
+    }
 
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.timeoutInterval = 15
-        request.cachePolicy = .reloadIgnoringLocalCacheData
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.setValue("no-store", forHTTPHeaderField: "Cache-Control")
-        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
-        return request
+    static func makeQuotaRequest(
+        token rawToken: String,
+        userAgent: String
+    ) throws -> URLRequest {
+        try makeAuthorizedRequest(
+            path: "/api/v1/quota",
+            token: rawToken,
+            userAgent: userAgent
+        )
     }
 
     static func decodeSuccess(_ data: Data) throws -> QRZRankAPIEnvelope {
@@ -213,6 +249,19 @@ nonisolated enum QRZRankAPIContract {
         guard envelope.apiVersion == nil || envelope.apiVersion == "v1",
               envelope.data.callsign?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false,
               envelope.data.hasRankingValue else {
+            throw QRZRankAPIContractError.invalidResponse
+        }
+        return envelope
+    }
+
+    static func decodeQuota(_ data: Data) throws -> QRZRankAPIQuotaEnvelope {
+        let envelope: QRZRankAPIQuotaEnvelope
+        do {
+            envelope = try JSONDecoder().decode(QRZRankAPIQuotaEnvelope.self, from: data)
+        } catch {
+            throw QRZRankAPIContractError.invalidResponse
+        }
+        guard envelope.apiVersion == nil || envelope.apiVersion == "v1" else {
             throw QRZRankAPIContractError.invalidResponse
         }
         return envelope
@@ -238,6 +287,38 @@ nonisolated enum QRZRankAPIContract {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return String(trimmed.prefix(500))
     }
+
+    private static func makeAuthorizedRequest(
+        path: String,
+        token rawToken: String,
+        userAgent: String
+    ) throws -> URLRequest {
+        let token = normalizedToken(rawToken)
+        guard !token.isEmpty else {
+            throw QRZRankAPIContractError.missingToken
+        }
+        let forbiddenCharacters = CharacterSet.whitespacesAndNewlines.union(.controlCharacters)
+        guard token.unicodeScalars.allSatisfy({ !forbiddenCharacters.contains($0) }) else {
+            throw QRZRankAPIContractError.malformedToken
+        }
+        guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
+            throw QRZRankAPIContractError.invalidURL
+        }
+        components.percentEncodedPath = path
+        guard let url = components.url else {
+            throw QRZRankAPIContractError.invalidURL
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 15
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("no-store", forHTTPHeaderField: "Cache-Control")
+        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        return request
+    }
 }
 
 private extension KeyedDecodingContainer {
@@ -260,6 +341,23 @@ private extension KeyedDecodingContainer {
         }
         if let value = try? decode(String.self, forKey: key) {
             return Int(value.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        return nil
+    }
+
+    nonisolated func decodeFlexibleBool(forKey key: Key) -> Bool? {
+        if let value = try? decode(Bool.self, forKey: key) {
+            return value
+        }
+        if let value = try? decode(Int.self, forKey: key) {
+            return value != 0
+        }
+        if let value = try? decode(String.self, forKey: key) {
+            switch value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+            case "true", "yes", "y", "1": return true
+            case "false", "no", "n", "0": return false
+            default: return nil
+            }
         }
         return nil
     }

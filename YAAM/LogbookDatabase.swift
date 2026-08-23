@@ -26,10 +26,26 @@ nonisolated enum LogbookDatabaseError: LocalizedError {
     }
 }
 
+nonisolated struct QSORecoveryReport: Sendable {
+    let recoveredCount: Int
+    let skippedExistingCount: Int
+    let skippedNonLegacyCount: Int
+    let skippedUnknownProfileCount: Int
+}
+
 nonisolated final class LogbookDatabase: @unchecked Sendable {
     private struct BackupManifest: Codable {
         let createdAt: Date
         let reason: String
+    }
+
+    private struct RecoveryCandidate {
+        let id: UUID
+        let profileID: UUID
+        let fields: [String: String]
+        let uniqueKey: String
+        let createdAt: TimeInterval
+        let updatedAt: TimeInterval
     }
 
     private let queue = DispatchQueue(label: "app.yaam.logbook-database", qos: .userInitiated)
@@ -230,25 +246,39 @@ nonisolated final class LogbookDatabase: @unchecked Sendable {
         profileID: UUID,
         headers: [String],
         records: [PersistedQSO],
-        allowEmptyReplacement: Bool = false
+        allowEmptyReplacement: Bool = false,
+        replaceMissingRecords: Bool = true
     ) throws {
         try queue.sync {
             let savedCount = try qsoCountInternal(profileID: profileID)
-            if records.isEmpty, savedCount > 0, !allowEmptyReplacement {
+            if replaceMissingRecords, records.isEmpty, savedCount > 0, !allowEmptyReplacement {
                 throw LogbookDatabaseError.refusingEmptyOverwrite(savedCount)
             }
             try execute("BEGIN IMMEDIATE TRANSACTION;")
             do {
-                let deleteStatement = try prepare("DELETE FROM qsos WHERE station_profile_id = ?;")
-                bind(profileID.uuidString, to: 1, in: deleteStatement)
-                try stepDone(deleteStatement)
-                sqlite3_finalize(deleteStatement)
+                if replaceMissingRecords {
+                    let deleteStatement = try prepare("DELETE FROM qsos WHERE station_profile_id = ?;")
+                    bind(profileID.uuidString, to: 1, in: deleteStatement)
+                    try stepDone(deleteStatement)
+                    sqlite3_finalize(deleteStatement)
+                }
 
                 let insertSQL = """
                 INSERT INTO qsos (
                     id, station_profile_id, unique_key, call, qso_date, time_on, band, mode,
                     fields_json, sort_order, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    station_profile_id = excluded.station_profile_id,
+                    unique_key = excluded.unique_key,
+                    call = excluded.call,
+                    qso_date = excluded.qso_date,
+                    time_on = excluded.time_on,
+                    band = excluded.band,
+                    mode = excluded.mode,
+                    fields_json = excluded.fields_json,
+                    sort_order = excluded.sort_order,
+                    updated_at = excluded.updated_at;
                 """
                 let insertStatement = try prepare(insertSQL)
                 defer { sqlite3_finalize(insertStatement) }
@@ -408,6 +438,209 @@ nonisolated final class LogbookDatabase: @unchecked Sendable {
                 try? initializeSchema()
                 throw error
             }
+        }
+    }
+
+    /// Restores only rows that match the signature of YAAM's retired five-minute
+    /// duplicate cleanup. Exact duplicates and unrelated user deletions stay removed.
+    func recoverQSOsRemovedByLegacyNearDuplicateCleanup(
+        from snapshot: BackupSnapshot
+    ) throws -> QSORecoveryReport {
+        try queue.sync {
+            let source = snapshot.url.standardizedFileURL
+            let backupRoot = backupDirectoryURL.standardizedFileURL.path + "/"
+            guard source.path.hasPrefix(backupRoot), FileManager.default.fileExists(atPath: source.path) else {
+                throw LogbookDatabaseError.invalidBackup
+            }
+            try validateDatabase(at: source)
+
+            var sourceDB: OpaquePointer?
+            let openStatus = sqlite3_open_v2(
+                source.path,
+                &sourceDB,
+                SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX,
+                nil
+            )
+            guard openStatus == SQLITE_OK, let sourceDB else {
+                let message = sourceDB.map { String(cString: sqlite3_errmsg($0)) } ?? "Unable to open recovery source."
+                if let sourceDB { sqlite3_close_v2(sourceDB) }
+                throw LogbookDatabaseError.sqlite(message: message)
+            }
+            defer { sqlite3_close_v2(sourceDB) }
+            sqlite3_busy_timeout(sourceDB, 5_000)
+
+            var knownProfiles = Set<String>()
+            let profileStatement = try prepare("SELECT id FROM station_profiles; ")
+            defer { sqlite3_finalize(profileStatement) }
+            while sqlite3_step(profileStatement) == SQLITE_ROW {
+                knownProfiles.insert(text(profileStatement, 0).lowercased())
+            }
+
+            var existingIDs = Set<String>()
+            var existingExactKeys = Set<String>()
+            var currentTimesByRelaxedKey: [String: [Int]] = [:]
+            var nextSortOrderByProfile: [String: Int] = [:]
+            let currentStatement = try prepare("""
+                SELECT id, station_profile_id, fields_json, sort_order
+                FROM qsos;
+                """)
+            defer { sqlite3_finalize(currentStatement) }
+            while sqlite3_step(currentStatement) == SQLITE_ROW {
+                let id = text(currentStatement, 0).lowercased()
+                let profileID = text(currentStatement, 1).lowercased()
+                let sortOrder = Int(sqlite3_column_int64(currentStatement, 3))
+                existingIDs.insert(id)
+                nextSortOrderByProfile[profileID] = max(nextSortOrderByProfile[profileID] ?? 0, sortOrder)
+
+                guard let fields = decodedFields(currentStatement, column: 2) else { continue }
+                let exactKey = QSOIdentity.exactKey(fields: fields)
+                if !exactKey.isEmpty {
+                    existingExactKeys.insert(scopedIdentity(profileID: profileID, key: exactKey))
+                }
+                let relaxedKey = QSOIdentity.relaxedKey(fields: fields)
+                if !relaxedKey.isEmpty, let seconds = QSOIdentity.secondsFromMidnight(fields) {
+                    currentTimesByRelaxedKey[scopedIdentity(profileID: profileID, key: relaxedKey), default: []]
+                        .append(seconds)
+                }
+            }
+
+            var candidates: [RecoveryCandidate] = []
+            var skippedExisting = 0
+            var skippedNonLegacy = 0
+            var skippedUnknownProfile = 0
+            let sourceStatement = try prepare(
+                """
+                SELECT id, station_profile_id, fields_json, created_at, updated_at
+                FROM qsos
+                ORDER BY station_profile_id, sort_order;
+                """,
+                in: sourceDB
+            )
+            defer { sqlite3_finalize(sourceStatement) }
+
+            while sqlite3_step(sourceStatement) == SQLITE_ROW {
+                let idText = text(sourceStatement, 0).lowercased()
+                let profileIDString = text(sourceStatement, 1).lowercased()
+                guard let id = UUID(uuidString: idText),
+                      knownProfiles.contains(profileIDString),
+                      let profileID = UUID(uuidString: profileIDString) else {
+                    skippedUnknownProfile += 1
+                    continue
+                }
+                guard !existingIDs.contains(idText) else {
+                    skippedExisting += 1
+                    continue
+                }
+                guard let rawFields = decodedFields(sourceStatement, column: 2) else {
+                    skippedNonLegacy += 1
+                    continue
+                }
+                let fields = CountryNameNormalizer.normalizedFields(rawFields).fields
+                let exactKey = QSOIdentity.exactKey(fields: fields)
+                let relaxedKey = QSOIdentity.relaxedKey(fields: fields)
+                guard !exactKey.isEmpty,
+                      !relaxedKey.isEmpty,
+                      let seconds = QSOIdentity.secondsFromMidnight(fields) else {
+                    skippedNonLegacy += 1
+                    continue
+                }
+
+                let scopedExactKey = scopedIdentity(profileID: profileIDString, key: exactKey)
+                guard !existingExactKeys.contains(scopedExactKey) else {
+                    skippedExisting += 1
+                    continue
+                }
+                let scopedRelaxedKey = scopedIdentity(profileID: profileIDString, key: relaxedKey)
+                guard currentTimesByRelaxedKey[scopedRelaxedKey]?.contains(where: {
+                    abs($0 - seconds) <= 300
+                }) == true else {
+                    skippedNonLegacy += 1
+                    continue
+                }
+
+                candidates.append(RecoveryCandidate(
+                    id: id,
+                    profileID: profileID,
+                    fields: fields,
+                    uniqueKey: exactKey,
+                    createdAt: sqlite3_column_double(sourceStatement, 3),
+                    updatedAt: sqlite3_column_double(sourceStatement, 4)
+                ))
+                existingIDs.insert(idText)
+                existingExactKeys.insert(scopedExactKey)
+            }
+
+            guard !candidates.isEmpty else {
+                return QSORecoveryReport(
+                    recoveredCount: 0,
+                    skippedExistingCount: skippedExisting,
+                    skippedNonLegacyCount: skippedNonLegacy,
+                    skippedUnknownProfileCount: skippedUnknownProfile
+                )
+            }
+
+            try execute("BEGIN IMMEDIATE TRANSACTION;")
+            do {
+                let insertStatement = try prepare("""
+                    INSERT INTO qsos (
+                        id, station_profile_id, unique_key, call, qso_date, time_on, band, mode,
+                        fields_json, sort_order, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                    """)
+                defer { sqlite3_finalize(insertStatement) }
+                var recoveredByProfile: [UUID: [PersistedQSO]] = [:]
+
+                for candidate in candidates {
+                    let profileKey = candidate.profileID.uuidString.lowercased()
+                    let nextSortOrder = (nextSortOrderByProfile[profileKey] ?? 0) + 1
+                    nextSortOrderByProfile[profileKey] = nextSortOrder
+                    let jsonData = try JSONEncoder().encode(candidate.fields)
+                    guard let json = String(data: jsonData, encoding: .utf8) else { continue }
+
+                    sqlite3_reset(insertStatement)
+                    sqlite3_clear_bindings(insertStatement)
+                    bind(candidate.id.uuidString, to: 1, in: insertStatement)
+                    bind(candidate.profileID.uuidString, to: 2, in: insertStatement)
+                    bind(candidate.uniqueKey, to: 3, in: insertStatement)
+                    bind(candidate.fields["CALL"] ?? "", to: 4, in: insertStatement)
+                    bind(candidate.fields["QSO_DATE"] ?? "", to: 5, in: insertStatement)
+                    bind(candidate.fields["TIME_ON"] ?? candidate.fields["TIME_OFF"] ?? "", to: 6, in: insertStatement)
+                    bind(QSOIdentity.resolvedBand(candidate.fields), to: 7, in: insertStatement)
+                    bind(QSOIdentity.effectiveMode(candidate.fields), to: 8, in: insertStatement)
+                    bind(json, to: 9, in: insertStatement)
+                    sqlite3_bind_int64(insertStatement, 10, sqlite3_int64(nextSortOrder))
+                    sqlite3_bind_double(insertStatement, 11, candidate.createdAt)
+                    sqlite3_bind_double(insertStatement, 12, candidate.updatedAt)
+                    try stepDone(insertStatement)
+
+                    recoveredByProfile[candidate.profileID, default: []].append(PersistedQSO(
+                        id: candidate.id,
+                        index: nextSortOrder,
+                        fields: candidate.fields
+                    ))
+                }
+
+                let now = Date().timeIntervalSince1970
+                for (profileID, records) in recoveredByProfile {
+                    try updateFieldCatalog(profileID: profileID, headers: [], records: records, timestamp: now)
+                }
+                try insertAudit(
+                    action: "legacy-near-duplicate-cleanup-recovered",
+                    detail: "Recovered \(candidates.count) QSO(s) with distinct UTC times from \(snapshot.id).",
+                    profileID: nil
+                )
+                try execute("COMMIT;")
+            } catch {
+                try? execute("ROLLBACK;")
+                throw error
+            }
+
+            return QSORecoveryReport(
+                recoveredCount: candidates.count,
+                skippedExistingCount: skippedExisting,
+                skippedNonLegacyCount: skippedNonLegacy,
+                skippedUnknownProfileCount: skippedUnknownProfile
+            )
         }
     }
 
@@ -885,7 +1118,7 @@ nonisolated final class LogbookDatabase: @unchecked Sendable {
 
     private func validateDatabase(at url: URL) throws {
         var handle: OpaquePointer?
-        guard sqlite3_open_v2(url.path, &handle, SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK, let handle else {
+        guard sqlite3_open_v2(url.path, &handle, SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK, let handle else {
             let message = handle.map { String(cString: sqlite3_errmsg($0)) } ?? "Unable to open backup."
             if let handle { sqlite3_close_v2(handle) }
             throw LogbookDatabaseError.sqlite(message: "Backup validation failed: \(message)")
@@ -964,6 +1197,24 @@ nonisolated final class LogbookDatabase: @unchecked Sendable {
         return statement
     }
 
+    private func prepare(_ sql: String, in handle: OpaquePointer) throws -> OpaquePointer {
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(handle, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
+            throw LogbookDatabaseError.sqlite(message: String(cString: sqlite3_errmsg(handle)))
+        }
+        return statement
+    }
+
+    private func decodedFields(_ statement: OpaquePointer, column: Int32) -> [String: String]? {
+        guard let jsonText = sqlite3_column_text(statement, column) else { return nil }
+        let data = Data(bytes: jsonText, count: Int(sqlite3_column_bytes(statement, column)))
+        return try? JSONDecoder().decode([String: String].self, from: data)
+    }
+
+    private func scopedIdentity(profileID: String, key: String) -> String {
+        "\(profileID.lowercased())|\(key)"
+    }
+
     private func execute(_ sql: String) throws {
         guard let db else { throw LogbookDatabaseError.unavailable("Database is closed.") }
         var errorPointer: UnsafeMutablePointer<CChar>?
@@ -1007,12 +1258,7 @@ nonisolated final class LogbookDatabase: @unchecked Sendable {
     }
 
     private static func uniqueKey(fields: [String: String]) -> String {
-        let call = fields["CALL"]?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
-        let date = fields["QSO_DATE"] ?? ""
-        let time = fields["TIME_ON"] ?? fields["TIME_OFF"] ?? ""
-        let band = fields["BAND"]?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
-        let mode = fields["MODE"]?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
-        return "\(call)_\(date)_\(time)_\(band)_\(mode)"
+        QSOIdentity.exactKey(fields: fields)
     }
 
     private static func fileSafeReason(_ value: String) -> String {

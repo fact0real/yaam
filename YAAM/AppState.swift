@@ -755,12 +755,7 @@ nonisolated struct QSORecordModel: Identifiable, Sendable {
     
     // SMART DEDUPLICATION KEY: Call + Date + Time + Band + Mode
     var uniqueKey: String {
-        let call = fields["CALL"]?.uppercased().trimmingCharacters(in: .whitespaces) ?? ""
-        let date = fields["QSO_DATE"] ?? ""
-        let time = fields["TIME_ON"] ?? fields["TIME_OFF"] ?? ""
-        let band = fields["BAND"]?.uppercased().trimmingCharacters(in: .whitespaces) ?? ""
-        let mode = fields["MODE"]?.uppercased().trimmingCharacters(in: .whitespaces) ?? ""
-        return "\(call)_\(date)_\(time)_\(band)_\(mode)"
+        QSOIdentity.exactKey(fields: fields)
     }
     
     subscript(key: String) -> String {
@@ -1725,6 +1720,7 @@ class AppState: NSObject, ObservableObject {
     @Published var rankHistoryStatus: String = ""
     @Published var rankServiceStatus: String = ""
     @Published private(set) var rankDailyQuota = QRZRankDailyQuota()
+    @Published private(set) var rankServerQuota: QRZRankAPIQuota?
     @Published var isDailyRankBackfillRunning: Bool = false
     @Published var dailyRankBackfillStatus: String = ""
     @Published var dailyRankBackfillCompleted: Int = 0
@@ -2718,9 +2714,10 @@ class AppState: NSObject, ObservableObject {
     }
 
     var dailyRankRequestsRemaining: Int {
-        var quota = rankDailyQuota
-        quota.resetIfNeeded()
-        return quota.remainingRequests
+        guard let quota = rankServerQuota else { return Int.max }
+        if quota.isUnlimited { return Int.max }
+        if let remaining = quota.effectiveRemaining { return max(0, remaining) }
+        return quota.allowsRequest ? Int.max : 0
     }
 
     var dailyRankBackfillCandidateCount: Int {
@@ -2735,7 +2732,10 @@ class AppState: NSObject, ObservableObject {
             rankCandidateCacheDay = checkedDay
             rankCandidateCacheRevision = qsoRecordsRevision
         }
-        return min(rankCandidateCacheAvailable, dailyRankRequestsRemaining)
+        let serverRemaining = dailyRankRequestsRemaining
+        return serverRemaining == Int.max
+            ? rankCandidateCacheAvailable
+            : min(rankCandidateCacheAvailable, serverRemaining)
     }
 
     private func loadDailyRankQuota() {
@@ -2762,18 +2762,11 @@ class AppState: NSObject, ObservableObject {
         saveDailyRankQuota()
     }
 
-    private func reserveDailyRankRequest() -> Bool {
+    private func recordDailyRankRequestAttempt() {
         var quota = rankDailyQuota
-        guard quota.reserveRequest() else {
-            if quota != rankDailyQuota {
-                rankDailyQuota = quota
-                saveDailyRankQuota()
-            }
-            return false
-        }
+        quota.recordAttempt()
         rankDailyQuota = quota
         saveDailyRankQuota()
-        return true
     }
 
     private func recordDailyRankSuccess() {
@@ -2787,9 +2780,22 @@ class AppState: NSObject, ObservableObject {
         callsign: String,
         credentials: QRZRankServiceCredentials
     ) async -> Result<QRZRankResponse, QRZRankFetchFailure> {
-        guard reserveDailyRankRequest() else {
-            return .failure(.dailyLimitReached(QRZRankDailyQuota.maximumRequests))
+        if let quota = rankServerQuota, !quota.allowsRequest {
+            do {
+                rankServerQuota = try await QRZRankService.shared.fetchQuota(
+                    token: credentials.token,
+                    userAgent: "YAAM-macOS/\(currentVersion)"
+                )
+            } catch let failure as QRZRankFetchFailure {
+                return .failure(failure)
+            } catch {
+                return .failure(.transport(error.localizedDescription))
+            }
+            if let refreshedQuota = rankServerQuota, !refreshedQuota.allowsRequest {
+                return .failure(.rateLimited(rankQuotaExhaustedMessage(refreshedQuota)))
+            }
         }
+        recordDailyRankRequestAttempt()
 
         do {
             let response = try await QRZRankService.shared.fetchRank(
@@ -2797,13 +2803,33 @@ class AppState: NSObject, ObservableObject {
                 token: credentials.token,
                 userAgent: "YAAM-macOS/\(currentVersion)"
             )
+            rankServerQuota = await QRZRankService.shared.latestQuota
             recordDailyRankSuccess()
             return .success(response)
         } catch let failure as QRZRankFetchFailure {
+            rankServerQuota = await QRZRankService.shared.latestQuota
             return .failure(failure)
         } catch {
+            rankServerQuota = await QRZRankService.shared.latestQuota
             return .failure(.transport(error.localizedDescription))
         }
+    }
+
+    private func rankQuotaExhaustedMessage(_ quota: QRZRankAPIQuota) -> String {
+        var message = "The QRZ Rank allowance assigned by the server has been exhausted."
+        if let resetsAt = quota.resetsAt, !resetsAt.isEmpty {
+            message += " It resets at \(resetsAt)."
+        }
+        return message
+    }
+
+    private var rankQuotaAvailabilityDescription: String {
+        guard let quota = rankServerQuota else { return "server allowance not checked" }
+        if quota.isUnlimited { return "unlimited server allowance" }
+        if let remaining = quota.effectiveRemaining {
+            return "\(remaining) server request(s) remaining"
+        }
+        return quota.allowsRequest ? "server allowance available" : "server allowance exhausted"
     }
 
     private func fetchSingleRank(
@@ -2939,7 +2965,10 @@ class AppState: NSObject, ObservableObject {
         }
     }
     
-    func autoSaveActiveWorkspace(allowEmptyReplacement: Bool = false) {
+    func autoSaveActiveWorkspace(
+        allowEmptyReplacement: Bool = false,
+        replaceMissingRecords: Bool = false
+    ) {
         if isMasterMode, let database = logbookDatabase, let profileID = activeStationProfileID {
             guard loadedWorkspaceProfileID == profileID else {
                 databaseStatus = YAAMPersistenceError.workspaceNotLoaded.localizedDescription
@@ -2954,7 +2983,8 @@ class AppState: NSObject, ObservableObject {
                         profileID: profileID,
                         headers: headers,
                         records: records,
-                        allowEmptyReplacement: allowEmptyReplacement
+                        allowEmptyReplacement: allowEmptyReplacement,
+                        replaceMissingRecords: replaceMissingRecords
                     )
                 } catch {
                     DispatchQueue.main.async {
@@ -3219,6 +3249,97 @@ class AppState: NSObject, ObservableObject {
         }
     }
 
+    @MainActor
+    private func mergeIncomingRecordsSafely(
+        incomingFields: [[String: String]],
+        profileID: UUID?,
+        sourceName: String
+    ) async throws -> SDRControlMergeResult {
+        for attempt in 1...3 {
+            guard activeStationProfileID == profileID else {
+                throw NSError(
+                    domain: "YAAM.LogMerge",
+                    code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: "\(sourceName) import stopped because the active station changed."]
+                )
+            }
+
+            let startingRevision = qsoRecordsRevision
+            let localRecords = qsoRecords
+            let result = await Task.detached(priority: .userInitiated) {
+                SDRControlMergeEngine.merge(
+                    localRecords: localRecords,
+                    incomingFields: incomingFields
+                )
+            }.value
+
+            guard activeStationProfileID == profileID else {
+                throw NSError(
+                    domain: "YAAM.LogMerge",
+                    code: 2,
+                    userInfo: [NSLocalizedDescriptionKey: "\(sourceName) import stopped because the active station changed."]
+                )
+            }
+            if qsoRecordsRevision == startingRevision {
+                return result
+            }
+            if attempt < 3 { await Task.yield() }
+        }
+
+        throw NSError(
+            domain: "YAAM.LogMerge",
+            code: 3,
+            userInfo: [NSLocalizedDescriptionKey: "The log changed while \(sourceName) was being imported. YAAM kept the newer contacts; run the import again."]
+        )
+    }
+
+    /// Publishes only fields changed by a background workflow. Contacts imported
+    /// while that workflow was awaiting network responses remain untouched.
+    @MainActor
+    @discardableResult
+    private func applySafeFieldDeltas(
+        from baseRecords: [QSORecordModel],
+        to updatedRecords: [QSORecordModel]
+    ) -> Int {
+        let baseByID = Dictionary(uniqueKeysWithValues: baseRecords.map { ($0.id, $0.fields) })
+        let updatedByID = Dictionary(uniqueKeysWithValues: updatedRecords.map { ($0.id, $0.fields) })
+        var mergedRecords = qsoRecords
+        let currentIndexByID = Dictionary(uniqueKeysWithValues: mergedRecords.indices.map {
+            (mergedRecords[$0].id, $0)
+        })
+        var changedFieldCount = 0
+
+        for (id, updatedFields) in updatedByID {
+            guard let baseFields = baseByID[id], let currentIndex = currentIndexByID[id] else { continue }
+            let changedKeys = Set(baseFields.keys).union(updatedFields.keys).filter {
+                baseFields[$0] != updatedFields[$0]
+            }
+            guard !changedKeys.isEmpty else { continue }
+
+            var currentFields = mergedRecords[currentIndex].fields
+            var changedRecord = false
+            for key in changedKeys {
+                // A simultaneous operation wins if it changed the same field.
+                guard currentFields[key] == baseFields[key] else { continue }
+                if let updatedValue = updatedFields[key] {
+                    currentFields[key] = updatedValue
+                } else {
+                    currentFields.removeValue(forKey: key)
+                }
+                changedFieldCount += 1
+                changedRecord = true
+            }
+            if changedRecord {
+                mergedRecords[currentIndex].fields = currentFields
+            }
+        }
+
+        if changedFieldCount > 0 {
+            qsoRecords = mergedRecords
+        }
+        return changedFieldCount
+    }
+
     private func mergeSDRControlLogbook(
         from source: SDRControlLogbookSource,
         allowPermissionPrompt: Bool = true,
@@ -3257,43 +3378,54 @@ class AppState: NSObject, ObservableObject {
                     }
 
                     let profileID = self.activeStationProfileID
-                    let localRecords = self.qsoRecords
                     let taggedRecords = records.map { self.stationTaggedFields($0) }
                     Task { @MainActor [weak self] in
-                        let mergeResult = await Task.detached(priority: .userInitiated) {
-                            SDRControlMergeEngine.merge(
-                                localRecords: localRecords,
-                                incomingFields: taggedRecords
-                            )
-                        }.value
-
                         guard let self else { return }
-                        guard self.activeStationProfileID == profileID else {
-                            self.isLoading = false
-                            completion?(.failure(NSError(
-                                domain: "YAAM.SDRControl",
-                                code: 5,
-                                userInfo: [NSLocalizedDescriptionKey: "SDR-Control import stopped because the active station changed."]
-                            )))
-                            return
-                        }
+                        do {
+                            let mergeResult = try await self.mergeIncomingRecordsSafely(
+                                incomingFields: taggedRecords,
+                                profileID: profileID,
+                                sourceName: "SDR-Control"
+                            )
 
-                        let summary = mergeResult.summary
-                        if summary.added > 0 || summary.updated > 0 {
-                            self.qsoRecords = mergeResult.records
-                            self.autoSaveActiveWorkspace()
+                            let summary = mergeResult.summary
+                            if mergeResult.removedDuplicates > 0 {
+                                guard self.createDestructiveCheckpointIfNeeded(
+                                    reason: "Before consolidating exact duplicate QSOs during SDR-Control import"
+                                ) else {
+                                    throw NSError(
+                                        domain: "YAAM.SDRControlImport",
+                                        code: 1,
+                                        userInfo: [NSLocalizedDescriptionKey: "YAAM could not create the required recovery checkpoint, so no duplicate records were removed."]
+                                    )
+                                }
+                            }
+                            if summary.added > 0 || summary.updated > 0 || mergeResult.removedDuplicates > 0 {
+                                self.qsoRecords = mergeResult.records
+                                self.autoSaveActiveWorkspace(
+                                    replaceMissingRecords: mergeResult.removedDuplicates > 0
+                                )
+                            }
+                            self.isLoading = false
+                            var details = "SDR-Control sync complete: \(summary.added) new QSOs added, \(summary.updated) existing QSOs enriched, \(summary.skipped) duplicates skipped"
+                            if mergeResult.removedDuplicates > 0 {
+                                details += ", \(mergeResult.removedDuplicates) exact duplicate row(s) consolidated"
+                            }
+                            if parsed.ignoredDeletedRecordCount > 0 {
+                                details += ", \(parsed.ignoredDeletedRecordCount) deleted entries ignored"
+                            }
+                            if parsed.validationIssueCount > 0 {
+                                details += ", \(parsed.validationIssueCount) invalid entries ignored"
+                            }
+                            self.appendLog(details + ".")
+                            self.playActivitySound(.success)
+                            completion?(.success(summary))
+                        } catch {
+                            self.isLoading = false
+                            self.appendLog("SDR-Control sync stopped safely: \(error.localizedDescription)")
+                            self.playActivitySound(.failure)
+                            completion?(.failure(error))
                         }
-                        self.isLoading = false
-                        var details = "SDR-Control sync complete: \(summary.added) new QSOs added, \(summary.updated) existing QSOs enriched, \(summary.skipped) duplicates skipped"
-                        if parsed.ignoredDeletedRecordCount > 0 {
-                            details += ", \(parsed.ignoredDeletedRecordCount) deleted entries ignored"
-                        }
-                        if parsed.validationIssueCount > 0 {
-                            details += ", \(parsed.validationIssueCount) invalid entries ignored"
-                        }
-                        self.appendLog(details + ".")
-                        self.playActivitySound(.success)
-                        completion?(.success(summary))
                     }
                 }
             } catch {
@@ -3398,30 +3530,33 @@ class AppState: NSObject, ObservableObject {
                 }
 
                 let profileID = self.activeStationProfileID
-                let localRecords = self.qsoRecords
                 let taggedRecords = parsed.records.map { self.stationTaggedFields($0) }
-                let mergeResult = await Task.detached(priority: .userInitiated) {
-                    SDRControlMergeEngine.merge(
-                        localRecords: localRecords,
-                        incomingFields: taggedRecords
-                    )
-                }.value
-
-                guard self.activeStationProfileID == profileID else {
-                    throw NSError(
-                        domain: "YAAM.ExternalADIF",
-                        code: 6,
-                        userInfo: [NSLocalizedDescriptionKey: "ADIF import stopped because the active station changed."]
-                    )
-                }
+                let mergeResult = try await self.mergeIncomingRecordsSafely(
+                    incomingFields: taggedRecords,
+                    profileID: profileID,
+                    sourceName: "ADIF"
+                )
 
                 let summary = mergeResult.summary
-                if summary.added > 0 || summary.updated > 0 {
+                if mergeResult.removedDuplicates > 0 {
+                    guard self.createDestructiveCheckpointIfNeeded(
+                        reason: "Before consolidating exact duplicate QSOs during ADIF import"
+                    ) else {
+                        throw NSError(
+                            domain: "YAAM.ADIFImport",
+                            code: 1,
+                            userInfo: [NSLocalizedDescriptionKey: "YAAM could not create the required recovery checkpoint, so no duplicate records were removed."]
+                        )
+                    }
+                }
+                if summary.added > 0 || summary.updated > 0 || mergeResult.removedDuplicates > 0 {
                     self.qsoRecords = mergeResult.records
-                    self.autoSaveActiveWorkspace()
+                    self.autoSaveActiveWorkspace(
+                        replaceMissingRecords: mergeResult.removedDuplicates > 0
+                    )
                 }
                 self.isLoading = false
-                self.appendLog("Merge complete: \(summary.added) new QSOs added, \(summary.updated) existing QSOs enriched, \(summary.skipped) duplicates skipped.")
+                self.appendLog("Merge complete: \(summary.added) new QSOs added, \(summary.updated) existing QSOs enriched, \(summary.skipped) duplicates skipped, \(mergeResult.removedDuplicates) exact duplicate row(s) consolidated.")
                 self.playActivitySound(.success)
                 completion?(.success(summary))
             } catch {
@@ -4100,6 +4235,7 @@ class AppState: NSObject, ObservableObject {
         enrichmentTask = Task { @MainActor in
             var rankBatchBlocker: QRZRankFetchFailure?
             var workingRecords = self.qsoRecords
+            var publishedRecords = workingRecords
             var hasUnsavedChanges = false
             for (idx, callsign) in uniqueCallsigns.enumerated() {
                 if Task.isCancelled { break }
@@ -4184,7 +4320,8 @@ class AppState: NSObject, ObservableObject {
                     self.rankServiceStatus = "Enriched \(completed) of \(uniqueCallsigns.count) callsigns."
                 }
                 if completed.isMultiple(of: 100) || completed == uniqueCallsigns.count {
-                    self.qsoRecords = workingRecords
+                    self.applySafeFieldDeltas(from: publishedRecords, to: workingRecords)
+                    publishedRecords = workingRecords
                     self.autoSaveActiveWorkspace()
                     hasUnsavedChanges = false
                 }
@@ -4192,7 +4329,7 @@ class AppState: NSObject, ObservableObject {
             
             let wasCancelled = Task.isCancelled
             if hasUnsavedChanges {
-                self.qsoRecords = workingRecords
+                self.applySafeFieldDeltas(from: publishedRecords, to: workingRecords)
                 self.autoSaveActiveWorkspace()
             }
             self.isEnriching = false
@@ -4222,18 +4359,11 @@ class AppState: NSObject, ObservableObject {
         }
 
         let propagatedRows = propagateExistingRankValues()
-        let remaining = rankDailyQuota.remainingRequests
-        guard remaining > 0 else {
-            dailyRankBackfillStatus = "Today's 1,440 QRZ Rank requests have been used. The counter resets at local midnight."
-            rankServiceStatus = dailyRankBackfillStatus
-            return
-        }
-
         let checkedDay = Self.adifDateFormatter.string(from: Date())
         let callsigns = QRZRankBackfillPlanner.candidateCallsigns(
             from: qsoRecords,
             checkedDay: checkedDay,
-            limit: remaining,
+            limit: Int.max,
             value: { record, field in record[field] }
         )
         guard !callsigns.isEmpty else {
@@ -4266,20 +4396,60 @@ class AppState: NSObject, ObservableObject {
         isDailyRankBackfillRunning = true
         dailyRankBackfillCompleted = 0
         dailyRankBackfillTotal = callsigns.count
-        dailyRankBackfillStatus = "Preparing \(callsigns.count) missing QRZ rankings..."
+        dailyRankBackfillStatus = "Checking the server allowance for \(callsigns.count) missing QRZ rankings..."
         rankServiceStatus = dailyRankBackfillStatus
-        appendLog("QRZ Rank daily backfill started: \(callsigns.count) unique callsign(s), \(remaining) request(s) available today.")
+        appendLog("QRZ Rank daily backfill is checking the server allowance for \(callsigns.count) unique callsign(s).")
 
         enrichmentTask = Task { @MainActor in
+            do {
+                self.rankServerQuota = try await QRZRankService.shared.fetchQuota(
+                    token: credentials.token,
+                    userAgent: "YAAM-macOS/\(self.currentVersion)"
+                )
+            } catch let failure as QRZRankFetchFailure {
+                self.isEnriching = false
+                self.isDailyRankBackfillRunning = false
+                self.enrichmentTask = nil
+                self.dailyRankBackfillStatus = "Daily rank backfill could not start: \(failure.localizedDescription)"
+                self.rankServiceStatus = self.dailyRankBackfillStatus
+                self.appendLog("QRZ Rank daily backfill: \(self.dailyRankBackfillStatus)")
+                return
+            } catch {
+                self.isEnriching = false
+                self.isDailyRankBackfillRunning = false
+                self.enrichmentTask = nil
+                self.dailyRankBackfillStatus = "Daily rank backfill could not start: \(error.localizedDescription)"
+                self.rankServiceStatus = self.dailyRankBackfillStatus
+                self.appendLog("QRZ Rank daily backfill: \(self.dailyRankBackfillStatus)")
+                return
+            }
+
+            if let quota = self.rankServerQuota, !quota.allowsRequest {
+                self.isEnriching = false
+                self.isDailyRankBackfillRunning = false
+                self.enrichmentTask = nil
+                self.dailyRankBackfillStatus = self.rankQuotaExhaustedMessage(quota)
+                self.rankServiceStatus = self.dailyRankBackfillStatus
+                self.appendLog("QRZ Rank daily backfill did not start: \(self.dailyRankBackfillStatus)")
+                return
+            }
+
+            self.dailyRankBackfillStatus = "Starting \(callsigns.count) callsign(s), \(self.rankQuotaAvailabilityDescription)."
+            self.rankServiceStatus = self.dailyRankBackfillStatus
             var successfulCallsigns = 0
             var unavailableCallsigns = 0
             var consecutiveTransientFailures = 0
             var stoppingFailure: QRZRankFetchFailure?
             var workingRecords = self.qsoRecords
+            var publishedRecords = workingRecords
             var hasUnsavedChanges = false
 
             for (offset, callsign) in callsigns.enumerated() {
                 if Task.isCancelled { break }
+                if let quota = self.rankServerQuota, !quota.allowsRequest {
+                    stoppingFailure = .rateLimited(self.rankQuotaExhaustedMessage(quota))
+                    break
+                }
 
                 let result = await self.fetchRankWithDailyQuota(callsign: callsign, credentials: credentials)
                 if Task.isCancelled { break }
@@ -4334,12 +4504,13 @@ class AppState: NSObject, ObservableObject {
                 let completed = offset + 1
                 if completed.isMultiple(of: 5) || completed == callsigns.count || stoppingFailure != nil {
                     self.dailyRankBackfillCompleted = completed
-                    self.dailyRankBackfillStatus = "\(completed) of \(callsigns.count) checked, \(successfulCallsigns) saved, \(self.rankDailyQuota.remainingRequests) requests left today."
+                    self.dailyRankBackfillStatus = "\(completed) of \(callsigns.count) checked, \(successfulCallsigns) saved, \(self.rankQuotaAvailabilityDescription)."
                     self.rankServiceStatus = self.dailyRankBackfillStatus
                 }
 
                 if completed.isMultiple(of: 100) || completed == callsigns.count || stoppingFailure != nil {
-                    self.qsoRecords = workingRecords
+                    self.applySafeFieldDeltas(from: publishedRecords, to: workingRecords)
+                    publishedRecords = workingRecords
                     self.autoSaveActiveWorkspace()
                     hasUnsavedChanges = false
                 }
@@ -4350,7 +4521,7 @@ class AppState: NSObject, ObservableObject {
 
             let wasCancelled = Task.isCancelled
             if hasUnsavedChanges {
-                self.qsoRecords = workingRecords
+                self.applySafeFieldDeltas(from: publishedRecords, to: workingRecords)
                 self.autoSaveActiveWorkspace()
             }
             self.isEnriching = false
@@ -4362,7 +4533,7 @@ class AppState: NSObject, ObservableObject {
             } else if let stoppingFailure {
                 self.dailyRankBackfillStatus = "Paused after \(self.dailyRankBackfillCompleted) callsigns: \(stoppingFailure.localizedDescription)"
             } else {
-                self.dailyRankBackfillStatus = "Daily rank backfill finished: \(successfulCallsigns) saved, \(unavailableCallsigns) unavailable, \(self.rankDailyQuota.remainingRequests) requests left today."
+                self.dailyRankBackfillStatus = "Daily rank backfill finished: \(successfulCallsigns) saved, \(unavailableCallsigns) unavailable, \(self.rankQuotaAvailabilityDescription)."
                 self.playActivitySound(.success)
             }
             self.rankServiceStatus = self.dailyRankBackfillStatus
@@ -4374,7 +4545,8 @@ class AppState: NSObject, ObservableObject {
     private func propagateExistingRankValues() -> Int {
         let rankFields = ["RANK_QSO", "RANK_BAND", "RANK_DXCC"]
         var knownValues: [String: [String: String]] = [:]
-        var workingRecords = qsoRecords
+        let baseRecords = qsoRecords
+        var workingRecords = baseRecords
 
         for record in workingRecords {
             let callsign = record["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
@@ -4400,7 +4572,9 @@ class AppState: NSObject, ObservableObject {
             }
             if rowChanged { updatedRows += 1 }
         }
-        if updatedRows > 0 { qsoRecords = workingRecords }
+        if updatedRows > 0 {
+            applySafeFieldDeltas(from: baseRecords, to: workingRecords)
+        }
         return updatedRows
     }
 
@@ -4498,7 +4672,8 @@ class AppState: NSObject, ObservableObject {
         var savedEmails: [String] = []
         var noContactCallsigns: [String] = []
         var detailLines: [String] = []
-        var workingRecords = qsoRecords
+        let baseRecords = qsoRecords
+        var workingRecords = baseRecords
         var recordIndicesByCallsign: [String: [Int]] = [:]
         for index in workingRecords.indices {
             let callsign = workingRecords[index]["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
@@ -4572,7 +4747,7 @@ class AppState: NSObject, ObservableObject {
         }
 
         if didChangeRecords {
-            qsoRecords = workingRecords
+            applySafeFieldDeltas(from: baseRecords, to: workingRecords)
             autoSaveActiveWorkspace()
         }
         let namesSummary = savedNames.isEmpty ? "none" : savedNames.joined(separator: ", ")
@@ -6600,7 +6775,10 @@ class AppState: NSObject, ObservableObject {
                 qsoRecords[i].index = i + 1
             }
             appendLog("Deleted QSO record #\(recordNum) (\(call)).")
-            autoSaveActiveWorkspace(allowEmptyReplacement: qsoRecords.isEmpty)
+            autoSaveActiveWorkspace(
+                allowEmptyReplacement: qsoRecords.isEmpty,
+                replaceMissingRecords: true
+            )
         }
     }
 

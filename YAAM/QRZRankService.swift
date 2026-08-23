@@ -19,7 +19,6 @@ nonisolated enum QRZRankFetchFailure: LocalizedError, Equatable, Sendable {
     case authenticationFailed(String)
     case subscriptionRequired(String)
     case callsignNotFound(String)
-    case dailyLimitReached(Int)
     case rateLimited(String)
     case server(status: Int, message: String)
     case transport(String)
@@ -43,8 +42,6 @@ nonisolated enum QRZRankFetchFailure: LocalizedError, Equatable, Sendable {
                 : message
         case .callsignNotFound(let callsign):
             return "No QRZ ranking was found for \(callsign)."
-        case .dailyLimitReached(let limit):
-            return "The daily QRZ Rank limit of \(limit) requests has been reached. It resets at local midnight."
         case .rateLimited(let message):
             return message.isEmpty
                 ? "The shared QRZ Rank daily quota has been reached. Try again after it resets."
@@ -61,7 +58,7 @@ nonisolated enum QRZRankFetchFailure: LocalizedError, Equatable, Sendable {
     var shouldStopBatch: Bool {
         switch self {
         case .authenticationRequired, .authenticationFailed,
-             .subscriptionRequired, .dailyLimitReached, .rateLimited:
+             .subscriptionRequired, .rateLimited:
             return true
         case .invalidCallsign, .callsignNotFound, .server, .transport, .invalidResponse:
             return false
@@ -73,7 +70,7 @@ nonisolated enum QRZRankFetchFailure: LocalizedError, Equatable, Sendable {
         case .invalidCallsign, .callsignNotFound:
             return true
         case .authenticationRequired, .authenticationFailed,
-             .subscriptionRequired, .dailyLimitReached, .rateLimited,
+             .subscriptionRequired, .rateLimited,
              .server, .transport, .invalidResponse:
             return false
         }
@@ -161,6 +158,59 @@ actor QRZRankService {
         }
         latestQuota = envelope.quota
         return envelope.data
+    }
+
+    func fetchQuota(
+        token: String,
+        userAgent: String
+    ) async throws -> QRZRankAPIQuota {
+        let request: URLRequest
+        do {
+            request = try QRZRankAPIContract.makeQuotaRequest(
+                token: token,
+                userAgent: userAgent
+            )
+        } catch QRZRankAPIContractError.missingToken {
+            throw QRZRankFetchFailure.authenticationRequired("")
+        } catch QRZRankAPIContractError.malformedToken {
+            throw QRZRankFetchFailure.authenticationFailed("The saved QRZ Rank API token is malformed. Save it again in Settings > Rank Service.")
+        } catch {
+            throw QRZRankFetchFailure.invalidResponse
+        }
+
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch {
+            throw QRZRankFetchFailure.transport(error.localizedDescription)
+        }
+        guard let http = response as? HTTPURLResponse else {
+            throw QRZRankFetchFailure.invalidResponse
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            let details = QRZRankAPIContract.decodeError(data)
+            let message = details?.message ?? ""
+            switch http.statusCode {
+            case 401:
+                throw QRZRankFetchFailure.authenticationFailed(message)
+            case 403:
+                throw QRZRankFetchFailure.subscriptionRequired(message)
+            case 429:
+                throw QRZRankFetchFailure.rateLimited(message)
+            default:
+                throw QRZRankFetchFailure.server(status: http.statusCode, message: message)
+            }
+        }
+
+        let envelope: QRZRankAPIQuotaEnvelope
+        do {
+            envelope = try QRZRankAPIContract.decodeQuota(data)
+        } catch {
+            throw QRZRankFetchFailure.invalidResponse
+        }
+        latestQuota = envelope.quota
+        return envelope.quota
     }
 }
 

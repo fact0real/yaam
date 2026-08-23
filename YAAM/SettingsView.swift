@@ -135,7 +135,7 @@ struct SettingsView: View {
                         Label("Open QRZ Rank panel to generate a token", systemImage: "arrow.up.right.square")
                     }
 
-                    Text("Leaderboard, enrichment, and Daily Rank Backfill use your personal Bearer token. YAAM never puts this token in a URL or log. The service quota is shared across rank features and is limited to 1,440 requests per local day unless your subscription reports an unlimited quota. This token is separate from your QRZ.com credentials.")
+                    Text("Leaderboard, enrichment, and Daily Rank Backfill use your personal Bearer token. YAAM never puts this token in a URL or log. Before a batch, YAAM reads the allowance assigned to your account by the server and follows its reported remaining count or unlimited status. This token is separate from your QRZ.com credentials.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)

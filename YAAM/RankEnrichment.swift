@@ -6,8 +6,6 @@
 import Foundation
 
 nonisolated struct QRZRankDailyQuota: Codable, Equatable, Sendable {
-    static let maximumRequests = 1_440
-
     private(set) var dayKey: String
     private(set) var attemptedRequests: Int
     private(set) var successfulRequests: Int
@@ -19,12 +17,8 @@ nonisolated struct QRZRankDailyQuota: Codable, Equatable, Sendable {
         successfulRequests: Int = 0
     ) {
         dayKey = Self.dayKey(for: date, calendar: calendar)
-        self.attemptedRequests = max(0, min(Self.maximumRequests, attemptedRequests))
+        self.attemptedRequests = max(0, attemptedRequests)
         self.successfulRequests = max(0, min(self.attemptedRequests, successfulRequests))
-    }
-
-    var remainingRequests: Int {
-        max(0, Self.maximumRequests - attemptedRequests)
     }
 
     mutating func resetIfNeeded(date: Date = Date(), calendar: Calendar = .current) {
@@ -34,11 +28,9 @@ nonisolated struct QRZRankDailyQuota: Codable, Equatable, Sendable {
         successfulRequests = 0
     }
 
-    mutating func reserveRequest(date: Date = Date(), calendar: Calendar = .current) -> Bool {
+    mutating func recordAttempt(date: Date = Date(), calendar: Calendar = .current) {
         resetIfNeeded(date: date, calendar: calendar)
-        guard attemptedRequests < Self.maximumRequests else { return false }
         attemptedRequests += 1
-        return true
     }
 
     mutating func recordSuccess() {
