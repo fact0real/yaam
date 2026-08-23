@@ -502,7 +502,7 @@ final class FT8EngineService: ObservableObject {
                     return decoded.contains { $0.text == message }
                 }.value
                 self?.selfTestStatus = passed
-                    ? "Passed: CI-V, FT8 encode/decode, audio, and UTC slot clock"
+                    ? "Passed: CI-V, safe UDP, FT8 encode/decode, audio, and UTC slot clock"
                     : "FT8 loopback decode did not reproduce the test message"
             } catch {
                 self?.selfTestStatus = "Failed: \(error.localizedDescription)"

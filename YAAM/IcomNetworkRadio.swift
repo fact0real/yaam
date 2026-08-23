@@ -44,6 +44,19 @@ nonisolated enum IcomNetworkConnectionState: Equatable, Sendable {
         if case .connected = self { return true }
         return false
     }
+
+    var isTransitioning: Bool {
+        switch self {
+        case .connecting, .authenticating, .openingStreams:
+            return true
+        default:
+            return false
+        }
+    }
+
+    var canDisconnect: Bool {
+        isConnected || isTransitioning
+    }
 }
 
 nonisolated struct IcomNetworkSnapshot: Equatable, Sendable {
@@ -185,6 +198,7 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
     private var tokenTimer: DispatchSourceTimer?
     private var pttWatchdog: DispatchWorkItem?
     private var _audioSampleHandler: (@Sendable ([Float], Date) -> Void)?
+    private var isStopping = false
 
     deinit {
         keepaliveTimer?.cancel()
@@ -200,14 +214,21 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
         let clean = IcomNetworkSettings(
             host: proposed.host.trimmingCharacters(in: .whitespacesAndNewlines),
             controlPort: proposed.controlPort,
-            username: String(proposed.username.trimmingCharacters(in: .whitespacesAndNewlines).prefix(16)),
-            clientName: String(proposed.clientName.trimmingCharacters(in: .whitespacesAndNewlines).prefix(16)),
+            username: Self.limitedUTF8(
+                proposed.username.trimmingCharacters(in: .whitespacesAndNewlines),
+                maximumBytes: 16
+            ),
+            clientName: Self.limitedUTF8(
+                proposed.clientName.trimmingCharacters(in: .whitespacesAndNewlines),
+                maximumBytes: 16
+            ),
             model: proposed.model
         )
+        let cleanPassword = Self.limitedUTF8(proposedPassword, maximumBytes: 16)
         guard !clean.host.isEmpty,
               (1...65_535).contains(clean.controlPort),
               !clean.username.isEmpty,
-              !proposedPassword.isEmpty else {
+              !cleanPassword.isEmpty else {
             state = .failed(IcomNetworkError.invalidSettings.localizedDescription)
             lastMessage = IcomNetworkError.invalidSettings.localizedDescription
             return
@@ -219,22 +240,16 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
         pttWatchdog = nil
         isTransmitting = false
         transmitArmed = false
-        queue.sync {
-            self.sendPTT(false)
-            self.sendControl(type: 0x05, tracked: false, sequence: 0, on: .civ)
-            self.sendControl(type: 0x05, tracked: false, sequence: 0, on: .audio)
-            self.sendControl(type: 0x05, tracked: false, sequence: 0, on: .control)
-            self.stopNetworkState()
-            self.generation = id
-            self.settings = clean
-            self.password = String(proposedPassword.prefix(16))
-            self.startedAt = Date()
-        }
         state = .connecting
         lastMessage = "Opening \(clean.host):\(clean.controlPort)..."
 
         queue.async { [weak self] in
-            guard let self, self.generation == id else { return }
+            guard let self else { return }
+            self.stopNetworkState()
+            self.generation = id
+            self.settings = clean
+            self.password = cleanPassword
+            self.startedAt = Date()
             do {
                 let socket = try IcomUDPSocket(queue: self.queue) { [weak self] data in
                     self?.receive(data, on: .control, generation: id)
@@ -257,14 +272,17 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
         publishedGeneration = id
         pttWatchdog?.cancel()
         pttWatchdog = nil
-        queue.sync {
+        queue.async { [weak self] in
+            guard let self else { return }
             self.generation = id
+            self.isStopping = true
             self.sendPTT(false)
             self.sendControl(type: 0x05, tracked: false, sequence: 0, on: .civ)
             self.sendControl(type: 0x05, tracked: false, sequence: 0, on: .audio)
             self.sendControl(type: 0x05, tracked: false, sequence: 0, on: .control)
             self.stopNetworkState()
             self.settings = nil
+            self.isStopping = false
         }
         isTransmitting = false
         transmitArmed = false
@@ -872,7 +890,7 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
     }
 
     private func fail(_ message: String, generation id: UUID) {
-        guard generation == id else { return }
+        guard generation == id, !isStopping else { return }
         stopNetworkState()
         DispatchQueue.main.async {
             guard self.publishedGeneration == id else { return }
@@ -945,8 +963,57 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
     }
 
     static func protocolSelfTest() -> Bool {
+        civCodecSelfTest()
+            && credentialBoundsSelfTest()
+            && udpTransportSelfTest()
+    }
+
+    static func civCodecSelfTest() -> Bool {
         let frequencies: [UInt64] = [1_840_000, 7_074_000, 14_074_000, 50_313_000]
         return frequencies.allSatisfy { frequencyFromBCD(frequencyBCD($0)) == $0 }
+    }
+
+    static func credentialBoundsSelfTest() -> Bool {
+        let boundedCredential = limitedUTF8("0123456789abcde\u{00E9}", maximumBytes: 16)
+        return boundedCredential.utf8.count <= 16
+            && !boundedCredential.isEmpty
+    }
+
+    /// Exercises the connected-UDP write path against a closed local endpoint.
+    /// No credentials, radio commands, or network traffic leave this Mac.
+    static func udpTransportSelfTest() -> Bool {
+        (try? runUDPTransportSelfTest()) != nil
+    }
+
+    static func runUDPTransportSelfTest() throws {
+        let testQueue = DispatchQueue(label: "YAAM.IcomNetworkRadio.UDPTransportSelfTest")
+        let socket = try IcomUDPSocket(
+            queue: testQueue,
+            onData: { _ in },
+            onError: { _ in }
+        )
+        try socket.connect(host: "127.0.0.1", port: 65_535)
+        let probe = Data(repeating: 0, count: 16)
+        for _ in 0..<6 {
+            socket.send(probe)
+            usleep(5_000)
+        }
+        socket.close()
+        testQueue.sync {}
+    }
+
+    private static func limitedUTF8(_ value: String, maximumBytes: Int) -> String {
+        guard maximumBytes > 0 else { return "" }
+        var result = ""
+        var byteCount = 0
+        for character in value {
+            let fragment = String(character)
+            let fragmentCount = fragment.utf8.count
+            guard byteCount + fragmentCount <= maximumBytes else { break }
+            result.append(character)
+            byteCount += fragmentCount
+        }
+        return result
     }
 
     private static func modeName(_ value: UInt8) -> String {
@@ -1008,6 +1075,21 @@ nonisolated private final class IcomUDPSocket: @unchecked Sendable {
         guard fd >= 0 else {
             throw IcomNetworkError.socket("Unable to create UDP socket: \(String(cString: strerror(errno)))")
         }
+
+        // A connected UDP socket can receive EPIPE after an ICMP rejection on
+        // macOS. Keep that transport error local instead of terminating YAAM.
+        var noSignal: Int32 = 1
+        guard setsockopt(
+            fd,
+            SOL_SOCKET,
+            SO_NOSIGPIPE,
+            &noSignal,
+            socklen_t(MemoryLayout<Int32>.size)
+        ) == 0 else {
+            let message = String(cString: strerror(errno))
+            Darwin.close(fd)
+            throw IcomNetworkError.socket("Unable to protect UDP socket writes: \(message)")
+        }
         descriptor = fd
 
         var local = sockaddr_in()
@@ -1033,7 +1115,12 @@ nonisolated private final class IcomUDPSocket: @unchecked Sendable {
             }
         }
         localPort = UInt16(bigEndian: bound.sin_port)
-        _ = fcntl(fd, F_SETFL, O_NONBLOCK)
+        let flags = fcntl(fd, F_GETFL)
+        if flags >= 0 { _ = fcntl(fd, F_SETFL, flags | O_NONBLOCK) }
+    }
+
+    deinit {
+        close()
     }
 
     func connect(host: String, port: UInt16) throws {
@@ -1051,8 +1138,6 @@ nonisolated private final class IcomUDPSocket: @unchecked Sendable {
         guard Darwin.connect(descriptor, address.pointee.ai_addr, address.pointee.ai_addrlen) == 0 else {
             throw IcomNetworkError.socket("Unable to connect UDP socket: \(String(cString: strerror(errno)))")
         }
-        isConnected = true
-
         var local = sockaddr_in()
         var length = socklen_t(MemoryLayout<sockaddr_in>.size)
         _ = withUnsafeMutablePointer(to: &local) { pointer in
@@ -1066,20 +1151,42 @@ nonisolated private final class IcomUDPSocket: @unchecked Sendable {
             | UInt32(localPort)
 
         if source == nil {
+            let fileDescriptor = descriptor
             let readSource = DispatchSource.makeReadSource(fileDescriptor: descriptor, queue: queue)
             readSource.setEventHandler { [weak self] in self?.readAvailable() }
-            readSource.resume()
+            readSource.setCancelHandler { Darwin.close(fileDescriptor) }
+
+            lock.lock()
+            guard !isClosed else {
+                lock.unlock()
+                readSource.resume()
+                readSource.cancel()
+                throw IcomNetworkError.disconnected
+            }
+            isConnected = true
             source = readSource
+            readSource.resume()
+            lock.unlock()
         }
     }
 
     func send(_ data: Data) {
-        guard isConnected, !data.isEmpty else { return }
+        lock.lock()
+        guard isConnected, !isClosed, !data.isEmpty else {
+            lock.unlock()
+            return
+        }
         let result = data.withUnsafeBytes { bytes in
             Darwin.send(descriptor, bytes.baseAddress, bytes.count, 0)
         }
-        if result < 0, errno != EWOULDBLOCK {
-            onError("Icom UDP send failed: \(String(cString: strerror(errno)))")
+        let sendError = errno
+        let shouldReport = result < 0
+            && sendError != EWOULDBLOCK
+            && sendError != EAGAIN
+            && !isClosed
+        lock.unlock()
+        if shouldReport {
+            onError("Icom UDP send failed: \(String(cString: strerror(sendError)))")
         }
     }
 
@@ -1087,10 +1194,15 @@ nonisolated private final class IcomUDPSocket: @unchecked Sendable {
         lock.lock()
         guard !isClosed else { lock.unlock(); return }
         isClosed = true
-        lock.unlock()
-        source?.cancel()
+        isConnected = false
+        let readSource = source
         source = nil
-        Darwin.close(descriptor)
+        lock.unlock()
+        if let readSource {
+            readSource.cancel()
+        } else {
+            Darwin.close(descriptor)
+        }
     }
 
     private func readAvailable() {

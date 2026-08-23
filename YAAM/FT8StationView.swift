@@ -166,12 +166,12 @@ struct FT8StationView: View {
                     toggleIcomConnection()
                 } label: {
                     Label(
-                        radio.state.isConnected ? "Disconnect" : "Connect",
-                        systemImage: radio.state.isConnected ? "xmark.circle" : "network"
+                        icomConnectionButtonTitle,
+                        systemImage: icomConnectionButtonIcon
                     )
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(radio.state.isConnected ? .secondary : .blue)
+                .tint(radio.state.canDisconnect ? .secondary : .blue)
             }
 
             VStack(alignment: .leading, spacing: 10) {
@@ -186,22 +186,20 @@ struct FT8StationView: View {
                     TextField("Icom network user", text: $icomUsername)
                     SecureField("Password", text: $icomPassword)
                     Button { savePassword() } label: { Image(systemName: "key.fill") }
+                        .help("Save the Icom network password in macOS Keychain")
                     Button { toggleIcomConnection() } label: {
-                        Label(radio.state.isConnected ? "Disconnect" : "Connect", systemImage: "network")
+                        Label(icomConnectionButtonTitle, systemImage: icomConnectionButtonIcon)
                     }
                     .buttonStyle(.borderedProminent)
+                    .tint(radio.state.canDisconnect ? .secondary : .blue)
                 }
             }
             .textFieldStyle(.roundedBorder)
         }
         .overlay(alignment: .bottomLeading) {
-            Text(
-                credentialStatus.isEmpty
-                    ? "Radio: Network Control ON, CI-V Transceive ON, DATA MOD = WLAN"
-                    : "\(credentialStatus) · DATA MOD = WLAN"
-            )
+            Text(icomConnectionStatus)
             .font(.caption2)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(icomConnectionStatusColor)
             .offset(y: 14)
         }
     }
@@ -486,12 +484,11 @@ struct FT8StationView: View {
     }
 
     private func toggleIcomConnection() {
-        if radio.state.isConnected {
+        if radio.state.canDisconnect {
             engine.stopMonitoring()
             radio.disconnect()
             return
         }
-        savePassword()
         radio.connect(
             settings: IcomNetworkSettings(
                 host: icomHost,
@@ -502,6 +499,31 @@ struct FT8StationView: View {
             ),
             password: icomPassword
         )
+    }
+
+    private var icomConnectionButtonTitle: String {
+        if radio.state.isTransitioning { return "Cancel" }
+        return radio.state.isConnected ? "Disconnect" : "Connect"
+    }
+
+    private var icomConnectionButtonIcon: String {
+        radio.state.canDisconnect ? "xmark.circle" : "network"
+    }
+
+    private var icomConnectionStatus: String {
+        switch radio.state {
+        case .disconnected:
+            return credentialStatus.isEmpty
+                ? "Radio: Network Control ON, CI-V Transceive ON, DATA MOD = WLAN"
+                : "\(credentialStatus) · DATA MOD = WLAN"
+        default:
+            return radio.lastMessage
+        }
+    }
+
+    private var icomConnectionStatusColor: Color {
+        if case .failed = radio.state { return .red }
+        return radio.state.isConnected ? .green : .secondary
     }
 
     private func savePassword() {
