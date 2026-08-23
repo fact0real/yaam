@@ -19,6 +19,7 @@ enum SecureCredential: String, CaseIterable {
     case mobileAPIToken = "mobile-api.token"
     case cloudSyncBookmark = "cloud-sync.bookmark"
     case qrzRankPassword = "qrz-rank.password"
+    case qrzRankAPIToken = "qrz-rank.api-token"
     case smtpPassword = "smtp.password"
     case qrzCookieHeader = "qrz.cookies.header"
     case qrzCookieArchive = "qrz.cookies.archive"

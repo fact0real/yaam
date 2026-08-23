@@ -11,20 +11,6 @@ import AppKit
 import UniformTypeIdentifiers
 import WebKit
 
-// MARK: - API Response Models (Swift 6 Safe)
-nonisolated struct QRZRankResponse: Codable, Sendable {
-    let bid: String?
-    let callsign: String?
-    let country_iso: String?
-    let country_name: String?
-    let rank_band: String?
-    let rank_countries: String?
-    let rank_qso: String?
-    let score_band: String?
-    let score_countries: String?
-    let score_qso: String?
-}
-
 enum RankHistoryMetric: String, CaseIterable, Identifiable {
     case qso
     case bands
@@ -120,7 +106,7 @@ struct RankTrendSeries: Identifiable {
 }
 
 // MARK: - Band Statistics Model
-struct BandStatModel: Identifiable {
+nonisolated struct BandStatModel: Identifiable, Sendable {
     let id = UUID()
     let band: String
     let qsoCount: Int
@@ -132,13 +118,13 @@ struct BandStatModel: Identifiable {
 }
 
 // MARK: - Worked but Unconfirmed Country Statistics Model
-struct UnconfirmedBandCountryStatModel: Identifiable {
+nonisolated struct UnconfirmedBandCountryStatModel: Identifiable, Sendable {
     let id = UUID()
     let band: String
     let countries: [UnconfirmedCountryStatModel]
 }
 
-struct UnconfirmedCountryStatModel: Identifiable {
+nonisolated struct UnconfirmedCountryStatModel: Identifiable, Sendable {
     let id = UUID()
     let country: String
     let qsoCount: Int
@@ -386,7 +372,7 @@ struct SolarForecastPoint: Identifiable {
 }
 
 // MARK: - Country Statistics Model
-struct CountryStatModel: Identifiable {
+nonisolated struct CountryStatModel: Identifiable, Sendable {
     let id = UUID()
     let country: String
     let flag: String
@@ -401,7 +387,7 @@ struct CountryStatModel: Identifiable {
 }
 
 // MARK: - Comprehensive DXCC & Country/Territory Flag Lookup Engine
-func countryToFlag(_ country: String) -> String {
+nonisolated func countryToFlag(_ country: String) -> String {
     let clean = canonicalCountryName(country).lowercased()
     if clean.isEmpty { return "🌐" }
     
@@ -1685,7 +1671,9 @@ class AppState: NSObject, ObservableObject {
     @Published var isEnriching: Bool = false
     private var enrichmentTask: Task<Void, Never>? = nil
     private var sdrControlSyncTimer: Timer?
+    private var isSDRControlSyncRunning = false
     private var externalADIFSyncTimer: Timer?
+    private var isExternalADIFSyncRunning = false
     private var qrzEmailBackfillTimer: Timer?
     private var qrzEmailBackfillBatchNumber = 0
     private var isQRZEmailBackfillRunning = false
@@ -2806,8 +2794,7 @@ class AppState: NSObject, ObservableObject {
         do {
             let response = try await QRZRankService.shared.fetchRank(
                 callsign: callsign,
-                username: credentials.username,
-                password: credentials.password,
+                token: credentials.token,
                 userAgent: "YAAM-macOS/\(currentVersion)"
             )
             recordDailyRankSuccess()
@@ -2830,12 +2817,8 @@ class AppState: NSObject, ObservableObject {
     }
 
     private func rankServiceCredentials() -> QRZRankServiceCredentials {
-        let username = UserDefaults.standard.string(forKey: "qrzRankServiceUsername") ?? ""
         return QRZRankServiceCredentials(
-            username: username,
-            password: username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                ? ""
-                : CredentialVault.value(for: .qrzRankPassword)
+            token: CredentialVault.value(for: .qrzRankAPIToken)
         )
     }
     
@@ -3030,11 +3013,7 @@ class AppState: NSObject, ObservableObject {
     }
 
     func syncSDRControlLogbook() {
-        guard let source = sdrControlLogbookSource() ?? promptForSDRControlLogbookSource() else {
-            return
-        }
-
-        mergeSDRControlLogbook(from: source)
+        syncSDRControlLogbookIfNeeded()
     }
 
     func chooseSDRControlLogbookFile() {
@@ -3051,22 +3030,33 @@ class AppState: NSObject, ObservableObject {
         let intervalMinutes = storedIntervalMinutes > 0 ? storedIntervalMinutes : 15
         let interval = max(intervalMinutes, 1) * 60
 
-        sdrControlSyncTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
             DispatchQueue.main.async {
                 self?.syncSDRControlLogbookIfNeeded(isAutomatic: true)
             }
         }
+        timer.tolerance = min(30, max(2, interval * 0.05))
+        RunLoop.main.add(timer, forMode: .common)
+        sdrControlSyncTimer = timer
     }
 
     func syncSDRControlLogbookIfNeeded(
         isAutomatic: Bool = false,
         completion: ((Result<MergeSummary, Error>) -> Void)? = nil
     ) {
-        guard !isLoading else {
+        guard !isSDRControlSyncRunning else {
             completion?(.failure(NSError(
                 domain: "YAAM.SDRControl",
                 code: 3,
-                userInfo: [NSLocalizedDescriptionKey: "Another log operation is already running."]
+                userInfo: [NSLocalizedDescriptionKey: "An SDR-Control import is already running."]
+            )))
+            return
+        }
+        guard !isLoading, !isSyncingAPI, !isExternalADIFSyncRunning else {
+            completion?(.failure(NSError(
+                domain: "YAAM.SDRControl",
+                code: 4,
+                userInfo: [NSLocalizedDescriptionKey: "Another import or confirmation sync is already running."]
             )))
             return
         }
@@ -3084,15 +3074,13 @@ class AppState: NSObject, ObservableObject {
         let resourceValues = try? source.url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
         let lastModified = resourceValues?.contentModificationDate
         let sourceSignature = "\(resourceValues?.fileSize ?? 0)|\(lastModified?.timeIntervalSince1970 ?? 0)"
-        let lastSignature = UserDefaults.standard.string(forKey: "sdrControlLastSyncedSignature")
-        if isAutomatic, !sourceSignature.isEmpty, sourceSignature == lastSignature {
-            let result = Result<MergeSummary, Error>.success(MergeSummary(added: 0, updated: 0, skipped: 0))
-            completeSyncStatus(.sdrControl, result: result, unchangedText: "Source has no changes")
-            completion?(result)
-            return
-        }
+        // iCloud-backed property lists may replace their content without changing
+        // the metadata observed by this process. Parse each scheduled run and let
+        // the keyed merge decide whether anything is new.
+        isSDRControlSyncRunning = true
 
         mergeSDRControlLogbook(from: source, allowPermissionPrompt: !isAutomatic) { result in
+            self.isSDRControlSyncRunning = false
             if case .success = result {
                 if let lastModified {
                     UserDefaults.standard.set(lastModified, forKey: "sdrControlLastSyncedModificationDate")
@@ -3263,61 +3251,50 @@ class AppState: NSObject, ObservableObject {
                         self.loadMasterLogbook()
                     }
 
-                    for header in parsed.headers where !self.tableHeaders.contains(header) {
-                        self.tableHeaders.append(header)
+                    let missingHeaders = parsed.headers.filter { !self.tableHeaders.contains($0) }
+                    if !missingHeaders.isEmpty {
+                        self.tableHeaders.append(contentsOf: missingHeaders)
                     }
 
-                    var existingKeys = Set(self.qsoRecords.map { $0.uniqueKey })
-                    var addedCount = 0
-                    var updatedCount = 0
-                    var skippedCount = 0
+                    let profileID = self.activeStationProfileID
+                    let localRecords = self.qsoRecords
+                    let taggedRecords = records.map { self.stationTaggedFields($0) }
+                    Task { @MainActor [weak self] in
+                        let mergeResult = await Task.detached(priority: .userInitiated) {
+                            SDRControlMergeEngine.merge(
+                                localRecords: localRecords,
+                                incomingFields: taggedRecords
+                            )
+                        }.value
 
-                    for record in records {
-                        let model = QSORecordModel(index: self.qsoRecords.count + 1, fields: self.stationTaggedFields(record))
-                        guard !existingKeys.contains(model.uniqueKey) else {
-                            if let index = self.qsoRecords.firstIndex(where: { $0.uniqueKey == model.uniqueKey }) {
-                                let merged = ImportReviewAnalyzer.mergeUpdate(
-                                    incoming: model.fields,
-                                    into: self.qsoRecords[index].fields
-                                )
-                                if merged != self.qsoRecords[index].fields {
-                                    self.qsoRecords[index].fields = merged
-                                    updatedCount += 1
-                                } else {
-                                    skippedCount += 1
-                                }
-                            } else {
-                                skippedCount += 1
-                            }
-                            continue
+                        guard let self else { return }
+                        guard self.activeStationProfileID == profileID else {
+                            self.isLoading = false
+                            completion?(.failure(NSError(
+                                domain: "YAAM.SDRControl",
+                                code: 5,
+                                userInfo: [NSLocalizedDescriptionKey: "SDR-Control import stopped because the active station changed."]
+                            )))
+                            return
                         }
 
-                        self.qsoRecords.append(model)
-                        existingKeys.insert(model.uniqueKey)
-                        addedCount += 1
+                        let summary = mergeResult.summary
+                        if summary.added > 0 || summary.updated > 0 {
+                            self.qsoRecords = mergeResult.records
+                            self.autoSaveActiveWorkspace()
+                        }
+                        self.isLoading = false
+                        var details = "SDR-Control sync complete: \(summary.added) new QSOs added, \(summary.updated) existing QSOs enriched, \(summary.skipped) duplicates skipped"
+                        if parsed.ignoredDeletedRecordCount > 0 {
+                            details += ", \(parsed.ignoredDeletedRecordCount) deleted entries ignored"
+                        }
+                        if parsed.validationIssueCount > 0 {
+                            details += ", \(parsed.validationIssueCount) invalid entries ignored"
+                        }
+                        self.appendLog(details + ".")
+                        self.playActivitySound(.success)
+                        completion?(.success(summary))
                     }
-
-                    for index in self.qsoRecords.indices {
-                        self.qsoRecords[index].index = index + 1
-                    }
-
-                    let cleanupResult = self.reconcileDuplicateQSOsAfterImport(sourceName: "SDR-Control sync")
-                    self.autoSaveActiveWorkspace()
-                    self.isLoading = false
-                    let invalidCount = parsed.validationIssueCount
-                    var details = "SDR-Control sync complete: \(addedCount) new QSOs added, \(updatedCount) existing QSOs enriched, \(skippedCount) duplicates skipped"
-                    if let cleanupResult {
-                        details += ", \(cleanupResult.removedCount) extra duplicate row(s) removed"
-                    }
-                    if parsed.ignoredDeletedRecordCount > 0 {
-                        details += ", \(parsed.ignoredDeletedRecordCount) deleted entries ignored"
-                    }
-                    if invalidCount > 0 {
-                        details += ", \(invalidCount) invalid entries ignored"
-                    }
-                    self.appendLog(details + ".")
-                    self.playActivitySound(.success)
-                    completion?(.success(MergeSummary(added: addedCount, updated: updatedCount, skipped: skippedCount + (cleanupResult?.removedCount ?? 0))))
                 }
             } catch {
                 DispatchQueue.main.async {
@@ -3325,7 +3302,13 @@ class AppState: NSObject, ObservableObject {
                     if allowPermissionPrompt, self.isFilePermissionError(error), !source.securityScoped {
                         UserDefaults.standard.removeObject(forKey: "sdrControlLogbookPath")
                         if let selectedSource = self.promptForSDRControlLogbookSource() {
-                            self.mergeSDRControlLogbook(from: selectedSource, completion: completion)
+                            self.mergeSDRControlLogbook(
+                                from: selectedSource,
+                                allowPermissionPrompt: false,
+                                completion: completion
+                            )
+                        } else {
+                            completion?(.failure(error))
                         }
                         return
                     }
@@ -3397,87 +3380,55 @@ class AppState: NSObject, ObservableObject {
         isLoading = true
         appendLog("Analyzing & Merging '\(url.lastPathComponent)' into Master Logbook...")
         archiveLogToDatabase(originalURL: url)
-        
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            guard let self = self else { return }
-            
-            DispatchQueue.main.sync {
-                if !self.isMasterMode { self.loadMasterLogbook() }
-            }
-            
-            guard let content = (try? String(contentsOfFile: url.path, encoding: .utf8)) ?? (try? String(contentsOfFile: url.path, encoding: .isoLatin1)) else {
-                let error = NSError(
-                    domain: "YAAM.ExternalADIF",
-                    code: 1,
-                    userInfo: [NSLocalizedDescriptionKey: "Unable to read the ADIF file with a supported text encoding."]
-                )
-                DispatchQueue.main.async {
-                    self.isLoading = false
-                    self.appendLog("Error reading file encoding.")
-                    completion?(.failure(error))
-                }
-                return
-            }
-            
-            let (newHeaders, newRecordsDicts) = parseADIF(content: content)
-            
-            DispatchQueue.main.async {
-                for header in newHeaders {
-                    if !self.tableHeaders.contains(header) { self.tableHeaders.append(header) }
-                }
-                
-                var existingKeys = Set(self.qsoRecords.map { $0.uniqueKey })
-                var addedCount = 0
-                var updatedCount = 0
-                
-                for dict in newRecordsDicts {
-                    let tempModel = QSORecordModel(index: 0, fields: self.stationTaggedFields(dict))
-                    let key = tempModel.uniqueKey
-                    
-                    if !existingKeys.contains(key) {
-                        self.qsoRecords.append(tempModel)
-                        existingKeys.insert(key)
-                        addedCount += 1
-                    } else {
-                        if let idx = self.qsoRecords.firstIndex(where: { $0.uniqueKey == key }) {
-                            var updated = false
-                            let merged = ImportReviewAnalyzer.mergeUpdate(
-                                incoming: tempModel.fields,
-                                into: self.qsoRecords[idx].fields
-                            )
-                            if merged != self.qsoRecords[idx].fields {
-                                self.qsoRecords[idx].fields = merged
-                                updated = true
-                            }
-                            let incomingName = tempModel.fields["NAME"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                            if !incomingName.isEmpty {
-                                let existingName = self.qsoRecords[idx]["NAME"].trimmingCharacters(in: .whitespacesAndNewlines)
-                                let mergedName = existingName.isEmpty || self.isGenericQRZName(existingName)
-                                    ? incomingName
-                                    : self.appendedDistinctValue(existingName, newValue: incomingName)
-                                if mergedName != existingName {
-                                    self.qsoRecords[idx].fields["NAME"] = mergedName
-                                    updated = true
-                                }
-                            }
 
-                            if tempModel.isConfirmed && !self.qsoRecords[idx].isConfirmed {
-                                if let lotw = tempModel.fields["LOTW_QSL_RCVD"], !lotw.isEmpty { self.qsoRecords[idx].fields["LOTW_QSL_RCVD"] = lotw; updated = true }
-                                if let qsl = tempModel.fields["QSL_RCVD"], !qsl.isEmpty { self.qsoRecords[idx].fields["QSL_RCVD"] = qsl; updated = true }
-                            }
-                            if updated { updatedCount += 1 }
-                        }
-                    }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let parsed = try await Task.detached(priority: .userInitiated) {
+                    try LogFileReader.loadWithSecurityScopedAccess(from: url)
+                }.value
+                guard parsed.format == .adif else {
+                    throw LogFileReaderError.unsupportedFormat(url.lastPathComponent)
                 }
-                
-                for i in 0..<self.qsoRecords.count { self.qsoRecords[i].index = i + 1 }
-                let cleanupResult = self.reconcileDuplicateQSOsAfterImport(sourceName: "External ADIF sync")
-                self.autoSaveActiveWorkspace()
+
+                if !self.isMasterMode { self.loadMasterLogbook() }
+                let missingHeaders = parsed.headers.filter { !self.tableHeaders.contains($0) }
+                if !missingHeaders.isEmpty {
+                    self.tableHeaders.append(contentsOf: missingHeaders)
+                }
+
+                let profileID = self.activeStationProfileID
+                let localRecords = self.qsoRecords
+                let taggedRecords = parsed.records.map { self.stationTaggedFields($0) }
+                let mergeResult = await Task.detached(priority: .userInitiated) {
+                    SDRControlMergeEngine.merge(
+                        localRecords: localRecords,
+                        incomingFields: taggedRecords
+                    )
+                }.value
+
+                guard self.activeStationProfileID == profileID else {
+                    throw NSError(
+                        domain: "YAAM.ExternalADIF",
+                        code: 6,
+                        userInfo: [NSLocalizedDescriptionKey: "ADIF import stopped because the active station changed."]
+                    )
+                }
+
+                let summary = mergeResult.summary
+                if summary.added > 0 || summary.updated > 0 {
+                    self.qsoRecords = mergeResult.records
+                    self.autoSaveActiveWorkspace()
+                }
                 self.isLoading = false
-                let cleanupSuffix = cleanupResult.map { ", \($0.removedCount) extra duplicate row(s) removed" } ?? ""
-                self.appendLog("Merge Complete: \(addedCount) New QSOs added, \(updatedCount) existing QSOs enriched\(cleanupSuffix).")
+                self.appendLog("Merge complete: \(summary.added) new QSOs added, \(summary.updated) existing QSOs enriched, \(summary.skipped) duplicates skipped.")
                 self.playActivitySound(.success)
-                completion?(.success(MergeSummary(added: addedCount, updated: updatedCount, skipped: newRecordsDicts.count - addedCount - updatedCount + (cleanupResult?.removedCount ?? 0))))
+                completion?(.success(summary))
+            } catch {
+                self.isLoading = false
+                self.appendLog("External ADIF sync failed: \(error.localizedDescription)")
+                self.playActivitySound(.failure)
+                completion?(.failure(error))
             }
         }
     }
@@ -3533,11 +3484,14 @@ class AppState: NSObject, ObservableObject {
         let intervalMinutes = storedIntervalMinutes > 0 ? storedIntervalMinutes : 15
         let interval = max(intervalMinutes, 1) * 60
 
-        externalADIFSyncTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
             DispatchQueue.main.async {
                 self?.syncExternalADIFLogIfNeeded(isAutomatic: true)
             }
         }
+        timer.tolerance = min(30, max(2, interval * 0.05))
+        RunLoop.main.add(timer, forMode: .common)
+        externalADIFSyncTimer = timer
     }
 
     func configureSDRControlAutoSync() {
@@ -3548,11 +3502,19 @@ class AppState: NSObject, ObservableObject {
         isAutomatic: Bool = false,
         completion: ((Result<MergeSummary, Error>) -> Void)? = nil
     ) {
-        guard !isLoading else {
+        guard !isExternalADIFSyncRunning else {
+            completion?(.failure(NSError(
+                domain: "YAAM.ExternalADIF",
+                code: 7,
+                userInfo: [NSLocalizedDescriptionKey: "An external ADIF import is already running."]
+            )))
+            return
+        }
+        guard !isLoading, !isSyncingAPI, !isSDRControlSyncRunning else {
             completion?(.failure(NSError(
                 domain: "YAAM.ExternalADIF",
                 code: 2,
-                userInfo: [NSLocalizedDescriptionKey: "Another log operation is already running."]
+                userInfo: [NSLocalizedDescriptionKey: "Another import or confirmation sync is already running."]
             )))
             return
         }
@@ -3610,17 +3572,10 @@ class AppState: NSObject, ObservableObject {
         beginSyncStatus(.externalADIF, detail: "Reading external ADIF log...")
 
         let lastModified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
-        let lastSynced = UserDefaults.standard.object(forKey: "externalADIFLastSyncedModificationDate") as? Date ??
-            UserDefaults.standard.object(forKey: "sdrControlLastSyncedModificationDate") as? Date
-        if isAutomatic, let lastModified, let lastSynced, lastModified <= lastSynced {
-            let result = Result<MergeSummary, Error>.success(MergeSummary(added: 0, updated: 0, skipped: 0))
-            completeSyncStatus(.externalADIF, result: result, unchangedText: "Source has no changes")
-            completion?(result)
-            return
-        }
-
         appendLog("External ADIF sync started...")
+        isExternalADIFSyncRunning = true
         mergeADIFIntoMaster(from: url) { result in
+            self.isExternalADIFSyncRunning = false
             if case .success = result {
                 if let lastModified {
                     UserDefaults.standard.set(lastModified, forKey: "externalADIFLastSyncedModificationDate")
@@ -4228,7 +4183,7 @@ class AppState: NSObject, ObservableObject {
                 if completed.isMultiple(of: 10) || completed == uniqueCallsigns.count {
                     self.rankServiceStatus = "Enriched \(completed) of \(uniqueCallsigns.count) callsigns."
                 }
-                if completed.isMultiple(of: 25) || completed == uniqueCallsigns.count {
+                if completed.isMultiple(of: 100) || completed == uniqueCallsigns.count {
                     self.qsoRecords = workingRecords
                     self.autoSaveActiveWorkspace()
                     hasUnsavedChanges = false
@@ -4258,11 +4213,10 @@ class AppState: NSObject, ObservableObject {
         refreshDailyRankQuotaIfNeeded()
 
         let credentials = rankServiceCredentials()
-        guard !credentials.username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              !credentials.password.isEmpty else {
-            dailyRankBackfillStatus = "Configure the QRZ Rank Service account in Settings first."
-            alertTitle = "QRZ Rank Account Required"
-            alertMessage = "Daily Rank Backfill uses the separate QRZ Rank Service account. Add its username and password in Settings > Rank Service, then try again."
+        guard credentials.isConfigured else {
+            dailyRankBackfillStatus = "Add a QRZ Rank API token in Settings first."
+            alertTitle = "QRZ Rank API Token Required"
+            alertMessage = "Daily Rank Backfill uses the personal token generated in your QRZ Rank user panel. Save it in Settings > Rank Service, then try again."
             showAlert = true
             return
         }
@@ -4384,7 +4338,7 @@ class AppState: NSObject, ObservableObject {
                     self.rankServiceStatus = self.dailyRankBackfillStatus
                 }
 
-                if completed.isMultiple(of: 25) || completed == callsigns.count || stoppingFailure != nil {
+                if completed.isMultiple(of: 100) || completed == callsigns.count || stoppingFailure != nil {
                     self.qsoRecords = workingRecords
                     self.autoSaveActiveWorkspace()
                     hasUnsavedChanges = false

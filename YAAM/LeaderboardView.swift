@@ -324,11 +324,11 @@ struct LeaderboardView: View {
 
     private var rankServiceNeedsConfiguration: Bool {
         let status = appState.rankServiceStatus.lowercased()
-        return status.contains("guest")
-            || status.contains("sign in")
+        return status.contains("token")
+            || status.contains("unauthorized")
+            || status.contains("authentication")
             || status.contains("subscription")
-            || status.contains("premium")
-            || status.contains("account")
+            || status.contains("quota")
     }
 
     private var rankStatusColor: Color {
@@ -343,7 +343,7 @@ struct LeaderboardView: View {
     }
 
     private var rankStatusIcon: String {
-        if rankServiceNeedsConfiguration { return "person.badge.key.fill" }
+        if rankServiceNeedsConfiguration { return "key.fill" }
         let status = appState.rankServiceStatus.lowercased()
         if status.contains("failed") || status.contains("invalid") || status.contains("unavailable") {
             return "exclamationmark.triangle.fill"

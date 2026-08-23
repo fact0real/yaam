@@ -20,8 +20,7 @@ struct SettingsView: View {
     @AppStorage("qrzUsername") private var qrzUsername = ""
     @State private var qrzPassword = ""
     @State private var qrzCredentialStatus = ""
-    @AppStorage("qrzRankServiceUsername") private var qrzRankServiceUsername = ""
-    @State private var qrzRankServicePassword = ""
+    @State private var qrzRankAPIToken = ""
     @State private var qrzRankCredentialStatus = ""
     
     @AppStorage("lotwUsername") private var lotwUsername = ""
@@ -105,42 +104,38 @@ struct SettingsView: View {
 
             Form {
                 VStack(alignment: .leading, spacing: 16) {
-                    Text("QRZ Rank Service")
+                    Text("QRZ Rank API")
                         .font(.headline)
 
-                    TextField("Rank service username:", text: $qrzRankServiceUsername)
+                    SecureField("Personal API token (blank keeps the saved token):", text: $qrzRankAPIToken)
                         .textFieldStyle(.roundedBorder)
 
-                    SecureField("New password (blank keeps the saved password):", text: $qrzRankServicePassword)
-                        .textFieldStyle(.roundedBorder)
-
-                    Label("Stored in macOS Keychain", systemImage: "lock.fill")
+                    Label("Stored in macOS Keychain and sent only as an Authorization header", systemImage: "lock.fill")
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
                     HStack {
                         Button {
-                            saveCredential(qrzRankServicePassword, as: .qrzRankPassword, status: $qrzRankCredentialStatus)
-                            Task { await QRZRankService.shared.resetAuthentication() }
+                            let token = QRZRankAPIContract.normalizedToken(qrzRankAPIToken)
+                            saveCredential(token, as: .qrzRankAPIToken, status: $qrzRankCredentialStatus)
                         } label: {
-                            Label("Save Rank Password", systemImage: "checkmark.circle")
+                            Label("Save API Token", systemImage: "checkmark.circle")
                         }
                         .buttonStyle(.borderedProminent)
-                        .disabled(qrzRankServicePassword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .disabled(QRZRankAPIContract.normalizedToken(qrzRankAPIToken).isEmpty)
 
-                        Button("Remove Password", role: .destructive) {
-                            removeCredential(.qrzRankPassword, value: $qrzRankServicePassword, status: $qrzRankCredentialStatus)
-                            Task { await QRZRankService.shared.resetAuthentication() }
+                        Button("Remove Token", role: .destructive) {
+                            removeCredential(.qrzRankAPIToken, value: $qrzRankAPIToken, status: $qrzRankCredentialStatus)
                         }
 
                         credentialStatus(qrzRankCredentialStatus)
                     }
 
                     Link(destination: URL(string: "https://qrz-rank.asis.sh/")!) {
-                        Label("Open QRZ Rank account and subscription", systemImage: "arrow.up.right.square")
+                        Label("Open QRZ Rank panel to generate a token", systemImage: "arrow.up.right.square")
                     }
 
-                    Text("Leaderboard, enrichment, and Daily Rank Backfill use QRZ Rank Panel. Guest access is limited to three lookups; add a Rank Panel account here for authenticated retrieval. YAAM enforces one shared limit of 1,440 rank requests per local day. This account is separate from QRZ.com.")
+                    Text("Leaderboard, enrichment, and Daily Rank Backfill use your personal Bearer token. YAAM never puts this token in a URL or log. The service quota is shared across rank features and is limited to 1,440 requests per local day unless your subscription reports an unlimited quota. This token is separate from your QRZ.com credentials.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -451,11 +446,11 @@ struct SettingsView: View {
         as credential: SecureCredential,
         status: Binding<String>
     ) {
-        status.wrappedValue = CredentialVault.set(value, for: credential) ? "Saved" : "Keychain could not save this password"
+        status.wrappedValue = CredentialVault.set(value, for: credential) ? "Saved" : "Keychain could not save this credential"
         if status.wrappedValue == "Saved" {
             switch credential {
             case .qrzPassword: qrzPassword = ""
-            case .qrzRankPassword: qrzRankServicePassword = ""
+            case .qrzRankAPIToken: qrzRankAPIToken = ""
             case .lotwPassword: lotwPassword = ""
             case .lotwCertificatePassword: lotwCertificatePassword = ""
             case .hamqthPassword: hamqthPassword = ""
@@ -472,7 +467,7 @@ struct SettingsView: View {
     ) {
         let removed = CredentialVault.delete(credential)
         if removed { value.wrappedValue = "" }
-        status.wrappedValue = removed ? "Removed" : "Keychain could not remove this password"
+        status.wrappedValue = removed ? "Removed" : "Keychain could not remove this credential"
         appState.refreshSyncServiceConfiguration()
     }
 

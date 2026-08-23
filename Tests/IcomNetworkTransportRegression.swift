@@ -27,6 +27,10 @@ struct IcomNetworkTransportRegression {
             IcomNetworkRadio.credentialBoundsSelfTest(),
             "Icom credential byte-bound self-test failed."
         )
+        precondition(
+            IcomNetworkRadio.authenticationPacketLayoutSelfTest(),
+            "Icom authentication packet layout self-test failed."
+        )
         do {
             try IcomNetworkRadio.runUDPTransportSelfTest()
         } catch {

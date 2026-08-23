@@ -6,13 +6,15 @@
 import Foundation
 
 nonisolated struct QRZRankServiceCredentials: Sendable {
-    var username: String
-    var password: String
+    var token: String
+
+    var isConfigured: Bool {
+        !QRZRankAPIContract.normalizedToken(token).isEmpty
+    }
 }
 
 nonisolated enum QRZRankFetchFailure: LocalizedError, Equatable, Sendable {
     case invalidCallsign
-    case guestLimit(String)
     case authenticationRequired(String)
     case authenticationFailed(String)
     case subscriptionRequired(String)
@@ -27,23 +29,25 @@ nonisolated enum QRZRankFetchFailure: LocalizedError, Equatable, Sendable {
         switch self {
         case .invalidCallsign:
             return "Enter a valid callsign."
-        case .guestLimit(let message):
-            return message.isEmpty
-                ? "The QRZ Rank guest allowance has ended. Sign in to QRZ Rank Service in Settings."
-                : message
         case .authenticationRequired(let message):
-            return message.isEmpty ? "Sign in to QRZ Rank Service in Settings." : message
+            return message.isEmpty
+                ? "Add your personal QRZ Rank API token in Settings > Rank Service."
+                : message
         case .authenticationFailed(let message):
-            return message.isEmpty ? "QRZ Rank Service did not accept the account credentials." : message
+            return message.isEmpty
+                ? "The QRZ Rank API token is invalid or has been revoked."
+                : message
         case .subscriptionRequired(let message):
-            return message.isEmpty ? "The QRZ Rank Service account requires an active subscription." : message
+            return message.isEmpty
+                ? "QRZ Rank API access requires active supporter or unlimited access."
+                : message
         case .callsignNotFound(let callsign):
             return "No QRZ ranking was found for \(callsign)."
         case .dailyLimitReached(let limit):
             return "The daily QRZ Rank limit of \(limit) requests has been reached. It resets at local midnight."
         case .rateLimited(let message):
             return message.isEmpty
-                ? "QRZ Rank Service is temporarily rate limiting requests. Try again later."
+                ? "The shared QRZ Rank daily quota has been reached. Try again after it resets."
                 : message
         case .server(let status, let message):
             return message.isEmpty ? "QRZ Rank Service returned HTTP \(status)." : message
@@ -56,7 +60,7 @@ nonisolated enum QRZRankFetchFailure: LocalizedError, Equatable, Sendable {
 
     var shouldStopBatch: Bool {
         switch self {
-        case .guestLimit, .authenticationRequired, .authenticationFailed,
+        case .authenticationRequired, .authenticationFailed,
              .subscriptionRequired, .dailyLimitReached, .rateLimited:
             return true
         case .invalidCallsign, .callsignNotFound, .server, .transport, .invalidResponse:
@@ -68,7 +72,7 @@ nonisolated enum QRZRankFetchFailure: LocalizedError, Equatable, Sendable {
         switch self {
         case .invalidCallsign, .callsignNotFound:
             return true
-        case .guestLimit, .authenticationRequired, .authenticationFailed,
+        case .authenticationRequired, .authenticationFailed,
              .subscriptionRequired, .dailyLimitReached, .rateLimited,
              .server, .transport, .invalidResponse:
             return false
@@ -76,131 +80,45 @@ nonisolated enum QRZRankFetchFailure: LocalizedError, Equatable, Sendable {
     }
 }
 
-private nonisolated struct QRZRankErrorPayload: Decodable, Sendable {
-    let error: String?
-    let message: String?
-
-    var bestMessage: String {
-        (error ?? message ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-}
-
 actor QRZRankService {
     static let shared = QRZRankService()
 
-    private let baseURL = URL(string: "https://qrz-rank.asis.sh")!
     private let session: URLSession
-    private var authenticatedUsername = ""
-    private var authenticationTask: Task<Void, Error>?
+    private(set) var latestQuota: QRZRankAPIQuota?
 
     private init() {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 15
         configuration.timeoutIntervalForResource = 25
-        configuration.httpShouldSetCookies = true
-        configuration.httpCookieAcceptPolicy = .always
+        configuration.httpShouldSetCookies = false
+        configuration.httpCookieAcceptPolicy = .never
+        configuration.httpCookieStorage = nil
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         session = URLSession(configuration: configuration)
     }
 
-    func resetAuthentication() async {
-        authenticationTask?.cancel()
-        authenticationTask = nil
-        authenticatedUsername = ""
-        await withCheckedContinuation { continuation in
-            session.reset { continuation.resume() }
-        }
-    }
-
     func fetchRank(
         callsign: String,
-        username: String,
-        password: String,
+        token: String,
         userAgent: String
     ) async throws -> QRZRankResponse {
-        let normalized = callsign
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .uppercased()
-        guard Self.isPlausibleCallsign(normalized) else {
-            throw QRZRankFetchFailure.invalidCallsign
-        }
-
-        let normalizedUsername = username.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !normalizedUsername.isEmpty, !password.isEmpty {
-            try await authenticate(username: normalizedUsername, password: password, userAgent: userAgent)
-        }
-        return try await requestRank(callsign: normalized, userAgent: userAgent)
-    }
-
-    private func authenticate(username: String, password: String, userAgent: String) async throws {
-        let normalizedUsername = username.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !normalizedUsername.isEmpty, !password.isEmpty else {
-            throw QRZRankFetchFailure.authenticationRequired("")
-        }
-        if authenticatedUsername.caseInsensitiveCompare(normalizedUsername) == .orderedSame {
-            return
-        }
-
-        if let authenticationTask {
-            try await authenticationTask.value
-            guard authenticatedUsername.caseInsensitiveCompare(normalizedUsername) == .orderedSame else {
-                throw QRZRankFetchFailure.authenticationFailed("The active QRZ Rank session belongs to another account.")
-            }
-            return
-        }
-
-        let task = Task {
-            try await performAuthentication(
-                username: normalizedUsername,
-                password: password,
+        let normalized = QRZRankAPIContract.normalizedCallsign(callsign)
+        let request: URLRequest
+        do {
+            request = try QRZRankAPIContract.makeRequest(
+                callsign: normalized,
+                token: token,
                 userAgent: userAgent
             )
-        }
-        authenticationTask = task
-        do {
-            try await task.value
-            authenticationTask = nil
+        } catch QRZRankAPIContractError.invalidCallsign {
+            throw QRZRankFetchFailure.invalidCallsign
+        } catch QRZRankAPIContractError.missingToken {
+            throw QRZRankFetchFailure.authenticationRequired("")
+        } catch QRZRankAPIContractError.malformedToken {
+            throw QRZRankFetchFailure.authenticationFailed("The saved QRZ Rank API token is malformed. Save it again in Settings > Rank Service.")
         } catch {
-            authenticationTask = nil
-            throw error
-        }
-    }
-
-    private func performAuthentication(username normalizedUsername: String, password: String, userAgent: String) async throws {
-
-        var request = URLRequest(url: baseURL.appendingPathComponent("api/auth/login"))
-        request.httpMethod = "POST"
-        request.timeoutInterval = 15
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
-        request.httpBody = try JSONSerialization.data(withJSONObject: [
-            "username": normalizedUsername,
-            "password": password
-        ])
-
-        let data: Data
-        let response: URLResponse
-        do {
-            (data, response) = try await session.data(for: request)
-        } catch {
-            throw QRZRankFetchFailure.transport(error.localizedDescription)
-        }
-        guard let http = response as? HTTPURLResponse else {
             throw QRZRankFetchFailure.invalidResponse
         }
-        guard (200..<300).contains(http.statusCode) else {
-            throw QRZRankFetchFailure.authenticationFailed(Self.message(from: data))
-        }
-        authenticatedUsername = normalizedUsername
-    }
-
-    private func requestRank(callsign: String, userAgent: String) async throws -> QRZRankResponse {
-        var request = URLRequest(url: baseURL.appendingPathComponent("api/rank/\(callsign)"))
-        request.httpMethod = "GET"
-        request.timeoutInterval = 15
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
 
         let data: Data
         let response: URLResponse
@@ -214,21 +132,20 @@ actor QRZRankService {
         }
 
         guard (200..<300).contains(http.statusCode) else {
-            let message = Self.message(from: data)
+            let details = QRZRankAPIContract.decodeError(data)
+            let message = details?.message ?? ""
             switch http.statusCode {
+            case 400:
+                if details?.code == "invalid_callsign" {
+                    throw QRZRankFetchFailure.invalidCallsign
+                }
+                throw QRZRankFetchFailure.server(status: http.statusCode, message: message)
             case 401:
-                throw QRZRankFetchFailure.authenticationRequired(message)
+                throw QRZRankFetchFailure.authenticationFailed(message)
             case 403:
-                let lower = message.lowercased()
-                if lower.contains("guest") || lower.contains("free quer") || lower.contains("limit") {
-                    throw QRZRankFetchFailure.guestLimit(message)
-                }
-                if lower.contains("subscription") || lower.contains("premium") || lower.contains("payment") {
-                    throw QRZRankFetchFailure.subscriptionRequired(message)
-                }
-                throw QRZRankFetchFailure.authenticationRequired(message)
+                throw QRZRankFetchFailure.subscriptionRequired(message)
             case 404:
-                throw QRZRankFetchFailure.callsignNotFound(callsign)
+                throw QRZRankFetchFailure.callsignNotFound(normalized)
             case 429:
                 throw QRZRankFetchFailure.rateLimited(message)
             default:
@@ -236,39 +153,18 @@ actor QRZRankService {
             }
         }
 
-        guard let decoded = try? JSONDecoder().decode(QRZRankResponse.self, from: data),
-              decoded.callsign?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false,
-              decoded.hasRankingValue else {
+        let envelope: QRZRankAPIEnvelope
+        do {
+            envelope = try QRZRankAPIContract.decodeSuccess(data)
+        } catch {
             throw QRZRankFetchFailure.invalidResponse
         }
-        return decoded
-    }
-
-    private static func message(from data: Data) -> String {
-        if let payload = try? JSONDecoder().decode(QRZRankErrorPayload.self, from: data),
-           !payload.bestMessage.isEmpty {
-            return payload.bestMessage
-        }
-        return String(data: data, encoding: .utf8)?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-    }
-
-    private static func isPlausibleCallsign(_ callsign: String) -> Bool {
-        guard (3...16).contains(callsign.count),
-              callsign.contains(where: \.isLetter),
-              callsign.contains(where: \.isNumber) else { return false }
-        return callsign.allSatisfy { $0.isLetter || $0.isNumber || $0 == "/" || $0 == "-" }
+        latestQuota = envelope.quota
+        return envelope.data
     }
 }
 
 nonisolated extension QRZRankResponse {
-    var hasRankingValue: Bool {
-        [rank_qso, rank_band, rank_countries, score_qso, score_band, score_countries]
-            .contains { value in
-                !(value?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
-            }
-    }
-
     init(snapshot: QRZRankHistorySnapshot) {
         self.init(
             bid: nil,

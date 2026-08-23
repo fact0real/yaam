@@ -17,12 +17,15 @@ struct StatisticsView: View {
     @State private var selectedUnconfirmedBand = "All Bands"
     @State private var countryBandSearchText = ""
     @State private var selectedCoverageCountry: String?
-    @State private var snapshot: StatisticsSnapshot?
+    @State private var snapshot = StatisticsSnapshot.empty
+    @State private var snapshotGeneration = 0
+    @State private var isRefreshingSnapshot = false
     @State private var followUpScope: StatisticsFollowUpScope = .creditOpportunities
     @State private var emailLookupRecordID: UUID?
+    @State private var selectedCountryBandDetails: StatisticsCountryBandDetailSelection?
 
     private var currentSnapshot: StatisticsSnapshot {
-        snapshot ?? StatisticsSnapshot.make(from: appState)
+        snapshot
     }
 
     private var unconfirmedBandOptions: [String] {
@@ -92,8 +95,17 @@ struct StatisticsView: View {
                 Button {
                     refreshSnapshot()
                 } label: {
-                    Label("Refresh", systemImage: "arrow.clockwise")
+                    if isRefreshingSnapshot {
+                        Label {
+                            Text("Refreshing")
+                        } icon: {
+                            ProgressView().controlSize(.small)
+                        }
+                    } else {
+                        Label("Refresh", systemImage: "arrow.clockwise")
+                    }
                 }
+                .disabled(isRefreshingSnapshot)
                 .help("Recalculate statistics from the active log")
 
                 Button {
@@ -109,6 +121,7 @@ struct StatisticsView: View {
                 Button {
                     appState.selectedTab = 0
                     appState.showConfirmationReconciliationSheet = true
+                    dismissWindow(id: YAAMWindowID.statistics)
                     NSApp.activate(ignoringOtherApps: true)
                 } label: {
                     Label("Reconcile", systemImage: "arrow.triangle.2.circlepath")
@@ -426,13 +439,27 @@ struct StatisticsView: View {
             idealHeight: 780,
             maxHeight: .infinity
         )
+        .sheet(item: $selectedCountryBandDetails) { selection in
+            StatisticsCountryBandDetailSheet(
+                selection: selection,
+                opportunityByRecordID: Dictionary(
+                    uniqueKeysWithValues: currentSnapshot.followUpCandidates.map { ($0.record.id, $0.opportunity) }
+                ),
+                emailLookupRecordID: emailLookupRecordID,
+                onShowInLog: showRecordInLog,
+                onEmail: { record in
+                    prepareEmail(for: record, qslDelivery: selection.state == .confirmed)
+                },
+                onFindEmail: { record in
+                    lookupEmail(for: record, qslDelivery: selection.state == .confirmed)
+                },
+                onPreviewQSL: previewQSL,
+                onOpenQRZ: openQRZ
+            )
+        }
         .onAppear {
             appState.refreshOwnerQRZRankIfNeeded()
-            appState.populateMissingGridSquaresFromCoordinates()
             refreshSnapshot()
-            if selectedCoverageCountry == nil {
-                selectedCoverageCountry = snapshot?.countryBandCoverage.first?.country
-            }
         }
     }
 
@@ -583,7 +610,27 @@ struct StatisticsView: View {
     }
 
     private func refreshSnapshot() {
-        snapshot = StatisticsSnapshot.make(from: appState)
+        let records = appState.qsoRecords
+        let ownerRankData = appState.ownerRankData
+        snapshotGeneration += 1
+        let generation = snapshotGeneration
+        isRefreshingSnapshot = true
+
+        Task {
+            let refreshed = await Task.detached(priority: .userInitiated) {
+                StatisticsSnapshot.make(records: records, ownerRankData: ownerRankData)
+            }.value
+            guard generation == snapshotGeneration else { return }
+            snapshot = refreshed
+            isRefreshingSnapshot = false
+
+            let selectedStillExists = selectedCoverageCountry.map { selected in
+                refreshed.countryBandCoverage.contains { $0.country == selected }
+            } ?? false
+            if !selectedStillExists {
+                selectedCoverageCountry = refreshed.countryBandCoverage.first?.country
+            }
+        }
     }
 
     private func showRecordInLog(_ record: QSORecordModel) {
@@ -596,6 +643,8 @@ struct StatisticsView: View {
         appState.selectedRecordIDs = [record.id]
         appState.selectedTab = 0
         appState.appendLog("Showing \(callsign.isEmpty ? "selected QSO" : callsign) in the Log Table from Statistics.")
+        selectedCountryBandDetails = nil
+        dismissWindow(id: YAAMWindowID.statistics)
         NSApp.activate(ignoringOtherApps: true)
     }
 
@@ -618,6 +667,8 @@ struct StatisticsView: View {
             appState.selectedEmailIncomingRequest = nil
             appState.showEmailComposer = true
         }
+        selectedCountryBandDetails = nil
+        dismissWindow(id: YAAMWindowID.statistics)
         NSApp.activate(ignoringOtherApps: true)
     }
 
@@ -640,6 +691,8 @@ struct StatisticsView: View {
         appState.selectedTab = 0
         appState.selectedQSLCardQSO = record
         appState.showQSLCardComposer = true
+        selectedCountryBandDetails = nil
+        dismissWindow(id: YAAMWindowID.statistics)
         NSApp.activate(ignoringOtherApps: true)
     }
 
@@ -870,21 +923,22 @@ struct StatisticsView: View {
 
     private func showCountryBandQSOs(country: String, band: CountryBandCoverageItem) {
         guard band.state != .needed else { return }
+        let normalizedCountry = canonicalCountryName(country)
+        let normalizedBand = band.band.lowercased()
+        let records = appState.qsoRecords
+            .filter { record in
+                canonicalCountryName(record["COUNTRY"]) == normalizedCountry
+                    && ConfirmationOpportunityIndex.normalizedBand(for: record).lowercased() == normalizedBand
+                    && (band.state == .confirmed ? record.isConfirmed : !record.isConfirmed)
+            }
+            .sorted { StatisticsSnapshot.chronologicalKey(for: $0) > StatisticsSnapshot.chronologicalKey(for: $1) }
 
-        var criteria = FilterCriteria()
-        criteria.useBand = true
-        criteria.band = band.band
-        criteria.useCountry = true
-        criteria.selectedCountries = [country]
-        criteria.useConfirmation = true
-        criteria.confirmationState = band.state == .confirmed ? "Confirmed (Y)" : "Unconfirmed (N/Blank)"
-
-        appState.filterCriteria = criteria
-        appState.searchText = ""
-        appState.clearSelection()
-        appState.selectedTab = 0
-        appState.appendLog("Showing \(band.state == .confirmed ? "confirmed" : "unconfirmed") QSOs for \(country) on \(band.band).")
-        NSApp.activate(ignoringOtherApps: true)
+        selectedCountryBandDetails = StatisticsCountryBandDetailSelection(
+            country: country,
+            band: band.band,
+            state: band.state,
+            records: records
+        )
     }
 
     private func showUnconfirmedQSOs(band: String, country: String) {
@@ -901,6 +955,7 @@ struct StatisticsView: View {
         appState.clearSelection()
         appState.selectedTab = 0
         appState.appendLog("Showing unconfirmed QSOs for \(country) on \(band).")
+        dismissWindow(id: YAAMWindowID.statistics)
         NSApp.activate(ignoringOtherApps: true)
     }
 }
@@ -923,7 +978,7 @@ enum StatisticsFollowUpScope: String, CaseIterable, Identifiable {
     }
 }
 
-enum StatisticsConfirmationProvider: String, CaseIterable, Identifiable {
+nonisolated enum StatisticsConfirmationProvider: String, CaseIterable, Identifiable, Sendable {
     case lotw
     case qrz
     case eqsl
@@ -959,14 +1014,14 @@ enum StatisticsConfirmationProvider: String, CaseIterable, Identifiable {
     }
 }
 
-struct StatisticsConfirmationProviderStat: Identifiable {
+nonisolated struct StatisticsConfirmationProviderStat: Identifiable, Sendable {
     var id: String { provider.id }
     let provider: StatisticsConfirmationProvider
     let count: Int
     let percentage: Double
 }
 
-struct StatisticsFollowUpCandidate: Identifiable {
+nonisolated struct StatisticsFollowUpCandidate: Identifiable, Sendable {
     var id: UUID { record.id }
     let record: QSORecordModel
     let opportunity: QSOConfirmationOpportunity
@@ -976,6 +1031,107 @@ struct StatisticsFollowUpCandidate: Identifiable {
 private enum StatisticsQSOActionKind {
     case confirmationFollowUp
     case confirmedQSL
+}
+
+private struct StatisticsCountryBandDetailSelection: Identifiable {
+    var id: String { "\(country)|\(band)|\(state.rawValue)" }
+    let country: String
+    let band: String
+    let state: CountryBandCoverageState
+    let records: [QSORecordModel]
+}
+
+private struct StatisticsCountryBandDetailSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let selection: StatisticsCountryBandDetailSelection
+    let opportunityByRecordID: [UUID: QSOConfirmationOpportunity]
+    let emailLookupRecordID: UUID?
+    let onShowInLog: (QSORecordModel) -> Void
+    let onEmail: (QSORecordModel) -> Void
+    let onFindEmail: (QSORecordModel) -> Void
+    let onPreviewQSL: (QSORecordModel) -> Void
+    let onOpenQRZ: (QSORecordModel) -> Void
+
+    private var isConfirmed: Bool {
+        selection.state == .confirmed
+    }
+
+    var body: some View {
+        VStack(spacing: 12) {
+            HStack(spacing: 10) {
+                Image(systemName: isConfirmed ? "checkmark.seal.fill" : "clock.badge.exclamationmark.fill")
+                    .font(.title2)
+                    .foregroundStyle(isConfirmed ? Color.green : Color.orange)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(selection.country) · \(selection.band.uppercased())")
+                        .font(.headline)
+                    Text(
+                        isConfirmed
+                            ? "Confirmed contacts on this country-band"
+                            : "Pending contacts that can complete this country-band"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                Text("\(selection.records.count) QSO\(selection.records.count == 1 ? "" : "s")")
+                    .font(.caption.monospacedDigit().weight(.semibold))
+                    .foregroundStyle(isConfirmed ? Color.green : Color.orange)
+            }
+
+            Divider()
+
+            if selection.records.isEmpty {
+                ContentUnavailableView(
+                    "No Matching QSO",
+                    systemImage: "waveform.path.ecg.rectangle",
+                    description: Text("Refresh Statistics after the latest import or confirmation sync.")
+                )
+                .frame(maxWidth: .infinity, minHeight: 240)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 7) {
+                        ForEach(selection.records) { record in
+                            StatisticsQSOActionRow(
+                                record: record,
+                                opportunity: opportunityByRecordID[record.id],
+                                kind: isConfirmed ? .confirmedQSL : .confirmationFollowUp,
+                                isLookingUpEmail: emailLookupRecordID == record.id,
+                                onShowInLog: { onShowInLog(record) },
+                                onEmail: { onEmail(record) },
+                                onFindEmail: { onFindEmail(record) },
+                                onPreviewQSL: { onPreviewQSL(record) },
+                                onOpenQRZ: { onOpenQRZ(record) }
+                            )
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
+
+            Divider()
+
+            HStack {
+                if !isConfirmed {
+                    Label(
+                        "Open a QSO in Log Table or compose a confirmation request from its email action.",
+                        systemImage: "info.circle"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Done") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+            }
+        }
+        .padding(16)
+        .frame(minWidth: 720, idealWidth: 840, minHeight: 380, idealHeight: 520)
+    }
 }
 
 private struct StatisticsProviderCard: View {
@@ -1326,7 +1482,7 @@ struct StatBadgeCard: View {
     }
 }
 
-struct ConfirmedProgressSummary {
+nonisolated struct ConfirmedProgressSummary: Sendable {
     let todayCount: Int
     let weekCount: Int
     let monthCount: Int
@@ -1336,14 +1492,14 @@ struct ConfirmedProgressSummary {
     let forecasts: [ConfirmedForecast]
 }
 
-struct ConfirmedProgressPoint: Identifiable {
+nonisolated struct ConfirmedProgressPoint: Identifiable, Sendable {
     let id = UUID()
     let label: String
     let cumulativeCount: Int
     let isForecast: Bool
 }
 
-struct ConfirmedForecast: Identifiable {
+nonisolated struct ConfirmedForecast: Identifiable, Sendable {
     let id = UUID()
     let months: Int
     let projectedGain: Int
@@ -1359,7 +1515,7 @@ struct ConfirmedForecast: Identifiable {
     let projectedDxccRank: Int?
 }
 
-struct StatisticsSnapshot {
+nonisolated struct StatisticsSnapshot: Sendable {
     let totalQSOCount: Int
     let confirmedCount: Int
     let unconfirmedCount: Int
@@ -1380,17 +1536,55 @@ struct StatisticsSnapshot {
     let countryBandCoverage: [CountryBandCoverage]
     let progressSummary: ConfirmedProgressSummary
 
-    static func make(from appState: AppState) -> StatisticsSnapshot {
+    static let empty = StatisticsSnapshot(
+        totalQSOCount: 0,
+        confirmedCount: 0,
+        unconfirmedCount: 0,
+        confirmationPercentage: 0,
+        dxccCountryCount: 0,
+        confirmedDxccCountryCount: 0,
+        workedGridCount: 0,
+        confirmedGridCount: 0,
+        gridConfirmationPercentage: 0,
+        uniqueCallsignCount: 0,
+        uniqueModeCount: 0,
+        providerStatistics: [],
+        followUpCandidates: [],
+        recentConfirmedRecords: [],
+        bandStatistics: [],
+        countryStatistics: [],
+        unconfirmedBandCountryStatistics: [],
+        countryBandCoverage: [],
+        progressSummary: ConfirmedProgressSummary(
+            todayCount: 0,
+            weekCount: 0,
+            monthCount: 0,
+            yearCount: 0,
+            monthlyRate: 0,
+            chartPoints: [],
+            forecasts: []
+        )
+    )
+
+    static func make(records: [QSORecordModel], ownerRankData: QRZRankResponse?) -> StatisticsSnapshot {
+        let availableCountries = Set(
+            records.compactMap { record -> String? in
+                let country = canonicalCountryName(record["COUNTRY"])
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                return country.isEmpty ? nil : country
+            }
+        )
         let confirmedDxccCountries = Set(
-            appState.qsoRecords.compactMap { record -> String? in
-                let country = record["COUNTRY"].trimmingCharacters(in: .whitespacesAndNewlines)
+            records.compactMap { record -> String? in
+                let country = canonicalCountryName(record["COUNTRY"])
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
                 return record.isConfirmed && !country.isEmpty ? country : nil
             }
         )
 
-        let workedGrids = Set(appState.qsoRecords.compactMap { fourCharacterGrid(for: $0) })
+        let workedGrids = Set(records.compactMap { fourCharacterGrid(for: $0) })
         let confirmedGrids = Set(
-            appState.qsoRecords.compactMap { record -> String? in
+            records.compactMap { record -> String? in
                 guard record.isConfirmed else { return nil }
                 return fourCharacterGrid(for: record)
             }
@@ -1398,14 +1592,16 @@ struct StatisticsSnapshot {
         let gridConfirmationPercentage = workedGrids.isEmpty
             ? 0
             : Double(confirmedGrids.count) / Double(workedGrids.count) * 100
-        let totalCount = appState.qsoRecords.count
-        let confirmedCount = appState.totalConfirmedCount
+        let totalCount = records.count
+        let confirmedCount = records.reduce(into: 0) { count, record in
+            if record.isConfirmed { count += 1 }
+        }
         let confirmationPercentage = totalCount == 0
             ? 0
             : Double(confirmedCount) / Double(totalCount) * 100
-        let providerStatistics = makeProviderStatistics(records: appState.qsoRecords)
-        let opportunityIndex = appState.confirmationOpportunityIndex
-        let followUpCandidates = appState.qsoRecords.compactMap { record -> StatisticsFollowUpCandidate? in
+        let providerStatistics = makeProviderStatistics(records: records)
+        let opportunityIndex = ConfirmationOpportunityIndex(records: records)
+        let followUpCandidates = records.compactMap { record -> StatisticsFollowUpCandidate? in
             guard !record.isConfirmed,
                   let opportunity = opportunityIndex.opportunity(for: record.id) else { return nil }
 
@@ -1420,7 +1616,7 @@ struct StatisticsSnapshot {
             if lhs.priorityScore != rhs.priorityScore { return lhs.priorityScore > rhs.priorityScore }
             return chronologicalKey(for: lhs.record) > chronologicalKey(for: rhs.record)
         }
-        let recentConfirmedRecords = appState.qsoRecords
+        let recentConfirmedRecords = records
             .filter(\.isConfirmed)
             .sorted { chronologicalKey(for: $0) > chronologicalKey(for: $1) }
             .prefix(20)
@@ -1428,24 +1624,130 @@ struct StatisticsSnapshot {
         return StatisticsSnapshot(
             totalQSOCount: totalCount,
             confirmedCount: confirmedCount,
-            unconfirmedCount: appState.totalUnconfirmedCount,
+            unconfirmedCount: totalCount - confirmedCount,
             confirmationPercentage: confirmationPercentage,
-            dxccCountryCount: appState.availableCountries.count,
+            dxccCountryCount: availableCountries.count,
             confirmedDxccCountryCount: confirmedDxccCountries.count,
             workedGridCount: workedGrids.count,
             confirmedGridCount: confirmedGrids.count,
             gridConfirmationPercentage: gridConfirmationPercentage,
-            uniqueCallsignCount: appState.uniqueCallsignCount,
-            uniqueModeCount: appState.activeModesCount,
+            uniqueCallsignCount: Set(records.compactMap {
+                let callsign = $0["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+                return callsign.isEmpty ? nil : callsign
+            }).count,
+            uniqueModeCount: Set(records.compactMap {
+                let mode = $0["MODE"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+                return mode.isEmpty ? nil : mode
+            }).count,
             providerStatistics: providerStatistics,
             followUpCandidates: followUpCandidates,
             recentConfirmedRecords: Array(recentConfirmedRecords),
-            bandStatistics: appState.bandStatistics,
-            countryStatistics: appState.countryStatistics,
-            unconfirmedBandCountryStatistics: appState.unconfirmedBandCountryStatistics,
-            countryBandCoverage: appState.confirmationOpportunityIndex.countryBandCoverage,
-            progressSummary: ConfirmedProgressAnalyzer.makeSummary(records: appState.qsoRecords, ownerRankData: appState.ownerRankData)
+            bandStatistics: makeBandStatistics(records: records),
+            countryStatistics: makeCountryStatistics(records: records),
+            unconfirmedBandCountryStatistics: makeUnconfirmedBandCountryStatistics(records: records),
+            countryBandCoverage: opportunityIndex.countryBandCoverage,
+            progressSummary: ConfirmedProgressAnalyzer.makeSummary(records: records, ownerRankData: ownerRankData)
         )
+    }
+
+    private static func makeBandStatistics(records: [QSORecordModel]) -> [BandStatModel] {
+        guard !records.isEmpty else { return [] }
+        var values: [String: (total: Int, confirmed: Int, countries: Set<String>, confirmedCountries: Set<String>)] = [:]
+
+        for record in records {
+            let normalizedBand = ConfirmationOpportunityIndex.normalizedBand(for: record)
+            let band = normalizedBand.isEmpty ? "UNKNOWN" : normalizedBand.uppercased()
+            let country = canonicalCountryName(record["COUNTRY"])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            var value = values[band] ?? (
+                total: 0,
+                confirmed: 0,
+                countries: Set<String>(),
+                confirmedCountries: Set<String>()
+            )
+            value.total += 1
+            if record.isConfirmed { value.confirmed += 1 }
+            if !country.isEmpty { value.countries.insert(country) }
+            if record.isConfirmed, !country.isEmpty { value.confirmedCountries.insert(country) }
+            values[band] = value
+        }
+
+        let total = Double(records.count)
+        return values.map { band, value in
+            BandStatModel(
+                band: band,
+                qsoCount: value.total,
+                confirmedCount: value.confirmed,
+                unconfirmedCount: value.total - value.confirmed,
+                dxccCount: value.countries.count,
+                confirmedDxccCount: value.confirmedCountries.count,
+                percentage: Double(value.total) / total * 100
+            )
+        }
+        .sorted { lhs, rhs in
+            if lhs.qsoCount != rhs.qsoCount { return lhs.qsoCount > rhs.qsoCount }
+            return lhs.band.localizedStandardCompare(rhs.band) == .orderedAscending
+        }
+    }
+
+    private static func makeCountryStatistics(records: [QSORecordModel]) -> [CountryStatModel] {
+        var values: [String: (total: Int, confirmed: Int)] = [:]
+        for record in records {
+            let canonical = canonicalCountryName(record["COUNTRY"])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let country = canonical.isEmpty ? "Unknown" : canonical
+            var value = values[country] ?? (0, 0)
+            value.total += 1
+            if record.isConfirmed { value.confirmed += 1 }
+            values[country] = value
+        }
+
+        return values.map { country, value in
+            CountryStatModel(
+                country: country,
+                flag: countryToFlag(country),
+                qsoCount: value.total,
+                confirmedCount: value.confirmed,
+                unconfirmedCount: value.total - value.confirmed
+            )
+        }
+        .sorted { lhs, rhs in
+            if lhs.qsoCount != rhs.qsoCount { return lhs.qsoCount > rhs.qsoCount }
+            return lhs.country.localizedStandardCompare(rhs.country) == .orderedAscending
+        }
+    }
+
+    private static func makeUnconfirmedBandCountryStatistics(
+        records: [QSORecordModel]
+    ) -> [UnconfirmedBandCountryStatModel] {
+        var values: [String: [String: (total: Int, confirmed: Int)]] = [:]
+
+        for record in records {
+            let normalizedBand = ConfirmationOpportunityIndex.normalizedBand(for: record)
+            let band = normalizedBand.isEmpty ? "UNKNOWN" : normalizedBand.uppercased()
+            let canonical = canonicalCountryName(record["COUNTRY"])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let country = canonical.isEmpty ? "Unknown" : canonical
+            var countryValues = values[band] ?? [:]
+            var value = countryValues[country] ?? (0, 0)
+            value.total += 1
+            if record.isConfirmed { value.confirmed += 1 }
+            countryValues[country] = value
+            values[band] = countryValues
+        }
+
+        return values.compactMap { band, countryValues in
+            let countries = countryValues.compactMap { country, value -> UnconfirmedCountryStatModel? in
+                guard value.total > 0, value.confirmed == 0 else { return nil }
+                return UnconfirmedCountryStatModel(country: country, qsoCount: value.total)
+            }
+            .sorted { lhs, rhs in
+                if lhs.qsoCount != rhs.qsoCount { return lhs.qsoCount > rhs.qsoCount }
+                return lhs.country.localizedStandardCompare(rhs.country) == .orderedAscending
+            }
+            return countries.isEmpty ? nil : UnconfirmedBandCountryStatModel(band: band, countries: countries)
+        }
+        .sorted { $0.band.localizedStandardCompare($1.band) == .orderedAscending }
     }
 
     private static func fourCharacterGrid(for record: QSORecordModel) -> String? {
@@ -1486,14 +1788,14 @@ struct StatisticsSnapshot {
         return ["Y", "V", "C", "CONFIRMED", "VERIFIED"].contains(value)
     }
 
-    private static func chronologicalKey(for record: QSORecordModel) -> String {
+    static func chronologicalKey(for record: QSORecordModel) -> String {
         let date = record["QSO_DATE"].filter(\.isNumber)
         let time = record["TIME_ON"].filter(\.isNumber)
         return "\(date)\(time.padding(toLength: 6, withPad: "0", startingAt: 0))\(String(format: "%012d", record.index))"
     }
 }
 
-enum ConfirmedProgressAnalyzer {
+nonisolated enum ConfirmedProgressAnalyzer {
     static func makeSummary(records: [QSORecordModel], ownerRankData: QRZRankResponse?) -> ConfirmedProgressSummary {
         let calendar = Calendar(identifier: .gregorian)
         let now = Date()

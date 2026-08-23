@@ -619,6 +619,21 @@ extension AppState {
         }
         guard !isSyncingAPI else {
             appendLog("Confirmation sync is already running.")
+            if showCompletionAlert {
+                alertTitle = "Confirmation Sync In Progress"
+                alertMessage = "The current LoTW/QRZ sync is still running. Its result will appear as soon as it finishes."
+                showAlert = true
+            }
+            completion?(ConfirmationSyncSummary())
+            return
+        }
+        guard !isLoading else {
+            appendLog("Confirmation sync is waiting for the current log import to finish.")
+            if showCompletionAlert {
+                alertTitle = "Log Operation In Progress"
+                alertMessage = "Finish the current import before syncing LoTW and QRZ confirmations. This prevents a newer log snapshot from being overwritten."
+                showAlert = true
+            }
             completion?(ConfirmationSyncSummary())
             return
         }
@@ -648,11 +663,13 @@ extension AppState {
             return
         }
 
-        for header in [
+        let confirmationHeaders = [
             "LOTW_QSL_RCVD", "LOTW_QSLRDATE", "QRZLOG_QSL_RCVD",
             "APP_QRZLOG_QSLDATE", "APP_QRZLOG_STATUS", "QSL_RCVD"
-        ] where !tableHeaders.contains(header) {
-            tableHeaders.append(header)
+        ]
+        let missingConfirmationHeaders = confirmationHeaders.filter { !tableHeaders.contains($0) }
+        if !missingConfirmationHeaders.isEmpty {
+            tableHeaders.append(contentsOf: missingConfirmationHeaders)
         }
 
         let lotwCheckpoint = ConfirmationSyncCheckpointStore.load(profileID: profileID, source: .lotw)
@@ -683,6 +700,7 @@ extension AppState {
 
         Task { @MainActor [weak self] in
             guard let self else { return }
+            defer { self.isSyncingAPI = false }
             async let lotwAttempt = ConfirmationDownloadService.attemptLoTW(
                 enabled: syncLoTW,
                 username: lotwUsername,
@@ -700,8 +718,14 @@ extension AppState {
             let (lotw, qrz) = await (lotwAttempt, qrzAttempt)
 
             guard self.activeStationProfileID == profileID else {
-                self.isSyncingAPI = false
-                self.appendLog("Confirmation sync stopped because the active station changed.")
+                let message = "Confirmation sync stopped because the active station changed."
+                if syncLoTW {
+                    self.finishSyncStatus(.lotw, state: .failure, detail: message, changed: 0)
+                }
+                if syncQRZ {
+                    self.finishSyncStatus(.qrz, state: .failure, detail: message, changed: 0)
+                }
+                self.appendLog(message)
                 completion?(ConfirmationSyncSummary())
                 return
             }
@@ -800,7 +824,6 @@ extension AppState {
                 qrzFailed: qrzFailed
             )
             self.updateConfirmationReconciliation(with: summary)
-            self.isSyncingAPI = false
 
             if showCompletionAlert {
                 self.alertTitle = lotwFailed || qrzFailed
@@ -849,7 +872,9 @@ extension AppState {
         qrz: [[String: String]]
     ) -> Int {
         var added = 0
-        var knownIdentities = Set(qsoRecords.map(remoteConfirmationIdentity))
+        var workingRecords = qsoRecords
+        var addedRecords: [QSORecordModel] = []
+        var knownIdentities = Set(workingRecords.map(remoteConfirmationIdentity))
 
         for (source, records) in [(SyncSource.lotw, lotw), (.qrz, qrz)] {
             for record in records {
@@ -872,18 +897,22 @@ extension AppState {
 
                 let identity = remoteConfirmationIdentity(fields)
                 guard !knownIdentities.contains(identity) else { continue }
-                let model = QSORecordModel(index: qsoRecords.count + 1, fields: fields)
-                qsoRecords.append(model)
+                let model = QSORecordModel(index: workingRecords.count + 1, fields: fields)
+                workingRecords.append(model)
+                addedRecords.append(model)
                 knownIdentities.insert(identity)
                 added += 1
             }
         }
 
         if added > 0 {
-            for header in ["LOTW_QSL_RCVD", "QRZLOG_QSL_RCVD", "QSL_RCVD", "APP_YAAM_REMOTE_CONFIRMATION_IMPORTED"] where !tableHeaders.contains(header) {
-                tableHeaders.append(header)
+            qsoRecords = workingRecords
+            let remoteHeaders = ["LOTW_QSL_RCVD", "QRZLOG_QSL_RCVD", "QSL_RCVD", "APP_YAAM_REMOTE_CONFIRMATION_IMPORTED"]
+            let missingHeaders = remoteHeaders.filter { !tableHeaders.contains($0) }
+            if !missingHeaders.isEmpty {
+                tableHeaders.append(contentsOf: missingHeaders)
             }
-            rememberConfirmedRecords(Array(qsoRecords.suffix(added)))
+            rememberConfirmedRecords(addedRecords)
         }
         return added
     }

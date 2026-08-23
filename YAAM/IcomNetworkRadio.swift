@@ -114,6 +114,8 @@ nonisolated enum IcomNetworkError: LocalizedError, Sendable {
 /// by RS-BA1-compatible radios. UI state is published on the main thread while
 /// all packet work stays on a dedicated serial queue.
 nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable {
+    private static let maximumLoginAttempts = 8
+
     @MainActor @Published private(set) var state: IcomNetworkConnectionState = .disconnected
     @MainActor @Published private(set) var snapshot: IcomNetworkSnapshot?
     @MainActor @Published private(set) var lastMessage = "Direct Icom LAN is offline"
@@ -136,6 +138,33 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
     }
 
     private enum StreamKind { case control, civ, audio }
+
+    /// The Icom LAN server is sensitive to packet ordering during login. Keep
+    /// discovery, authentication, radio selection, and stream setup explicit
+    /// so keepalives cannot overtake a token or stream-open request.
+    private enum SessionStage: Equatable {
+        case idle
+        case discovering
+        case awaitingControlReady
+        case awaitingLogin
+        case awaitingRadioAvailability
+        case awaitingStreamReply
+        case openingDataChannels
+        case connected
+
+        var diagnosticName: String {
+            switch self {
+            case .idle: return "idle"
+            case .discovering: return "UDP discovery"
+            case .awaitingControlReady: return "control handshake"
+            case .awaitingLogin: return "network login"
+            case .awaitingRadioAvailability: return "radio availability"
+            case .awaitingStreamReply: return "stream authorization"
+            case .openingDataChannels: return "CI-V/audio handshake"
+            case .connected: return "connected"
+            }
+        }
+    }
 
     private struct TransmitPacketCache {
         private let capacity = 2_048
@@ -173,9 +202,9 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
     private var controlRemoteID: UInt32 = 0
     private var civRemoteID: UInt32 = 0
     private var audioRemoteID: UInt32 = 0
-    private var controlSequence: UInt16 = 0
-    private var civSequence: UInt16 = 0
-    private var audioSequence: UInt16 = 0
+    private var controlSequence: UInt16 = 1
+    private var civSequence: UInt16 = 1
+    private var audioSequence: UInt16 = 1
     private var controlPingSequence: UInt16 = 0
     private var civPingSequence: UInt16 = 0
     private var audioPingSequence: UInt16 = 0
@@ -184,16 +213,25 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
     private var audioTransmitCache = TransmitPacketCache()
     private var civDataSequence: UInt16 = 0
     private var audioDataSequence: UInt16 = 0
-    private var authSequence: UInt16 = 0
+    private var authSequence: UInt16 = 0x30
     private var tokenRequest: UInt16 = 0
     private var token: UInt32 = 0
+    private var authID: Data?
+    private var pendingLoginPacket: Data?
+    private var loginAttempts = 0
     private var selectedCapability: RadioCapability?
     private var loginSent = false
+    private var tokenSent = false
     private var streamRequested = false
     private var civReady = false
     private var audioReady = false
-    private var startedAt = Date.distantPast
-    private var lastControlPacketAt = Date.distantPast
+    private var sessionStage: SessionStage = .idle
+    private var stageStartedAt = Date.distantPast
+    private var lastHandshakeSendAt = Date.distantPast
+    private var handshakeAttempts = 0
+    private var sessionTicks = 0
+    private var controlPacketCounts: [Int: Int] = [:]
+    private var lastControlPacketType: UInt16?
     private var keepaliveTimer: DispatchSourceTimer?
     private var tokenTimer: DispatchSourceTimer?
     private var pttWatchdog: DispatchWorkItem?
@@ -211,15 +249,17 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
 
     @MainActor
     func connect(settings proposed: IcomNetworkSettings, password proposedPassword: String) {
+        let proposedUsername = proposed.username.trimmingCharacters(in: .whitespacesAndNewlines)
+        let proposedClientName = proposed.clientName.trimmingCharacters(in: .whitespacesAndNewlines)
         let clean = IcomNetworkSettings(
             host: proposed.host.trimmingCharacters(in: .whitespacesAndNewlines),
             controlPort: proposed.controlPort,
             username: Self.limitedUTF8(
-                proposed.username.trimmingCharacters(in: .whitespacesAndNewlines),
+                proposedUsername,
                 maximumBytes: 16
             ),
             clientName: Self.limitedUTF8(
-                proposed.clientName.trimmingCharacters(in: .whitespacesAndNewlines),
+                proposedClientName,
                 maximumBytes: 16
             ),
             model: proposed.model
@@ -231,6 +271,14 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
               !cleanPassword.isEmpty else {
             state = .failed(IcomNetworkError.invalidSettings.localizedDescription)
             lastMessage = IcomNetworkError.invalidSettings.localizedDescription
+            return
+        }
+        guard proposedUsername.utf8.count <= 16,
+              proposedPassword.utf8.count <= 16,
+              proposedClientName.utf8.count <= 16 else {
+            let message = "Icom network username, password, and client name must each be at most 16 UTF-8 bytes."
+            state = .failed(message)
+            lastMessage = message
             return
         }
 
@@ -245,11 +293,13 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
 
         queue.async { [weak self] in
             guard let self else { return }
+            self.isStopping = true
+            self.releaseSessionIfNeeded()
             self.stopNetworkState()
             self.generation = id
+            self.isStopping = false
             self.settings = clean
             self.password = cleanPassword
-            self.startedAt = Date()
             do {
                 let socket = try IcomUDPSocket(queue: self.queue) { [weak self] data in
                     self?.receive(data, on: .control, generation: id)
@@ -258,8 +308,10 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
                 }
                 try socket.connect(host: clean.host, port: UInt16(clean.controlPort))
                 self.controlSocket = socket
+                self.transition(to: .discovering)
                 self.sendControl(type: 0x03, tracked: false, sequence: 0, on: .control)
-                self.startKeepalive(generation: id)
+                self.noteHandshakeSend()
+                self.startSessionTimer(generation: id)
             } catch {
                 self.fail("Unable to open Icom LAN control: \(error.localizedDescription)", generation: id)
             }
@@ -277,6 +329,7 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
             self.generation = id
             self.isStopping = true
             self.sendPTT(false)
+            self.releaseSessionIfNeeded()
             self.sendControl(type: 0x05, tracked: false, sequence: 0, on: .civ)
             self.sendControl(type: 0x05, tracked: false, sequence: 0, on: .audio)
             self.sendControl(type: 0x05, tracked: false, sequence: 0, on: .control)
@@ -371,35 +424,112 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
         }
     }
 
-    private func startKeepalive(generation id: UUID) {
+    private func startSessionTimer(generation id: UUID) {
         keepaliveTimer?.cancel()
-        var ticks = 0
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(deadline: .now() + .milliseconds(100), repeating: .milliseconds(100), leeway: .milliseconds(20))
         timer.setEventHandler { [weak self] in
             guard let self, self.generation == id else { return }
-            ticks += 1
-            if self.controlRemoteID == 0 {
-                if ticks.isMultiple(of: 5) { self.sendControl(type: 0x03, tracked: false, sequence: 0, on: .control) }
-                if Date().timeIntervalSince(self.startedAt) > 20 {
-                    self.fail("The radio did not answer on the Icom control port.", generation: id)
-                }
-                return
-            }
-            self.sendControl(type: 0x00, tracked: true, sequence: 0, on: .control)
-            if self.civSocket != nil { self.sendControl(type: 0x00, tracked: true, sequence: 0, on: .civ) }
-            if self.audioSocket != nil { self.sendControl(type: 0x00, tracked: true, sequence: 0, on: .audio) }
-            if ticks.isMultiple(of: 5) {
-                self.sendPing(on: .control)
-                if self.civReady { self.sendPing(on: .civ) }
-                if self.audioReady { self.sendPing(on: .audio) }
-            }
-            if ticks.isMultiple(of: 10), self.civReady {
-                self.sendCIV(command: [0x03])
-            }
+            self.driveSession(generation: id)
         }
         timer.resume()
         keepaliveTimer = timer
+    }
+
+    private func driveSession(generation id: UUID) {
+        let now = Date()
+        let elapsed = now.timeIntervalSince(stageStartedAt)
+        let sinceLastSend = now.timeIntervalSince(lastHandshakeSendAt)
+
+        // Icom starts its idle/ping exchange as soon as the control handshake
+        // succeeds, before authentication completes. Missing these packets can
+        // leave an otherwise valid login waiting forever.
+        if controlRemoteID != 0, sessionStage != .idle, sessionStage != .discovering {
+            sendSessionKeepalive()
+        }
+
+        switch sessionStage {
+        case .idle:
+            return
+        case .discovering:
+            if elapsed > 20 {
+                fail(
+                    "The radio did not answer on UDP port \(settings?.controlPort ?? 0). Check WLAN Remote settings and the Mac firewall.",
+                    generation: id
+                )
+            } else if sinceLastSend >= 0.5 {
+                sendControl(type: 0x03, tracked: false, sequence: 0, on: .control)
+                noteHandshakeSend()
+            }
+        case .awaitingControlReady:
+            if elapsed > 5 {
+                fail("The radio answered but did not open an Icom control session.", generation: id)
+            } else if sinceLastSend >= 0.5 {
+                sendControl(type: 0x06, tracked: false, sequence: 1, on: .control)
+                noteHandshakeSend()
+            }
+        case .awaitingLogin:
+            if loginAttempts >= Self.maximumLoginAttempts, sinceLastSend >= 1 {
+                fail(
+                    "Icom login timed out after \(loginAttempts) attempts. Verify the network username/password, Administrator permission, and that no other remote client is using the radio.",
+                    generation: id
+                )
+            } else if sinceLastSend >= 1 {
+                sendPendingLogin()
+            }
+        case .awaitingRadioAvailability:
+            if elapsed > 15 {
+                fail(
+                    "Login succeeded, but the radio did not advertise an available stream. Close other Icom remote clients and confirm Remote Utility is enabled.",
+                    generation: id
+                )
+            }
+        case .awaitingStreamReply:
+            if elapsed > 10 {
+                fail(
+                    "The radio did not approve the CI-V/audio stream request. It may already be in use by another network client.",
+                    generation: id
+                )
+            }
+        case .openingDataChannels:
+            if elapsed > 10 {
+                fail("The radio approved login, but its CI-V/audio UDP channels did not become ready.", generation: id)
+            } else if sinceLastSend >= 0.5 {
+                if !civReady { sendControl(type: 0x03, tracked: false, sequence: 0, on: .civ) }
+                if !audioReady { sendControl(type: 0x03, tracked: false, sequence: 0, on: .audio) }
+                noteHandshakeSend()
+            }
+        case .connected:
+            if sessionTicks.isMultiple(of: 10) { sendCIV(command: [0x03]) }
+        }
+    }
+
+    private func sendSessionKeepalive() {
+        sessionTicks &+= 1
+        sendControl(type: 0x00, tracked: true, sequence: 0, on: .control)
+        if civSocket != nil, civRemoteID != 0 {
+            sendControl(type: 0x00, tracked: true, sequence: 0, on: .civ)
+        }
+        if audioSocket != nil, audioRemoteID != 0 {
+            sendControl(type: 0x00, tracked: true, sequence: 0, on: .audio)
+        }
+        guard sessionTicks.isMultiple(of: 5) else { return }
+        sendPing(on: .control)
+        if civSocket != nil, civRemoteID != 0 { sendPing(on: .civ) }
+        if audioSocket != nil, audioRemoteID != 0 { sendPing(on: .audio) }
+    }
+
+    private func transition(to stage: SessionStage) {
+        sessionStage = stage
+        stageStartedAt = Date()
+        lastHandshakeSendAt = .distantPast
+        handshakeAttempts = 0
+        sessionTicks = 0
+    }
+
+    private func noteHandshakeSend() {
+        lastHandshakeSendAt = Date()
+        handshakeAttempts += 1
     }
 
     private func startTokenRenewal(generation id: UUID) {
@@ -407,7 +537,10 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(deadline: .now() + 60, repeating: 60, leeway: .seconds(2))
         timer.setEventHandler { [weak self] in
-            guard let self, self.generation == id else { return }
+            guard let self,
+                  self.generation == id,
+                  self.sessionStage == .connected,
+                  self.tokenSent else { return }
             self.sendToken(requestType: 0x05)
         }
         timer.resume()
@@ -418,9 +551,15 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
         guard generation == id, data.count >= 16 else { return }
         let declaredLength = Int(data.uint32LE(at: 0))
         guard declaredLength == data.count else { return }
-        lastControlPacketAt = Date()
         let type = data.uint16LE(at: 4)
         let senderID = data.uint32LE(at: 8)
+        switch stream {
+        case .control:
+            controlPacketCounts[data.count, default: 0] += 1
+            lastControlPacketType = type
+        case .civ, .audio:
+            break
+        }
 
         if type == 0x01 {
             handleRetransmitRequest(data, on: stream)
@@ -433,17 +572,33 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
         if data.count == 16 {
             if type == 0x04 {
                 setRemoteID(senderID, for: stream)
+                switch stream {
+                case .control:
+                    if sessionStage == .discovering {
+                        transition(to: .awaitingControlReady)
+                    } else if sessionStage != .awaitingControlReady {
+                        return
+                    }
+                case .civ, .audio:
+                    guard sessionStage == .openingDataChannels else { return }
+                }
                 sendControl(type: 0x06, tracked: false, sequence: 1, on: stream)
+                noteHandshakeSend()
             } else if type == 0x06 {
                 setRemoteID(senderID, for: stream)
                 switch stream {
                 case .control:
-                    if !loginSent { sendLogin() }
+                    guard sessionStage == .awaitingControlReady, !loginSent else { return }
+                    sendLogin()
                 case .civ:
-                    civReady = true
-                    sendOpenCIV()
+                    guard sessionStage == .openingDataChannels else { return }
+                    if !civReady {
+                        civReady = true
+                        sendOpenCIV()
+                    }
                     publishConnectedIfReady()
                 case .audio:
+                    guard sessionStage == .openingDataChannels else { return }
                     audioReady = true
                     publishConnectedIfReady()
                 }
@@ -464,20 +619,34 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
     private func receiveControlPayload(_ data: Data) {
         switch data.count {
         case 96:
+            guard sessionStage == .awaitingLogin else { return }
             let error = data.uint32LE(at: 48)
             if error != 0 {
-                fail("Icom rejected the username or password.", generation: generation)
+                fail(
+                    "Icom rejected the network login. Re-enter the radio's WLAN Remote username/password and verify the account is enabled.",
+                    generation: generation
+                )
                 return
             }
             guard data.uint16LE(at: 26) == tokenRequest else { return }
+            authID = Data(data[26..<32])
             token = data.uint32LE(at: 28)
-            publish(state: .openingStreams, message: "Authenticated; requesting radio streams...")
-            sendToken(requestType: 0x02)
-            startTokenRenewal(generation: generation)
+            pendingLoginPacket = nil
+            transition(to: .awaitingRadioAvailability)
+            publish(state: .openingStreams, message: "Signed in; waiting for the radio to become available...")
+            if !tokenSent {
+                tokenSent = true
+                sendToken(requestType: 0x02)
+            }
         case 80:
+            guard sessionStage == .awaitingStreamReply else { return }
             let error = data.uint32LE(at: 48)
-            if error == UInt32.max {
-                fail("The radio refused the requested stream. It may be busy.", generation: generation)
+            if error != 0 {
+                let errorCode = String(format: "0x%08X", error)
+                fail(
+                    "The radio refused the CI-V/audio stream (code \(errorCode)). Close any other Icom remote client and try again.",
+                    generation: generation
+                )
                 return
             }
             if data[64] == 1 {
@@ -492,14 +661,14 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
             }
             openRemoteStreams(civPort: civPort, audioPort: audioPort)
         case 64:
-            if data[21] == 0x05, data[20] == 0x02, data.uint32LE(at: 48) == 0 {
-                startTokenRenewal(generation: generation)
+            if data[21] == 0x05, data[20] == 0x02, data.uint32LE(at: 48) != 0 {
+                fail("The radio rejected session renewal. Reconnect to establish a fresh Icom session.", generation: generation)
             }
+        case 144:
+            receiveRadioAvailability(data)
         default:
             if data.count >= 66, (data.count - 66).isMultiple(of: 102) {
                 receiveCapabilities(data)
-            } else if data.count == 144, !streamRequested {
-                requestSelectedRadioIfPossible()
             }
         }
     }
@@ -520,25 +689,65 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
         }
         guard !candidates.isEmpty else { return }
         selectedCapability = candidates.first(where: { $0.civAddress == wanted.civAddress }) ?? candidates[0]
+    }
+
+    private func receiveRadioAvailability(_ data: Data) {
+        guard sessionStage == .awaitingRadioAvailability,
+              data[20] == 0x03,
+              data[21] == 0x00,
+              let settings else { return }
+
+        let busy = data.uint32LE(at: 96) != 0
+        if busy {
+            let computer = data.nullTerminatedString(in: 100..<116)
+            let detail = computer.isEmpty ? "another Icom network client" : computer
+            fail("\(settings.model.rawValue) is currently in use by \(detail). Disconnect that session and try again.", generation: generation)
+            return
+        }
+
+        let advertisedIdentity = Data(data[32..<48])
+        let advertisedName = data.nullTerminatedString(in: 64..<96)
+        if var capability = selectedCapability {
+            // The availability broadcast is authoritative for the currently
+            // selectable radio. Preserve the capability's CI-V/TX metadata.
+            capability.identity = advertisedIdentity
+            if !advertisedName.isEmpty { capability.name = advertisedName }
+            selectedCapability = capability
+        } else {
+            selectedCapability = RadioCapability(
+                identity: advertisedIdentity,
+                name: advertisedName.isEmpty ? settings.model.rawValue : advertisedName,
+                civAddress: settings.model.civAddress,
+                supportsTX: true
+            )
+        }
         requestSelectedRadioIfPossible()
     }
 
     private func requestSelectedRadioIfPossible() {
-        guard !streamRequested, let capability = selectedCapability, let settings else { return }
+        guard sessionStage == .awaitingRadioAvailability,
+              !streamRequested,
+              let capability = selectedCapability,
+              let settings else { return }
+        guard let authID, authID.count == 6 else {
+            fail("The radio accepted login without returning a valid Icom authentication identity.", generation: generation)
+            return
+        }
         do {
+            let id = generation
             let civ = try IcomUDPSocket(queue: queue) { [weak self] data in
                 guard let self else { return }
-                self.receive(data, on: .civ, generation: self.generation)
+                self.receive(data, on: .civ, generation: id)
             } onError: { [weak self] message in
                 guard let self else { return }
-                self.fail(message, generation: self.generation)
+                self.fail(message, generation: id)
             }
             let audio = try IcomUDPSocket(queue: queue) { [weak self] data in
                 guard let self else { return }
-                self.receive(data, on: .audio, generation: self.generation)
+                self.receive(data, on: .audio, generation: id)
             } onError: { [weak self] message in
                 guard let self else { return }
-                self.fail(message, generation: self.generation)
+                self.fail(message, generation: id)
             }
             civSocket = civ
             audioSocket = audio
@@ -549,8 +758,7 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
             packet[21] = 0x03
             packet.writeUInt16BE(authSequence, at: 22)
             authSequence &+= 1
-            packet.writeUInt16LE(tokenRequest, at: 26)
-            packet.writeUInt32LE(token, at: 28)
+            packet.replaceSubrange(26..<32, with: authID)
             packet.replaceSubrange(32..<48, with: capability.identity.prefix(16))
             packet.writeCString(capability.name, at: 64, maximum: 32)
             packet.writeBytes(Self.obfuscated(settings.username), at: 96, maximum: 16)
@@ -562,9 +770,10 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
             packet.writeUInt32BE(capability.supportsTX ? 48_000 : 0, at: 120)
             packet.writeUInt32BE(UInt32(civ.localPort), at: 124)
             packet.writeUInt32BE(UInt32(audio.localPort), at: 128)
-            packet.writeUInt32BE(120, at: 132)
+            packet.writeUInt32BE(150, at: 132)
             packet[136] = 1
             streamRequested = true
+            transition(to: .awaitingStreamReply)
             sendTracked(packet, on: .control)
             publish(state: .openingStreams, message: "Opening \(capability.name) CI-V and audio...")
         } catch {
@@ -577,21 +786,27 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
         do {
             try civSocket.connect(host: settings.host, port: civPort)
             try audioSocket.connect(host: settings.host, port: audioPort)
+            transition(to: .openingDataChannels)
             sendControl(type: 0x03, tracked: false, sequence: 0, on: .civ)
             sendControl(type: 0x03, tracked: false, sequence: 0, on: .audio)
+            noteHandshakeSend()
         } catch {
             fail("Unable to open Icom CI-V/audio channels: \(error.localizedDescription)", generation: generation)
         }
     }
 
     private func publishConnectedIfReady() {
-        guard civReady, audioReady else { return }
+        guard sessionStage == .openingDataChannels, civReady, audioReady else { return }
+        transition(to: .connected)
         let name = selectedCapability?.name.isEmpty == false ? selectedCapability?.name ?? "Icom" : settings?.model.rawValue ?? "Icom"
+        let id = generation
         DispatchQueue.main.async {
+            guard self.publishedGeneration == id else { return }
             self.radioName = name
             self.state = .connected
             self.lastMessage = "\(name) LAN, CI-V, RX audio, and TX audio are ready"
         }
+        startTokenRenewal(generation: generation)
         sendCIV(command: [0x03])
         sendCIV(command: [0x04])
     }
@@ -599,6 +814,7 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
     private func sendLogin() {
         guard let settings else { return }
         loginSent = true
+        loginAttempts = 0
         tokenRequest = UInt16.random(in: 1...UInt16.max)
         var packet = basePacket(size: 128, on: .control)
         packet.writeUInt32BE(112, at: 16)
@@ -610,19 +826,37 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
         packet.writeBytes(Self.obfuscated(settings.username), at: 64, maximum: 16)
         packet.writeBytes(Self.obfuscated(password), at: 80, maximum: 16)
         packet.writeCString(settings.clientName.isEmpty ? "YAAM" : settings.clientName, at: 96, maximum: 16)
+        pendingLoginPacket = packet
+        transition(to: .awaitingLogin)
+        sendPendingLogin()
+    }
+
+    private func sendPendingLogin() {
+        guard sessionStage == .awaitingLogin,
+              loginAttempts < Self.maximumLoginAttempts,
+              let packet = pendingLoginPacket,
+              let settings else { return }
+        loginAttempts += 1
         sendTracked(packet, on: .control)
-        publish(state: .authenticating, message: "Signing in to \(settings.model.rawValue)...")
+        noteHandshakeSend()
+        publish(
+            state: .authenticating,
+            message: "Signing in to \(settings.model.rawValue) (attempt \(loginAttempts)/\(Self.maximumLoginAttempts))..."
+        )
     }
 
     private func sendToken(requestType: UInt8) {
+        guard let authID, authID.count == 6 else {
+            fail("Icom session token could not be sent because its authentication identity is missing.", generation: generation)
+            return
+        }
         var packet = basePacket(size: 64, on: .control)
         packet.writeUInt32BE(48, at: 16)
         packet[20] = 0x01
         packet[21] = requestType
         packet.writeUInt16BE(authSequence, at: 22)
         authSequence &+= 1
-        packet.writeUInt16LE(tokenRequest, at: 26)
-        packet.writeUInt32LE(token, at: 28)
+        packet.replaceSubrange(26..<32, with: authID)
         packet.writeUInt16BE(0x0798, at: 36)
         sendTracked(packet, on: .control)
     }
@@ -883,7 +1117,9 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
     }
 
     private func publish(state newState: IcomNetworkConnectionState, message: String) {
+        let id = generation
         DispatchQueue.main.async {
+            guard self.publishedGeneration == id else { return }
             self.state = newState
             self.lastMessage = message
         }
@@ -891,16 +1127,55 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
 
     private func fail(_ message: String, generation id: UUID) {
         guard generation == id, !isStopping else { return }
+        let detailedMessage = "\(message) \(connectionDiagnostics())"
+        isStopping = true
+        releaseSessionIfNeeded()
         stopNetworkState()
+        isStopping = false
         DispatchQueue.main.async {
             guard self.publishedGeneration == id else { return }
             self.pttWatchdog?.cancel()
             self.pttWatchdog = nil
-            self.state = .failed(message)
-            self.lastMessage = message
+            self.state = .failed(detailedMessage)
+            self.lastMessage = detailedMessage
             self.isTransmitting = false
             self.transmitArmed = false
         }
+    }
+
+    private func connectionDiagnostics() -> String {
+        var details = ["Stage: \(sessionStage.diagnosticName)"]
+        if let controlSocket {
+            let localAddress = controlSocket.localAddress.isEmpty ? "unknown" : controlSocket.localAddress
+            details.append("local UDP \(localAddress):\(controlSocket.localPort)")
+            if let remoteAddress = settings?.host,
+               Self.usesDifferentIPv4Subnet(localAddress, remoteAddress) {
+                details.append("local and radio addresses are on different /24 subnets")
+            }
+        }
+        if loginAttempts > 0 { details.append("login attempts \(loginAttempts)") }
+        if let lastControlPacketType {
+            details.append(String(format: "last reply type 0x%04X", lastControlPacketType))
+        }
+        if !controlPacketCounts.isEmpty {
+            let summary = controlPacketCounts
+                .sorted { $0.key < $1.key }
+                .map { "\($0.key)B x\($0.value)" }
+                .joined(separator: ", ")
+            details.append("replies \(summary)")
+        } else {
+            details.append("no UDP reply")
+        }
+        return "[\(details.joined(separator: "; "))]"
+    }
+
+    private func releaseSessionIfNeeded() {
+        guard controlSocket != nil,
+              controlRemoteID != 0,
+              tokenSent,
+              token != 0,
+              authID?.count == 6 else { return }
+        sendToken(requestType: 0x01)
     }
 
     private func stopNetworkState() {
@@ -919,9 +1194,9 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
         controlRemoteID = 0
         civRemoteID = 0
         audioRemoteID = 0
-        controlSequence = 0
-        civSequence = 0
-        audioSequence = 0
+        controlSequence = 1
+        civSequence = 1
+        audioSequence = 1
         controlPingSequence = 0
         civPingSequence = 0
         audioPingSequence = 0
@@ -930,12 +1205,25 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
         audioTransmitCache = TransmitPacketCache()
         civDataSequence = 0
         audioDataSequence = 0
-        authSequence = 0
+        authSequence = 0x30
+        tokenRequest = 0
+        token = 0
+        authID = nil
+        pendingLoginPacket = nil
+        loginAttempts = 0
         selectedCapability = nil
         loginSent = false
+        tokenSent = false
         streamRequested = false
         civReady = false
         audioReady = false
+        sessionStage = .idle
+        stageStartedAt = .distantPast
+        lastHandshakeSendAt = .distantPast
+        handshakeAttempts = 0
+        sessionTicks = 0
+        controlPacketCounts = [:]
+        lastControlPacketType = nil
         password = ""
     }
 
@@ -965,6 +1253,7 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
     static func protocolSelfTest() -> Bool {
         civCodecSelfTest()
             && credentialBoundsSelfTest()
+            && authenticationPacketLayoutSelfTest()
             && udpTransportSelfTest()
     }
 
@@ -977,6 +1266,36 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
         let boundedCredential = limitedUTF8("0123456789abcde\u{00E9}", maximumBytes: 16)
         return boundedCredential.utf8.count <= 16
             && !boundedCredential.isEmpty
+    }
+
+    static func authenticationPacketLayoutSelfTest() -> Bool {
+        var login = Data(repeating: 0, count: 128)
+        login.writeUInt32LE(128, at: 0)
+        login.writeUInt32BE(112, at: 16)
+        login[20] = 0x01
+        login[21] = 0x00
+        login.writeUInt16BE(0x0030, at: 22)
+        login.writeUInt16LE(0x1234, at: 26)
+        login.writeBytes(obfuscated("A"), at: 64, maximum: 16)
+
+        var tokenPacket = Data(repeating: 0, count: 64)
+        tokenPacket.writeUInt32LE(64, at: 0)
+        tokenPacket.writeUInt32BE(48, at: 16)
+        tokenPacket[20] = 0x01
+        tokenPacket[21] = 0x02
+        tokenPacket.writeUInt16BE(0x0031, at: 22)
+        tokenPacket.replaceSubrange(26..<32, with: Data([0x34, 0x12, 0x78, 0x56, 0x34, 0x12]))
+        tokenPacket.writeUInt16BE(0x0798, at: 36)
+
+        return Array(login[0..<4]) == [0x80, 0x00, 0x00, 0x00]
+            && Array(login[16..<20]) == [0x00, 0x00, 0x00, 0x70]
+            && Array(login[20..<24]) == [0x01, 0x00, 0x00, 0x30]
+            && Array(login[26..<28]) == [0x34, 0x12]
+            && login[64] == obfuscated("A")[0]
+            && Array(tokenPacket[0..<4]) == [0x40, 0x00, 0x00, 0x00]
+            && Array(tokenPacket[16..<24]) == [0x00, 0x00, 0x00, 0x30, 0x01, 0x02, 0x00, 0x31]
+            && Array(tokenPacket[26..<32]) == [0x34, 0x12, 0x78, 0x56, 0x34, 0x12]
+            && Array(tokenPacket[36..<38]) == [0x07, 0x98]
     }
 
     /// Exercises the connected-UDP write path against a closed local endpoint.
@@ -1016,6 +1335,17 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
         return result
     }
 
+    private static func usesDifferentIPv4Subnet(_ local: String, _ remote: String) -> Bool {
+        func octets(_ value: String) -> [UInt8]? {
+            let parts = value.split(separator: ".", omittingEmptySubsequences: false)
+            guard parts.count == 4 else { return nil }
+            let values = parts.compactMap { UInt8($0) }
+            return values.count == 4 ? values : nil
+        }
+        guard let localOctets = octets(local), let remoteOctets = octets(remote) else { return false }
+        return localOctets.prefix(3) != remoteOctets.prefix(3)
+    }
+
     private static func modeName(_ value: UInt8) -> String {
         switch value {
         case 0x00: return "LSB"
@@ -1053,6 +1383,7 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
 nonisolated private final class IcomUDPSocket: @unchecked Sendable {
     let localPort: UInt16
     private(set) var clientID: UInt32 = 0
+    private(set) var localAddress = ""
 
     private let queue: DispatchQueue
     private let onData: @Sendable (Data) -> Void
@@ -1149,6 +1480,16 @@ nonisolated private final class IcomUDPSocket: @unchecked Sendable {
         clientID = (((addressValue >> 8) & 0xFF) << 24)
             | ((addressValue & 0xFF) << 16)
             | UInt32(localPort)
+        var localAddressValue = local.sin_addr
+        var localAddressBuffer = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
+        let renderedAddress = withUnsafePointer(to: &localAddressValue) { addressPointer in
+            localAddressBuffer.withUnsafeMutableBufferPointer { bufferPointer in
+                inet_ntop(AF_INET, addressPointer, bufferPointer.baseAddress, socklen_t(INET_ADDRSTRLEN))
+            }
+        }
+        if renderedAddress != nil {
+            localAddress = String(cString: localAddressBuffer)
+        }
 
         if source == nil {
             let fileDescriptor = descriptor
