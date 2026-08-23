@@ -13,6 +13,12 @@ struct CountryNameNormalizerRegression {
             "Bosnia-Herzegovin", "Bosnia and Herzegovin"
         ])
         assertAliases("South Africa", ["South Africa", "Republic of South Africa"])
+        assertAliases("Mount Athos", ["Mount Athos", "Mt Athos", "Mt. Athos"])
+        assertAliases("Rodrigues Island", [
+            "Rodrigues Island", "Rodrigues Is.", "Rodriguez Island",
+            "Rodrigez Is.", "Rodrigez Island"
+        ])
+        assertAliases("Balearic Islands", ["Balearic Islands", "Balearic Is.", "Balearic Island"])
         assertAliases("South Korea", ["Republic Of Korea", "Korea, Republic of", "ROK"])
         assertAliases("Slovakia", ["Slovak Republic", "SLOVAKIA"])
         assertAliases("Vietnam", ["Viet Nam", "VIETNAM"])
@@ -23,6 +29,8 @@ struct CountryNameNormalizerRegression {
 
         precondition(canonicalCountryName("Crete") != canonicalCountryName("Greece"))
         precondition(canonicalCountryName("European Russia") != canonicalCountryName("Asiatic Russia"))
+        precondition(canonicalCountryName("Russia") != canonicalCountryName("European Russia"))
+        precondition(canonicalCountryName("Russia") != canonicalCountryName("Asiatic Russia"))
         precondition(canonicalCountryName("England") != canonicalCountryName("Scotland"))
         precondition(canonicalCountryName("Republic of the Congo") != canonicalCountryName("Democratic Republic of the Congo"))
 

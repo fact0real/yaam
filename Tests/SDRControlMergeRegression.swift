@@ -27,6 +27,10 @@ struct MergeSummary: Sendable {
 }
 
 enum ImportReviewAnalyzer {
+    private static let confirmationFields = Set([
+        "QSL_RCVD", "LOTW_QSL_RCVD", "QRZLOG_QSL_RCVD", "EQSL_QSL_RCVD"
+    ])
+
     static func mergeUpdate(
         incoming: [String: String],
         into existing: [String: String]
@@ -36,6 +40,9 @@ enum ImportReviewAnalyzer {
             let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
             if (merged[key] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                !trimmed.isEmpty {
+                merged[key] = value
+            } else if confirmationFields.contains(key),
+                      ["Y", "YES", "TRUE", "1", "C", "CONFIRMED", "RECEIVED"].contains(trimmed.uppercased()) {
                 merged[key] = value
             }
         }
@@ -93,6 +100,98 @@ enum SDRControlMergeRegression {
         precondition(distinctTimes.records.count == 2)
         precondition(distinctTimes.summary.added == 2)
 
+        var coarse = roundedSDRFields(time: "210500", frequency: "21.0766")
+        coarse["LOTW_QSL_RCVD"] = "Y"
+        coarse["LOTW_QSLRDATE"] = "20260823"
+        var precise = roundedSDRFields(time: "210514", frequency: "21.076626")
+        precise["LOTW_QSL_RCVD"] = "N"
+        precise["GRIDSQUARE"] = "PM95"
+
+        let roundedPair = SDRControlMergeEngine.merge(
+            localRecords: [],
+            incomingFields: [coarse, precise],
+            allowRoundedSDRMatches: true
+        )
+        precondition(roundedPair.records.count == 1)
+        precondition(roundedPair.summary.added == 1)
+        precondition(roundedPair.summary.updated == 1)
+        precondition(roundedPair.records[0]["TIME_ON"] == "210514")
+        precondition(roundedPair.records[0]["FREQ"] == "21.076626")
+        precondition(roundedPair.records[0]["LOTW_QSL_RCVD"] == "Y")
+        precondition(roundedPair.records[0]["LOTW_QSLRDATE"] == "20260823")
+        precondition(roundedPair.records[0]["GRIDSQUARE"] == "PM95")
+
+        let reverseRoundedPair = SDRControlMergeEngine.merge(
+            localRecords: [],
+            incomingFields: [precise, coarse],
+            allowRoundedSDRMatches: true
+        )
+        precondition(reverseRoundedPair.records.count == 1)
+        precondition(reverseRoundedPair.records[0]["TIME_ON"] == "210514")
+        precondition(reverseRoundedPair.records[0]["FREQ"] == "21.076626")
+        precondition(reverseRoundedPair.records[0]["LOTW_QSL_RCVD"] == "Y")
+
+        let existingRoundedPairs = [
+            ("JA3JKK", "210500", "210514"),
+            ("JF2DJV", "210200", "210214"),
+            ("JA0UUA", "210000", "210044"),
+            ("JR8AMF", "205600", "205644")
+        ].flatMap { callsign, roundedTime, preciseTime in
+            [
+                QSORecordModel(
+                    index: 0,
+                    fields: roundedSDRFields(
+                        call: callsign,
+                        time: roundedTime,
+                        frequency: "21.0766"
+                    )
+                ),
+                QSORecordModel(
+                    index: 0,
+                    fields: roundedSDRFields(
+                        call: callsign,
+                        time: preciseTime,
+                        frequency: "21.076626"
+                    )
+                )
+            ]
+        }
+        let cleanedExistingPairs = SDRControlMergeEngine.merge(
+            localRecords: existingRoundedPairs,
+            incomingFields: [],
+            allowRoundedSDRMatches: true
+        )
+        precondition(cleanedExistingPairs.records.count == 4)
+        precondition(cleanedExistingPairs.removedDuplicates == 4)
+        precondition(cleanedExistingPairs.records.allSatisfy { record in
+            record["TIME_ON"].hasSuffix("14") || record["TIME_ON"].hasSuffix("44")
+        })
+        precondition(cleanedExistingPairs.records.allSatisfy { $0["FREQ"] == "21.076626" })
+
+        let exactOnlyPair = SDRControlMergeEngine.merge(
+            localRecords: [],
+            incomingFields: [coarse, precise]
+        )
+        precondition(exactOnlyPair.records.count == 2)
+
+        var anotherRealQSO = precise
+        anotherRealQSO["TIME_ON"] = "210544"
+        let twoRealQSOs = SDRControlMergeEngine.merge(
+            localRecords: [],
+            incomingFields: [precise, anotherRealQSO],
+            allowRoundedSDRMatches: true
+        )
+        precondition(twoRealQSOs.records.count == 2)
+
+        var nextMinute = coarse
+        nextMinute["TIME_ON"] = "210600"
+        let differentMinutes = SDRControlMergeEngine.merge(
+            localRecords: [],
+            incomingFields: [precise, nextMinute],
+            allowRoundedSDRMatches: true
+        )
+        precondition(differentMinutes.records.count == 2)
+
         print("SDR-Control duplicate merge regression passed.")
     }
 
@@ -112,6 +211,25 @@ enum SDRControlMergeRegression {
             "NAME": name,
             "EMAIL": email,
             "LOTW_QSL_RCVD": confirmed ? "Y" : "N"
+        ]
+    }
+
+    private static func roundedSDRFields(
+        call: String = "JA3JKK",
+        time: String,
+        frequency: String
+    ) -> [String: String] {
+        [
+            "CALL": call,
+            "QSO_DATE": "20260620",
+            "TIME_ON": time,
+            "BAND": "15M",
+            "MODE": "MFSK",
+            "SUBMODE": "FT8",
+            "FREQ": frequency,
+            "NAME": "Tsukasa Egami",
+            "RST_SENT": "-10",
+            "RST_RCVD": "-01"
         ]
     }
 }

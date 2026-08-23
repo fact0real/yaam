@@ -21,6 +21,13 @@ nonisolated enum CountryNameNormalizer {
             "Republic of Bosnia and Herzegovina"
         ]),
         ("South Africa", ["Republic of South Africa", "RSA"]),
+        ("Mount Athos", ["Mt Athos", "Mt. Athos"]),
+        ("Rodrigues Island", [
+            "Rodrigues Is.", "Rodrigues Is", "Rodrigues Isl.",
+            "Rodriguez Island", "Rodriguez Is.",
+            "Rodrigez Island", "Rodrigez Is.", "Rodrigez Is"
+        ]),
+        ("Balearic Islands", ["Balearic Is.", "Balearic Is", "Balearic Island"]),
         ("USA", [
             "United States", "United States of America", "U.S.A.", "U.S.",
             "US", "America"

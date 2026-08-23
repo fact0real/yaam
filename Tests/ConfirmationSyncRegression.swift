@@ -8,6 +8,7 @@ struct ConfirmationSyncRegression {
         testPercentEncodedQRZResponse()
         testThirtyMinuteOneToOneMatching()
         testReportedLoTWAndQRZConfirmationsRemainIndependent()
+        testPaperDirectRequiresExplicitProvenance()
         testIncrementalReplayWindow()
         testCheckpointInvalidationAfterLateImport()
         print("Confirmation sync regression tests passed.")
@@ -119,6 +120,70 @@ struct ConfirmationSyncRegression {
         precondition(result.records[1]["LOTW_QSL_RCVD"].isEmpty)
         precondition(result.records[1]["QRZLOG_QSL_RCVD"] == "Y")
         precondition(result.records[1]["QSL_RCVD"] == "Y")
+    }
+
+    private static func testPaperDirectRequiresExplicitProvenance() {
+        let lotwOnly = QSORecordModel(
+            index: 1,
+            fields: fields(
+                call: "SM6CWP",
+                time: "113714",
+                mode: "FT8",
+                extra: ["QSL_RCVD": "Y", "LOTW_QSL_RCVD": "Y"]
+            )
+        )
+        let qrzOnly = QSORecordModel(
+            index: 2,
+            fields: fields(
+                call: "SP5IDR",
+                time: "111014",
+                mode: "FT8",
+                extra: ["QSL_RCVD": "Y", "QRZLOG_QSL_RCVD": "Y"]
+            )
+        )
+        let direct = QSORecordModel(
+            index: 3,
+            fields: fields(
+                call: "W1AW",
+                time: "120000",
+                mode: "SSB",
+                extra: ["QSL_RCVD": "Y", "QSL_RCVD_VIA": "D"]
+            )
+        )
+        let bureau = QSORecordModel(
+            index: 4,
+            fields: fields(
+                call: "K1JT",
+                time: "121500",
+                mode: "FT8",
+                extra: ["QSL_RCVD": "Y", "QSL_RCVD_VIA": "B"]
+            )
+        )
+        let explicitPaper = QSORecordModel(
+            index: 5,
+            fields: fields(
+                call: "N0CALL",
+                time: "123000",
+                mode: "CW",
+                extra: ["QSL_RCVD": "Y", "APP_YAAM_QSL_SOURCE": "Paper card"]
+            )
+        )
+        let unconfirmedDirect = QSORecordModel(
+            index: 6,
+            fields: fields(
+                call: "N1CALL",
+                time: "124500",
+                mode: "CW",
+                extra: ["QSL_RCVD": "N", "QSL_RCVD_VIA": "D"]
+            )
+        )
+
+        precondition(!StatisticsConfirmationSourceClassifier.isPaperOrDirectConfirmed(lotwOnly))
+        precondition(!StatisticsConfirmationSourceClassifier.isPaperOrDirectConfirmed(qrzOnly))
+        precondition(StatisticsConfirmationSourceClassifier.isPaperOrDirectConfirmed(direct))
+        precondition(StatisticsConfirmationSourceClassifier.isPaperOrDirectConfirmed(bureau))
+        precondition(StatisticsConfirmationSourceClassifier.isPaperOrDirectConfirmed(explicitPaper))
+        precondition(!StatisticsConfirmationSourceClassifier.isPaperOrDirectConfirmed(unconfirmedDirect))
     }
 
     private static func testIncrementalReplayWindow() {

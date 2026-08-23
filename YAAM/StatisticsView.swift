@@ -1014,6 +1014,37 @@ nonisolated enum StatisticsConfirmationProvider: String, CaseIterable, Identifia
     }
 }
 
+nonisolated enum StatisticsConfirmationSourceClassifier {
+    static func isPaperOrDirectConfirmed(_ record: QSORecordModel) -> Bool {
+        guard isAffirmative(record["QSL_RCVD"]) else { return false }
+
+        let receivedVia = normalized(record["QSL_RCVD_VIA"])
+        if ["B", "D", "BUREAU", "BURO", "DIRECT"].contains(receivedVia) {
+            return true
+        }
+
+        let explicitSources = [
+            record["APP_YAAM_QSL_SOURCE"],
+            record["APP_YAAM_CONFIRMATION_SOURCE"],
+            record["APP_QSL_SOURCE"]
+        ].map(normalized)
+        let paperLabels = ["PAPER", "DIRECT", "CARD", "BUREAU", "BURO"]
+        return explicitSources.contains { source in
+            paperLabels.contains { source.contains($0) }
+        }
+    }
+
+    private static func normalized(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+            .replacingOccurrences(of: "_", with: " ")
+    }
+
+    private static func isAffirmative(_ rawValue: String) -> Bool {
+        ["Y", "V", "C", "CONFIRMED", "VERIFIED"].contains(normalized(rawValue))
+    }
+}
+
 nonisolated struct StatisticsConfirmationProviderStat: Identifiable, Sendable {
     var id: String { provider.id }
     let provider: StatisticsConfirmationProvider
@@ -1766,12 +1797,17 @@ nonisolated struct StatisticsSnapshot: Sendable {
             case .eqsl:
                 fields = ["EQSL_QSL_RCVD", "APP_EQSL_QSL_RCVD"]
             case .direct:
-                fields = ["QSL_RCVD"]
+                fields = []
             }
 
             let count = records.filter { record in
-                fields.contains { field in
-                    isAffirmative(record[field])
+                switch provider {
+                case .direct:
+                    return StatisticsConfirmationSourceClassifier.isPaperOrDirectConfirmed(record)
+                default:
+                    return fields.contains { field in
+                        isAffirmative(record[field])
+                    }
                 }
             }.count
             let percentage = total == 0 ? 0 : Double(count) / Double(total) * 100

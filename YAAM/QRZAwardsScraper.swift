@@ -406,7 +406,13 @@ final class QRZAwardsScraper: NSObject, WKNavigationDelegate {
         }
     }
 
-    private func waitForAwardsDOM(attempt: Int, lastAction: String) {
+    private func waitForAwardsDOM(
+        attempt: Int,
+        lastAction: String,
+        lastAwardHeaders: Int = -1,
+        lastAwardedRows: Int = -1,
+        stablePasses: Int = 0
+    ) {
         guard continuation != nil, stage == .loadingAwards else { return }
 
         let script = """
@@ -440,8 +446,14 @@ final class QRZAwardsScraper: NSObject, WKNavigationDelegate {
             let payload = result as? [String: Any] ?? [:]
             let isReady = payload["ready"] as? Bool ?? false
             let loginVisible = payload["loginVisible"] as? Bool ?? false
+            let awardedRows = (payload["awardedRows"] as? NSNumber)?.intValue ?? 0
+            let awardHeaders = (payload["awardHeaders"] as? NSNumber)?.intValue ?? 0
+            let countsAreStable = awardHeaders > 0
+                && awardHeaders == lastAwardHeaders
+                && awardedRows == lastAwardedRows
+            let nextStablePasses = countsAreStable ? stablePasses + 1 : 0
 
-            if isReady {
+            if isReady, nextStablePasses >= 3 {
                 self.startAwardAnalysis()
                 return
             }
@@ -452,9 +464,7 @@ final class QRZAwardsScraper: NSObject, WKNavigationDelegate {
                 return
             }
 
-            if attempt >= 60 {
-                let awardedRows = (payload["awardedRows"] as? NSNumber)?.intValue ?? 0
-                let awardHeaders = (payload["awardHeaders"] as? NSNumber)?.intValue ?? 0
+            if attempt >= 90 {
                 let url = payload["url"] as? String ?? ""
                 self.finish(QRZAwardsFetchResult(
                     awards: [],
@@ -464,7 +474,13 @@ final class QRZAwardsScraper: NSObject, WKNavigationDelegate {
             }
 
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                self.waitForAwardsDOM(attempt: attempt + 1, lastAction: lastAction)
+                self.waitForAwardsDOM(
+                    attempt: attempt + 1,
+                    lastAction: lastAction,
+                    lastAwardHeaders: awardHeaders,
+                    lastAwardedRows: awardedRows,
+                    stablePasses: nextStablePasses
+                )
             }
         }
     }
@@ -794,40 +810,48 @@ final class QRZAwardsScraper: NSObject, WKNavigationDelegate {
             sbook: sbook,
             incmode: descriptor.mode
         });
-        var controller = new AbortController();
-        var timer = setTimeout(function() { controller.abort(); }, 25000);
-        try {
-            var response = await fetch(endpoint, {
-                method: "POST",
-                credentials: "include",
-                headers: {
-                    "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-                    "X-Requested-With": "XMLHttpRequest"
-                },
-                body: body.toString(),
-                signal: controller.signal
-            });
-            if (!response.ok) { throw new Error("HTTP " + response.status); }
-            var html = await response.text();
-            return parseAnalysis(descriptor, html, issuedByID[descriptor.id]);
-        } catch (error) {
-            failed += 1;
-            var issued = issuedByID[descriptor.id];
-            return {
-                awardID: descriptor.id,
-                title: descriptor.title,
-                detail: issued ? issued.info : "QRZ did not return analysis for this award.",
-                percent: issued ? 100 : 0,
-                progressAvailable: !!issued,
-                status: issued ? "Award received" : "Progress unavailable",
-                earned: !!issued,
-                achievement: issued ? "Award received" : "Not reported",
-                awardType: "Mode: " + descriptor.mode,
-                ribbonURL: descriptor.ribbonURL
-            };
-        } finally {
-            clearTimeout(timer);
+        for (var attempt = 0; attempt < 3; attempt += 1) {
+            var controller = new AbortController();
+            var timer = setTimeout(function() { controller.abort(); }, 25000);
+            try {
+                var response = await fetch(endpoint, {
+                    method: "POST",
+                    credentials: "include",
+                    headers: {
+                        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+                        "X-Requested-With": "XMLHttpRequest"
+                    },
+                    body: body.toString(),
+                    signal: controller.signal
+                });
+                if (!response.ok) { throw new Error("HTTP " + response.status); }
+                var html = await response.text();
+                return parseAnalysis(descriptor, html, issuedByID[descriptor.id]);
+            } catch (error) {
+                if (attempt < 2) {
+                    await new Promise(function(resolve) {
+                        setTimeout(resolve, 500 * (attempt + 1));
+                    });
+                }
+            } finally {
+                clearTimeout(timer);
+            }
         }
+
+        failed += 1;
+        var issued = issuedByID[descriptor.id];
+        return {
+            awardID: descriptor.id,
+            title: descriptor.title,
+            detail: issued ? issued.info : "QRZ did not return analysis for this award.",
+            percent: issued ? 100 : 0,
+            progressAvailable: !!issued,
+            status: issued ? "Award received" : "Progress unavailable",
+            earned: !!issued,
+            achievement: issued ? "Award received" : "Not reported",
+            awardType: "Mode: " + descriptor.mode,
+            ribbonURL: descriptor.ribbonURL
+        };
     }
 
     async function worker() {
@@ -839,7 +863,7 @@ final class QRZAwardsScraper: NSObject, WKNavigationDelegate {
         }
     }
 
-    var workerCount = Math.min(4, descriptors.length);
+    var workerCount = Math.min(3, descriptors.length);
     await Promise.all(Array.from({ length: workerCount }, function() { return worker(); }));
 
     Object.keys(issuedByID).forEach(function(id) {

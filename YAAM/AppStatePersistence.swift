@@ -520,7 +520,7 @@ extension AppState {
     }
 
     private func migrateCountryNamesIfNeeded(using database: LogbookDatabase) throws {
-        let migrationKey = "migration.country-name-normalization.v1"
+        let migrationKey = "migration.country-name-normalization.v2"
         guard try database.metadata(for: migrationKey) != "1" else { return }
 
         var normalizedWorkspaces: [(profileID: UUID, headers: [String], records: [PersistedQSO])] = []
@@ -568,10 +568,10 @@ extension AppState {
         try database.setMetadata("1", for: migrationKey)
         try database.recordAudit(
             action: "country-names-normalized",
-            detail: "Normalized (changedQSOCount) QSO country value(s) and (normalizedProfiles.count) station profile(s).",
+            detail: "Normalized \(changedQSOCount) QSO country value(s) and \(normalizedProfiles.count) station profile(s).",
             profileID: nil
         )
-        appendLog("Country names normalized safely in (changedQSOCount) saved QSO(s). A restore point was created first.")
+        appendLog("Country names normalized safely in \(changedQSOCount) saved QSO(s). A restore point was created first.")
     }
 
     private func recoverLegacyNearDuplicateCleanupIfNeeded(using database: LogbookDatabase) -> Int {

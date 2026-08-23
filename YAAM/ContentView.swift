@@ -251,36 +251,33 @@ struct ContentView: View {
                         Spacer()
                     }
                     
-                    // Row 5: Terminal Console Log
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack {
-                            Label("Console & Activity Log", systemImage: "terminal.fill")
-                                .font(.caption)
-                                .fontWeight(.semibold)
-                                .foregroundColor(.secondary)
-                            
-                            Spacer()
-                            
-                            Circle()
-                                .fill(conversionStatusColor)
-                                .frame(width: 7, height: 7)
-                            
-                            Text(conversionStatusTitle)
-                                .font(.caption2)
-                                .foregroundColor(.secondary)
+                    // Row 5: Activity status and separate console window
+                    HStack(spacing: 10) {
+                        Label("Activity Console", systemImage: "terminal.fill")
+                            .font(.callout.weight(.semibold))
+
+                        Text("Detailed import, sync, and enrichment logs open in a separate window.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+
+                        Spacer()
+
+                        Circle()
+                            .fill(conversionStatusColor)
+                            .frame(width: 7, height: 7)
+
+                        Text(conversionStatusTitle)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+
+                        Button {
+                            openWindow(id: YAAMWindowID.console)
+                        } label: {
+                            Label("Open Console", systemImage: "rectangle.on.rectangle")
                         }
-                        .padding(.horizontal, 4)
-                        
-                        TextEditor(text: .constant(appState.logText))
-                            .font(.system(.body, design: .monospaced))
-                            .frame(minHeight: 120, maxHeight: .infinity)
-                            .background(Color(NSColor.textBackgroundColor))
-                            .cornerRadius(6)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .stroke(Color.gray.opacity(0.35), lineWidth: 1)
-                            )
                     }
+                    .padding(.horizontal, 4)
                 }
                 .padding(16)
             } else if appState.selectedTab == 2 {
@@ -292,6 +289,7 @@ struct ContentView: View {
                 QRZAwardsView()
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .sheet(isPresented: $appState.showAboutSheet) {
             AboutView()
                 .environmentObject(appState)

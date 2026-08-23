@@ -2258,6 +2258,12 @@ class AppState: NSObject, ObservableObject {
             }
         }
     }
+
+    func clearActivityLog() {
+        DispatchQueue.main.async {
+            self.logText = "YAAM activity log cleared.\n"
+        }
+    }
     
     func saveQRZSessionCookies(_ cookies: [HTTPCookie]) {
         let cookieHeader = QRZSessionStore.save(cookies: cookies)
@@ -3266,10 +3272,12 @@ class AppState: NSObject, ObservableObject {
 
             let startingRevision = qsoRecordsRevision
             let localRecords = qsoRecords
+            let allowRoundedSDRMatches = sourceName == "SDR-Control"
             let result = await Task.detached(priority: .userInitiated) {
                 SDRControlMergeEngine.merge(
                     localRecords: localRecords,
-                    incomingFields: incomingFields
+                    incomingFields: incomingFields,
+                    allowRoundedSDRMatches: allowRoundedSDRMatches
                 )
             }.value
 
@@ -3391,7 +3399,7 @@ class AppState: NSObject, ObservableObject {
                             let summary = mergeResult.summary
                             if mergeResult.removedDuplicates > 0 {
                                 guard self.createDestructiveCheckpointIfNeeded(
-                                    reason: "Before consolidating exact duplicate QSOs during SDR-Control import"
+                                    reason: "Before consolidating duplicate QSOs during SDR-Control import"
                                 ) else {
                                     throw NSError(
                                         domain: "YAAM.SDRControlImport",
@@ -3409,7 +3417,7 @@ class AppState: NSObject, ObservableObject {
                             self.isLoading = false
                             var details = "SDR-Control sync complete: \(summary.added) new QSOs added, \(summary.updated) existing QSOs enriched, \(summary.skipped) duplicates skipped"
                             if mergeResult.removedDuplicates > 0 {
-                                details += ", \(mergeResult.removedDuplicates) exact duplicate row(s) consolidated"
+                                details += ", \(mergeResult.removedDuplicates) duplicate SDR-Control row(s) consolidated"
                             }
                             if parsed.ignoredDeletedRecordCount > 0 {
                                 details += ", \(parsed.ignoredDeletedRecordCount) deleted entries ignored"

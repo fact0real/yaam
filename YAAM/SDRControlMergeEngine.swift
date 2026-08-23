@@ -17,30 +17,52 @@ nonisolated struct SDRControlMergeResult: Sendable {
 nonisolated enum SDRControlMergeEngine {
     static func merge(
         localRecords: [QSORecordModel],
-        incomingFields: [[String: String]]
+        incomingFields: [[String: String]],
+        allowRoundedSDRMatches: Bool = false
     ) -> SDRControlMergeResult {
         var records: [QSORecordModel] = []
         records.reserveCapacity(localRecords.count + incomingFields.count)
         var indexByUniqueKey: [String: Int] = [:]
         indexByUniqueKey.reserveCapacity(localRecords.count + incomingFields.count)
+        var indexesByRelaxedKey: [String: [Int]] = [:]
+        indexesByRelaxedKey.reserveCapacity(localRecords.count + incomingFields.count)
 
         var removedDuplicates = 0
         for record in localRecords {
-            let key = record.uniqueKey
+            let key = QSOIdentity.exactKey(fields: record.fields)
             guard !key.isEmpty else {
                 records.append(record)
                 continue
             }
 
-            if let existingIndex = indexByUniqueKey[key] {
+            if let existingIndex = duplicateIndex(
+                for: record.fields,
+                records: records,
+                indexByUniqueKey: indexByUniqueKey,
+                indexesByRelaxedKey: indexesByRelaxedKey,
+                allowRoundedSDRMatches: allowRoundedSDRMatches
+            ) {
                 records[existingIndex].fields = richestMergedFields(
                     records[existingIndex].fields,
-                    record.fields
+                    record.fields,
+                    preferSDRCanonical: allowRoundedSDRMatches
+                )
+                register(
+                    records[existingIndex].fields,
+                    at: existingIndex,
+                    indexByUniqueKey: &indexByUniqueKey,
+                    indexesByRelaxedKey: &indexesByRelaxedKey
                 )
                 removedDuplicates += 1
             } else {
-                indexByUniqueKey[key] = records.count
+                let index = records.count
                 records.append(record)
+                register(
+                    record.fields,
+                    at: index,
+                    indexByUniqueKey: &indexByUniqueKey,
+                    indexesByRelaxedKey: &indexesByRelaxedKey
+                )
             }
         }
 
@@ -50,27 +72,46 @@ nonisolated enum SDRControlMergeEngine {
 
         for fields in incomingFields {
             let incoming = QSORecordModel(index: records.count + 1, fields: fields)
-            let incomingKey = incoming.uniqueKey
+            let incomingKey = QSOIdentity.exactKey(fields: incoming.fields)
             guard !incomingKey.isEmpty else {
                 skipped += 1
                 continue
             }
-            if let existingIndex = indexByUniqueKey[incomingKey] {
+            if let existingIndex = duplicateIndex(
+                for: incoming.fields,
+                records: records,
+                indexByUniqueKey: indexByUniqueKey,
+                indexesByRelaxedKey: indexesByRelaxedKey,
+                allowRoundedSDRMatches: allowRoundedSDRMatches
+            ) {
                 let merged = richestMergedFields(
                     records[existingIndex].fields,
-                    incoming.fields
+                    incoming.fields,
+                    preferSDRCanonical: allowRoundedSDRMatches
                 )
                 if merged == records[existingIndex].fields {
                     skipped += 1
                 } else {
                     records[existingIndex].fields = merged
+                    register(
+                        merged,
+                        at: existingIndex,
+                        indexByUniqueKey: &indexByUniqueKey,
+                        indexesByRelaxedKey: &indexesByRelaxedKey
+                    )
                     updated += 1
                 }
                 continue
             }
 
-            indexByUniqueKey[incomingKey] = records.count
+            let index = records.count
             records.append(incoming)
+            register(
+                incoming.fields,
+                at: index,
+                indexByUniqueKey: &indexByUniqueKey,
+                indexesByRelaxedKey: &indexesByRelaxedKey
+            )
             added += 1
         }
 
@@ -89,12 +130,131 @@ nonisolated enum SDRControlMergeEngine {
     /// missing field from its duplicate. The caller retains the original row ID.
     private static func richestMergedFields(
         _ lhs: [String: String],
-        _ rhs: [String: String]
+        _ rhs: [String: String],
+        preferSDRCanonical: Bool
     ) -> [String: String] {
+        if preferSDRCanonical {
+            if prefersSDRIdentity(rhs, over: lhs) {
+                return ImportReviewAnalyzer.mergeUpdate(incoming: lhs, into: rhs)
+            }
+            return ImportReviewAnalyzer.mergeUpdate(incoming: rhs, into: lhs)
+        }
+
         if richnessScore(rhs) > richnessScore(lhs) {
             return ImportReviewAnalyzer.mergeUpdate(incoming: lhs, into: rhs)
         }
         return ImportReviewAnalyzer.mergeUpdate(incoming: rhs, into: lhs)
+    }
+
+    private static func duplicateIndex(
+        for fields: [String: String],
+        records: [QSORecordModel],
+        indexByUniqueKey: [String: Int],
+        indexesByRelaxedKey: [String: [Int]],
+        allowRoundedSDRMatches: Bool
+    ) -> Int? {
+        let exactKey = QSOIdentity.exactKey(fields: fields)
+        if let exactIndex = indexByUniqueKey[exactKey] {
+            return exactIndex
+        }
+        guard allowRoundedSDRMatches else { return nil }
+
+        let relaxedKey = QSOIdentity.relaxedKey(fields: fields)
+        guard !relaxedKey.isEmpty,
+              let candidates = indexesByRelaxedKey[relaxedKey] else {
+            return nil
+        }
+        return candidates.first { index in
+            records.indices.contains(index)
+                && isRoundedSDRDuplicate(records[index].fields, fields)
+        }
+    }
+
+    private static func register(
+        _ fields: [String: String],
+        at index: Int,
+        indexByUniqueKey: inout [String: Int],
+        indexesByRelaxedKey: inout [String: [Int]]
+    ) {
+        let exactKey = QSOIdentity.exactKey(fields: fields)
+        if !exactKey.isEmpty {
+            indexByUniqueKey[exactKey] = index
+        }
+
+        let relaxedKey = QSOIdentity.relaxedKey(fields: fields)
+        guard !relaxedKey.isEmpty else { return }
+        if !(indexesByRelaxedKey[relaxedKey] ?? []).contains(index) {
+            indexesByRelaxedKey[relaxedKey, default: []].append(index)
+        }
+    }
+
+    /// SDR-Control occasionally stores one rounded shadow row at `:00` and a
+    /// second, more precise row in the same minute. Only that narrow pattern is
+    /// accepted here so two genuine QSOs in a busy minute remain independent.
+    private static func isRoundedSDRDuplicate(
+        _ lhs: [String: String],
+        _ rhs: [String: String]
+    ) -> Bool {
+        guard QSOIdentity.relaxedKey(fields: lhs) == QSOIdentity.relaxedKey(fields: rhs),
+              let lhsTime = QSOIdentity.secondsFromMidnight(lhs),
+              let rhsTime = QSOIdentity.secondsFromMidnight(rhs),
+              lhsTime / 60 == rhsTime / 60 else {
+            return false
+        }
+
+        let lhsSecond = lhsTime % 60
+        let rhsSecond = rhsTime % 60
+        guard (lhsSecond == 0) != (rhsSecond == 0),
+              let lhsFrequency = frequencyMHz(lhs["FREQ"] ?? ""),
+              let rhsFrequency = frequencyMHz(rhs["FREQ"] ?? "") else {
+            return false
+        }
+        return abs(lhsFrequency - rhsFrequency) <= 0.001
+    }
+
+    private static func prefersSDRIdentity(
+        _ candidate: [String: String],
+        over current: [String: String]
+    ) -> Bool {
+        let candidateHasPreciseTime = hasNonZeroSeconds(candidate)
+        let currentHasPreciseTime = hasNonZeroSeconds(current)
+        if candidateHasPreciseTime != currentHasPreciseTime {
+            return candidateHasPreciseTime
+        }
+
+        let candidateFrequencyPrecision = frequencyDecimalPrecision(candidate["FREQ"] ?? "")
+        let currentFrequencyPrecision = frequencyDecimalPrecision(current["FREQ"] ?? "")
+        if candidateFrequencyPrecision != currentFrequencyPrecision {
+            return candidateFrequencyPrecision > currentFrequencyPrecision
+        }
+        return richnessScore(candidate) > richnessScore(current)
+    }
+
+    private static func hasNonZeroSeconds(_ fields: [String: String]) -> Bool {
+        guard let seconds = QSOIdentity.secondsFromMidnight(fields) else { return false }
+        return seconds % 60 != 0
+    }
+
+    private static func frequencyDecimalPrecision(_ rawValue: String) -> Int {
+        let normalized = rawValue.replacingOccurrences(of: ",", with: ".")
+        guard let decimal = normalized.firstIndex(of: ".") else { return 0 }
+        return normalized[normalized.index(after: decimal)...].prefix(while: \.isNumber).count
+    }
+
+    private static func frequencyMHz(_ rawValue: String) -> Double? {
+        let upper = rawValue.uppercased()
+        let numeric = rawValue
+            .replacingOccurrences(of: ",", with: ".")
+            .filter { $0.isNumber || $0 == "." }
+        guard var value = Double(numeric), value > 0 else { return nil }
+        if upper.contains("GHZ") {
+            value *= 1_000
+        } else if upper.contains("KHZ") {
+            value /= 1_000
+        } else if (upper.contains("HZ") && !upper.contains("MHZ")) || value >= 1_000_000 {
+            value /= 1_000_000
+        }
+        return value
     }
 
     private static func richnessScore(_ fields: [String: String]) -> Int {

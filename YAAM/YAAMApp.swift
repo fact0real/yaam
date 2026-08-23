@@ -9,6 +9,7 @@ import Combine
 
 enum YAAMWindowID {
     static let statistics = "statistics-window"
+    static let console = "activity-console-window"
     static let help = "help-window"
 }
 
@@ -64,6 +65,8 @@ struct YAAMApp: App {
 
                 Button("Log Statistics...") { openWindow(id: YAAMWindowID.statistics) }
                     .keyboardShortcut("t", modifiers: .command)
+
+                Button("Activity Console...") { openWindow(id: YAAMWindowID.console) }
                 
                 Button("Sync Confirmations (LoTW & QRZ)") { appState.syncConfirmations() }
                     .keyboardShortcut("r", modifiers: .command)
@@ -111,6 +114,21 @@ struct YAAMApp: App {
                 )
         }
         .defaultSize(width: 1180, height: 780)
+        .windowResizability(.contentMinSize)
+
+        Window("YAAM Activity Console", id: YAAMWindowID.console) {
+            ActivityConsoleView()
+                .environmentObject(appState)
+                .frame(
+                    minWidth: 720,
+                    idealWidth: 980,
+                    maxWidth: .infinity,
+                    minHeight: 420,
+                    idealHeight: 640,
+                    maxHeight: .infinity
+                )
+        }
+        .defaultSize(width: 980, height: 640)
         .windowResizability(.contentMinSize)
 
         // MARK: - Help Secondary Window Scene
