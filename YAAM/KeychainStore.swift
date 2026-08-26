@@ -16,6 +16,8 @@ enum SecureCredential: String, CaseIterable {
     case eqslPassword = "eqsl.password"
     case clubLogPassword = "clublog.password"
     case clubLogAPIKey = "clublog.api-key"
+    case clubLogCookieHeader = "clublog.cookies.header"
+    case clubLogCookieArchive = "clublog.cookies.archive"
     case mobileAPIToken = "mobile-api.token"
     case cloudSyncBookmark = "cloud-sync.bookmark"
     case qrzRankPassword = "qrz-rank.password"

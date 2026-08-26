@@ -307,7 +307,7 @@ extension AppState {
         }
     }
 
-    private func qslServiceCredentials(for providers: Set<QSLProvider>) -> QSLServiceCredentials {
+    func qslServiceCredentials(for providers: Set<QSLProvider>) -> QSLServiceCredentials {
         let defaults = UserDefaults.standard
         return QSLServiceCredentials(
             qrzAPIKey: providers.contains(.qrz) ? activeQRZAPIKey : "",

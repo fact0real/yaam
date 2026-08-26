@@ -61,6 +61,11 @@ struct YAAMApp: App {
                     appState.operatorDeskSection = 1
                 }
 
+                Button("Club Log Personal Spots") {
+                    appState.selectedTab = 5
+                    appState.operatorDeskSection = 10
+                }
+
                 Divider()
 
                 Button("Log Statistics...") { openWindow(id: YAAMWindowID.statistics) }

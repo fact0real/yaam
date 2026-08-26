@@ -291,6 +291,92 @@ enum QRZSessionStore {
     }
 }
 
+enum ClubLogSessionStore {
+    static func save(cookies: [HTTPCookie]) -> String {
+        let clubLogCookies = cookies.filter { $0.domain.contains("clublog.org") }
+        let cookieHeader = clubLogCookies
+            .map { "\($0.name)=\($0.value)" }
+            .joined(separator: "; ")
+        _ = CredentialVault.set(cookieHeader, for: .clubLogCookieHeader)
+
+        let storedCookies = clubLogCookies.map(QRZStoredCookie.init(cookie:))
+        if let data = try? JSONEncoder().encode(storedCookies) {
+            _ = CredentialVault.set(data, for: .clubLogCookieArchive)
+        }
+
+        return cookieHeader
+    }
+
+    static func savedCookieHeader(allowUserInteraction: Bool = true) -> String {
+        let structuredHeader = validStoredCookies(allowUserInteraction: allowUserInteraction)
+            .map { "\($0.name)=\($0.value)" }
+            .joined(separator: "; ")
+        if !structuredHeader.isEmpty {
+            return structuredHeader
+        }
+
+        return allowUserInteraction
+            ? CredentialVault.value(for: .clubLogCookieHeader)
+            : CredentialVault.valueIfAvailableWithoutPrompt(for: .clubLogCookieHeader)
+    }
+
+    static func hasSavedSession(allowUserInteraction: Bool = true) -> Bool {
+        !savedCookieHeader(allowUserInteraction: allowUserInteraction).isEmpty
+    }
+
+    static func restoreToWebKit(completion: (() -> Void)? = nil) {
+        let cookies = validStoredCookies().compactMap(\.httpCookie)
+        guard !cookies.isEmpty else {
+            completion?()
+            return
+        }
+
+        let cookieStore = WKWebsiteDataStore.default().httpCookieStore
+        let group = DispatchGroup()
+        for cookie in cookies {
+            group.enter()
+            cookieStore.setCookie(cookie) {
+                group.leave()
+            }
+        }
+        group.notify(queue: .main) {
+            completion?()
+        }
+    }
+
+    static func clear() {
+        _ = CredentialVault.delete(.clubLogCookieHeader)
+        _ = CredentialVault.delete(.clubLogCookieArchive)
+    }
+
+    private static func validStoredCookies(allowUserInteraction: Bool = true) -> [QRZStoredCookie] {
+        let archive = allowUserInteraction
+            ? CredentialVault.data(for: .clubLogCookieArchive)
+            : CredentialVault.dataIfAvailableWithoutPrompt(for: .clubLogCookieArchive)
+        guard let data = archive,
+              let cookies = try? JSONDecoder().decode([QRZStoredCookie].self, from: data) else {
+            return []
+        }
+
+        let now = Date()
+        let validCookies = cookies.filter { cookie in
+            guard let expiresDate = cookie.expiresDate else { return true }
+            return expiresDate > now
+        }
+
+        if allowUserInteraction, validCookies.count != cookies.count {
+            if let data = try? JSONEncoder().encode(validCookies) {
+                _ = CredentialVault.set(data, for: .clubLogCookieArchive)
+            }
+            if validCookies.isEmpty {
+                _ = CredentialVault.delete(.clubLogCookieHeader)
+            }
+        }
+
+        return validCookies
+    }
+}
+
 struct PropagationSnapshot {
     var updatedAt: Date?
     var solarFlux: String = "-"
@@ -738,11 +824,27 @@ nonisolated struct QSORecordModel: Identifiable, Sendable {
     let id: UUID
     var index: Int
     var fields: [String: String]
+    private(set) var searchDocument: LogSearchDocument
 
     init(id: UUID = UUID(), index: Int, fields: [String: String]) {
         self.id = id
         self.index = index
-        self.fields = CountryNameNormalizer.normalizedFields(fields).fields
+        let normalized = CountryNameNormalizer.normalizedFields(fields).fields
+        self.fields = normalized
+        self.searchDocument = Self.makeSearchDocument(fields: normalized)
+    }
+
+    private static func makeSearchDocument(fields: [String: String]) -> LogSearchDocument {
+        let cName = fields["COUNTRY"] ?? ""
+        let country = cName.isEmpty ? "" : canonicalCountryName(cName)
+        let flag = country.isEmpty ? "" : countryToFlag(country)
+        let cont = fields["CONT"] ?? ""
+        return LogSearchEngine.makeDocument(
+            fields: fields,
+            country: country,
+            continent: cont,
+            countryFlag: flag
+        )
     }
     
     var isConfirmed: Bool {
@@ -765,6 +867,7 @@ nonisolated struct QSORecordModel: Identifiable, Sendable {
         }
         set {
             fields[key] = ["COUNTRY", "MY_COUNTRY"].contains(key.uppercased()) ? canonicalCountryName(newValue) : newValue
+            searchDocument = Self.makeSearchDocument(fields: fields)
         }
     }
 }
@@ -1743,9 +1846,16 @@ class AppState: NSObject, ObservableObject {
     private let qrzRankDailyQuotaKey = "qrzRankDailyQuota.v1"
 
     @Published var showQRZLoginSheet: Bool = false
+    @Published var showClubLogLoginSheet: Bool = false
     
     // Search & Smart Sorting States
     @Published var searchText: String = "" {
+        didSet {
+            filteredRecordsCache = nil
+            filteredChronologicalOrdinals.removeAll(keepingCapacity: true)
+        }
+    }
+    @Published var logSearchMode: LogSearchMode = .quick {
         didSet {
             filteredRecordsCache = nil
             filteredChronologicalOrdinals.removeAll(keepingCapacity: true)
@@ -1893,6 +2003,7 @@ class AppState: NSObject, ObservableObject {
         configureOperatorFeatureBridges()
         DispatchQueue.main.async {
             CredentialVault.migrateLegacyCredentials()
+            self.restoreSavedClubLogSessionCookies()
         }
     }
 
@@ -2141,20 +2252,11 @@ class AppState: NSObject, ObservableObject {
             }
         }
         
-        if !searchText.isEmpty {
-            let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let mode = logSearchMode
+            let text = searchText
             records = records.filter { record in
-                let country = record["COUNTRY"]
-                let searchableText = (record.fields.values + [
-                    country,
-                    countryToFlag(country),
-                    record["CONT"]
-                ])
-                .joined(separator: " ")
-                .lowercased()
-
-                return searchableText.contains(query) ||
-                tableHeaders.contains { $0.lowercased().contains(query) }
+                LogSearchEngine.matches(record.searchDocument, query: text, mode: mode)
             }
         }
 
@@ -2273,6 +2375,22 @@ class AppState: NSObject, ObservableObject {
             QRZSessionStore.restoreToWebKit()
             appendLog("✅ QRZ session saved for future app launches.")
         }
+    }
+
+    func saveClubLogSessionCookies(_ cookies: [HTTPCookie]) {
+        let cookieHeader = ClubLogSessionStore.save(cookies: cookies)
+        if cookieHeader.isEmpty {
+            appendLog("⚠️ Club Log session save requested, but no clublog.org cookies found.")
+        } else {
+            ClubLogSessionStore.restoreToWebKit()
+            appendLog("✅ Club Log session saved securely in Keychain.")
+        }
+    }
+
+    func restoreSavedClubLogSessionCookies() {
+        guard ClubLogSessionStore.hasSavedSession() else { return }
+        ClubLogSessionStore.restoreToWebKit()
+        appendLog("🔑 Restored saved Club Log session cookies.")
     }
 
     func restoreSavedQRZSessionCookies() {

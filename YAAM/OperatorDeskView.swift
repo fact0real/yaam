@@ -65,6 +65,8 @@ struct OperatorDeskView: View {
                 ConnectivityPanel()
             case 9:
                 ContestCalendarAndPropagationPanel()
+            case 10:
+                ClubLogSpotsView()
             default:
                 QuickLogPanel()
             }
@@ -82,6 +84,7 @@ struct OperatorDeskView: View {
         Picker("Operator workspace", selection: $appState.operatorDeskSection) {
             Label("Quick Log", systemImage: "plus.circle.fill").tag(0)
             Label("DX Cluster", systemImage: "dot.radiowaves.left.and.right").tag(1)
+            Label("Club Log Spots", systemImage: "person.3.fill").tag(10)
             Label("Sync Center", systemImage: "arrow.triangle.2.circlepath").tag(2)
             Label("Radio Bridge", systemImage: "wave.3.right.circle").tag(3)
             Label("Contest", systemImage: "flag.checkered").tag(4)

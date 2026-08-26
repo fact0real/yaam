@@ -231,12 +231,24 @@ struct LogTableView: View {
                 Divider().frame(height: 14)
                 
                 HStack(spacing: 4) {
-                    Image(systemName: "magnifyingglass")
-                        .foregroundColor(.secondary)
-                        .font(.caption)
-                    TextField("Search log or columns...", text: $appState.searchText)
+                    Menu {
+                        Picker("Search Mode", selection: $appState.logSearchMode) {
+                            ForEach(LogSearchMode.allCases) { mode in
+                                Label(mode.title, systemImage: mode.systemImage).tag(mode)
+                            }
+                        }
+                    } label: {
+                        Image(systemName: appState.logSearchMode.systemImage)
+                            .foregroundColor(.accentColor)
+                            .font(.caption)
+                    }
+                    .menuStyle(.borderlessButton)
+                    .help("Search Mode: Quick Any, Exact Callsign, or Multi-word Contact Name")
+
+                    TextField(appState.logSearchMode.placeholder, text: $appState.searchText)
                         .textFieldStyle(.plain)
                         .font(.caption)
+
                     if !appState.searchText.isEmpty {
                         Button(action: { appState.searchText = "" }) {
                             Image(systemName: "xmark.circle.fill")
@@ -251,7 +263,7 @@ struct LogTableView: View {
                 .background(Color(NSColor.textBackgroundColor))
                 .cornerRadius(6)
                 .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.gray.opacity(0.3), lineWidth: 1))
-                .frame(width: 170)
+                .frame(width: 210)
                 
                 Divider().frame(height: 14)
 

@@ -12,7 +12,7 @@ import UniformTypeIdentifiers
 // MARK: - macOS Preferences & Credentials Settings Sheet
 struct SettingsView: View {
     private enum Tabs: Hashable {
-        case stations, dataSafety, qrz, qrzRank, lotw, hamqth, smtp, externalADIF, sdrControl, assistant
+        case stations, dataSafety, qrz, qrzRank, clubLog, lotw, hamqth, smtp, externalADIF, sdrControl, assistant
     }
 
     @EnvironmentObject var appState: AppState
@@ -22,6 +22,13 @@ struct SettingsView: View {
     @State private var qrzCredentialStatus = ""
     @State private var qrzRankAPIToken = ""
     @State private var qrzRankCredentialStatus = ""
+
+    @AppStorage("clubLogEmail") private var clubLogEmail = ""
+    @AppStorage("clubLogCallsign") private var clubLogCallsign = ""
+    @State private var clubLogPassword = ""
+    @State private var clubLogAPIKey = ""
+    @State private var clubLogCredentialStatus = ""
+    @State private var showSettingsClubLogLoginSheet = false
     
     @AppStorage("lotwUsername") private var lotwUsername = ""
     @State private var lotwPassword = ""
@@ -146,6 +153,117 @@ struct SettingsView: View {
                 Label("Rank Service", systemImage: "chart.line.uptrend.xyaxis")
             }
             .tag(Tabs.qrzRank)
+
+            // MARK: - Club Log Settings Tab
+            Form {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("Club Log Integration")
+                        .font(.headline)
+
+                    TextField("Email Address:", text: $clubLogEmail)
+                        .textFieldStyle(.roundedBorder)
+
+                    TextField("Callsign:", text: $clubLogCallsign)
+                        .textFieldStyle(.roundedBorder)
+
+                    SecureField("Application Password (blank keeps saved password):", text: $clubLogPassword)
+                        .textFieldStyle(.roundedBorder)
+
+                    SecureField("Club Log API Key (optional):", text: $clubLogAPIKey)
+                        .textFieldStyle(.roundedBorder)
+
+                    Label("Stored securely in macOS Keychain", systemImage: "lock.fill")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    HStack {
+                        Button {
+                            if !clubLogPassword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                saveCredential(clubLogPassword, as: .clubLogPassword, status: $clubLogCredentialStatus)
+                            }
+                            if !clubLogAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                saveCredential(clubLogAPIKey, as: .clubLogAPIKey, status: $clubLogCredentialStatus)
+                            }
+                            if clubLogPassword.isEmpty && clubLogAPIKey.isEmpty {
+                                clubLogCredentialStatus = "Saved"
+                            }
+                        } label: {
+                            Label("Save Credentials", systemImage: "checkmark.circle")
+                        }
+                        .buttonStyle(.borderedProminent)
+
+                        Button("Remove Password/Key", role: .destructive) {
+                            removeCredential(.clubLogPassword, value: $clubLogPassword, status: $clubLogCredentialStatus)
+                            removeCredential(.clubLogAPIKey, value: $clubLogAPIKey, status: $clubLogCredentialStatus)
+                        }
+
+                        credentialStatus(clubLogCredentialStatus)
+                    }
+
+                    Divider()
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("2-Factor Authentication (2FA / MFA)")
+                            .font(.subheadline.weight(.semibold))
+
+                        if ClubLogSessionStore.hasSavedSession() {
+                            HStack(spacing: 8) {
+                                Image(systemName: "checkmark.seal.fill")
+                                    .foregroundColor(.green)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Active Club Log Session Authenticated")
+                                        .font(.caption.bold())
+                                        .foregroundColor(.green)
+                                    Text("Your 2FA session is active and saved in Keychain.")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                }
+                                Spacer()
+                                Button("Sign Out", role: .destructive) {
+                                    ClubLogSessionStore.clear()
+                                    clubLogCredentialStatus = "Signed out"
+                                }
+                                .buttonStyle(.bordered)
+                                .font(.caption)
+                            }
+                            .padding(8)
+                            .background(Color.green.opacity(0.1))
+                            .cornerRadius(8)
+                        } else {
+                            Text("If your Club Log account uses 2-Factor Authentication (2FA/MFA) or if you do not have an API key, click below to log in.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+
+                        Button {
+                            if !clubLogPassword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                saveCredential(clubLogPassword, as: .clubLogPassword, status: $clubLogCredentialStatus)
+                            }
+                            if !clubLogAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                saveCredential(clubLogAPIKey, as: .clubLogAPIKey, status: $clubLogCredentialStatus)
+                            }
+                            showSettingsClubLogLoginSheet = true
+                        } label: {
+                            Label(
+                                ClubLogSessionStore.hasSavedSession() ? "Verify / Re-authenticate 2FA" : "Log In & Verify 2FA",
+                                systemImage: ClubLogSessionStore.hasSavedSession() ? "arrow.clockwise.circle" : "lock.shield.fill"
+                            )
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(ClubLogSessionStore.hasSavedSession() ? .green : .blue)
+                    }
+                }
+                .padding()
+            }
+            .tabItem {
+                Label("Club Log", systemImage: "person.3.fill")
+            }
+            .tag(Tabs.clubLog)
+            .onAppear {
+                clubLogPassword = CredentialVault.value(for: .clubLogPassword)
+                clubLogAPIKey = CredentialVault.value(for: .clubLogAPIKey)
+            }
             
             // MARK: - LoTW Settings Tab
             Form {
@@ -428,6 +546,10 @@ struct SettingsView: View {
         .padding(10)
         .onAppear {
             refreshSDRControlPath()
+        }
+        .sheet(isPresented: $showSettingsClubLogLoginSheet) {
+            ClubLogLoginView()
+                .environmentObject(appState)
         }
     }
 
