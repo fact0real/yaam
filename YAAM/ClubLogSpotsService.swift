@@ -42,6 +42,24 @@ nonisolated struct ClubLogSpotModel: Identifiable, Sendable {
         self.comment = comment
         self.status = status
     }
+
+    var isDigital: Bool {
+        let m = mode.uppercased()
+        let c = comment.uppercased()
+        return m == "FT8" || m == "FT4" || m == "RTTY" || m == "PSK" || m == "PSK31" || m == "JS8" || m == "DATA" || m == "DIGI" || m == "Q65" || m == "MSK144" || m.contains("FT") || c.contains("FT8") || c.contains("FT4") || c.contains("RTTY") || c.contains("PSK")
+    }
+
+    var isVoice: Bool {
+        let m = mode.uppercased()
+        let c = comment.uppercased()
+        return m == "SSB" || m == "USB" || m == "LSB" || m == "AM" || m == "FM" || m == "PHONE" || c.contains("SSB") || c.contains("USB") || c.contains("LSB") || c.contains("PHONE")
+    }
+
+    var isCW: Bool {
+        let m = mode.uppercased()
+        let c = comment.uppercased()
+        return m == "CW" || c.contains("CW") || c.contains("CWT")
+    }
 }
 
 @MainActor
@@ -122,21 +140,37 @@ final class ClubLogSpotsService: ObservableObject {
                 // Determine Mode from Comment or Frequency
                 var mode = 'CW';
                 var cLower = comment.toLowerCase();
-                if (cLower.includes('ft8') || Math.abs(freqKHz - 14074) < 1.0 || Math.abs(freqKHz - 21074) < 1.0 || Math.abs(freqKHz - 7074) < 1.0 || Math.abs(freqKHz - 7056) < 1.0 || Math.abs(freqKHz - 3573) < 1.0 || Math.abs(freqKHz - 10131) < 1.0 || Math.abs(freqKHz - 10136) < 1.0 || Math.abs(freqKHz - 24915) < 1.0 || Math.abs(freqKHz - 28074) < 1.0 || Math.abs(freqKHz - 18100) < 1.0) {
+                if (cLower.includes('ft8')) {
                     mode = 'FT8';
                 } else if (cLower.includes('ft4')) {
                     mode = 'FT4';
-                } else if (cLower.includes('ssb') || cLower.includes('usb') || cLower.includes('lsb') || cLower.includes('pota')) {
-                    mode = 'SSB';
                 } else if (cLower.includes('rtty')) {
                     mode = 'RTTY';
-                } else if (cLower.includes('cw') || cLower.includes('cwt') || cLower.includes('qsx') || cLower.includes('up')) {
+                } else if (cLower.includes('psk')) {
+                    mode = 'PSK';
+                } else if (cLower.includes('js8')) {
+                    mode = 'JS8';
+                } else if (cLower.includes('cw') || cLower.includes('cwt') || cLower.includes('qsx') || cLower.includes('up ') || cLower.startsWith('up') || cLower.includes(' up')) {
                     mode = 'CW';
+                } else if (cLower.includes('usb')) {
+                    mode = 'USB';
+                } else if (cLower.includes('lsb')) {
+                    mode = 'LSB';
+                } else if (cLower.includes('ssb') || cLower.includes('pota') || cLower.includes('phone')) {
+                    mode = 'SSB';
+                } else if (Math.abs(freqKHz - 14074) < 1.5 || Math.abs(freqKHz - 21074) < 1.5 || Math.abs(freqKHz - 7074) < 1.5 || Math.abs(freqKHz - 7056) < 1.5 || Math.abs(freqKHz - 3573) < 1.5 || Math.abs(freqKHz - 10136) < 1.5 || Math.abs(freqKHz - 24915) < 1.5 || Math.abs(freqKHz - 28074) < 1.5 || Math.abs(freqKHz - 18100) < 1.5 || Math.abs(freqKHz - 50313) < 1.5 || Math.abs(freqKHz - 1840) < 1.5) {
+                    mode = 'FT8';
+                } else if (Math.abs(freqKHz - 7047.5) < 1.5 || Math.abs(freqKHz - 14080) < 1.5 || Math.abs(freqKHz - 21140) < 1.5 || Math.abs(freqKHz - 28180) < 1.5 || Math.abs(freqKHz - 3575) < 1.5 || Math.abs(freqKHz - 10140) < 1.5 || Math.abs(freqKHz - 18104) < 1.5 || Math.abs(freqKHz - 24919) < 1.5) {
+                    mode = 'FT4';
                 } else if (band === '20M' && freqKHz >= 14100) {
                     mode = 'SSB';
                 } else if (band === '15M' && freqKHz >= 21200) {
                     mode = 'SSB';
                 } else if (band === '40M' && freqKHz >= 7100) {
+                    mode = 'SSB';
+                } else if (band === '80M' && freqKHz >= 3600) {
+                    mode = 'SSB';
+                } else if (band === '10M' && freqKHz >= 28300) {
                     mode = 'SSB';
                 }
 
@@ -366,23 +400,48 @@ final class ClubLogSpotsService: ObservableObject {
 
     nonisolated static func detectMode(comment: String, freqKHz: Double, band: String) -> String {
         let cLower = comment.lowercased()
-        let ft8Freqs = [1840.0, 3573.0, 5357.0, 7074.0, 7056.0, 10131.0, 10136.0, 14074.0, 18100.0, 21074.0, 24915.0, 28074.0, 50313.0]
 
-        if cLower.contains("ft8") || ft8Freqs.contains(where: { abs(freqKHz - $0) < 1.5 }) {
+        // 1. Explicit comment mode keywords take top priority
+        if cLower.contains("ft8") {
             return "FT8"
         } else if cLower.contains("ft4") {
             return "FT4"
-        } else if cLower.contains("ssb") || cLower.contains("usb") || cLower.contains("lsb") || cLower.contains("pota") {
-            return "SSB"
         } else if cLower.contains("rtty") {
             return "RTTY"
-        } else if cLower.contains("cw") || cLower.contains("cwt") || cLower.contains("qsx") || cLower.contains("up") {
+        } else if cLower.contains("psk") {
+            return "PSK"
+        } else if cLower.contains("js8") {
+            return "JS8"
+        } else if cLower.contains("cw") || cLower.contains("cwt") || cLower.contains("qsx") || cLower.contains("up ") || cLower.hasPrefix("up") || cLower.contains(" up") {
             return "CW"
-        } else if band == "20M" && freqKHz >= 14100 {
+        } else if cLower.contains("usb") {
+            return "USB"
+        } else if cLower.contains("lsb") {
+            return "LSB"
+        } else if cLower.contains("ssb") || cLower.contains("pota") || cLower.contains("phone") {
+            return "SSB"
+        }
+
+        // 2. Standard Digital Frequency Detection
+        let ft8Freqs = [1840.0, 3573.0, 5357.0, 7074.0, 7056.0, 10131.0, 10136.0, 14074.0, 18100.0, 21074.0, 24915.0, 28074.0, 50313.0]
+        let ft4Freqs = [3575.0, 7047.5, 10140.0, 14080.0, 18104.0, 21140.0, 24919.0, 28180.0, 50318.0]
+
+        if ft8Freqs.contains(where: { abs(freqKHz - $0) < 1.5 }) {
+            return "FT8"
+        } else if ft4Freqs.contains(where: { abs(freqKHz - $0) < 1.5 }) {
+            return "FT4"
+        }
+
+        // 3. Band Frequency Phone / Voice Segments
+        if band == "20M" && freqKHz >= 14100 {
             return "SSB"
         } else if band == "15M" && freqKHz >= 21200 {
             return "SSB"
         } else if band == "40M" && freqKHz >= 7100 {
+            return "SSB"
+        } else if band == "80M" && freqKHz >= 3600 {
+            return "SSB"
+        } else if band == "10M" && freqKHz >= 28300 {
             return "SSB"
         }
 
@@ -398,7 +457,7 @@ final class ClubLogSpotsFetcher: NSObject, WKNavigationDelegate {
     private var timeoutTask: Task<Void, Never>?
 
     func fetchSpots() async -> [ClubLogSpotModel]? {
-        await withCheckedContinuation { cont in
+        await withCheckedContinuation { (cont: CheckedContinuation<[ClubLogSpotModel]?, Never>) in
             self.continuation = cont
             let config = WKWebViewConfiguration()
             config.websiteDataStore = .default()

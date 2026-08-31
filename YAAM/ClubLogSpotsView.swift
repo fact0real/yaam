@@ -12,6 +12,7 @@ struct ClubLogSpotsView: View {
     
     @State private var viewMode: Int = 0 // 0: Native Spots Table, 1: Live Web Page
     @State private var filterBand: String = "All"
+    @State private var filterMode: String = "All"
     @State private var filterText: String = ""
 
     private var availableBands: [String] {
@@ -19,17 +20,37 @@ struct ClubLogSpotsView: View {
         return ["All"] + bands.sorted()
     }
 
+    private var availableSpecificModes: [String] {
+        let modes = Set(spotsService.spots.map { $0.mode.uppercased() }).filter { !$0.isEmpty }
+        return modes.sorted()
+    }
+
     private var filteredSpots: [ClubLogSpotModel] {
         spotsService.spots.filter { spot in
             if filterBand != "All" && spot.band.uppercased() != filterBand.uppercased() {
                 return false
+            }
+            if filterMode != "All" {
+                switch filterMode {
+                case "Digital":
+                    if !spot.isDigital { return false }
+                case "Phone", "Voice":
+                    if !spot.isVoice { return false }
+                case "CW":
+                    if !spot.isCW { return false }
+                default:
+                    if spot.mode.uppercased() != filterMode.uppercased() {
+                        return false
+                    }
+                }
             }
             if !filterText.isEmpty {
                 let query = filterText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
                 return spot.callsign.lowercased().contains(query) ||
                     spot.dxcc.lowercased().contains(query) ||
                     spot.spotter.lowercased().contains(query) ||
-                    spot.comment.lowercased().contains(query)
+                    spot.comment.lowercased().contains(query) ||
+                    spot.mode.lowercased().contains(query)
             }
             return true
         }
@@ -55,13 +76,52 @@ struct ClubLogSpotsView: View {
 
                 if viewMode == 0 {
                     HStack(spacing: 8) {
-                        Picker("", selection: $filterBand) {
+                        Picker("Band", selection: $filterBand) {
                             ForEach(availableBands, id: \.self) { band in
-                                Text(band).tag(band)
+                                Text(band == "All" ? "All Bands" : band).tag(band)
                             }
                         }
                         .labelsHidden()
-                        .frame(width: 80)
+                        .frame(width: 85)
+
+                        Picker("Mode", selection: $filterMode) {
+                            Text("All Modes").tag("All")
+                            Divider()
+                            Text("⚡️ Digital (FT8, FT4...)").tag("Digital")
+                            Text("FT8").tag("FT8")
+                            Text("FT4").tag("FT4")
+                            Text("RTTY").tag("RTTY")
+                            Divider()
+                            Text("📻 CW").tag("CW")
+                            Divider()
+                            Text("🎙 Phone (SSB, USB, LSB)").tag("Phone")
+                            Text("SSB").tag("SSB")
+                            Text("USB").tag("USB")
+                            Text("LSB").tag("LSB")
+
+                            let extraModes = availableSpecificModes.filter { !["CW", "FT8", "FT4", "RTTY", "SSB", "USB", "LSB"].contains($0) }
+                            if !extraModes.isEmpty {
+                                Divider()
+                                ForEach(extraModes, id: \.self) { em in
+                                    Text(em).tag(em)
+                                }
+                            }
+                        }
+                        .labelsHidden()
+                        .frame(width: 110)
+
+                        if filterBand != "All" || filterMode != "All" || !filterText.isEmpty {
+                            Button {
+                                filterBand = "All"
+                                filterMode = "All"
+                                filterText = ""
+                            } label: {
+                                Image(systemName: "line.3.horizontal.decrease.circle.fill")
+                                    .foregroundColor(.accentColor)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Reset all filters")
+                        }
 
                         HStack(spacing: 4) {
                             Image(systemName: "magnifyingglass")
@@ -84,7 +144,7 @@ struct ClubLogSpotsView: View {
                         .background(Color(NSColor.textBackgroundColor))
                         .cornerRadius(6)
                         .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.gray.opacity(0.3), lineWidth: 1))
-                        .frame(width: 150)
+                        .frame(width: 135)
 
                         Button {
                             Task {
@@ -219,9 +279,21 @@ struct ClubLogSpotsView: View {
                 .padding()
             } else {
                 VStack(spacing: 0) {
-                    HStack {
+                    HStack(spacing: 8) {
+                        Text("Showing \(filteredSpots.count) of \(spotsService.spots.count) spots")
+                            .font(.caption2.bold())
+                            .foregroundColor(.secondary)
+
+                        if filterBand != "All" || filterMode != "All" || !filterText.isEmpty {
+                            Text("•")
+                                .foregroundColor(.secondary)
+                            Text("Filtered: \(filterBand != "All" ? "Band: \(filterBand) " : "")\(filterMode != "All" ? "Mode: \(filterMode) " : "")\(filterText.isEmpty ? "" : "\"\(filterText)\"")")
+                                .font(.caption2.bold())
+                                .foregroundColor(.accentColor)
+                        }
+
                         if let lastRefreshed = spotsService.lastRefreshed {
-                            Text("Showing \(filteredSpots.count) of \(spotsService.spots.count) spots • Refreshed: \(lastRefreshed.formatted(date: .omitted, time: .standard))")
+                            Text("• Refreshed: \(lastRefreshed.formatted(date: .omitted, time: .standard))")
                                 .font(.caption2)
                                 .foregroundColor(.secondary)
                         }
@@ -236,7 +308,7 @@ struct ClubLogSpotsView: View {
                     Table(filteredSpots) {
                         TableColumn("Callsign") { spot in
                             HStack(spacing: 6) {
-                                Text(countryToFlag(spot.dxcc.isEmpty ? spot.callsign : spot.dxcc))
+                                Text(flagForSpot(spot))
                                 Text(spot.callsign)
                                     .fontWeight(.bold)
                                     .font(.system(.body, design: .monospaced))
@@ -261,10 +333,16 @@ struct ClubLogSpotsView: View {
                         .width(min: 60, ideal: 75)
 
                         TableColumn("Mode") { spot in
+                            let modeColor: Color = spot.isDigital ? .green : (spot.isCW ? .orange : .purple)
                             Text(spot.mode)
-                                .font(.caption)
+                                .font(.caption.bold())
+                                .foregroundColor(modeColor)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(modeColor.opacity(0.12))
+                                .cornerRadius(4)
                         }
-                        .width(min: 60, ideal: 75)
+                        .width(min: 65, ideal: 80)
 
                         TableColumn("DXCC Entity") { spot in
                             Text(spot.dxcc)
@@ -340,6 +418,14 @@ struct ClubLogSpotsView: View {
                 }
             }
         }
+    }
+
+    private func flagForSpot(_ spot: ClubLogSpotModel) -> String {
+        if !spot.dxcc.isEmpty {
+            let flag = countryToFlag(spot.dxcc)
+            if flag != "🌐" { return flag }
+        }
+        return countryToFlag(spot.callsign)
     }
 
     private func refreshSpots() async {

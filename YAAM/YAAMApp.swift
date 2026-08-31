@@ -53,13 +53,91 @@ struct YAAMApp: App {
                     .keyboardShortcut("e", modifiers: [.command, .shift])
             }
             
-            // MARK: - Tools Menu Commands
+            // MARK: - Log & QSL Operations Menu
+            CommandMenu("Log") {
+                Button("Download LoTW Cloud Logbook...") {
+                    appState.confirmAndFetchCloudLogbook()
+                }
+
+                Button("Sync Confirmations (LoTW & QRZ)") {
+                    appState.syncConfirmations()
+                }
+                .keyboardShortcut("r", modifiers: .command)
+
+                Button("Confirmation Reconciliation...") {
+                    appState.showConfirmationReconciliationSheet = true
+                }
+
+                Button("QRZ Incoming Requests...") {
+                    appState.showQRZIncomingSheet = true
+                }
+
+                Divider()
+
+                Button("Enrich QSOs") {
+                    if !appState.selectedRecordIDs.isEmpty {
+                        appState.enrichSelectedRecords()
+                    } else {
+                        appState.enrichLogData()
+                    }
+                }
+                .keyboardShortcut("e", modifiers: .command)
+
+                Button("Backfill Missing QRZ Names & Emails") {
+                    appState.backfillMissingQRZEmailsNow()
+                }
+
+                Button("Daily Rank Backfill") {
+                    appState.fetchDailyQRZRankBackfill()
+                }
+                .disabled(appState.isEnriching || appState.dailyRankBackfillCandidateCount == 0 || appState.dailyRankRequestsRemaining == 0)
+
+                Button("Log Assistant...") {
+                    appState.showLogAssistantSheet = true
+                }
+
+                Divider()
+
+                Button("Send Recent QSL Cards Batch...") {
+                    appState.sendRecentConfirmedQSLCardsBatch()
+                }
+                .disabled(appState.recentConfirmedQSLBatchCandidateCount() == 0 || appState.isSendingBatchMail)
+
+                Button("Remind Recent Unconfirmed Batch...") {
+                    appState.sendRecentUnconfirmedReminderBatch()
+                }
+                .disabled(appState.recentUnconfirmedReminderBatchRecipientCount() == 0 || appState.isSendingBatchMail)
+
+                Divider()
+
+                Button("Review Duplicate QSOs...") {
+                    appState.prepareDuplicateReview()
+                }
+                .disabled(appState.qsoRecords.isEmpty || appState.isAnalyzingDuplicates)
+
+                Button("QRZ Login...") {
+                    appState.forceQRZReLogin()
+                }
+            }
+
+            // MARK: - Tools & Desks Menu
             CommandMenu("Tools") {
                 Button("Quick Log QSO") {
                     appState.selectedTab = 5
                     appState.operatorDeskSection = 0
                 }
                 .keyboardShortcut("l", modifiers: .command)
+
+                Button("6m Magic Band Watch") {
+                    appState.selectedTab = 5
+                    appState.operatorDeskSection = 11
+                }
+                .keyboardShortcut("6", modifiers: .command)
+
+                Button("Contest Calendar") {
+                    appState.selectedTab = 5
+                    appState.operatorDeskSection = 9
+                }
 
                 Button("Open DX Cluster") {
                     appState.selectedTab = 5
@@ -77,9 +155,6 @@ struct YAAMApp: App {
                     .keyboardShortcut("t", modifiers: .command)
 
                 Button("Activity Console...") { openWindow(id: YAAMWindowID.console) }
-                
-                Button("Sync Confirmations (LoTW & QRZ)") { appState.syncConfirmations() }
-                    .keyboardShortcut("r", modifiers: .command)
             }
             
             // MARK: - Application Info & Help Commands

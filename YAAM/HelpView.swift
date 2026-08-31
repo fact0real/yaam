@@ -391,19 +391,74 @@ struct HelpView: View {
 
     private var magicBand: some View {
         Group {
-            helpHeader(title: "6m & Propagation", subtitle: "Combine PSK Reporter evidence, solar context, and regional locator matching to sense whether the Magic Band is worth immediate attention.", icon: "dot.radiowaves.left.and.right", color: .orange)
+            helpHeader(
+                title: "6m Magic Band Watch & Propagation Suite",
+                subtitle: "Real-time scientific VHF telemetry combining NOAA space weather, GIRO ionosondes, mid-point geometry, dynamic weighting, and automated opening alarms.",
+                icon: "bolt.badge.clock.fill",
+                color: .orange
+            )
+
             HelpFlow(steps: [
-                HelpFlowStep(icon: "antenna.radiowaves.left.and.right", title: "Set station", detail: "Choose the active station callsign before querying PSK Reporter."),
-                HelpFlowStep(icon: "arrow.clockwise", title: "Refresh", detail: "Refresh no more than every few minutes; PSK Reporter asks developers to avoid repeated frequent queries."),
-                HelpFlowStep(icon: "bolt.circle.fill", title: "React", detail: "When YAAM reports a likely 6m opening, check 50.313 FT8, beacons, and DX Cluster immediately."),
-                HelpFlowStep(icon: "checkmark.seal", title: "Confirm", detail: "After QSOs are uploaded and confirmed, LoTW progress updates the local VUCC-style grid count.")
+                HelpFlowStep(icon: "antenna.radiowaves.left.and.right", title: "Station Location", detail: "YAAM automatically uses your active station grid/coordinates to calculate Great Circle beam headings and midpoint distances."),
+                HelpFlowStep(icon: "arrow.triangle.swap", title: "Mid-Point Sounders", detail: "Ionospheric reflection occurs 500–1100 km away at the path midpoint, not overhead. YAAM tracks Nicosia, Athens, and Balkan sounders."),
+                HelpFlowStep(icon: "chart.line.uptrend.xyaxis", title: "Rate of Change", detail: "Look for positive ΔFoEs/Δt rates (▲ Rapid Rise ≥1.5 MHz/h) indicating rapid formation of dense Sporadic-E clouds."),
+                HelpFlowStep(icon: "bell.badge.fill", title: "Alarms & Webhooks", detail: "Receive audio chimes, spoken voice announcements, and Discord/Telegram push notifications when the 50 MHz threshold is breached.")
             ])
-            helpSection("Evidence Model") {
-                HelpDefinition(icon: "6.circle.fill", title: "6m reports", text: "Reports between 50 and 54 MHz are counted separately from HF reception reports.", color: .orange)
-                HelpDefinition(icon: "location.north.circle", title: "Near Middle East", text: "YAAM treats LL, LM, LK, KL, and KM grid prefixes as regional evidence around Iran and neighboring paths.", color: .blue)
-                HelpDefinition(icon: "sparkles", title: "E-skip context", text: "HamQSL VHF propagation values are used as supporting context, not as a replacement for live reception reports.")
+
+            helpSection("Propagation Physics & Corridors") {
+                HelpDefinition(
+                    icon: "cloud.bolt.rain.fill",
+                    title: "Sporadic-E (Es) Mechanism",
+                    text: "Dense clouds of metallic ions (Fe+, Mg+ from meteoric ablation) form in the E-region (90–120 km altitude). When the critical vertical frequency (FoEs) reaches 10–12 MHz, oblique reflection (MUF ≈ 5.0 × FoEs) opens 50 MHz.",
+                    color: .orange
+                )
+                HelpDefinition(
+                    icon: "arrow.triangle.merge",
+                    title: "Single-Hop (Es1) vs Double-Hop (Es2)",
+                    text: "A single Sporadic-E hop spans up to 2,200 km with an ionospheric midpoint at 500–1,100 km. Paths beyond 2,200 km (e.g. Tehran to Western Europe at 2,600 km) require two consecutive hops (Es2) with an intermediate ground bounce.",
+                    color: .blue
+                )
+                HelpDefinition(
+                    icon: "location.north.circle.fill",
+                    title: "Optimal Beam Heading",
+                    text: "YAAM computes the true Great Circle azimuth (0°–360°) and 16-point compass heading (e.g. 295° WNW) pointing directly toward the highest ionization hotspot.",
+                    color: .orange
+                )
+                HelpDefinition(
+                    icon: "sun.max.fill",
+                    title: "F2 Solar Max & Transequatorial (TEP)",
+                    text: "During Solar Cycle peaks when SFI ≥ 160–200, the F2 layer supports worldwide propagation. In late afternoons/evenings, TEP enables 5,000–8,000 km north-south paths across the magnetic equator.",
+                    color: .yellow
+                )
+                HelpDefinition(
+                    icon: "sparkles",
+                    title: "Auroral Scatter",
+                    text: "When Planetary Kp ≥ 5 during geomagnetic storms, intense auroral backscatter enables high-latitude VHF communication with distinctive raspy audio.",
+                    color: .purple
+                )
             }
-            helpCallout(icon: "exclamationmark.triangle.fill", title: "Opening alerts are advisory", text: "6m can open and close quickly. Treat YAAM's alert as a strong prompt to listen and transmit, not as a guarantee of propagation.", color: .orange)
+
+            helpSection("Scientific Weighted Composite Model") {
+                HelpDefinition(
+                    icon: "chart.bar.xaxis",
+                    title: "Dynamic Weighting Formula",
+                    text: "Composite Score = (Midpoint MUF × W1) + (2000km Telemetry × W2) + (Diurnal/Seasonal × 15%) + (Space Weather × 10%).",
+                    color: .green
+                )
+                HelpDefinition(
+                    icon: "scope",
+                    title: "Sparse-Receiver Dynamic Compensation",
+                    text: "In regions with lower active amateur beacon density (such as the Middle East/EP), when regional spots are <5, YAAM dynamically shifts 15% weight from Telemetry to Mid-Point MUF (boosting it to 65%) so valid ionospheric conditions are not penalized.",
+                    color: .green
+                )
+            }
+
+            helpCallout(
+                icon: "bolt.fill",
+                title: "Operating Strategy on 50 MHz",
+                text: "Sporadic-E openings can develop within 10–15 minutes and fade just as quickly. When YAAM signals High Alert (Score ≥45%) or Band Open (Score ≥70%), rotate your antenna to the recommended beam heading and immediately monitor 50.313 MHz (FT8), 50.090–50.110 MHz (CW beacons), and the DX Cluster.",
+                color: .orange
+            )
         }
     }
 

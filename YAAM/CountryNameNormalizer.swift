@@ -86,7 +86,29 @@ nonisolated enum CountryNameNormalizer {
         ("Trinidad and Tobago", ["Trinidad & Tobago"]),
         ("United Arab Emirates", ["UAE", "U.A.E."]),
         ("United Nations HQ", ["United Nations Hq", "UN HQ", "United Nations Headquarters"]),
-        ("Isle of Man", ["Isle Of Man"])
+        ("Isle of Man", ["Isle Of Man"]),
+        ("Franz Josef Land", ["Franz Joseph Land", "Franz-Josef Land", "Franz Josef Lnd"]),
+        ("San Andres and Providencia", [
+            "San Andres Island", "San Andrés Island", "San Andres Is.", "San Andres",
+            "San Andrés", "San Andres & Providencia", "San Andres and Providencia"
+        ]),
+        ("Antarctica", ["Antarctic", "South Pole"]),
+        ("Mozambique", ["Republic of Mozambique", "Mocambique", "Moçambique"]),
+        ("Saint Helena", ["St. Helena", "St Helena"]),
+        ("Ascension Island", ["Ascension", "Ascension Is."]),
+        ("Tristan da Cunha", ["Tristan Da Cunha"]),
+        ("Svalbard", ["Spitsbergen", "Svalbard and Jan Mayen", "Svalbard & Jan Mayen"]),
+        ("Jan Mayen", ["Jan Mayen Island"]),
+        ("Bonaire", ["Bonaire, Sint Eustatius and Saba", "Bonaire, Saba & St. Eustatius"]),
+        ("Saint Barthelemy", ["St. Barthelemy", "St Barthelemy", "Saint Barthélemy", "St. Barts", "St Barts"]),
+        ("Saint Kitts and Nevis", ["St. Kitts and Nevis", "St Kitts and Nevis", "St. Kitts & Nevis", "St Kitts & Nevis"]),
+        ("Saint Lucia", ["St. Lucia", "St Lucia"]),
+        ("Saint Vincent and the Grenadines", ["St. Vincent and the Grenadines", "St. Vincent & Grenadines", "St. Vincent", "St Vincent"]),
+        ("Saint Pierre and Miquelon", ["St. Pierre and Miquelon", "St. Pierre & Miquelon", "St Pierre & Miquelon"]),
+        ("Papua New Guinea", ["PNG", "Papua N.G."]),
+        ("Dominican Republic", ["Dom. Rep.", "Dominican Rep."]),
+        ("Equatorial Guinea", ["Eq. Guinea", "Republic of Equatorial Guinea"]),
+        ("Central African Republic", ["CAR", "C.A.R.", "Central African Rep."])
     ]
 
     private static let aliasMap: [String: String] = {

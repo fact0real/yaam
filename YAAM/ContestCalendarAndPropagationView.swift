@@ -7,39 +7,35 @@ import AppKit
 import SwiftUI
 import UserNotifications
 
-struct ContestCalendarAndPropagationPanel: View {
+typealias ContestCalendarAndPropagationPanel = ContestCalendarPanel
+
+struct ContestCalendarPanel: View {
     @EnvironmentObject private var appState: AppState
     @AppStorage("contestPreferredModes") private var contestPreferredModes = "FT8, FT4"
     @AppStorage("contestInterestKeywords") private var contestInterestKeywords = "digital, FT8, FT4"
     @AppStorage("contestInterestNotifications") private var contestInterestNotifications = false
     @AppStorage("dxpeditionSpotNotifications") private var dxpeditionSpotNotifications = false
     @State private var showContestPreferences = false
+    @State private var showAllContests = false
 
     private let calendarURL = URL(string: "https://www.contestcalendar.com/fivewkcal.php")!
-    private let pskReporterURL = URL(string: "https://pskreporter.info/pskmap.html")!
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 sectionHeader(
-                    title: "Contest Calendar & 6m Watch",
-                    subtitle: "Contest planning, PSK Reporter reception evidence, and Magic Band opening alerts",
-                    icon: "calendar.badge.clock",
+                    title: "Contest Calendar",
+                    subtitle: "Contest planning, WA7BNM 5-week schedule, and DXpedition opportunities",
+                    icon: "calendar",
                     color: .blue
                 )
 
                 contestCalendar
                 dxpeditionWatch
-                sixMeterAlert
-                signalReporter
-                sixMeterEvidence
-                propagationContext
             }
             .padding(22)
         }
         .onAppear {
-            appState.fetchPropagationSnapshot()
-            appState.fetchPSKReporterSignals()
             appState.fetchContestCalendar()
             appState.fetchDXpeditions()
         }
@@ -159,7 +155,28 @@ struct ContestCalendarAndPropagationPanel: View {
             HStack {
                 Label("Upcoming contests", systemImage: "flag.checkered")
                     .font(.headline)
+
+                if !appState.contestCalendarEntries.isEmpty {
+                    Text("(\(prioritizedContests.count))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 Spacer()
+
+                if prioritizedContests.count > 12 {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            showAllContests.toggle()
+                        }
+                    } label: {
+                        Text(showAllContests ? "Show Top 12" : "Show All (\(prioritizedContests.count))")
+                            .font(.caption2)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+
                 Button {
                     appState.fetchContestCalendar(force: true)
                 } label: {
@@ -168,9 +185,11 @@ struct ContestCalendarAndPropagationPanel: View {
                 .buttonStyle(.borderless)
                 .help("Refresh contest calendar")
                 .disabled(appState.isFetchingContestCalendar)
+
                 Link(destination: calendarURL) {
                     Label("WA7BNM 5-week calendar", systemImage: "arrow.up.right.square")
                 }
+
                 Button {
                     showContestPreferences = true
                 } label: {
@@ -188,39 +207,10 @@ struct ContestCalendarAndPropagationPanel: View {
                 )
                 .frame(maxWidth: .infinity, minHeight: 150)
             } else {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 260), spacing: 10)], spacing: 10) {
-                    ForEach(Array(prioritizedContests.prefix(12))) { item in
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Image(systemName: isPreferredContest(item) ? "star.circle.fill" : (item.isMiddleEastRelevant ? "location.north.line.fill" : "flag.checkered"))
-                                .foregroundStyle(isPreferredContest(item) ? .orange : (item.isMiddleEastRelevant ? .green : .blue))
-                            Text(item.title)
-                                .font(.subheadline.weight(.semibold))
-                                .lineLimit(2)
-                            Spacer()
-                        }
-                        Text(item.utcWindow)
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                        if item.isMiddleEastRelevant {
-                            Text("Middle East relevant")
-                                .font(.caption2.weight(.semibold))
-                                .foregroundStyle(.green)
-                        }
-                        if isPreferredContest(item) {
-                            Label("Matches your operating interests", systemImage: "checkmark.seal.fill")
-                                .font(.caption2.weight(.semibold))
-                                .foregroundStyle(.orange)
-                        }
-                        Text(item.operatingSummary.isEmpty ? item.geographicFocus : item.operatingSummary)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
-                    }
-                    .padding(12)
-                    .frame(maxWidth: .infinity, minHeight: 112, alignment: .topLeading)
-                    .background(Color(nsColor: .controlBackgroundColor).opacity(0.55), in: RoundedRectangle(cornerRadius: 8))
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke((isPreferredContest(item) ? Color.orange : (item.isMiddleEastRelevant ? Color.green : Color.blue)).opacity(0.42)))
+                let visibleContests = showAllContests ? prioritizedContests : Array(prioritizedContests.prefix(12))
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 280, maximum: 380), spacing: 12)], spacing: 12) {
+                    ForEach(visibleContests) { item in
+                        contestCard(item)
                     }
                 }
             }
@@ -238,6 +228,154 @@ struct ContestCalendarAndPropagationPanel: View {
                 .foregroundStyle(.secondary)
         }
         .contestOperationsBand(color: .blue)
+    }
+
+    private func contestCard(_ item: ContestCalendarEntry) -> some View {
+        let isPreferred = isPreferredContest(item)
+        let isME = item.isMiddleEastRelevant
+        let accentColor: Color = isPreferred ? .orange : (isME ? .green : .blue)
+
+        return VStack(alignment: .leading, spacing: 0) {
+            // MARK: - Header (Title + Icon + External Link)
+            HStack(alignment: .top, spacing: 8) {
+                ZStack {
+                    Circle()
+                        .fill(accentColor.opacity(0.16))
+                    Image(systemName: isPreferred ? "star.fill" : (isME ? "location.north.line.fill" : "flag.checkered"))
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(accentColor)
+                }
+                .frame(width: 24, height: 24)
+
+                Text(item.title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundColor(.primary)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .help(item.title)
+
+                if let url = URL(string: item.sourceURL), !item.sourceURL.isEmpty {
+                    Link(destination: url) {
+                        Image(systemName: "arrow.up.right.square")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Open official contest rules / announcement")
+                }
+            }
+            .frame(height: 38, alignment: .topLeading)
+            .padding(.horizontal, 12)
+            .padding(.top, 10)
+            .padding(.bottom, 6)
+
+            // MARK: - Time Window (Pill)
+            HStack(spacing: 5) {
+                Image(systemName: "clock")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                Text(item.utcWindow)
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color(nsColor: .separatorColor).opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+            .padding(.horizontal, 12)
+            .help(item.utcWindow)
+
+            // MARK: - Badges & Tags Row
+            HStack(spacing: 6) {
+                if isPreferred {
+                    HStack(spacing: 3) {
+                        Image(systemName: "checkmark.seal.fill")
+                            .font(.system(size: 9))
+                        Text("Preferred")
+                            .font(.caption2.bold())
+                    }
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2.5)
+                    .background(Color.orange.opacity(0.15))
+                    .foregroundColor(.orange)
+                    .cornerRadius(5)
+                }
+
+                if isME {
+                    HStack(spacing: 3) {
+                        Image(systemName: "globe.asia.australia.fill")
+                            .font(.system(size: 9))
+                        Text("Middle East")
+                            .font(.caption2.bold())
+                    }
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2.5)
+                    .background(Color.green.opacity(0.15))
+                    .foregroundColor(.green)
+                    .cornerRadius(5)
+                }
+
+                if !isPreferred && !isME {
+                    Text(item.geographicFocus.isEmpty ? "Worldwide" : item.geographicFocus)
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2.5)
+                        .background(Color(nsColor: .separatorColor).opacity(0.1))
+                        .cornerRadius(5)
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 12)
+            .padding(.top, 6)
+
+            Spacer(minLength: 4)
+
+            // MARK: - Card Footer (Modes & Bands)
+            HStack(spacing: 6) {
+                if !item.modes.isEmpty && item.modes != "Not specified" {
+                    Text(item.modes)
+                        .font(.caption2.weight(.semibold))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(accentColor.opacity(0.12))
+                        .foregroundColor(accentColor)
+                        .cornerRadius(4)
+                        .lineLimit(1)
+                }
+
+                if !item.bands.isEmpty && item.bands != "Not specified" {
+                    Text(item.bands)
+                        .font(.caption2.monospaced())
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                } else if !item.operatingSummary.isEmpty {
+                    Text(item.operatingSummary)
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(Color(nsColor: .controlBackgroundColor).opacity(0.7))
+        }
+        .frame(height: 164)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(accentColor.opacity(isPreferred ? 0.55 : (isME ? 0.4 : 0.2)), lineWidth: isPreferred ? 1.4 : 1)
+        )
+        .shadow(color: Color.black.opacity(0.03), radius: 3, x: 0, y: 1)
     }
 
     private var preferredTokens: [String] {
@@ -266,150 +404,6 @@ struct ContestCalendarAndPropagationPanel: View {
 
     private func isPreferredContest(_ item: ContestCalendarEntry) -> Bool {
         contestInterestScore(item) >= 4
-    }
-
-    private var sixMeterAlert: some View {
-        let assessment = appState.sixMeterAssessment
-        return HStack(alignment: .center, spacing: 14) {
-            ZStack {
-                Circle()
-                    .fill(assessment.color.opacity(0.18))
-                Image(systemName: assessment.icon)
-                    .font(.system(size: 28, weight: .bold))
-                    .foregroundStyle(assessment.color)
-            }
-            .frame(width: 58, height: 58)
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(assessment.title)
-                    .font(.title3.weight(.bold))
-                Text(assessment.detail)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Spacer()
-
-            Button {
-                appState.fetchPSKReporterSignals()
-                appState.fetchPropagationSnapshot()
-            } label: {
-                Label("Refresh", systemImage: "arrow.clockwise")
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(appState.isFetchingPSKReporter || appState.isFetchingPropagation)
-        }
-        .padding(16)
-        .background(assessment.color.opacity(assessment.isOpen ? 0.16 : 0.08), in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(assessment.color.opacity(assessment.isOpen ? 0.55 : 0.24), lineWidth: assessment.isOpen ? 1.6 : 1))
-    }
-
-    private var signalReporter: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Label("Live PSK Reporter", systemImage: "dot.radiowaves.left.and.right")
-                    .font(.headline)
-                Spacer()
-                Link(destination: pskReporterURL) {
-                    Label("Open map", systemImage: "map")
-                }
-            }
-
-            HStack(spacing: 10) {
-                PropagationMetric(title: "Reports", value: appState.pskReporterSignals.count.formatted(), icon: "antenna.radiowaves.left.and.right", color: .green)
-                PropagationMetric(title: "6m reports", value: appState.sixMeterSignalCount.formatted(), icon: "waveform.path.ecg", color: .orange)
-                PropagationMetric(title: "Middle East", value: appState.middleEastSixMeterSignalCount.formatted(), icon: "location.north.circle", color: .blue)
-                PropagationMetric(title: "Best SNR", value: appState.bestSixMeterSNRText, icon: "gauge.high", color: .purple)
-            }
-
-            if appState.isFetchingPSKReporter {
-                ProgressView("Loading PSK Reporter reports...")
-                    .controlSize(.small)
-            } else if appState.pskReporterSignals.isEmpty {
-                ContentUnavailableView("No reports loaded", systemImage: "waveform.slash", description: Text(appState.pskReporterStatus.isEmpty ? "Refresh to query recent reception reports for your callsign." : appState.pskReporterStatus))
-                    .frame(minHeight: 140)
-            } else {
-                VStack(spacing: 0) {
-                    ForEach(appState.pskReporterSignals.prefix(12)) { spot in
-                        HStack(spacing: 10) {
-                            Image(systemName: spot.isSixMeters ? "6.circle.fill" : "circle")
-                                .foregroundStyle(spot.isSixMeters ? .orange : .secondary)
-                                .frame(width: 20)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Heard by \(spot.receiverCallsign)")
-                                    .font(.subheadline.weight(.semibold))
-                                Text("\(spot.bandLabel) · \(spot.mode) · \(spot.receiverLocator.isEmpty ? "locator unknown" : spot.receiverLocator)")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Text(spot.snrText)
-                                .font(.caption.monospacedDigit().weight(.semibold))
-                                .foregroundStyle(spot.snrColor)
-                            Text(spot.ageText)
-                                .font(.caption2.monospacedDigit())
-                                .foregroundStyle(.secondary)
-                        }
-                        .padding(.vertical, 8)
-                        Divider()
-                    }
-                }
-            }
-
-            if !appState.pskReporterStatus.isEmpty {
-                Text(appState.pskReporterStatus)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .contestOperationsBand(color: .green)
-    }
-
-    private var sixMeterEvidence: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label("6m Middle East evidence", systemImage: "scope")
-                .font(.headline)
-
-            Text(appState.sixMeterAssessment.evidence)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            HStack(spacing: 8) {
-                ForEach(["50000000-54000000", "50000000-50500000", "50280000-50350000"], id: \.self) { range in
-                    Button(range) {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(range, forType: .string)
-                    }
-                    .buttonStyle(.bordered)
-                    .help("Copy PSK Reporter frange value")
-                }
-            }
-        }
-        .contestOperationsBand(color: .orange)
-    }
-
-    private var propagationContext: some View {
-        let snapshot = appState.propagationSnapshot
-        return VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Label("Solar and VHF context", systemImage: "sun.max.fill")
-                    .font(.headline)
-                Spacer()
-                Text(snapshot.updatedAt.map { $0.formatted(date: .omitted, time: .shortened) } ?? "Not updated")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            HStack(spacing: 10) {
-                PropagationMetric(title: "SFI", value: snapshot.solarFlux, icon: "sun.max", color: .yellow)
-                PropagationMetric(title: "K", value: snapshot.kIndex, icon: "k.circle", color: .orange)
-                PropagationMetric(title: "A", value: snapshot.aIndex, icon: "a.circle", color: .red)
-                PropagationMetric(title: "E-skip EU", value: snapshot.vhfConditions["E-Skip|Europe 6m"] ?? snapshot.vhfConditions["E-Skip|Europe"] ?? "-", icon: "sparkles", color: .blue)
-            }
-        }
-        .contestOperationsBand(color: .yellow)
     }
 }
 

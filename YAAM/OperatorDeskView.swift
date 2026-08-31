@@ -64,9 +64,11 @@ struct OperatorDeskView: View {
             case 8:
                 ConnectivityPanel()
             case 9:
-                ContestCalendarAndPropagationPanel()
+                ContestCalendarPanel()
             case 10:
                 ClubLogSpotsView()
+            case 11:
+                SixMeterWatchView()
             default:
                 QuickLogPanel()
             }
@@ -92,7 +94,8 @@ struct OperatorDeskView: View {
             Label("Awards", systemImage: "medal").tag(6)
             Label("Portable", systemImage: "figure.hiking").tag(7)
             Label("Connect", systemImage: "network").tag(8)
-            Label("Calendar/6m", systemImage: "calendar.badge.clock").tag(9)
+            Label("Calendar", systemImage: "calendar").tag(9)
+            Label("6m Magic Band", systemImage: "bolt.badge.clock.fill").tag(11)
         }
         .labelsHidden()
         .onChange(of: appState.operatorDeskSection) { _, value in
@@ -118,7 +121,9 @@ struct OperatorDeskView: View {
         case 8:
             (appState.isMobileCompanionRunning || appState.cloudSyncLastRun != nil, appState.isMobileCompanionRunning ? appState.mobileCompanionStatus : appState.cloudSyncStatus)
         case 9:
-            (appState.sixMeterAssessment.isOpen, appState.sixMeterAssessment.title)
+            (!appState.contestCalendarEntries.isEmpty, "\(appState.contestCalendarEntries.count) upcoming contests")
+        case 11:
+            (SixMeterPropagationEngine.shared.assessment.level != .quiet, SixMeterPropagationEngine.shared.assessment.summaryHeadline)
         default:
             (appState.dxClusterClient.state.isConnected, appState.dxClusterClient.state.title)
         }

@@ -119,6 +119,10 @@ struct LogTableView: View {
                 .help("Active station profile")
 
                 Divider().frame(height: 14)
+
+                OnTheAirPillView()
+
+                Divider().frame(height: 14)
                 
                 Menu {
                     Button {
@@ -217,16 +221,17 @@ struct LogTableView: View {
                                 .scaleEffect(0.55)
                                 .frame(width: 14, height: 14)
                         } else {
-                            Image(systemName: "ellipsis.circle")
+                            Image(systemName: "wand.and.stars")
+                                .foregroundStyle(.blue)
                         }
-                        Text("Tools")
+                        Text("Log Actions")
                             .font(.caption)
                             .fontWeight(.semibold)
                     }
                 }
                 .menuStyle(.borderlessButton)
                 .disabled(appState.isEnriching || appState.isSendingBatchMail)
-                .help("Cloud logbook, enrichment, rank backfill, batch mail, and QRZ login")
+                .help("Log actions: Cloud logbook, QRZ enrichment, rank backfill, QSL batch mail, and reconciliation")
                 
                 Divider().frame(height: 14)
                 

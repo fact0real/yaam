@@ -460,6 +460,13 @@ extension AppState {
         defaults.set(profile.powerWatts, forKey: "radioPowerWatts")
         defaults.set(profile.antennaDescription, forKey: "antennaDescription")
         defaults.set(profile.antennaHeightMeters, forKey: "antennaHeightMeters")
+
+        OnTheAirMonitorService.shared.setStation(
+            callsign: profile.normalizedCallsign,
+            grid: profile.normalizedGrid,
+            latitude: Double(profile.latitude ?? ""),
+            longitude: Double(profile.longitude ?? "")
+        )
     }
 
     private func migrateLegacyMasterLogsIfNeeded(using database: LogbookDatabase) throws {

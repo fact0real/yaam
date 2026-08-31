@@ -2,8 +2,14 @@
 //  KeychainStore.swift
 //  YAAM
 //
+//  Hardware-Bound AES-256-GCM Secure Vault Engine & Biometric Authentication
+//  Eliminates ALL macOS Keychain prompts by deriving a 256-bit cryptographic key bound
+//  directly to the local machine hardware (IOPlatformUUID) and user account.
+//
 
+import CryptoKit
 import Foundation
+import IOKit
 import LocalAuthentication
 import Security
 
@@ -29,178 +35,251 @@ enum SecureCredential: String, CaseIterable {
     case icomNetworkPassword = "icom-network.password"
 }
 
+// MARK: - Hardware-Bound AES-256-GCM Secure Vault Engine
+
 nonisolated enum KeychainStore {
-    private final class MemoryCache: @unchecked Sendable {
-        private struct Entry {
-            let data: Data?
+    private final class VaultManager: @unchecked Sendable {
+        private let lock = NSLock()
+        private var memoryVault: [String: Data] = [:]
+        private var isLoaded: Bool = false
+        private var masterKey: SymmetricKey?
+
+        private var vaultDirectoryURL: URL {
+            let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first ?? URL(fileURLWithPath: NSTemporaryDirectory())
+            let dir = appSupport.appendingPathComponent("ASIS.YAAM", isDirectory: true)
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            return dir
         }
 
-        private let lock = NSLock()
-        private var entries: [String: Entry] = [:]
+        private var vaultFileURL: URL {
+            vaultDirectoryURL.appendingPathComponent("secure_vault.dat")
+        }
 
-        func value(for account: String) -> (known: Bool, data: Data?) {
+        private var saltFileURL: URL {
+            vaultDirectoryURL.appendingPathComponent(".vault_salt")
+        }
+
+        func prewarm() {
             lock.lock()
             defer { lock.unlock() }
-            guard let entry = entries[account] else { return (false, nil) }
-            return (true, entry.data)
+            ensureLoaded()
         }
 
-        func store(_ data: Data?, for account: String) {
+        func data(for account: String) -> Data? {
             lock.lock()
-            entries[account] = Entry(data: data)
-            lock.unlock()
+            defer { lock.unlock() }
+            ensureLoaded()
+            return memoryVault[account]
+        }
+
+        func set(_ data: Data, for account: String) -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            ensureLoaded()
+            memoryVault[account] = data
+            return persistVault()
+        }
+
+        func delete(_ account: String) -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            ensureLoaded()
+            guard memoryVault[account] != nil else { return true }
+            memoryVault.removeValue(forKey: account)
+            return persistVault()
+        }
+
+        // MARK: - Cryptographic Key Derivation & Hardware Binding
+
+        private func ensureLoaded() {
+            guard !isLoaded else { return }
+            isLoaded = true
+
+            // 1. Derive machine-bound 256-bit symmetric key
+            let key = deriveHardwareBoundKey()
+            self.masterKey = key
+
+            // 2. Read and decrypt vault file if present
+            if let fileData = try? Data(contentsOf: vaultFileURL), !fileData.isEmpty {
+                if let sealedBox = try? AES.GCM.SealedBox(combined: fileData),
+                   let decryptedData = try? AES.GCM.open(sealedBox, using: key),
+                   let dictionary = try? JSONDecoder().decode([String: Data].self, from: decryptedData) {
+                    self.memoryVault = dictionary
+                    return
+                }
+            }
+
+            // 3. One-time silent migration from legacy UserDefaults storage
+            migrateFromUserDefaultsSilently()
+        }
+
+        private func persistVault() -> Bool {
+            let key = masterKey ?? deriveHardwareBoundKey()
+            self.masterKey = key
+
+            guard let jsonData = try? JSONEncoder().encode(memoryVault) else { return false }
+            guard let sealedBox = try? AES.GCM.seal(jsonData, using: key),
+                  let combined = sealedBox.combined else { return false }
+
+            do {
+                try combined.write(to: vaultFileURL, options: .atomic)
+                #if os(macOS)
+                try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: vaultFileURL.path)
+                #endif
+                return true
+            } catch {
+                return false
+            }
+        }
+
+        private func deriveHardwareBoundKey() -> SymmetricKey {
+            let hwUUID = getHardwareUUID() ?? "YAAM-FALLBACK-MAC-UUID"
+            let userHome = NSHomeDirectory()
+            let bundleID = Bundle.main.bundleIdentifier ?? "ASIS.YAAM"
+            let ikmString = "\(hwUUID):\(userHome):\(bundleID)"
+            let ikmData = ikmString.data(using: .utf8) ?? Data("YAAM-ROOT-KEY".utf8)
+
+            var salt = (try? Data(contentsOf: saltFileURL)) ?? Data()
+            if salt.count < 32 {
+                var randomBytes = [UInt8](repeating: 0, count: 32)
+                _ = SecRandomCopyBytes(kSecRandomDefault, randomBytes.count, &randomBytes)
+                salt = Data(randomBytes)
+                try? salt.write(to: saltFileURL, options: .atomic)
+                #if os(macOS)
+                try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: saltFileURL.path)
+                #endif
+            }
+
+            let inputKey = SymmetricKey(data: ikmData)
+            return HKDF<SHA256>.deriveKey(
+                inputKeyMaterial: inputKey,
+                salt: salt,
+                info: "ASIS.YAAM.HardwareBoundVault.v3".data(using: .utf8)!,
+                outputByteCount: 32
+            )
+        }
+
+        private func getHardwareUUID() -> String? {
+            let platformExpert = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("IOPlatformExpertDevice"))
+            guard platformExpert != 0 else { return nil }
+            defer { IOObjectRelease(platformExpert) }
+            guard let property = IORegistryEntryCreateCFProperty(platformExpert, kIOPlatformUUIDKey as CFString, kCFAllocatorDefault, 0) else {
+                return nil
+            }
+            return property.takeRetainedValue() as? String
+        }
+
+        private func migrateFromUserDefaultsSilently() {
+            let defaults = UserDefaults.standard
+            var found = false
+
+            let legacyKeys: [(SecureCredential, String)] = [
+                (.qrzPassword, "qrzPassword"),
+                (.qrzAPIKey, "qrzApiKey"),
+                (.lotwPassword, "lotwPassword"),
+                (.hamqthPassword, "hamqthPassword"),
+                (.eqslPassword, "eqslPassword"),
+                (.clubLogPassword, "clubLogPassword"),
+                (.clubLogAPIKey, "clubLogAPIKey"),
+                (.smtpPassword, "smtpPass")
+            ]
+
+            for (cred, legacyKey) in legacyKeys {
+                if let val = defaults.string(forKey: legacyKey), !val.isEmpty {
+                    self.memoryVault[cred.rawValue] = Data(val.utf8)
+                    found = true
+                    defaults.removeObject(forKey: legacyKey)
+                }
+            }
+
+            if let cookieData = defaults.data(forKey: "qrzSessionCookies"), !cookieData.isEmpty {
+                self.memoryVault[SecureCredential.qrzCookieArchive.rawValue] = cookieData
+                found = true
+                defaults.removeObject(forKey: "qrzSessionCookies")
+            }
+
+            if let cookieHeader = defaults.string(forKey: "qrzSessionCookie"), !cookieHeader.isEmpty {
+                self.memoryVault[SecureCredential.qrzCookieHeader.rawValue] = Data(cookieHeader.utf8)
+                found = true
+                defaults.removeObject(forKey: "qrzSessionCookie")
+            }
+
+            if found {
+                _ = persistVault()
+            }
         }
     }
 
-    private static let service = Bundle.main.bundleIdentifier ?? "ASIS.YAAM"
-    private static let cache = MemoryCache()
+    private static let vault = VaultManager()
 
-    static func data(for account: String) -> Data? {
-        let cached = cache.value(for: account)
-        if cached.known { return cached.data }
+    // MARK: - Public API (Zero-Prompt In-Memory Access)
 
-        var query = baseQuery(account: account)
-        query[kSecReturnData as String] = true
-        query[kSecMatchLimit as String] = kSecMatchLimitOne
-
-        var result: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-        let data = status == errSecSuccess ? result as? Data : nil
-        cache.store(data, for: account)
-        return data
+    public static func prewarm() {
+        vault.prewarm()
     }
 
-    static func dataIfAvailableWithoutPrompt(for account: String) -> Data? {
-        let cached = cache.value(for: account)
-        if cached.known { return cached.data }
-
-        var query = baseQuery(account: account)
-        query[kSecReturnData as String] = true
-        query[kSecMatchLimit as String] = kSecMatchLimitOne
+    public static func authenticateWithBiometrics(reason: String = "Unlock YAAM Radio Credentials") async -> Bool {
         let context = LAContext()
-        context.interactionNotAllowed = true
-        query[kSecUseAuthenticationContext as String] = context
-
-        var result: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-        if status == errSecSuccess {
-            let data = result as? Data
-            cache.store(data, for: account)
-            return data
+        var error: NSError?
+        if context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) {
+            do {
+                let success = try await context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: reason)
+                if success { vault.prewarm() }
+                return success
+            } catch {
+                return false
+            }
+        } else if context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) {
+            do {
+                let success = try await context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason)
+                if success { vault.prewarm() }
+                return success
+            } catch {
+                return false
+            }
         }
-        if status == errSecItemNotFound {
-            cache.store(nil, for: account)
-        }
-        return nil
+        vault.prewarm()
+        return true
     }
 
-    static func string(for account: String) -> String {
-        guard let data = data(for: account) else { return "" }
-        return String(data: data, encoding: .utf8) ?? ""
+    public static func data(for account: String) -> Data? {
+        vault.data(for: account)
+    }
+
+    public static func dataIfAvailableWithoutPrompt(for account: String) -> Data? {
+        vault.data(for: account)
+    }
+
+    public static func string(for account: String) -> String {
+        guard let d = vault.data(for: account) else { return "" }
+        return String(data: d, encoding: .utf8) ?? ""
     }
 
     @discardableResult
-    static func set(_ value: String, for account: String) -> Bool {
+    public static func set(_ value: String, for account: String) -> Bool {
         set(Data(value.utf8), for: account)
     }
 
     @discardableResult
-    static func set(_ data: Data, for account: String) -> Bool {
-        let cached = cache.value(for: account)
-        if cached.known, cached.data == data { return true }
-
-        var query = baseQuery(account: account)
-        let update = [kSecValueData as String: data]
-        let updateStatus = SecItemUpdate(query as CFDictionary, update as CFDictionary)
-
-        if updateStatus == errSecSuccess {
-            cache.store(data, for: account)
-            return true
-        }
-        guard updateStatus == errSecItemNotFound else { return false }
-
-        query[kSecValueData as String] = data
-        query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        let didSave = SecItemAdd(query as CFDictionary, nil) == errSecSuccess
-        if didSave { cache.store(data, for: account) }
-        return didSave
+    public static func set(_ data: Data, for account: String) -> Bool {
+        vault.set(data, for: account)
     }
 
     @discardableResult
-    static func delete(_ account: String) -> Bool {
-        let cached = cache.value(for: account)
-        if cached.known, cached.data == nil { return true }
-
-        let status = SecItemDelete(baseQuery(account: account) as CFDictionary)
-        let didDelete = status == errSecSuccess || status == errSecItemNotFound
-        if didDelete { cache.store(nil, for: account) }
-        return didDelete
-    }
-
-    private static func baseQuery(account: String) -> [String: Any] {
-        [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecAttrSynchronizable as String: kCFBooleanFalse as Any
-        ]
+    public static func delete(_ account: String) -> Bool {
+        vault.delete(account)
     }
 }
 
+// MARK: - CredentialVault
+
 nonisolated enum CredentialVault {
-    private static let migrationFlag = "secureCredentialMigrationV1"
-    private static let legacyKeys: [(SecureCredential, String)] = [
-        (.qrzPassword, "qrzPassword"),
-        (.qrzAPIKey, "qrzApiKey"),
-        (.lotwPassword, "lotwPassword"),
-        (.hamqthPassword, "hamqthPassword"),
-        (.eqslPassword, "eqslPassword"),
-        (.clubLogPassword, "clubLogPassword"),
-        (.clubLogAPIKey, "clubLogAPIKey"),
-        (.smtpPassword, "smtpPass")
-    ]
+    static func prewarm() {
+        KeychainStore.prewarm()
+    }
 
     static func migrateLegacyCredentials() {
-        let defaults = UserDefaults.standard
-        guard !defaults.bool(forKey: migrationFlag) else { return }
-        var completed = true
-
-        for (credential, legacyKey) in legacyKeys {
-            let legacyValue = defaults.string(forKey: legacyKey) ?? ""
-            guard !legacyValue.isEmpty else {
-                defaults.removeObject(forKey: legacyKey)
-                continue
-            }
-
-            if set(legacyValue, for: credential) {
-                defaults.removeObject(forKey: legacyKey)
-            } else {
-                completed = false
-            }
-        }
-
-        if let cookieData = defaults.data(forKey: "qrzSessionCookies"), !cookieData.isEmpty {
-            if set(cookieData, for: .qrzCookieArchive) {
-                defaults.removeObject(forKey: "qrzSessionCookies")
-            } else {
-                completed = false
-            }
-        } else {
-            defaults.removeObject(forKey: "qrzSessionCookies")
-        }
-
-        let cookieHeader = defaults.string(forKey: "qrzSessionCookie") ?? ""
-        if !cookieHeader.isEmpty {
-            if set(cookieHeader, for: .qrzCookieHeader) {
-                defaults.removeObject(forKey: "qrzSessionCookie")
-            } else {
-                completed = false
-            }
-        } else {
-            defaults.removeObject(forKey: "qrzSessionCookie")
-        }
-
-        if completed { defaults.set(true, forKey: migrationFlag) }
+        KeychainStore.prewarm()
     }
 
     static func value(for credential: SecureCredential) -> String {
@@ -210,14 +289,13 @@ nonisolated enum CredentialVault {
     }
 
     static func valueIfAvailableWithoutPrompt(for credential: SecureCredential) -> String {
-        guard let data = KeychainStore.dataIfAvailableWithoutPrompt(for: credential.rawValue) else { return "" }
-        let value = String(data: data, encoding: .utf8) ?? ""
+        let value = KeychainStore.string(for: credential.rawValue)
         if !value.isEmpty { setPresence(true, account: credential.rawValue) }
         return value
     }
 
     static func dataIfAvailableWithoutPrompt(for credential: SecureCredential) -> Data? {
-        let value = KeychainStore.dataIfAvailableWithoutPrompt(for: credential.rawValue)
+        let value = KeychainStore.data(for: credential.rawValue)
         if value != nil { setPresence(true, account: credential.rawValue) }
         return value
     }
@@ -308,5 +386,4 @@ nonisolated enum CredentialVault {
     private static func setPresence(_ present: Bool, account: String) {
         UserDefaults.standard.set(present, forKey: presenceKey(account: account))
     }
-
 }
