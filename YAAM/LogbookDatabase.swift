@@ -242,6 +242,100 @@ nonisolated final class LogbookDatabase: @unchecked Sendable {
         }
     }
 
+    func loadAllWorkspaces() throws -> (headers: [String], records: [PersistedQSO]) {
+        try queue.sync {
+            var allHeaderSet = Set<String>()
+            var orderedHeaders: [String] = []
+
+            let metaStatement = try prepare("SELECT key, value FROM metadata WHERE key LIKE 'headers.%';")
+            defer { sqlite3_finalize(metaStatement) }
+            while sqlite3_step(metaStatement) == SQLITE_ROW {
+                let jsonText = text(metaStatement, 1)
+                if let data = jsonText.data(using: .utf8),
+                   let profileHeaders = try? JSONDecoder().decode([String].self, from: data) {
+                    for header in profileHeaders {
+                        let normalized = TableColumnPolicy.normalized(header)
+                        if !normalized.isEmpty && !allHeaderSet.contains(normalized) {
+                            allHeaderSet.insert(normalized)
+                            orderedHeaders.append(normalized)
+                        }
+                    }
+                }
+            }
+
+            let statement = try prepare("""
+                SELECT id, sort_order, fields_json
+                FROM qsos
+                ORDER BY qso_date ASC, time_on ASC, sort_order ASC;
+                """)
+            defer { sqlite3_finalize(statement) }
+
+            var records: [PersistedQSO] = []
+            var counter = 1
+            while sqlite3_step(statement) == SQLITE_ROW {
+                guard let id = UUID(uuidString: text(statement, 0)),
+                      let jsonText = sqlite3_column_text(statement, 2) else {
+                    throw LogbookDatabaseError.corruptQSO(counter)
+                }
+                let data = Data(bytes: jsonText, count: Int(sqlite3_column_bytes(statement, 2)))
+                guard let fields = try? JSONDecoder().decode([String: String].self, from: data) else {
+                    throw LogbookDatabaseError.corruptQSO(counter)
+                }
+                for key in fields.keys {
+                    let normalized = TableColumnPolicy.normalized(key)
+                    if !normalized.isEmpty && !allHeaderSet.contains(normalized) {
+                        allHeaderSet.insert(normalized)
+                        orderedHeaders.append(normalized)
+                    }
+                }
+                records.append(PersistedQSO(id: id, index: counter, fields: fields))
+                counter += 1
+            }
+
+            let defaultPriority = ["QSO_DATE", "TIME_ON", "CALL", "FREQ", "BAND", "MODE", "RST_SENT", "RST_RCVD", "NAME", "QTH", "COMMENT"]
+            var finalHeaders: [String] = []
+            for item in defaultPriority {
+                if allHeaderSet.contains(item) {
+                    finalHeaders.append(item)
+                    allHeaderSet.remove(item)
+                }
+            }
+            for header in orderedHeaders {
+                if allHeaderSet.contains(header) {
+                    finalHeaders.append(header)
+                    allHeaderSet.remove(header)
+                }
+            }
+            finalHeaders.append(contentsOf: allHeaderSet.sorted())
+
+            return (finalHeaders, records)
+        }
+    }
+
+    func loadWorkspaceQSOs(profileID: UUID?) throws -> (headers: [String], records: [PersistedQSO]) {
+        if let profileID {
+            return try loadWorkspace(profileID: profileID)
+        } else {
+            return try loadAllWorkspaces()
+        }
+    }
+
+    func databaseQSOStats(profileID: UUID? = nil) throws -> (count: Int, firstDate: String?, lastDate: String?) {
+        try queue.sync {
+            let sql = profileID == nil
+                ? "SELECT COUNT(*), MIN(qso_date), MAX(qso_date) FROM qsos WHERE qso_date <> '';"
+                : "SELECT COUNT(*), MIN(qso_date), MAX(qso_date) FROM qsos WHERE station_profile_id = ? AND qso_date <> '';"
+            let statement = try prepare(sql)
+            defer { sqlite3_finalize(statement) }
+            if let profileID { bind(profileID.uuidString, to: 1, in: statement) }
+            guard sqlite3_step(statement) == SQLITE_ROW else { throw currentError() }
+            let count = Int(sqlite3_column_int64(statement, 0))
+            let firstDate = sqlite3_column_type(statement, 1) != SQLITE_NULL ? text(statement, 1) : nil
+            let lastDate = sqlite3_column_type(statement, 2) != SQLITE_NULL ? text(statement, 2) : nil
+            return (count, firstDate?.isEmpty == false ? firstDate : nil, lastDate?.isEmpty == false ? lastDate : nil)
+        }
+    }
+
     func saveWorkspace(
         profileID: UUID,
         headers: [String],

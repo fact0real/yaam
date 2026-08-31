@@ -46,6 +46,11 @@ struct YAAMApp: App {
                 
                 Button("Export Filtered Log As...") { appState.exportFilteredLogAs() }
                     .keyboardShortcut("s", modifiers: [.command, .option])
+
+                Divider()
+
+                Button("Export Database Logs...") { appState.openDatabaseExport() }
+                    .keyboardShortcut("e", modifiers: [.command, .shift])
             }
             
             // MARK: - Tools Menu Commands

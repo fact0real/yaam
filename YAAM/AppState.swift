@@ -1958,6 +1958,8 @@ class AppState: NSObject, ObservableObject {
     }
     @Published var recentLogFiles: [URL] = []
     @Published var selectedTab: Int = min(5, max(0, UserDefaults.standard.integer(forKey: "selectedTab")))
+    @Published var convertSource: Int = 0 // 0: External File, 1: YAAM Database
+    @Published var convertDatabaseProfileID: UUID? = nil // nil: All Station Profiles / Full Database
     
     // Persistent Local Confirmations Memory Database Cache
     private var localConfirmedKeys: Set<String> = []
@@ -7142,6 +7144,13 @@ class AppState: NSObject, ObservableObject {
             let filteredDicts = filteredRecords.map { $0.fields }
             writeRecordsToFileAsync(records: filteredDicts, to: url)
         }
+    }
+
+    func openDatabaseExport(profileID: UUID? = nil) {
+        convertSource = 1
+        convertDatabaseProfileID = profileID ?? activeStationProfileID
+        selectedTab = 1
+        UserDefaults.standard.set(1, forKey: "selectedTab")
     }
 
     private func writeRecordsToFileAsync(records: [[String: String]], to url: URL) {

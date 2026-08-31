@@ -85,6 +85,9 @@ extension AppState {
                 UserDefaults.standard.set(profile.id.uuidString, forKey: "activeStationProfileID")
                 syncLegacyStationDefaults(with: profile)
             }
+            if convertDatabaseProfileID == nil {
+                convertDatabaseProfileID = activeStationProfileID
+            }
 
             createDailyBackupIfNeeded(using: database)
             refreshDatabaseSafetyState()
@@ -642,5 +645,22 @@ extension AppState {
         showAlert = true
         appendLog("Logbook safety operation failed: \(error.localizedDescription)")
         playActivitySound(.failure)
+    }
+
+    func loadDatabaseQSOsForExport(profileID: UUID?) throws -> (headers: [String], records: [[String: String]]) {
+        guard let database = logbookDatabase else { throw YAAMPersistenceError.databaseUnavailable }
+        let (headers, records) = try database.loadWorkspaceQSOs(profileID: profileID)
+        let dicts = records.map { $0.fields }
+        return (headers, dicts)
+    }
+
+    func fetchDatabaseQSOStats(profileID: UUID?) -> (count: Int, firstDate: String?, lastDate: String?) {
+        guard let database = logbookDatabase else { return (0, nil, nil) }
+        return (try? database.databaseQSOStats(profileID: profileID)) ?? (0, nil, nil)
+    }
+
+    func totalDatabaseQSOCount(profileID: UUID? = nil) -> Int {
+        guard let database = logbookDatabase else { return 0 }
+        return (try? database.qsoCount(profileID: profileID)) ?? 0
     }
 }
