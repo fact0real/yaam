@@ -91,7 +91,7 @@ struct QRZAwardsView: View {
         }
         .background(Color(NSColor.textBackgroundColor))
         .onAppear {
-            if appState.qrzAwardSummaries.isEmpty && appState.qrzAwardsStatus.isEmpty {
+            if appState.qrzAwardSummaries.isEmpty && !appState.isFetchingQRZAwards {
                 appState.fetchQRZAwards()
             }
         }

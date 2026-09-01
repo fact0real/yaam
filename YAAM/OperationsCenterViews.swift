@@ -375,11 +375,13 @@ struct AwardCenterPanel: View {
                 }
                 .pickerStyle(.segmented)
                 .frame(maxWidth: 720)
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 310), spacing: 12)], spacing: 12) {
+
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 280, maximum: 360), spacing: 14)], spacing: 14) {
                     ForEach(filteredAwards) { award in
                         awardCard(award)
                     }
                 }
+
                 Label("These are local planning estimates. Issuing organizations remain authoritative for accepted credits and granted awards.", systemImage: "info.circle")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -408,17 +410,25 @@ struct AwardCenterPanel: View {
     }
 
     private func awardCard(_ award: AwardProgress) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .top) {
+        VStack(alignment: .leading, spacing: 10) {
+            // 1. Header (Icon, Title, Detail, Stage Menu) - Fixed Height
+            HStack(alignment: .center, spacing: 10) {
                 Image(systemName: award.earnedLocally ? "checkmark.seal.fill" : award.icon)
                     .font(.title2)
                     .foregroundStyle(award.earnedLocally ? Color.green : progressColor(award.percent))
-                    .frame(width: 34)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(award.title).font(.headline)
-                    Text(award.detail).font(.caption).foregroundStyle(.secondary)
+                    .frame(width: 28, height: 28)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(award.title)
+                        .font(.headline)
+                        .lineLimit(1)
+                    Text(award.detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
-                Spacer()
+                .frame(maxWidth: .infinity, alignment: .leading)
+
                 Menu {
                     ForEach(AwardLifecycleStage.allCases) { stage in
                         Button(stage.title) { appState.saveAwardStage(awardID: award.id, stage: stage) }
@@ -429,36 +439,79 @@ struct AwardCenterPanel: View {
                 }
                 .menuStyle(.borderlessButton)
             }
+            .frame(height: 36)
 
-            if let percent = award.percent {
-                ProgressView(value: percent, total: 100)
-                    .tint(progressColor(percent))
-                HStack {
-                    Text("\(Int(percent.rounded()))%")
-                        .font(.title3.monospacedDigit().weight(.bold))
-                        .foregroundStyle(progressColor(percent))
-                    Spacer()
-                    if let remaining = award.remaining { Text(remaining == 0 ? "Target reached" : "\(remaining) remaining").font(.caption).foregroundStyle(.secondary) }
+            // 2. Progress Bar & Percentage HUD - Fixed Height
+            VStack(spacing: 4) {
+                if let percent = award.percent {
+                    ProgressView(value: percent, total: 100)
+                        .tint(progressColor(percent))
+                    HStack {
+                        Text("\(Int(percent.rounded()))%")
+                            .font(.title3.monospacedDigit().weight(.bold))
+                            .foregroundStyle(progressColor(percent))
+                        Spacer()
+                        if let remaining = award.remaining {
+                            Text(remaining == 0 ? "Target reached" : "\(remaining) remaining")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                } else {
+                    ProgressView(value: min(100.0, Double(award.worked) * 10.0), total: 100)
+                        .tint(.orange)
+                    HStack {
+                        Text("\(award.worked)")
+                            .font(.title3.monospacedDigit().weight(.bold))
+                            .foregroundStyle(.orange)
+                        + Text(" active").font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        Text("Milestone tracker")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
+            .frame(height: 42)
 
+            // 3. Metric Counters Box (Worked, Confirmed, Credited)
             HStack(spacing: 0) {
                 awardMetric("Worked", award.worked)
-                Divider().frame(height: 34)
+                Divider().frame(height: 26)
                 awardMetric("Confirmed", award.confirmed)
-                Divider().frame(height: 34)
+                Divider().frame(height: 26)
                 awardMetric("Credited", award.credited)
             }
-            Text(award.sourceNote).font(.caption2).foregroundStyle(.secondary).lineLimit(3)
+            .padding(.vertical, 4)
+            .background(Color(nsColor: .windowBackgroundColor).opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
+
+            Spacer(minLength: 0)
+
+            // 4. Source Note Footer - Fixed 2-line Height
+            Text(award.sourceNote)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .frame(maxWidth: .infinity, minHeight: 26, maxHeight: 26, alignment: .topLeading)
         }
-        .padding(15)
-        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 7))
-        .overlay(RoundedRectangle(cornerRadius: 7).stroke(progressColor(award.percent).opacity(0.24)))
+        .padding(14)
+        .frame(height: 216)
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(progressColor(award.percent).opacity(0.25), lineWidth: 1)
+        )
     }
 
     private func awardMetric(_ title: String, _ value: Int) -> some View {
-        VStack(spacing: 2) { Text(value.formatted()).font(.headline.monospacedDigit()); Text(title).font(.caption2).foregroundStyle(.secondary) }
-            .frame(maxWidth: .infinity)
+        VStack(spacing: 2) {
+            Text(value.formatted())
+                .font(.headline.monospacedDigit())
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
     }
 
     private func progressColor(_ percent: Double?) -> Color {

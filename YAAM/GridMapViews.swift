@@ -19,6 +19,15 @@ public enum MapActivityLayer: String, CaseIterable, Identifiable, Sendable {
     case liveTraffic = "⚡️ WSJT-X & Cluster"
 
     public var id: String { rawValue }
+
+    public var shortTitle: String {
+        switch self {
+        case .all: return "All Activity"
+        case .onTheAir: return "On-Air"
+        case .recentQSOs: return "Log QSOs"
+        case .liveTraffic: return "WSJT-X"
+        }
+    }
 }
 
 // MARK: - Unified 3D Globe, Azimuthal & GridTracker Operator Workspace
@@ -102,159 +111,212 @@ public struct GlobeAndGridTrackerWorkspaceView: View {
     // MARK: - Toolbar Header
 
     private var toolbarHeader: some View {
-        HStack(spacing: 10) {
-            // 1. Projection Selector
-            Picker("", selection: $selectedProjection) {
-                ForEach(MapProjectionMode.allCases) { proj in
-                    Label(proj.rawValue, systemImage: proj.icon).tag(proj)
+        ViewThatFits(in: .horizontal) {
+            // Expanded single row with compact controls
+            HStack(spacing: 7) {
+                projectionControl
+                Divider().frame(height: 18)
+                mapStyleControl
+                activityLayerControl
+                azimuthalRangeControl
+                bandFilterControl
+                modeFilterControl
+                Spacer(minLength: 4)
+                togglesControl
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+
+            // Compact two rows
+            VStack(spacing: 5) {
+                HStack(spacing: 7) {
+                    projectionControl
+                    Divider().frame(height: 18)
+                    mapStyleControl
+                    activityLayerControl
+                    Spacer(minLength: 4)
                 }
+                HStack(spacing: 7) {
+                    azimuthalRangeControl
+                    bandFilterControl
+                    modeFilterControl
+                    Spacer(minLength: 4)
+                    togglesControl
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+        }
+        .background(Color(NSColor.controlBackgroundColor))
+    }
+
+    private var projectionControl: some View {
+        Picker("", selection: $selectedProjection) {
+            Text("🌐 Globe").tag(MapProjectionMode.globe3D)
+            Text("🧭 Azimuth").tag(MapProjectionMode.azimuthal)
+            Text("🗺 2D Grid").tag(MapProjectionMode.gridTracker)
+        }
+        .pickerStyle(.segmented)
+        .controlSize(.small)
+        .frame(width: 215)
+    }
+
+    @ViewBuilder
+    private var mapStyleControl: some View {
+        if selectedProjection == .gridTracker || selectedProjection == .globe3D {
+            Picker("", selection: $mapKitStyle) {
+                Text("🗺 Map").tag(MKMapType.standard)
+                Text("🛰 Sat").tag(MKMapType.satellite)
+                Text("🏔 Hybrid").tag(MKMapType.hybrid)
             }
             .pickerStyle(.segmented)
-            .frame(width: 320)
+            .controlSize(.small)
+            .frame(width: 155)
+        }
+    }
 
-            Divider()
-                .frame(height: 20)
-
-            // 2. Map Style Switcher (for GridTracker MapKit)
-            if selectedProjection == .gridTracker {
-                Picker("", selection: $mapKitStyle) {
-                    Text("🗺 Map").tag(MKMapType.standard)
-                    Text("🛰 Satellite").tag(MKMapType.satellite)
-                    Text("🏔 Hybrid").tag(MKMapType.hybrid)
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 210)
-            }
-
-            // 3. Activity Layer Selector
-            Picker("Activity", selection: $selectedActivityLayer) {
-                ForEach(MapActivityLayer.allCases) { layer in
-                    Text(layer.rawValue).tag(layer)
-                }
-            }
-            .pickerStyle(.menu)
-            .frame(width: 170)
-
-            // 4. Azimuthal Range Picker (When in Azimuthal Mode)
-            if selectedProjection == .azimuthal {
-                Menu {
-                    ForEach(azimuthalRanges, id: \.km) { r in
-                        Button {
-                            azimuthalRangeKm = r.km
-                        } label: {
-                            HStack {
-                                Text(r.label)
-                                if azimuthalRangeKm == r.km { Image(systemName: "checkmark") }
-                            }
-                        }
-                    }
+    private var activityLayerControl: some View {
+        Menu {
+            ForEach(MapActivityLayer.allCases) { layer in
+                Button {
+                    selectedActivityLayer = layer
                 } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "scope")
-                        Text("Range: \(Int(azimuthalRangeKm)) km")
-                            .fontWeight(.semibold)
+                    HStack {
+                        Text(layer.rawValue)
+                        if selectedActivityLayer == layer { Image(systemName: "checkmark") }
                     }
                 }
-                .menuStyle(.borderedButton)
-                .controlSize(.small)
             }
-
-            // 5. Band Filter Chips
-            Menu {
-                ForEach(availableBands, id: \.self) { band in
-                    Button {
-                        selectedBand = band
-                    } label: {
-                        HStack {
-                            Text(band)
-                            if selectedBand == band { Image(systemName: "checkmark") }
-                        }
-                    }
-                }
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "waveform.path")
-                    Text("Band: \(selectedBand)")
-                        .fontWeight(.semibold)
-                }
-            }
-            .menuStyle(.borderedButton)
-            .controlSize(.small)
-
-            // 6. Mode Filter Chips
-            Menu {
-                ForEach(availableModes, id: \.self) { mode in
-                    Button {
-                        selectedMode = mode
-                    } label: {
-                        HStack {
-                            Text(mode)
-                            if selectedMode == mode { Image(systemName: "checkmark") }
-                        }
-                    }
-                }
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "antenna.radiowaves.left.and.right")
-                    Text("Mode: \(selectedMode)")
-                        .fontWeight(.semibold)
-                }
-            }
-            .menuStyle(.borderedButton)
-            .controlSize(.small)
-
-            Spacer()
-
-            // 7. Toggles (Countries, Greyline, Grids, Arcs, Audio)
-            HStack(spacing: 6) {
-                Toggle(isOn: $showCountryLabels) {
-                    Label("Countries", systemImage: "flag.fill")
-                        .font(.caption)
-                }
-                .toggleStyle(.button)
-                .controlSize(.small)
-                .tint(.teal)
-                .help("Toggle Country Names & Flags")
-
-                Toggle(isOn: $showSolarGreyline) {
-                    Label("Greyline", systemImage: "sun.max.fill")
-                        .font(.caption)
-                }
-                .toggleStyle(.button)
-                .controlSize(.small)
-                .tint(.orange)
-                .help("Toggle Real-Time Solar Day/Night Greyline Terminator")
-
-                Toggle(isOn: $showGridOverlay) {
-                    Label("Grids", systemImage: "square.grid.3x3")
-                        .font(.caption)
-                }
-                .toggleStyle(.button)
-                .controlSize(.small)
-                .tint(.blue)
-                .help("Toggle Maidenhead Grid Squares Overlay")
-
-                Toggle(isOn: $showTrafficArcs) {
-                    Label("Arcs", systemImage: "point.3.connected.trianglepath.dotted")
-                        .font(.caption)
-                }
-                .toggleStyle(.button)
-                .controlSize(.small)
-                .tint(.cyan)
-                .help("Toggle Great Circle Live Decode Arcs")
-
-                Toggle(isOn: $audioAlertOnNewGrid) {
-                    Image(systemName: audioAlertOnNewGrid ? "bell.badge.fill" : "bell")
-                        .foregroundStyle(audioAlertOnNewGrid ? .green : .secondary)
-                }
-                .toggleStyle(.button)
-                .controlSize(.small)
-                .help("Audio alert when a new wanted Maidenhead Grid is decoded")
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "sparkles")
+                Text(selectedActivityLayer.shortTitle)
+                    .font(.caption)
+                    .fontWeight(.semibold)
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 7)
-        .background(Color(NSColor.controlBackgroundColor))
+        .menuStyle(.borderedButton)
+        .controlSize(.small)
+    }
+
+    @ViewBuilder
+    private var azimuthalRangeControl: some View {
+        if selectedProjection == .azimuthal {
+            Menu {
+                ForEach(azimuthalRanges, id: \.km) { r in
+                    Button {
+                        azimuthalRangeKm = r.km
+                    } label: {
+                        HStack {
+                            Text(r.label)
+                            if azimuthalRangeKm == r.km { Image(systemName: "checkmark") }
+                        }
+                    }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "scope")
+                    Text("Range: \(Int(azimuthalRangeKm)) km")
+                        .fontWeight(.semibold)
+                }
+            }
+            .menuStyle(.borderedButton)
+            .controlSize(.small)
+        }
+    }
+
+    private var bandFilterControl: some View {
+        Menu {
+            ForEach(availableBands, id: \.self) { band in
+                Button {
+                    selectedBand = band
+                } label: {
+                    HStack {
+                        Text(band)
+                        if selectedBand == band { Image(systemName: "checkmark") }
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "waveform.path")
+                Text("Band: \(selectedBand)")
+                    .fontWeight(.semibold)
+            }
+        }
+        .menuStyle(.borderedButton)
+        .controlSize(.small)
+    }
+
+    private var modeFilterControl: some View {
+        Menu {
+            ForEach(availableModes, id: \.self) { mode in
+                Button {
+                    selectedMode = mode
+                } label: {
+                    HStack {
+                        Text(mode)
+                        if selectedMode == mode { Image(systemName: "checkmark") }
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "antenna.radiowaves.left.and.right")
+                Text("Mode: \(selectedMode)")
+                    .fontWeight(.semibold)
+            }
+        }
+        .menuStyle(.borderedButton)
+        .controlSize(.small)
+    }
+
+    private var togglesControl: some View {
+        HStack(spacing: 5) {
+            Toggle(isOn: $showCountryLabels) {
+                Label("Countries", systemImage: "flag.fill")
+                    .font(.caption)
+            }
+            .toggleStyle(.button)
+            .controlSize(.small)
+            .tint(.teal)
+            .help("Toggle Country Names & Flags")
+
+            Toggle(isOn: $showSolarGreyline) {
+                Label("Greyline", systemImage: "sun.max.fill")
+                    .font(.caption)
+            }
+            .toggleStyle(.button)
+            .controlSize(.small)
+            .tint(.orange)
+            .help("Toggle Real-Time Solar Day/Night Greyline Terminator")
+
+            Toggle(isOn: $showGridOverlay) {
+                Label("Grids", systemImage: "square.grid.3x3")
+                    .font(.caption)
+            }
+            .toggleStyle(.button)
+            .controlSize(.small)
+            .tint(.blue)
+            .help("Toggle Maidenhead Grid Squares Overlay")
+
+            Toggle(isOn: $showTrafficArcs) {
+                Label("Arcs", systemImage: "point.3.connected.trianglepath.dotted")
+                    .font(.caption)
+            }
+            .toggleStyle(.button)
+            .controlSize(.small)
+            .tint(.cyan)
+            .help("Toggle Great Circle Live Decode Arcs")
+
+            Toggle(isOn: $audioAlertOnNewGrid) {
+                Image(systemName: audioAlertOnNewGrid ? "bell.badge.fill" : "bell")
+                    .foregroundStyle(audioAlertOnNewGrid ? .green : .secondary)
+            }
+            .toggleStyle(.button)
+            .controlSize(.small)
+            .help("Audio alert when a new wanted Maidenhead Grid is decoded")
+        }
     }
 
     // MARK: - Map Viewport
@@ -294,12 +356,14 @@ public struct GlobeAndGridTrackerWorkspaceView: View {
             )
 
         case .globe3D:
-            Globe3DSceneView(
+            Globe3DMapView(
                 homeCoordinate: homeCoord,
                 markers: markers,
+                mapType: mapKitStyle == .standard ? .hybrid : mapKitStyle,
                 showGreatCircleArcs: showTrafficArcs,
                 showDayNightShadow: showSolarGreyline,
                 showCountryLabels: showCountryLabels,
+                telemetryState: telemetryState,
                 onSelectMarker: { marker in
                     selectedMarker = marker
                     selectedGridDetail = nil
@@ -319,6 +383,7 @@ public struct GlobeAndGridTrackerWorkspaceView: View {
                 showTrafficArcs: showTrafficArcs,
                 showCountryLabels: showCountryLabels,
                 azimuthalRangeKm: azimuthalRangeKm,
+                stationCallsign: appState.activeStationProfile?.callsign ?? "EP2AES",
                 onSelectMarker: { marker in
                     selectedMarker = marker
                     selectedGridDetail = nil
@@ -437,15 +502,17 @@ public struct GlobeAndGridTrackerWorkspaceView: View {
                 .tint(.green)
 
                 Button {
-                    appState.appendLog("Target \(marker.callsign) selected. Beam heading set to \(Int(spBearing))° \(cardinal).")
+                    RotatorService.shared.turnTo(azimuth: spBearing)
+                    appState.appendLog("Target \(marker.callsign) selected. Rotator steered to \(Int(spBearing))° \(cardinal).")
                 } label: {
                     HStack(spacing: 4) {
-                        Image(systemName: "scope")
-                        Text("Aim \(Int(spBearing))°")
+                        Image(systemName: "location.north.line.fill")
+                        Text("Turn Rotator \(Int(spBearing))°")
                     }
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+                .tint(.orange)
             }
         }
         .padding(14)
@@ -557,6 +624,16 @@ public struct GlobeAndGridTrackerWorkspaceView: View {
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
                 .tint(.blue)
+
+                Button {
+                    RotatorService.shared.turnTo(azimuth: spBearing)
+                    appState.appendLog("Grid \(grid4) selected. Rotator steered to \(Int(spBearing))° \(cardinal).")
+                } label: {
+                    Label("Aim \(Int(spBearing))°", systemImage: "location.north.line.fill")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .tint(.orange)
 
                 Spacer()
             }

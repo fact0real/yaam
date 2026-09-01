@@ -207,6 +207,17 @@ extension AppState {
         quickLogAssessment = QuickLogAssessment()
         quickLogStatus = "Saved \(record["CALL"])"
         enqueueAutomaticQSL(for: record)
+        WavelogSyncEngine.shared.autoPushSingleQSO(record: record)
+        if HRDLogClient.shared.autoUploadEnabled {
+            Task {
+                _ = await HRDLogClient.shared.uploadSingleQSO(record: record)
+            }
+        }
+        if HamQTHUploadClient.shared.autoUploadEnabled {
+            Task {
+                _ = await HamQTHUploadClient.shared.uploadSingleQSO(record: record)
+            }
+        }
         refreshAwardProgress()
         updateMobileCompanionSnapshot()
         return record

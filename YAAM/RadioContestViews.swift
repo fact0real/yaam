@@ -7,7 +7,10 @@ import SwiftUI
 
 struct RadioBridgePanel: View {
     private enum Workspace: String, CaseIterable, Identifiable {
-        case bridge = "Bridge"
+        case bridge = "Hamlib / WSJT-X"
+        case flrig = "FLRig"
+        case tci = "TCI (SDR)"
+        case rotator = "Rotator"
         case ft8 = "FT8 Station"
 
         var id: String { rawValue }
@@ -16,11 +19,21 @@ struct RadioBridgePanel: View {
     @EnvironmentObject private var appState: AppState
     @ObservedObject var rig: RigControlClient
     @ObservedObject var wsjtx: WSJTXListener
+    @ObservedObject private var flrig = FLRigClient.shared
+    @ObservedObject private var rotator = RotatorService.shared
+
     @AppStorage("rigControlHost") private var rigHost = "127.0.0.1"
     @AppStorage("rigControlPort") private var rigPort = 4532
     @AppStorage("rigAutoFillQuickLog") private var rigAutoFill = false
     @AppStorage("wsjtxUDPPort") private var wsjtxPort = 2237
     @AppStorage("wsjtxAutoFillQuickLog") private var wsjtxAutoFill = false
+
+    @State private var flrigHost = "127.0.0.1"
+    @State private var flrigPort = 12345
+    @State private var rotatorHost = "127.0.0.1"
+    @State private var rotatorPort = 4533
+    @State private var targetAzimuthInput = 0.0
+
     @State private var actionStatus = ""
     @State private var workspace: Workspace = .bridge
 
@@ -35,6 +48,12 @@ struct RadioBridgePanel: View {
                     wsjtxSection
                     Divider()
                     pendingSection
+                } else if workspace == .flrig {
+                    flrigSection
+                } else if workspace == .tci {
+                    TCIControlView()
+                } else if workspace == .rotator {
+                    rotatorSection
                 } else {
                     FT8StationView(
                         engine: appState.ft8Engine,
@@ -52,10 +71,10 @@ struct RadioBridgePanel: View {
                 .font(.system(size: 30))
                 .foregroundStyle(.blue)
             VStack(alignment: .leading, spacing: 3) {
-                Text(workspace == .bridge ? "Radio & Digital Bridge" : "FT8 Station").font(.title3.weight(.bold))
+                Text(workspace == .bridge ? "Radio & Digital Bridge" : workspace.rawValue).font(.title3.weight(.bold))
                 Text(workspace == .bridge
                      ? "One operating context for your radio, WSJT-X/JTDX, and Quick Log"
-                     : "Native FT8 receive, decode, sequencing, and guarded transmit")
+                     : "High-performance rig control and transceiver telemetry")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
@@ -66,7 +85,7 @@ struct RadioBridgePanel: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .frame(width: 230)
+            .frame(width: 440)
             if !actionStatus.isEmpty {
                 Text(actionStatus).font(.caption).foregroundStyle(.secondary).lineLimit(2)
             }
@@ -243,6 +262,226 @@ struct RadioBridgePanel: View {
             .help("Dismiss this queued QSO")
         }
         .padding(.vertical, 10)
+    }
+
+    // MARK: - FLRig (XML-RPC) Workspace
+
+    private var flrigSection: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack {
+                sectionTitle("FLRig (W1HKJ XML-RPC)", icon: "antenna.radiowaves.left.and.right", active: flrig.isConnected, subtitle: flrig.isConnected ? "Connected to \(flrig.host):\(flrig.port)" : (flrig.lastError ?? "Ready to connect"))
+                Spacer()
+                Button {
+                    flrig.isConnected ? flrig.disconnect() : flrig.connect(host: flrigHost, port: flrigPort)
+                } label: {
+                    Label(flrig.isConnected ? "Disconnect" : "Connect FLRig", systemImage: flrig.isConnected ? "xmark.circle" : "link")
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(flrig.isConnected ? .secondary : .blue)
+            }
+
+            HStack(alignment: .bottom, spacing: 12) {
+                settingField("FLRig Host", width: 180) {
+                    TextField("127.0.0.1", text: $flrigHost).textFieldStyle(.roundedBorder)
+                }
+                settingField("XML-RPC Port", width: 95) {
+                    TextField("12345", value: $flrigPort, format: .number).textFieldStyle(.roundedBorder)
+                }
+                Spacer()
+            }
+
+            if flrig.isConnected {
+                // Live VFO Display
+                HStack(spacing: 20) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("VFO FREQUENCY")
+                            .font(.caption2.bold())
+                            .foregroundColor(.secondary)
+                        Text(String(format: "%.3f kHz", flrig.frequencyHz / 1000.0))
+                            .font(.system(size: 28, weight: .black, design: .monospaced))
+                            .foregroundColor(.blue)
+                    }
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("MODE")
+                            .font(.caption2.bold())
+                            .foregroundColor(.secondary)
+                        Text(flrig.mode)
+                            .font(.system(size: 20, weight: .bold, design: .monospaced))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
+                            .background(Color.accentColor.opacity(0.18), in: RoundedRectangle(cornerRadius: 6))
+                    }
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("STATE")
+                            .font(.caption2.bold())
+                            .foregroundColor(.secondary)
+                        HStack(spacing: 6) {
+                            Circle()
+                                .fill(flrig.isPTTActive ? Color.red : Color.green)
+                                .frame(width: 10, height: 10)
+                            Text(flrig.isPTTActive ? "TX (ON AIR)" : "RX (RECEIVING)")
+                                .font(.caption.bold())
+                                .foregroundColor(flrig.isPTTActive ? .red : .green)
+                        }
+                    }
+
+                    Spacer()
+
+                    Button {
+                        let snapshot = RigSnapshot(
+                            frequencyHz: UInt64(max(0, flrig.frequencyHz)),
+                            mode: flrig.mode,
+                            passbandHz: nil,
+                            updatedAt: Date()
+                        )
+                        appState.applyRigSnapshotToQuickLog(snapshot)
+                        actionStatus = "FLRig frequency (\(snapshot.frequencyMHz) MHz) copied to Quick Log"
+                    } label: {
+                        Label("Use in Quick Log", systemImage: "arrow.down.to.line.compact")
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+                .padding(16)
+                .background(Color(NSColor.controlBackgroundColor))
+                .cornerRadius(10)
+
+                // Quick Bands & Modes Switcher
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Quick Band Tune (MHz)")
+                        .font(.caption.bold())
+                        .foregroundColor(.secondary)
+                    HStack(spacing: 8) {
+                        ForEach([("160M", 1_840_000.0), ("80M", 3_573_000.0), ("40M", 7_074_000.0), ("30M", 10_136_000.0), ("20M", 14_074_000.0), ("17M", 18_100_000.0), ("15M", 21_074_000.0), ("12M", 24_915_000.0), ("10M", 28_074_000.0), ("6M", 50_313_000.0)], id: \.0) { item in
+                            Button(item.0) {
+                                Task { try? await flrig.setFrequency(hz: item.1) }
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        }
+                    }
+                }
+            } else {
+                ContentUnavailableView(
+                    "FLRig Not Connected",
+                    systemImage: "antenna.radiowaves.left.and.right",
+                    description: Text("Launch FLRig on your Mac or local network with XML-RPC enabled on port 12345 to control your transceiver.")
+                )
+                .frame(maxWidth: .infinity, minHeight: 160)
+            }
+        }
+        .padding(20)
+    }
+
+    // MARK: - Rotator Control Workspace
+
+    private var rotatorSection: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack {
+                sectionTitle("Antenna Rotator", icon: "location.north.line.fill", active: rotator.isConnected, subtitle: rotator.lastStatus)
+                Spacer()
+                Picker("Protocol", selection: $rotator.protocolType) {
+                    ForEach(RotatorProtocol.allCases) { p in
+                        Text(p.rawValue).tag(p)
+                    }
+                }
+                .frame(width: 170)
+                Button {
+                    rotator.isConnected ? rotator.disconnect() : rotator.connect(host: rotatorHost, port: rotatorPort, protocolType: rotator.protocolType)
+                } label: {
+                    Label(rotator.isConnected ? "Disconnect" : "Connect Rotator", systemImage: rotator.isConnected ? "xmark.circle" : "link")
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(rotator.isConnected ? .secondary : .orange)
+            }
+
+            HStack(alignment: .bottom, spacing: 12) {
+                settingField("Rotator Host", width: 180) {
+                    TextField("127.0.0.1", text: $rotatorHost).textFieldStyle(.roundedBorder)
+                }
+                settingField("Port", width: 95) {
+                    TextField("4533", value: $rotatorPort, format: .number).textFieldStyle(.roundedBorder)
+                }
+                Spacer()
+            }
+
+            if rotator.isConnected {
+                HStack(spacing: 24) {
+                    // Compass Azimuth Dial
+                    ZStack {
+                        Circle()
+                            .stroke(Color.secondary.opacity(0.3), lineWidth: 3)
+                            .frame(width: 130, height: 130)
+
+                        VStack(spacing: 2) {
+                            Text("\(Int(rotator.currentAzimuth))°")
+                                .font(.system(size: 24, weight: .black, design: .monospaced))
+                                .foregroundColor(.primary)
+                            Text(GeodesicMath.compassCardinal(for: rotator.currentAzimuth))
+                                .font(.caption.bold())
+                                .foregroundColor(.secondary)
+                        }
+
+                        // Rotating Needle
+                        Rectangle()
+                            .fill(Color.orange)
+                            .frame(width: 3, height: 55)
+                            .offset(y: -28)
+                            .rotationEffect(.degrees(rotator.currentAzimuth))
+                    }
+                    .frame(width: 140, height: 140)
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack(spacing: 12) {
+                            Text("Target Azimuth:")
+                                .font(.subheadline)
+                            TextField("Degrees (0-360)", value: $targetAzimuthInput, format: .number)
+                                .textFieldStyle(.roundedBorder)
+                                .frame(width: 90)
+                            Button("GO") {
+                                rotator.turnTo(azimuth: targetAzimuthInput)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(.green)
+
+                            Button("STOP", role: .destructive) {
+                                rotator.stop()
+                            }
+                            .buttonStyle(.borderedProminent)
+                        }
+
+                        // Quick Destination Presets
+                        Text("Destination Presets")
+                            .font(.caption.bold())
+                            .foregroundColor(.secondary)
+
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 110))], spacing: 8) {
+                            ForEach(rotator.defaultPresets) { preset in
+                                Button {
+                                    rotator.turnTo(azimuth: preset.azimuth)
+                                } label: {
+                                    Label(preset.label, systemImage: preset.icon)
+                                        .font(.caption)
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                        }
+                    }
+                }
+                .padding(18)
+                .background(Color(NSColor.controlBackgroundColor))
+                .cornerRadius(10)
+            } else {
+                ContentUnavailableView(
+                    "Rotator Not Connected",
+                    systemImage: "location.north.line.fill",
+                    description: Text("Connect to Hamlib rotctld (port 4533) or PstRotator over IP to steer your directional beam antenna in 1 click.")
+                )
+                .frame(maxWidth: .infinity, minHeight: 160)
+            }
+        }
+        .padding(20)
     }
 
     private func sectionTitle(_ title: String, icon: String, active: Bool, subtitle: String) -> some View {
@@ -567,6 +806,15 @@ struct ContestPanel: View {
                 }
             }
 
+            // ESM Live Ribbon & Mode Controller
+            ContestESMControlView(
+                inputCall: $inputCall,
+                inputSentExchange: $inputSentExchange,
+                inputRcvdExchange: $inputRcvdExchange,
+                onTriggerESM: { triggerESM(session: session) },
+                onAbortWipe: { abortAndWipe() }
+            )
+
             // Input Fields Row
             HStack(spacing: 10) {
                 // Callsign
@@ -578,6 +826,9 @@ struct ContestPanel: View {
                         .font(.title3.monospaced().weight(.bold))
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 170)
+                        .onSubmit {
+                            triggerESM(session: session)
+                        }
                 }
 
                 // Sent RST
@@ -623,25 +874,25 @@ struct ContestPanel: View {
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 140)
                         .onSubmit {
-                            submitFastQSO(session: session)
+                            triggerESM(session: session)
                         }
                 }
 
                 // Log Button
                 Button {
-                    submitFastQSO(session: session)
+                    triggerESM(session: session)
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "arrow.turn.down.left")
-                        Text("Log (↵)")
+                        Text(ContestESMEngine.shared.isESMEnabled ? "ESM (↵)" : "Log (↵)")
                     }
                     .font(.body.weight(.bold))
                     .frame(height: 28)
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
-                .tint(isDupe ? .orange : .green)
-                .disabled(inputCall.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .tint(isDupe ? .orange : (ContestESMEngine.shared.isESMEnabled ? ContestESMEngine.shared.currentState.actionColor : .green))
+                .disabled(inputCall.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !ContestESMEngine.shared.isESMEnabled)
                 .padding(.top, 14)
 
                 Spacer()
@@ -659,7 +910,7 @@ struct ContestPanel: View {
                         .foregroundStyle(.orange)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
-                        .background(Color.orange.opacity(0.15), in: Capsule())
+                        .background(Color.orange.opacity(0.12), in: Capsule())
                 } else {
                     Label("✅ VALID QSO (+3 Pts on \(inputBand))", systemImage: "checkmark.circle.fill")
                         .font(.caption.weight(.bold))
@@ -699,6 +950,25 @@ struct ContestPanel: View {
         }
         .padding(16)
         .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
+    }
+
+    private func triggerESM(session: ContestSession) {
+        ContestESMEngine.shared.myCallsign = appState.activeStationProfile?.callsign ?? "EP2AES"
+        ContestESMEngine.shared.nextSerial = session.nextSerial
+
+        ContestESMEngine.shared.handleEnterPressed(
+            callsign: &inputCall,
+            sentExchange: inputSentExchange,
+            rcvdExchange: &inputRcvdExchange
+        ) {
+            submitFastQSO(session: session)
+            return fastLogSuccess
+        }
+    }
+
+    private func abortAndWipe() {
+        ContestESMEngine.shared.abortAndWipe(callsign: &inputCall, rcvdExchange: &inputRcvdExchange)
+        fastLogStatus = "Wiped"
     }
 
     private func submitFastQSO(session: ContestSession) {

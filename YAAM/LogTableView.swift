@@ -19,6 +19,8 @@ struct LogTableView: View {
     @State private var dragStartWidths: [String: CGFloat] = [:]
     @State private var explicitlyShownColumns: Set<String> = []
     @State private var showFullConfirmationSyncPrompt = false
+    @State private var selectedEQSLRecord: QSORecordModel? = nil
+    @State private var showEQSLCardSheet = false
 
     private let compactCenteredColumns: Set<String> = [
         "TIME",
@@ -50,8 +52,7 @@ struct LogTableView: View {
 
         VStack(spacing: 0) {
             // MARK: - Toolbar & Quick Actions Summary Bar
-            HStack(spacing: 10) {
-                
+            HStack(spacing: 8) {
                 Menu {
                     if appState.recentLogFiles.isEmpty {
                         Text("No recent logs found in database")
@@ -85,9 +86,10 @@ struct LogTableView: View {
                         Text("Database")
                             .fontWeight(.semibold)
                     }
+                    .font(.caption)
                 }
                 .menuStyle(.borderlessButton)
-                .frame(width: 85)
+                .fixedSize(horizontal: true, vertical: false)
                 
                 Divider().frame(height: 14)
 
@@ -107,15 +109,15 @@ struct LogTableView: View {
                         Label("Manage Stations", systemImage: "slider.horizontal.3")
                     }
                 } label: {
-                    HStack(spacing: 5) {
+                    HStack(spacing: 4) {
                         Image(systemName: "antenna.radiowaves.left.and.right")
                             .foregroundStyle(.green)
-                        Text(appState.currentStationCallsign)
+                        Text(appState.currentStationCallsign.isEmpty ? "NO CALL" : appState.currentStationCallsign)
                             .font(.caption.monospaced().weight(.semibold))
                     }
                 }
                 .menuStyle(.borderlessButton)
-                .frame(width: 108)
+                .fixedSize(horizontal: true, vertical: false)
                 .help("Active station profile")
 
                 Divider().frame(height: 14)
@@ -194,7 +196,7 @@ struct LogTableView: View {
                     Button {
                         appState.forceQRZReLogin()
                     } label: {
-                        Label("QRZ Login", systemImage: "key.fill")
+                        Label("QRZ Login (2FA / WebKit)", systemImage: "lock.shield.fill")
                     }
 
                     Button {
@@ -215,7 +217,7 @@ struct LogTableView: View {
                         Label("Log Assistant", systemImage: "bubble.left.and.text.bubble.right")
                     }
                 } label: {
-                    HStack(spacing: 5) {
+                    HStack(spacing: 4) {
                         if appState.isEnriching || appState.isSendingBatchMail {
                             ProgressView()
                                 .scaleEffect(0.55)
@@ -230,6 +232,7 @@ struct LogTableView: View {
                     }
                 }
                 .menuStyle(.borderlessButton)
+                .fixedSize(horizontal: true, vertical: false)
                 .disabled(appState.isEnriching || appState.isSendingBatchMail)
                 .help("Log actions: Cloud logbook, QRZ enrichment, rank backfill, QSL batch mail, and reconciliation")
                 
@@ -268,7 +271,7 @@ struct LogTableView: View {
                 .background(Color(NSColor.textBackgroundColor))
                 .cornerRadius(6)
                 .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.gray.opacity(0.3), lineWidth: 1))
-                .frame(width: 210)
+                .frame(minWidth: 120, idealWidth: 160, maxWidth: 200)
                 
                 Divider().frame(height: 14)
 
@@ -306,7 +309,7 @@ struct LogTableView: View {
                         persistColumnVisibility()
                     }
                 } label: {
-                    HStack(spacing: 5) {
+                    HStack(spacing: 4) {
                         Image(systemName: "tablecolumns")
                         Text("Columns")
                             .font(.caption)
@@ -319,17 +322,21 @@ struct LogTableView: View {
                     }
                 }
                 .menuStyle(.borderlessButton)
+                .fixedSize(horizontal: true, vertical: false)
 
                 Divider().frame(height: 14)
                 
                 Button(action: { appState.showFilterSheet = true }) {
-                    HStack(spacing: 6) {
+                    HStack(spacing: 4) {
                         Image(systemName: appState.filterCriteria.isActive ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
                             .foregroundColor(appState.filterCriteria.isActive ? .orange : .primary)
-                        Text(appState.filterCriteria.isActive ? "Filters Active" : "Filters...")
+                        Text(appState.filterCriteria.isActive ? "Filters Active" : "Filters")
+                            .font(.caption)
                             .fontWeight(appState.filterCriteria.isActive ? .bold : .regular)
                     }
                 }
+                .buttonStyle(.borderless)
+                .fixedSize(horizontal: true, vertical: false)
                 
                 if appState.filterCriteria.isActive {
                     Button(action: { appState.filterCriteria.reset() }) {
@@ -349,8 +356,19 @@ struct LogTableView: View {
                 
                 Divider().frame(height: 14)
                 
-                Button {
-                    appState.syncConfirmations()
+                // MARK: - Unified Sync Menu
+                Menu {
+                    Button {
+                        appState.syncConfirmations()
+                    } label: {
+                        Label("Sync New QSLs (LoTW & QRZ)", systemImage: "arrow.clockwise.icloud")
+                    }
+
+                    Button {
+                        showFullConfirmationSyncPrompt = true
+                    } label: {
+                        Label("Full QSL History Reconciliation...", systemImage: "arrow.triangle.2.circlepath")
+                    }
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "arrow.clockwise.icloud")
@@ -360,39 +378,27 @@ struct LogTableView: View {
                             .fontWeight(.semibold)
                     }
                 }
-                .buttonStyle(.borderless)
+                .menuStyle(.borderlessButton)
+                .fixedSize(horizontal: true, vertical: false)
                 .disabled(appState.isSyncingAPI || appState.qsoRecords.isEmpty)
-                .help("Download only new LoTW and QRZ confirmations")
+                .help("Download only new LoTW and QRZ confirmations (or reconcile full history)")
 
-                Button {
-                    showFullConfirmationSyncPrompt = true
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "arrow.triangle.2.circlepath")
-                            .foregroundColor(appState.isSyncingAPI ? .gray : .green)
-                        Text("Full QSL History")
-                            .font(.caption)
-                            .fontWeight(.semibold)
-                    }
-                }
-                .buttonStyle(.borderless)
-                .disabled(appState.isSyncingAPI || appState.qsoRecords.isEmpty)
-                .help("Download and reconcile every LoTW and QRZ confirmation from the beginning")
-                
                 Button(action: { appState.showStatsSheet = true }) {
                     HStack(spacing: 4) {
                         Image(systemName: "chart.bar.fill")
                             .foregroundColor(.purple)
-                        Text("Statistics")
+                        Text("Stats")
                             .font(.caption)
                             .fontWeight(.semibold)
                     }
                 }
+                .buttonStyle(.borderless)
+                .fixedSize(horizontal: true, vertical: false)
                 
                 Divider().frame(height: 14)
                 
-                HStack(spacing: 10) {
-                    HStack(spacing: 4) {
+                HStack(spacing: 8) {
+                    HStack(spacing: 3) {
                         Image(systemName: "archivebox.fill")
                             .foregroundStyle(.secondary)
                         Text(appState.qsoRecords.count.formatted())
@@ -405,7 +411,7 @@ struct LogTableView: View {
                     .fixedSize(horizontal: true, vertical: false)
                     .help("\(appState.qsoRecords.count.formatted()) QSOs in the active station log")
                     
-                    HStack(spacing: 4) {
+                    HStack(spacing: 3) {
                         Image(systemName: "globe")
                             .foregroundStyle(.secondary)
                         Text(appState.availableCountries.count.formatted())
@@ -418,7 +424,7 @@ struct LogTableView: View {
                     .fixedSize(horizontal: true, vertical: false)
                 }
                 
-                Spacer()
+                Spacer(minLength: 4)
                 
                 if appState.isLoading || appState.isSyncingAPI || (appState.isEnriching && !appState.isDailyRankBackfillRunning) {
                     ProgressView()
@@ -431,23 +437,30 @@ struct LogTableView: View {
                         value: Double(appState.dailyRankBackfillCompleted),
                         total: Double(max(1, appState.dailyRankBackfillTotal))
                     )
-                    .frame(width: 110)
+                    .frame(width: 90)
 
                     Text(appState.dailyRankBackfillStatus)
                         .font(.caption2)
                         .foregroundColor(.secondary)
                         .lineLimit(1)
+                        .truncationMode(.tail)
+                        .frame(maxWidth: 150)
                         .help(appState.dailyRankBackfillStatus)
                 } else if !appState.dailyRankBackfillStatus.isEmpty {
                     Text(appState.dailyRankBackfillStatus)
                         .font(.caption2)
                         .foregroundColor(.secondary)
                         .lineLimit(1)
+                        .truncationMode(.tail)
+                        .frame(maxWidth: 150)
                         .help(appState.dailyRankBackfillStatus)
                 } else {
-                    Text("Tip: Select rows to enrich specific QSOs; with no selection, Enrich Data processes today's QSOs.")
+                    Text("Select rows to enrich specific QSOs")
                         .font(.caption2)
                         .foregroundColor(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .frame(maxWidth: 180)
                 }
             }
             .padding(.horizontal, 10)
@@ -535,24 +548,6 @@ struct LogTableView: View {
             .padding(.vertical, 6)
             .background(Color(NSColor.windowBackgroundColor))
         }
-        .sheet(isPresented: $appState.showFilterSheet) {
-            FilterSheetView().environmentObject(appState)
-        }
-        .sheet(isPresented: $appState.showQRZLoginSheet) {
-            QRZLoginView().environmentObject(appState)
-        }
-        .sheet(isPresented: $appState.showDuplicateReviewSheet) {
-            DuplicateReviewView().environmentObject(appState)
-        }
-        .sheet(isPresented: $appState.showQRZIncomingSheet) {
-            QRZIncomingRequestsView().environmentObject(appState)
-        }
-        .sheet(isPresented: $appState.showConfirmationReconciliationSheet) {
-            ConfirmationReconciliationView().environmentObject(appState)
-        }
-        .sheet(isPresented: $appState.showLogAssistantSheet) {
-            LogAssistantView().environmentObject(appState)
-        }
         .confirmationDialog(
             "Rebuild the complete confirmation history?",
             isPresented: $showFullConfirmationSyncPrompt,
@@ -564,6 +559,20 @@ struct LogTableView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("YAAM will page through every confirmed QRZ record and download LoTW confirmations from the beginning. The active station needs its QRZ Logbook API key and Settings needs your LoTW credentials. Existing log entries are preserved; only confirmation fields are reconciled.")
+        }
+        .sheet(isPresented: $showEQSLCardSheet) {
+            if let record = selectedEQSLRecord {
+                EQSLCardModalView(
+                    callsign: record["CALL"],
+                    date: record["QSO_DATE"],
+                    time: record["TIME_ON"],
+                    band: record["BAND"],
+                    mode: record["MODE"],
+                    rstSent: record["RST_SENT"],
+                    rstRcvd: record["RST_RCVD"],
+                    grid: record["GRIDSQUARE"]
+                )
+            }
         }
         .onAppear {
             restoreColumnVisibility()
@@ -853,6 +862,13 @@ struct LogTableView: View {
                         Button("Generate QSL Card") {
                             appState.selectedQSLCardQSO = record
                             appState.showQSLCardComposer = true
+                        }
+
+                        Button {
+                            selectedEQSLRecord = record
+                            showEQSLCardSheet = true
+                        } label: {
+                            Label("View eQSL Graphic Card", systemImage: "photo.badge.checkmark")
                         }
                     }
                     

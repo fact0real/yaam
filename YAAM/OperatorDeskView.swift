@@ -48,6 +48,21 @@ struct OperatorDeskView: View {
                 SixMeterWatchView()
             case 12:
                 GlobeAndGridTrackerWorkspaceView()
+            case 13:
+                BandmapView()
+            case 14:
+                CWKeyerView()
+                    .padding(20)
+            case 15:
+                ClubMembershipView()
+            case 16:
+                TCIControlView()
+            case 17:
+                ON4KSTView()
+            case 18:
+                WinKeyerView()
+            case 19:
+                QSLLabelDesignerView()
             default:
                 QuickLogPanel()
             }
@@ -63,9 +78,16 @@ struct OperatorDeskView: View {
     private var deskTabs: [DeskTabItem] {
         [
             DeskTabItem(tag: 0, title: "Quick Log", icon: "plus.circle.fill"),
-            DeskTabItem(tag: 12, title: "3D Globe & Grid Tracker", icon: "globe.americas.fill"),
+            DeskTabItem(tag: 12, title: "Globe & Grids", icon: "globe.americas.fill"),
+            DeskTabItem(tag: 13, title: "Bandmap", icon: "waveform.path.ecg.rectangle"),
+            DeskTabItem(tag: 14, title: "CW Keyer", icon: "tuningfork"),
+            DeskTabItem(tag: 18, title: "WinKeyer", icon: "cable.connector.horizontal"),
+            DeskTabItem(tag: 17, title: "ON4KST Chat", icon: "bubble.left.and.bubble.right.fill"),
+            DeskTabItem(tag: 19, title: "QSL Labels", icon: "printer.fill"),
+            DeskTabItem(tag: 15, title: "Clubs", icon: "person.3.sequence.fill"),
+            DeskTabItem(tag: 16, title: "TCI SDR", icon: "antenna.radiowaves.left.and.right"),
             DeskTabItem(tag: 1, title: "DX Cluster", icon: "dot.radiowaves.left.and.right"),
-            DeskTabItem(tag: 10, title: "Club Log Spots", icon: "person.3.fill"),
+            DeskTabItem(tag: 10, title: "Club Log", icon: "person.3.fill"),
             DeskTabItem(tag: 2, title: "Sync Center", icon: "arrow.triangle.2.circlepath"),
             DeskTabItem(tag: 3, title: "Radio Bridge", icon: "wave.3.right.circle"),
             DeskTabItem(tag: 4, title: "Contest", icon: "flag.checkered"),
@@ -74,12 +96,12 @@ struct OperatorDeskView: View {
             DeskTabItem(tag: 7, title: "Portable", icon: "figure.hiking"),
             DeskTabItem(tag: 8, title: "Connect", icon: "network"),
             DeskTabItem(tag: 9, title: "Calendar", icon: "calendar"),
-            DeskTabItem(tag: 11, title: "6m Magic Band", icon: "bolt.badge.clock.fill")
+            DeskTabItem(tag: 11, title: "6m Band", icon: "bolt.badge.clock.fill")
         ]
     }
 
     private var headerBar: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
             // Station Callsign & Grid Badge (Fixed layout - Zero Overlap)
             stationBadge
                 .fixedSize(horizontal: true, vertical: false)
@@ -87,47 +109,61 @@ struct OperatorDeskView: View {
             Divider()
                 .frame(height: 20)
 
-            // Scrollable / Responsive Tab Bar
-            ScrollView(.horizontal, showsIndicators: false) {
+            // Scrollable / Responsive Tab Bar with Auto-Scroll & Scroll Buttons
+            ScrollViewReader { scrollProxy in
                 HStack(spacing: 4) {
-                    ForEach(deskTabs, id: \.tag) { tab in
-                        Button {
-                            withAnimation(.easeInOut(duration: 0.15)) {
-                                appState.operatorDeskSection = tab.tag
-                                UserDefaults.standard.set(tab.tag, forKey: "operatorDeskSection")
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 4) {
+                            ForEach(deskTabs, id: \.tag) { tab in
+                                Button {
+                                    withAnimation(.easeInOut(duration: 0.15)) {
+                                        appState.operatorDeskSection = tab.tag
+                                        UserDefaults.standard.set(tab.tag, forKey: "operatorDeskSection")
+                                        scrollProxy.scrollTo(tab.tag, anchor: .center)
+                                    }
+                                } label: {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: tab.icon)
+                                        Text(tab.title)
+                                    }
+                                    .font(.system(size: 11.5, weight: appState.operatorDeskSection == tab.tag ? .bold : .medium))
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 5)
+                                    .background(
+                                        appState.operatorDeskSection == tab.tag ?
+                                            Color.accentColor.opacity(0.18) : Color.clear,
+                                        in: RoundedRectangle(cornerRadius: 6)
+                                    )
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 6)
+                                            .stroke(appState.operatorDeskSection == tab.tag ? Color.accentColor : Color.clear, lineWidth: 1.0)
+                                    )
+                                    .foregroundStyle(appState.operatorDeskSection == tab.tag ? Color.accentColor : Color.primary)
+                                }
+                                .buttonStyle(.plain)
+                                .id(tab.tag)
                             }
-                        } label: {
-                            HStack(spacing: 5) {
-                                Image(systemName: tab.icon)
-                                Text(tab.title)
-                            }
-                            .font(.system(size: 12, weight: appState.operatorDeskSection == tab.tag ? .bold : .medium))
-                            .padding(.horizontal, 9)
-                            .padding(.vertical, 5)
-                            .background(
-                                appState.operatorDeskSection == tab.tag ?
-                                    Color.accentColor.opacity(0.18) : Color.clear,
-                                in: RoundedRectangle(cornerRadius: 6)
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .stroke(appState.operatorDeskSection == tab.tag ? Color.accentColor : Color.clear, lineWidth: 1.0)
-                            )
-                            .foregroundStyle(appState.operatorDeskSection == tab.tag ? Color.accentColor : Color.primary)
                         }
-                        .buttonStyle(.plain)
+                        .padding(.vertical, 2)
+                    }
+                    .onAppear {
+                        scrollProxy.scrollTo(appState.operatorDeskSection, anchor: .center)
+                    }
+                    .onChange(of: appState.operatorDeskSection) { _, newSection in
+                        withAnimation {
+                            scrollProxy.scrollTo(newSection, anchor: .center)
+                        }
                     }
                 }
-                .padding(.vertical, 2)
             }
 
             Spacer(minLength: 4)
 
             deskStatus
-                .fixedSize(horizontal: true, vertical: false)
+                .frame(maxWidth: 180, alignment: .trailing)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 7)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
         .background(Color(nsColor: .controlBackgroundColor))
     }
 
@@ -166,6 +202,12 @@ struct OperatorDeskView: View {
             (!appState.contestCalendarEntries.isEmpty, "\(appState.contestCalendarEntries.count) upcoming contests")
         case 11:
             (SixMeterPropagationEngine.shared.assessment.level != .quiet, SixMeterPropagationEngine.shared.assessment.summaryHeadline)
+        case 13:
+            (true, "\(BandmapEngine.shared.spots.count) live spots on \(BandmapEngine.shared.selectedBand)")
+        case 14:
+            (CWKeyerService.shared.isTransmitting, CWKeyerService.shared.isTransmitting ? "TX Morse Active" : "CW Keyer \(CWKeyerService.shared.wpm) WPM")
+        case 15:
+            (true, "\(ClubMembershipEngine.shared.totalMembersIndexed) club members indexed")
         default:
             (appState.dxClusterClient.state.isConnected, appState.dxClusterClient.state.title)
         }
@@ -177,7 +219,7 @@ struct OperatorDeskView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
-                .truncationMode(.middle)
+                .truncationMode(.tail)
         }
         .help(status.1)
     }
@@ -334,6 +376,32 @@ private struct QuickLogPanel: View {
                     .focused($focusedField, equals: .callsign)
                     .onSubmit { moveAfterCallsign() }
                     .frame(minWidth: 260)
+
+                let matches = ClubMembershipEngine.shared.lookupMemberships(for: appState.quickLogDraft.callsign)
+                if !matches.isEmpty {
+                    HStack(spacing: 6) {
+                        ForEach(matches) { match in
+                            Button {
+                                appState.quickLogDraft.receivedExchange = match.memberNumber
+                                appState.quickLogDraft.comment = "\(match.club.rawValue) #\(match.memberNumber)"
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Image(systemName: match.club.icon)
+                                        .font(.system(size: 9))
+                                    Text("\(match.club.rawValue) #\(match.memberNumber)")
+                                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                }
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(match.club.badgeColor.opacity(0.18), in: Capsule())
+                                .foregroundColor(match.club.badgeColor)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Click to insert \(match.club.rawValue) #\(match.memberNumber) into exchange")
+                        }
+                    }
+                    .padding(.top, 2)
+                }
             }
 
             VStack(alignment: .leading, spacing: 5) {
@@ -1017,6 +1085,46 @@ private struct SyncCenterPanel: View {
                         syncCard(status)
                     }
                 }
+
+                // MARK: - Wavelog & Cloudlog Server Card
+                HStack(spacing: 16) {
+                    Image(systemName: "cloud.fill")
+                        .font(.title)
+                        .foregroundColor(.blue)
+                        .frame(width: 40)
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 8) {
+                            Text("Wavelog / Cloudlog Server")
+                                .font(.headline)
+                            Text(WavelogSyncEngine.shared.isConfigured ? "Connected" : "Not configured")
+                                .font(.caption2.bold())
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(WavelogSyncEngine.shared.isConfigured ? Color.green.opacity(0.18) : Color.secondary.opacity(0.18), in: Capsule())
+                                .foregroundColor(WavelogSyncEngine.shared.isConfigured ? .green : .secondary)
+                        }
+
+                        Text(WavelogSyncEngine.shared.lastStatusMessage)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+
+                    Spacer()
+
+                    Button {
+                        Task {
+                            await WavelogSyncEngine.shared.performFullSync(appState: appState)
+                        }
+                    } label: {
+                        Label("Sync Wavelog", systemImage: "arrow.triangle.2.circlepath")
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(WavelogSyncEngine.shared.isSyncing || !WavelogSyncEngine.shared.isConfigured)
+                }
+                .padding(14)
+                .background(Color(NSColor.controlBackgroundColor))
+                .cornerRadius(10)
 
                 Divider()
 

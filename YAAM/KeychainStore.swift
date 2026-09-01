@@ -33,6 +33,8 @@ enum SecureCredential: String, CaseIterable {
     case qrzCookieArchive = "qrz.cookies.archive"
     case logAssistantAPIKey = "log-assistant.api-key"
     case icomNetworkPassword = "icom-network.password"
+    case wavelogAPIKey = "wavelog.api-key"
+    case hrdlogCode = "hrdlog.upload-code"
 }
 
 // MARK: - Hardware-Bound AES-256-GCM Secure Vault Engine

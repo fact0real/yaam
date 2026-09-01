@@ -248,6 +248,17 @@ extension AppState {
 
         qsoRecords.append(newRecord)
         persistQuickLog(newRecord)
+        WavelogSyncEngine.shared.autoPushSingleQSO(record: newRecord)
+        if HRDLogClient.shared.autoUploadEnabled {
+            Task {
+                _ = await HRDLogClient.shared.uploadSingleQSO(record: newRecord)
+            }
+        }
+        if HamQTHUploadClient.shared.autoUploadEnabled {
+            Task {
+                _ = await HamQTHUploadClient.shared.uploadSingleQSO(record: newRecord)
+            }
+        }
         advanceContestSerial()
         playActivitySound(.success)
 

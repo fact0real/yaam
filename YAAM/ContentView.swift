@@ -444,6 +444,30 @@ struct ContentView: View {
             ImportReviewView()
                 .environmentObject(appState)
         }
+        .sheet(isPresented: $appState.showQRZLoginSheet) {
+            QRZLoginView()
+                .environmentObject(appState)
+        }
+        .sheet(isPresented: $appState.showFilterSheet) {
+            FilterSheetView()
+                .environmentObject(appState)
+        }
+        .sheet(isPresented: $appState.showDuplicateReviewSheet) {
+            DuplicateReviewView()
+                .environmentObject(appState)
+        }
+        .sheet(isPresented: $appState.showQRZIncomingSheet) {
+            QRZIncomingRequestsView()
+                .environmentObject(appState)
+        }
+        .sheet(isPresented: $appState.showConfirmationReconciliationSheet) {
+            ConfirmationReconciliationView()
+                .environmentObject(appState)
+        }
+        .sheet(isPresented: $appState.showLogAssistantSheet) {
+            LogAssistantView()
+                .environmentObject(appState)
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
             if appState.isMasterMode {
                 try? appState.persistCurrentWorkspace(reason: "Application exit")

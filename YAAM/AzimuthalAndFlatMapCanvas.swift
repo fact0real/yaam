@@ -2,11 +2,14 @@
 //  AzimuthalAndFlatMapCanvas.swift
 //  YAAM
 //
-//  High-Performance 2D Vector Canvas for Azimuthal Equidistant & GridTracker Maps.
-//  Includes precise Vector Country Boundaries, Country Flags & Labels, Range Zoom,
-//  and Decluttered Smart Station Badges.
+//  High-Precision NS6T-Style 2D Vector Canvas for Azimuthal Equidistant Great-Circle Map
+//  Authentic sky-blue ocean, crisp white continents, curved latitude/longitude graticule mesh,
+//  center station badge, active beam heading arrow, 360° calibrated outer compass dial,
+//  and real-time solar greyline terminator with subsolar ☀️ marker.
 //
 
+import Combine
+import CoreGraphics
 import SwiftUI
 
 public struct AzimuthalAndFlatMapCanvas: View {
@@ -20,8 +23,13 @@ public struct AzimuthalAndFlatMapCanvas: View {
     public var showTrafficArcs: Bool
     public var showCountryLabels: Bool
     public var azimuthalRangeKm: Double
+    public var stationCallsign: String
     public var onSelectMarker: (Globe3DMarker) -> Void
     public var onSelectGrid: (String) -> Void
+
+    @ObservedObject private var rotatorService = RotatorService.shared
+    @State private var liveDate = Date()
+    private let timer = Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()
 
     public init(
         mode: MapProjectionMode,
@@ -33,7 +41,8 @@ public struct AzimuthalAndFlatMapCanvas: View {
         showGridLines: Bool = true,
         showTrafficArcs: Bool = true,
         showCountryLabels: Bool = true,
-        azimuthalRangeKm: Double = 8000.0,
+        azimuthalRangeKm: Double = 20015.0,
+        stationCallsign: String = "EP2AES",
         onSelectMarker: @escaping (Globe3DMarker) -> Void,
         onSelectGrid: @escaping (String) -> Void
     ) {
@@ -47,6 +56,7 @@ public struct AzimuthalAndFlatMapCanvas: View {
         self.showTrafficArcs = showTrafficArcs
         self.showCountryLabels = showCountryLabels
         self.azimuthalRangeKm = azimuthalRangeKm
+        self.stationCallsign = stationCallsign
         self.onSelectMarker = onSelectMarker
         self.onSelectGrid = onSelectGrid
     }
@@ -54,12 +64,12 @@ public struct AzimuthalAndFlatMapCanvas: View {
     public var body: some View {
         GeometryReader { geometry in
             let size = geometry.size
-            let subSolar = SolarEphemeris.calculate(at: Date())
-            let terminatorPoints = SolarEphemeris.terminatorCoordinates(at: Date(), stepDegrees: 3.0)
+            let subSolar = SolarEphemeris.calculate(at: liveDate)
+            let terminatorPoints = SolarEphemeris.terminatorCoordinates(at: liveDate, stepDegrees: 2.0)
 
-            ZStack {
-                // Base Background
-                Color(red: 0.04, green: 0.07, blue: 0.13)
+            ZStack(alignment: .bottomLeading) {
+                // Outer Canvas Background
+                Color(red: 0.96, green: 0.97, blue: 0.98)
 
                 Canvas { context, canvasSize in
                     if mode == .azimuthal {
@@ -82,22 +92,42 @@ public struct AzimuthalAndFlatMapCanvas: View {
                 }
                 .drawingGroup()
 
-                // Interactive Smart Pins Overlay (Decluttered & Distinct)
-                pinsOverlay(size: size)
-
-                // Map Compass & Legend Watermark
-                mapWatermark(size: size)
+                // Live UTC GMT Clock Watermark (matching reference diagram)
+                Text(formattedGMT(liveDate))
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .foregroundColor(Color(red: 0.15, green: 0.20, blue: 0.25))
+                    .padding(.leading, 18)
+                    .padding(.bottom, 14)
             }
-            .clipShape(RoundedRectangle(cornerRadius: 8))
             .contentShape(Rectangle())
-            .onTapGesture { location in
-                handleCanvasTap(location: location, size: size)
+            .onReceive(timer) { newDate in
+                liveDate = newDate
             }
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onEnded { value in
+                        handleCanvasTap(location: value.location, size: size)
+                    }
+            )
         }
     }
 
+    private func formattedGMT(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss 'GMT'"
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        return formatter.string(from: date)
+    }
+
     private func handleCanvasTap(location: CGPoint, size: CGSize) {
-        if mode == .gridTracker {
+        if mode == .azimuthal {
+            let center = CGPoint(x: size.width / 2.0, y: size.height / 2.0)
+            let dx = location.x - center.x
+            let dy = location.y - center.y
+            var bearing = atan2(dy, dx) * 180.0 / .pi + 90.0
+            if bearing < 0 { bearing += 360.0 }
+            rotatorService.turnTo(azimuth: bearing)
+        } else if mode == .gridTracker {
             let lon = (location.x / size.width) * 360.0 - 180.0
             let lat = 90.0 - (location.y / size.height) * 180.0
             let grid4 = MaidenheadGridEngine.locator(from: GeoCoordinate(latitude: lat, longitude: lon))
@@ -105,69 +135,7 @@ public struct AzimuthalAndFlatMapCanvas: View {
         }
     }
 
-    // MARK: - Equirectangular & GridTracker Drawing
-
-    private func drawEquirectangularMap(
-        context: GraphicsContext,
-        size: CGSize,
-        home: GeoCoordinate,
-        subSolar: SubSolarPosition,
-        terminator: [GeoCoordinate]
-    ) {
-        let w = size.width
-        let h = size.height
-
-        func screenPoint(lat: Double, lon: Double) -> CGPoint {
-            let x = (lon + 180.0) / 360.0 * w
-            let y = (90.0 - lat) / 180.0 * h
-            return CGPoint(x: x, y: y)
-        }
-
-        // 1. Draw GridTracker Maidenhead Colored Tiles
-        if showGridLines {
-            drawMaidenheadGridTiles(context: context, size: size, toScreen: screenPoint)
-        }
-
-        // 2. Draw High-Precision Country Boundaries
-        drawVectorCountriesEquirectangular(context: context, toScreen: screenPoint)
-
-        // 3. Solar Terminator & Night Shading Overlay
-        if showDayNightShadow {
-            drawSolarTerminatorShade(context: context, size: size, subSolar: subSolar, terminator: terminator, toScreen: screenPoint)
-        }
-
-        // 4. Draw Traffic Arcs
-        if showTrafficArcs {
-            drawGreatCircleTrafficArcs(context: context, home: home, toScreen: screenPoint)
-        }
-
-        // 5. Country Names & Flags
-        if showCountryLabels {
-            drawCountryLabelsEquirectangular(context: context, toScreen: screenPoint)
-        }
-
-        // 6. Home Station Beacon Pulse
-        let homePt = screenPoint(lat: home.latitude, lon: home.longitude)
-        context.fill(
-            Path(ellipseIn: CGRect(x: homePt.x - 7, y: homePt.y - 7, width: 14, height: 14)),
-            with: .color(.green.opacity(0.85))
-        )
-        context.stroke(
-            Path(ellipseIn: CGRect(x: homePt.x - 12, y: homePt.y - 12, width: 24, height: 24)),
-            with: .color(.green.opacity(0.5)),
-            lineWidth: 1.5
-        )
-
-        // 7. Sun Position Pin
-        let sunPt = screenPoint(lat: subSolar.latitude, lon: subSolar.longitude)
-        context.fill(
-            Path(ellipseIn: CGRect(x: sunPt.x - 8, y: sunPt.y - 8, width: 16, height: 16)),
-            with: .color(.yellow.opacity(0.85))
-        )
-        context.draw(Text("☀️").font(.system(size: 14)), at: sunPt, anchor: .center)
-    }
-
-    // MARK: - Azimuthal Equidistant Drawing (Antenna Beam Heading)
+    // MARK: - Azimuthal Equidistant Map Drawing (Matching NS6T Reference Image)
 
     private func drawAzimuthalMap(
         context: GraphicsContext,
@@ -177,7 +145,8 @@ public struct AzimuthalAndFlatMapCanvas: View {
         terminator: [GeoCoordinate]
     ) {
         let center = CGPoint(x: size.width / 2.0, y: size.height / 2.0)
-        let maxRadius = min(size.width, size.height) / 2.0 - 24.0
+        let outerDialRadius = min(size.width, size.height) / 2.0 - 16.0
+        let mapRadius = outerDialRadius - 28.0
         let maxDistKm: Double = max(3000.0, azimuthalRangeKm)
 
         func azimuthalPoint(lat: Double, lon: Double) -> CGPoint {
@@ -186,146 +155,63 @@ public struct AzimuthalAndFlatMapCanvas: View {
             let bearingDeg = GeodesicMath.initialBearing(from: home, to: target)
             let bearingRad = (bearingDeg - 90.0) * .pi / 180.0
 
-            let r = (distKm / maxDistKm) * Double(maxRadius)
+            let r = (distKm / maxDistKm) * Double(mapRadius)
             let x = center.x + CGFloat(r * cos(bearingRad))
             let y = center.y + CGFloat(r * sin(bearingRad))
             return CGPoint(x: x, y: y)
         }
 
-        // 1. Concentric Distance Range Rings
-        let rangeSteps = [maxDistKm * 0.25, maxDistKm * 0.50, maxDistKm * 0.75, maxDistKm]
-        for dist in rangeSteps {
-            let r = CGFloat((dist / maxDistKm) * Double(maxRadius))
+        // 1. Fill Ocean Base Disc (NS6T Sky Blue)
+        let mapDisc = Path(ellipseIn: CGRect(x: center.x - mapRadius, y: center.y - mapRadius, width: mapRadius * 2, height: mapRadius * 2))
+        context.fill(mapDisc, with: .color(WorldVectorGeography.colorOcean))
+        context.stroke(mapDisc, with: .color(Color(red: 0.15, green: 0.25, blue: 0.35)), lineWidth: 1.5)
+
+        // 2. Concentric Distance Range Rings (5,000 km, 10,000 km, 15,000 km, 20,000 km)
+        let distanceSteps: [Double] = [5000.0, 10000.0, 15000.0, 20000.0].filter { $0 <= maxDistKm }
+        for dist in distanceSteps {
+            let r = CGFloat((dist / maxDistKm) * Double(mapRadius))
             let ringPath = Path(ellipseIn: CGRect(x: center.x - r, y: center.y - r, width: r * 2, height: r * 2))
-            context.stroke(ringPath, with: .color(.cyan.opacity(0.20)), lineWidth: 1)
-
-            let labelPt = CGPoint(x: center.x + 4, y: center.y - r + 8)
-            context.draw(
-                Text("\(Int(dist)) km").font(.system(size: 9, weight: .bold, design: .monospaced)).foregroundColor(.cyan.opacity(0.65)),
-                at: labelPt,
-                anchor: .leading
-            )
+            context.stroke(ringPath, with: .color(Color.white.opacity(0.35)), lineWidth: 0.8)
         }
 
-        // 2. Radial Beam Heading Degree Lines (Every 30°)
-        for deg in stride(from: 0, to: 360, by: 30) {
-            let rad = (Double(deg) - 90.0) * .pi / 180.0
-            let pEdge = CGPoint(
-                x: center.x + CGFloat(Double(maxRadius) * cos(rad)),
-                y: center.y + CGFloat(Double(maxRadius) * sin(rad))
-            )
-            var line = Path()
-            line.move(to: center)
-            line.addLine(to: pEdge)
-            context.stroke(line, with: .color(.cyan.opacity(0.12)), lineWidth: 1)
-
-            let cardinal = GeodesicMath.compassCardinal(for: Double(deg))
-            let labelPt = CGPoint(
-                x: center.x + CGFloat(Double(maxRadius + 14) * cos(rad)),
-                y: center.y + CGFloat(Double(maxRadius + 14) * sin(rad))
-            )
-            context.draw(
-                Text("\(deg)° \(cardinal)").font(.system(size: 9, weight: .bold, design: .monospaced)).foregroundColor(.cyan.opacity(0.85)),
-                at: labelPt,
-                anchor: .center
-            )
-        }
-
-        // 3. Draw High-Precision Country Outlines in Azimuthal Projection
-        drawVectorCountriesAzimuthal(context: context, toScreen: azimuthalPoint, center: center, maxRadius: maxRadius)
-
-        // 4. Country Names & Flags in Azimuthal
-        if showCountryLabels {
-            drawCountryLabelsAzimuthal(context: context, toScreen: azimuthalPoint, center: center, maxRadius: maxRadius)
-        }
-
-        // 5. Great Circle Solar Terminator Curve
-        if showDayNightShadow {
-            var termPath = Path()
-            var started = false
-            for pt in terminator {
-                let screenPt = azimuthalPoint(lat: pt.latitude, lon: pt.longitude)
-                let distFromCenter = hypot(screenPt.x - center.x, screenPt.y - center.y)
-                if distFromCenter <= maxRadius + 20 {
-                    if !started {
-                        termPath.move(to: screenPt)
-                        started = true
+        // 3. Curved Lat / Lon Graticule Mesh
+        if showGridLines {
+            let graticules = WorldVectorGeography.generateGraticuleLines()
+            for line in graticules {
+                var path = Path()
+                var started = false
+                for coord in line.coordinates {
+                    let pt = azimuthalPoint(lat: coord.latitude, lon: coord.longitude)
+                    let dist = hypot(pt.x - center.x, pt.y - center.y)
+                    if dist <= mapRadius {
+                        if !started {
+                            path.move(to: pt)
+                            started = true
+                        } else {
+                            path.addLine(to: pt)
+                        }
                     } else {
-                        termPath.addLine(to: screenPt)
+                        started = false
                     }
                 }
-            }
-            context.stroke(termPath, with: .color(.orange.opacity(0.75)), lineWidth: 1.8)
-        }
-
-        // 6. Direct Radial Beam Lines to DX Stations
-        if showTrafficArcs {
-            for m in markers.prefix(30) {
-                let targetPt = azimuthalPoint(lat: m.coordinate.latitude, lon: m.coordinate.longitude)
-                let distFromCenter = hypot(targetPt.x - center.x, targetPt.y - center.y)
-                if distFromCenter <= maxRadius + 30 {
-                    var beam = Path()
-                    beam.move(to: center)
-                    beam.addLine(to: targetPt)
-                    context.stroke(beam, with: .color(colorForBand(m.band).opacity(0.65)), lineWidth: 1.5)
-                }
+                context.stroke(
+                    path,
+                    with: .color(line.isMajor ? WorldVectorGeography.colorGraticuleMajor : WorldVectorGeography.colorGraticule),
+                    lineWidth: line.isMajor ? 1.0 : 0.6
+                )
             }
         }
 
-        // 7. Center Home Antenna Beacon
-        context.fill(
-            Path(ellipseIn: CGRect(x: center.x - 7, y: center.y - 7, width: 14, height: 14)),
-            with: .color(.green)
-        )
-        context.stroke(
-            Path(ellipseIn: CGRect(x: center.x - 13, y: center.y - 13, width: 26, height: 26)),
-            with: .color(.green.opacity(0.6)),
-            lineWidth: 2
-        )
-    }
-
-    // MARK: - Country Geometry & Labels Drawing
-
-    private func drawVectorCountriesEquirectangular(context: GraphicsContext, toScreen: (Double, Double) -> CGPoint) {
-        for poly in WorldVectorGeography.countryBoundaries {
-            guard poly.coordinates.count >= 3 else { continue }
-            var path = Path()
-            path.move(to: toScreen(poly.coordinates[0].latitude, poly.coordinates[0].longitude))
-            for pt in poly.coordinates.dropFirst() {
-                path.addLine(to: toScreen(pt.latitude, pt.longitude))
-            }
-            path.closeSubpath()
-            context.fill(path, with: .color(Color(red: 0.12, green: 0.22, blue: 0.26).opacity(0.6)))
-            context.stroke(path, with: .color(Color(red: 0.28, green: 0.70, blue: 0.85).opacity(0.75)), lineWidth: 1.2)
-        }
-    }
-
-    private func drawCountryLabelsEquirectangular(context: GraphicsContext, toScreen: (Double, Double) -> CGPoint) {
-        for c in WorldVectorGeography.countries {
-            let pt = toScreen(c.center.latitude, c.center.longitude)
-            context.draw(
-                Text("\(c.flag) \(c.name)").font(.system(size: 8, weight: .bold)).foregroundColor(.white.opacity(0.85)),
-                at: pt,
-                anchor: .center
-            )
-        }
-    }
-
-    private func drawVectorCountriesAzimuthal(
-        context: GraphicsContext,
-        toScreen: (Double, Double) -> CGPoint,
-        center: CGPoint,
-        maxRadius: CGFloat
-    ) {
-        for poly in WorldVectorGeography.countryBoundaries {
+        // 4. High-Resolution Crisp White Landmass Polygons with Dark Navy Coastlines
+        for poly in WorldVectorGeography.landmassPolygons {
             guard poly.coordinates.count >= 3 else { continue }
             var path = Path()
             var started = false
 
             for pt in poly.coordinates {
-                let p = toScreen(pt.latitude, pt.longitude)
-                let dist = hypot(p.x - center.x, p.y - center.y)
-                if dist <= maxRadius + 40 {
+                let p = azimuthalPoint(lat: pt.latitude, lon: pt.longitude)
+                let distFromCenter = hypot(p.x - center.x, p.y - center.y)
+                if distFromCenter <= mapRadius + 2.0 {
                     if !started {
                         path.move(to: p)
                         started = true
@@ -336,241 +222,386 @@ public struct AzimuthalAndFlatMapCanvas: View {
             }
 
             if started {
-                context.fill(path, with: .color(Color(red: 0.12, green: 0.22, blue: 0.26).opacity(0.55)))
-                context.stroke(path, with: .color(Color(red: 0.28, green: 0.70, blue: 0.85).opacity(0.80)), lineWidth: 1.2)
+                path.closeSubpath()
+                context.fill(path, with: .color(WorldVectorGeography.colorLand))
+                context.stroke(path, with: .color(WorldVectorGeography.colorLandStroke), lineWidth: 1.0)
             }
         }
-    }
 
-    private func drawCountryLabelsAzimuthal(
-        context: GraphicsContext,
-        toScreen: (Double, Double) -> CGPoint,
-        center: CGPoint,
-        maxRadius: CGFloat
-    ) {
-        for c in WorldVectorGeography.countries {
-            let pt = toScreen(c.center.latitude, c.center.longitude)
-            let dist = hypot(pt.x - center.x, pt.y - center.y)
-            if dist <= maxRadius - 10 {
-                context.draw(
-                    Text("\(c.flag) \(c.name)").font(.system(size: 8, weight: .bold)).foregroundColor(.white.opacity(0.9)),
-                    at: pt,
-                    anchor: .center
-                )
-            }
-        }
-    }
-
-    // MARK: - Maidenhead Field Labels (LM, JN, KO...)
-
-    private func drawMaidenheadFieldLabels(
-        context: GraphicsContext,
-        size: CGSize,
-        toScreen: (Double, Double) -> CGPoint
-    ) {
-        for fieldLat in 0..<18 {
-            for fieldLon in 0..<18 {
-                let minLon = Double(fieldLon) * 20.0 - 180.0
-                let minLat = Double(fieldLat) * 10.0 - 90.0
-                let centerPt = toScreen(minLat + 5.0, minLon + 10.0)
-
-                let charA = Character(UnicodeScalar(UInt8(Character("A").asciiValue! + UInt8(fieldLon))))
-                let charB = Character(UnicodeScalar(UInt8(Character("A").asciiValue! + UInt8(fieldLat))))
-                let text = "\(charA)\(charB)"
-
-                context.draw(
-                    Text(text)
-                        .font(.system(size: 13, weight: .black, design: .monospaced))
-                        .foregroundColor(Color(red: 0.15, green: 0.55, blue: 0.75).opacity(0.85)),
-                    at: centerPt,
-                    anchor: .center
-                )
-            }
-        }
-    }
-
-    // MARK: - Maidenhead Tile Rendering
-
-    private func drawMaidenheadGridTiles(
-        context: GraphicsContext,
-        size: CGSize,
-        toScreen: (Double, Double) -> CGPoint
-    ) {
-        if showGridLines {
-            drawMaidenheadFieldLabels(context: context, size: size, toScreen: toScreen)
-        }
-
-        for (grid4, summary) in logSummaries {
-            guard let box = MaidenheadGridEngine.boundingBox(for: grid4) else { continue }
-            let pTopLeft = toScreen(box.maxLat, box.minLon)
-            let pBottomRight = toScreen(box.minLat, box.maxLon)
-
-            let tileRect = CGRect(
-                x: min(pTopLeft.x, pBottomRight.x),
-                y: min(pTopLeft.y, pBottomRight.y),
-                width: max(2, abs(pBottomRight.x - pTopLeft.x)),
-                height: max(2, abs(pBottomRight.y - pTopLeft.y))
-            )
-
-            let color: Color
-            if activeOnAirGrids.contains(grid4) {
-                color = .cyan
-            } else if summary.isConfirmed {
-                color = .green
-            } else {
-                color = .orange
-            }
-
-            context.fill(Path(tileRect), with: .color(color.opacity(0.35)))
-            context.stroke(Path(tileRect), with: .color(color.opacity(0.75)), lineWidth: 0.8)
-        }
-    }
-
-    private func drawSolarTerminatorShade(
-        context: GraphicsContext,
-        size: CGSize,
-        subSolar: SubSolarPosition,
-        terminator: [GeoCoordinate],
-        toScreen: (Double, Double) -> CGPoint
-    ) {
-        guard terminator.count >= 2 else { return }
-        var termPath = Path()
-        let first = terminator[0]
-        termPath.move(to: toScreen(first.latitude, first.longitude))
-        for pt in terminator.dropFirst() {
-            termPath.addLine(to: toScreen(pt.latitude, pt.longitude))
-        }
-        context.stroke(termPath, with: .color(.orange.opacity(0.85)), lineWidth: 2.0)
-    }
-
-    private func drawGreatCircleTrafficArcs(
-        context: GraphicsContext,
-        home: GeoCoordinate,
-        toScreen: (Double, Double) -> CGPoint
-    ) {
-        for m in markers.prefix(35) {
-            let waypoints = GeodesicMath.greatCircleWaypoints(from: home, to: m.coordinate, count: 20)
-            guard waypoints.count >= 2 else { continue }
-
+        // 5. Internal Country Borders
+        for border in WorldVectorGeography.countryBorders {
             var path = Path()
-            let p0 = toScreen(waypoints[0].latitude, waypoints[0].longitude)
-            path.move(to: p0)
-
-            for i in 1..<waypoints.count {
-                let p = toScreen(waypoints[i].latitude, waypoints[i].longitude)
-                if abs(p.x - toScreen(waypoints[i - 1].latitude, waypoints[i - 1].longitude).x) < 400 {
-                    path.addLine(to: p)
-                } else {
-                    path.move(to: p)
+            var started = false
+            for pt in border.coordinates {
+                let p = azimuthalPoint(lat: pt.latitude, lon: pt.longitude)
+                let dist = hypot(p.x - center.x, p.y - center.y)
+                if dist <= mapRadius {
+                    if !started {
+                        path.move(to: p)
+                        started = true
+                    } else {
+                        path.addLine(to: p)
+                    }
                 }
             }
-
-            let c = colorForBand(m.band)
-            context.stroke(path, with: .color(c.opacity(0.7)), lineWidth: 1.4)
+            context.stroke(path, with: .color(WorldVectorGeography.colorBorder), style: StrokeStyle(lineWidth: 0.6, dash: [3, 2]))
         }
+
+        // 6. Day / Night Solar Greyline Terminator Dark Shadow
+        if showDayNightShadow {
+            drawAzimuthalSolarNightShadow(
+                context: context,
+                center: center,
+                mapRadius: mapRadius,
+                subSolar: subSolar,
+                toScreen: azimuthalPoint
+            )
+        }
+
+        // 7. Subsolar Point Sun Symbol ☀️
+        let sunPt = azimuthalPoint(lat: subSolar.latitude, lon: subSolar.longitude)
+        let sunDist = hypot(sunPt.x - center.x, sunPt.y - center.y)
+        if sunDist <= mapRadius {
+            context.draw(
+                Text("☀️")
+                    .font(.system(size: 20)),
+                at: sunPt,
+                anchor: .center
+            )
+        }
+
+        // 8. Country Labels & Major DXCC Entities
+        if showCountryLabels {
+            for country in WorldVectorGeography.countries {
+                let pt = azimuthalPoint(lat: country.center.latitude, lon: country.center.longitude)
+                let dist = hypot(pt.x - center.x, pt.y - center.y)
+                if dist <= mapRadius - 12.0 {
+                    let labelText = "\(country.name)\n\(country.primaryPrefix)"
+                    context.draw(
+                        Text(labelText)
+                            .font(.system(size: 8.5, weight: .bold))
+                            .foregroundColor(Color(red: 0.12, green: 0.16, blue: 0.22)),
+                        at: CGPoint(x: pt.x + country.labelOffset.x, y: pt.y + country.labelOffset.y),
+                        anchor: .center
+                    )
+                }
+            }
+        }
+
+        // 9. Great Circle Direct Traffic Arcs & Contacts
+        if showTrafficArcs {
+            for m in markers.prefix(35) {
+                let targetPt = azimuthalPoint(lat: m.coordinate.latitude, lon: m.coordinate.longitude)
+                let dist = hypot(targetPt.x - center.x, targetPt.y - center.y)
+                if dist <= mapRadius {
+                    var beam = Path()
+                    beam.move(to: center)
+                    beam.addLine(to: targetPt)
+                    context.stroke(beam, with: .color(Color.yellow.opacity(0.80)), lineWidth: 1.6)
+
+                    context.fill(
+                        Path(ellipseIn: CGRect(x: targetPt.x - 3.5, y: targetPt.y - 3.5, width: 7, height: 7)),
+                        with: .color(Color.red)
+                    )
+                }
+            }
+        }
+
+        // 10. Active Rotator Beam Heading Arrow (NS6T Red Heading Arrow)
+        let beamAzimuth = rotatorService.currentAzimuth
+        let beamRad = (beamAzimuth - 90.0) * .pi / 180.0
+        let beamLen = Double(mapRadius) * 0.85
+        let arrowEnd = CGPoint(
+            x: center.x + CGFloat(beamLen * cos(beamRad)),
+            y: center.y + CGFloat(beamLen * sin(beamRad))
+        )
+
+        var beamLine = Path()
+        beamLine.move(to: center)
+        beamLine.addLine(to: arrowEnd)
+        context.stroke(beamLine, with: .color(Color.red), lineWidth: 2.4)
+
+        // Arrowhead at the tip
+        let headLen: CGFloat = 14.0
+        let headAngle: CGFloat = 0.40
+        let arrowPt1 = CGPoint(
+            x: arrowEnd.x - headLen * CGFloat(cos(beamRad - Double(headAngle))),
+            y: arrowEnd.y - headLen * CGFloat(sin(beamRad - Double(headAngle)))
+        )
+        let arrowPt2 = CGPoint(
+            x: arrowEnd.x - headLen * CGFloat(cos(beamRad + Double(headAngle))),
+            y: arrowEnd.y - headLen * CGFloat(sin(beamRad + Double(headAngle)))
+        )
+        var arrowHead = Path()
+        arrowHead.move(to: arrowEnd)
+        arrowHead.addLine(to: arrowPt1)
+        arrowHead.addLine(to: arrowPt2)
+        arrowHead.closeSubpath()
+        context.fill(arrowHead, with: .color(Color.red))
+
+        // 11. Center Station Callout Badge (NS6T Authentic Callout Box)
+        drawCenterStationCalloutBadge(
+            context: context,
+            center: center,
+            home: home
+        )
+
+        // 12. Calibrated 360° Compass Dial Bezel
+        drawCompassDial(
+            context: context,
+            center: center,
+            innerRadius: mapRadius,
+            outerRadius: outerDialRadius
+        )
     }
 
-    // MARK: - Smart Decluttered Pins Overlay
+    // MARK: - Center Station Callout Badge (Matching NS6T Reference)
 
-    @ViewBuilder
-    private func pinsOverlay(size: CGSize) -> some View {
-        let arranged = arrangePins(size: size)
-        ForEach(arranged) { item in
-            Button {
-                onSelectMarker(item.marker)
-            } label: {
-                HStack(spacing: 3) {
-                    Text(item.marker.flag.isEmpty ? "🌐" : item.marker.flag)
-                        .font(.system(size: 11))
-                    Text(item.marker.callsign)
-                        .font(.system(size: 9, weight: .bold, design: .monospaced))
-                        .foregroundColor(.white)
-                }
-                .padding(.horizontal, 5)
-                .padding(.vertical, 2)
-                .background(.ultraThinMaterial.opacity(0.92), in: RoundedRectangle(cornerRadius: 4))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 4)
-                        .stroke(colorForBand(item.marker.band), lineWidth: 1.0)
+    private func drawCenterStationCalloutBadge(
+        context: GraphicsContext,
+        center: CGPoint,
+        home: GeoCoordinate
+    ) {
+        let badgeWidth: CGFloat = 110.0
+        let badgeHeight: CGFloat = 46.0
+        let badgeRect = CGRect(
+            x: center.x - badgeWidth / 2.0,
+            y: center.y - badgeHeight - 12.0,
+            width: badgeWidth,
+            height: badgeHeight
+        )
+
+        // Drop Shadow
+        let shadowRect = badgeRect.offsetBy(dx: 0, dy: 2)
+        context.fill(
+            Path(roundedRect: shadowRect, cornerRadius: 5),
+            with: .color(Color.black.opacity(0.25))
+        )
+
+        // Gradient Background (White to Light Cyan-Blue)
+        context.fill(
+            Path(roundedRect: badgeRect, cornerRadius: 5),
+            with: .color(Color(red: 0.93, green: 0.96, blue: 1.00))
+        )
+        context.stroke(
+            Path(roundedRect: badgeRect, cornerRadius: 5),
+            with: .color(Color(red: 0.20, green: 0.40, blue: 0.70)),
+            lineWidth: 1.2
+        )
+
+        // Badge Callout Arrow downwards
+        var pointer = Path()
+        pointer.move(to: CGPoint(x: center.x - 6, y: badgeRect.maxY))
+        pointer.addLine(to: CGPoint(x: center.x, y: badgeRect.maxY + 7))
+        pointer.addLine(to: CGPoint(x: center.x + 6, y: badgeRect.maxY))
+        pointer.closeSubpath()
+        context.fill(pointer, with: .color(Color(red: 0.93, green: 0.96, blue: 1.00)))
+        context.stroke(pointer, with: .color(Color(red: 0.20, green: 0.40, blue: 0.70)), lineWidth: 1.2)
+
+        // Callsign Text
+        let stationCall = stationCallsign.isEmpty ? "EP2AES" : stationCallsign
+        context.draw(
+            Text(stationCall)
+                .font(.system(size: 11, weight: .bold))
+                .foregroundColor(Color(red: 0.05, green: 0.10, blue: 0.25)),
+            at: CGPoint(x: center.x, y: badgeRect.minY + 12),
+            anchor: .center
+        )
+
+        // Grid & Location Subtitle
+        let grid = MaidenheadGridEngine.locator(from: home)
+        let latStr = String(format: "%.2f°%@", abs(home.latitude), home.latitude >= 0 ? "N" : "S")
+        let lonStr = String(format: "%.2f°%@", abs(home.longitude), home.longitude >= 0 ? "E" : "W")
+
+        context.draw(
+            Text("\(grid) · \(latStr) \(lonStr)")
+                .font(.system(size: 8, weight: .medium, design: .monospaced))
+                .foregroundColor(Color(red: 0.25, green: 0.35, blue: 0.45)),
+            at: CGPoint(x: center.x, y: badgeRect.minY + 26),
+            anchor: .center
+        )
+
+        context.draw(
+            Text("Center Origin")
+                .font(.system(size: 7.5, weight: .regular))
+                .foregroundColor(Color.secondary),
+            at: CGPoint(x: center.x, y: badgeRect.minY + 37),
+            anchor: .center
+        )
+
+        // Center Pin Dot
+        context.fill(
+            Path(ellipseIn: CGRect(x: center.x - 3.5, y: center.y - 3.5, width: 7, height: 7)),
+            with: .color(Color.red)
+        )
+        context.stroke(
+            Path(ellipseIn: CGRect(x: center.x - 3.5, y: center.y - 3.5, width: 7, height: 7)),
+            with: .color(Color.white),
+            lineWidth: 1.5
+        )
+    }
+
+    // MARK: - 360° Calibrated Compass Dial Bezel
+
+    private func drawCompassDial(
+        context: GraphicsContext,
+        center: CGPoint,
+        innerRadius: CGFloat,
+        outerRadius: CGFloat
+    ) {
+        // Outer Dial Background Ring
+        let bezelRing = Path { p in
+            p.addEllipse(in: CGRect(x: center.x - outerRadius, y: center.y - outerRadius, width: outerRadius * 2, height: outerRadius * 2))
+        }
+        context.stroke(bezelRing, with: .color(Color(red: 0.20, green: 0.30, blue: 0.40)), lineWidth: 1.5)
+
+        // Inner Divider Line
+        let innerRing = Path { p in
+            p.addEllipse(in: CGRect(x: center.x - innerRadius, y: center.y - innerRadius, width: innerRadius * 2, height: innerRadius * 2))
+        }
+        context.stroke(innerRing, with: .color(Color(red: 0.20, green: 0.30, blue: 0.40)), lineWidth: 1.0)
+
+        // 360 Degree Ticks & Labels
+        for deg in 0..<360 {
+            let rad = (Double(deg) - 90.0) * .pi / 180.0
+            let isMajor = deg % 10 == 0
+            let isMedium = deg % 5 == 0
+
+            let tickLen: CGFloat = isMajor ? 10.0 : (isMedium ? 6.0 : 3.0)
+            let pOuter = CGPoint(x: center.x + CGFloat(Double(outerRadius) * cos(rad)), y: center.y + CGFloat(Double(outerRadius) * sin(rad)))
+            let pInner = CGPoint(x: center.x + CGFloat(Double(outerRadius - tickLen) * cos(rad)), y: center.y + CGFloat(Double(outerRadius - tickLen) * sin(rad)))
+
+            var tickPath = Path()
+            tickPath.move(to: pInner)
+            tickPath.addLine(to: pOuter)
+            context.stroke(tickPath, with: .color(Color(red: 0.15, green: 0.20, blue: 0.30)), lineWidth: isMajor ? 1.4 : 0.7)
+
+            if isMajor {
+                let textRadius = outerRadius + 14.0
+                let labelPt = CGPoint(x: center.x + CGFloat(Double(textRadius) * cos(rad)), y: center.y + CGFloat(Double(textRadius) * sin(rad)))
+                context.draw(
+                    Text("\(deg)°")
+                        .font(.system(size: 9.5, weight: .bold, design: .monospaced))
+                        .foregroundColor(Color(red: 0.10, green: 0.15, blue: 0.25)),
+                    at: labelPt,
+                    anchor: .center
                 )
-                .shadow(color: Color.black.opacity(0.4), radius: 3, x: 0, y: 1)
             }
-            .buttonStyle(.plain)
-            .position(item.screenPosition)
         }
     }
 
-    private struct ArrangedPin: Identifiable {
-        let id = UUID()
-        let marker: Globe3DMarker
-        var screenPosition: CGPoint
+    // MARK: - Solar Night Shadow Polygon
+
+    private func drawAzimuthalSolarNightShadow(
+        context: GraphicsContext,
+        center: CGPoint,
+        mapRadius: CGFloat,
+        subSolar: SubSolarPosition,
+        toScreen: (Double, Double) -> CGPoint
+    ) {
+        let sampleStep = 8.0
+        for lat in stride(from: -85.0, through: 85.0, by: sampleStep) {
+            for lon in stride(from: -180.0, through: 180.0, by: sampleStep) {
+                let coord = GeoCoordinate(latitude: lat, longitude: lon)
+                let sunElev = SolarEphemeris.solarElevation(for: coord, at: liveDate)
+                if sunElev < 0 { // In night / twilight zone
+                    let pt = toScreen(lat, lon)
+                    let dist = hypot(pt.x - center.x, pt.y - center.y)
+                    if dist <= mapRadius {
+                        let cellSize = CGFloat((sampleStep / 180.0) * Double(mapRadius) * 1.5)
+                        let alpha = sunElev < -6.0 ? 0.44 : 0.22
+                        context.fill(
+                            Path(ellipseIn: CGRect(x: pt.x - cellSize / 2.0, y: pt.y - cellSize / 2.0, width: cellSize, height: cellSize)),
+                            with: .color(Color(red: 0.05, green: 0.08, blue: 0.14).opacity(alpha))
+                        )
+                    }
+                }
+            }
+        }
     }
 
-    private func arrangePins(size: CGSize) -> [ArrangedPin] {
-        var list: [ArrangedPin] = []
-        var occupied: [CGPoint] = []
+    // MARK: - Equirectangular 2D Map (Flat GridTracker)
 
-        for m in markers.prefix(25) {
-            var pt = calculateScreenPosition(m.coordinate, size: size)
+    private func drawEquirectangularMap(
+        context: GraphicsContext,
+        size: CGSize,
+        home: GeoCoordinate,
+        subSolar: SubSolarPosition,
+        terminator: [GeoCoordinate]
+    ) {
+        func toFlatScreen(lat: Double, lon: Double) -> CGPoint {
+            let x = ((lon + 180.0) / 360.0) * size.width
+            let y = ((90.0 - lat) / 180.0) * size.height
+            return CGPoint(x: x, y: y)
+        }
 
-            // Collision avoidance: fan out overlapping pins
-            for occ in occupied {
-                let dist = hypot(pt.x - occ.x, pt.y - occ.y)
-                if dist < 26.0 {
-                    pt.y += 18.0
-                    pt.x += 12.0
+        // 1. Ocean Background
+        context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(WorldVectorGeography.colorOcean))
+
+        // 2. Lat / Lon Graticule Grid
+        if showGridLines {
+            for lat in stride(from: -75.0, through: 75.0, by: 15.0) {
+                let y = ((90.0 - lat) / 180.0) * size.height
+                var p = Path()
+                p.move(to: CGPoint(x: 0, y: y))
+                p.addLine(to: CGPoint(x: size.width, y: y))
+                context.stroke(p, with: .color(Color.white.opacity(abs(lat) < 0.1 ? 0.50 : 0.25)), lineWidth: abs(lat) < 0.1 ? 1.0 : 0.5)
+            }
+            for lon in stride(from: -180.0, through: 180.0, by: 30.0) {
+                let x = ((lon + 180.0) / 360.0) * size.width
+                var p = Path()
+                p.move(to: CGPoint(x: x, y: 0))
+                p.addLine(to: CGPoint(x: x, y: size.height))
+                context.stroke(p, with: .color(Color.white.opacity(abs(lon) < 0.1 ? 0.50 : 0.25)), lineWidth: abs(lon) < 0.1 ? 1.0 : 0.5)
+            }
+        }
+
+        // 3. Landmass Polygons
+        for poly in WorldVectorGeography.landmassPolygons {
+            guard poly.coordinates.count >= 3 else { continue }
+            var path = Path()
+            var started = false
+
+            for pt in poly.coordinates {
+                let p = toFlatScreen(lat: pt.latitude, lon: pt.longitude)
+                if !started {
+                    path.move(to: p)
+                    started = true
+                } else {
+                    path.addLine(to: p)
                 }
             }
 
-            occupied.append(pt)
-            list.append(ArrangedPin(marker: m, screenPosition: pt))
-        }
-        return list
-    }
-
-    private func calculateScreenPosition(_ coord: GeoCoordinate, size: CGSize) -> CGPoint {
-        if mode == .azimuthal {
-            let center = CGPoint(x: size.width / 2.0, y: size.height / 2.0)
-            let maxRadius = min(size.width, size.height) / 2.0 - 24.0
-            let maxDistKm: Double = max(3000.0, azimuthalRangeKm)
-
-            let distKm = GeodesicMath.distanceKm(from: homeCoordinate, to: coord)
-            let bearingDeg = GeodesicMath.initialBearing(from: homeCoordinate, to: coord)
-            let bearingRad = (bearingDeg - 90.0) * .pi / 180.0
-
-            let r = (distKm / maxDistKm) * Double(maxRadius)
-            let x = center.x + CGFloat(r * cos(bearingRad))
-            let y = center.y + CGFloat(r * sin(bearingRad))
-            return CGPoint(x: x, y: y)
-        } else {
-            let x = (coord.longitude + 180.0) / 360.0 * size.width
-            let y = (90.0 - coord.latitude) / 180.0 * size.height
-            return CGPoint(x: x, y: y)
-        }
-    }
-
-    private func mapWatermark(size: CGSize) -> some View {
-        VStack {
-            Spacer()
-            HStack {
-                Text(mode == .azimuthal ? "📡 Azimuthal Equidistant · Range \(Int(azimuthalRangeKm)) km" : "🗺 GridTracker 2D · \(markers.count) Active Spots")
-                    .font(.system(size: 9, weight: .bold, design: .monospaced))
-                    .foregroundStyle(.cyan.opacity(0.7))
-                    .padding(6)
-                    .background(.ultraThinMaterial.opacity(0.7), in: RoundedRectangle(cornerRadius: 4))
-                    .padding(10)
-                Spacer()
+            if started {
+                path.closeSubpath()
+                context.fill(path, with: .color(WorldVectorGeography.colorLand))
+                context.stroke(path, with: .color(WorldVectorGeography.colorLandStroke), lineWidth: 0.9)
             }
         }
-    }
 
-    private func colorForBand(_ band: String) -> Color {
-        let b = band.uppercased()
-        if b == "160M" || b == "80M" { return .red }
-        if b == "40M" || b == "30M" { return .orange }
-        if b == "20M" || b == "17M" { return .green }
-        if b == "15M" || b == "12M" { return .cyan }
-        if b == "10M" || b == "6M" { return .purple }
-        return .mint
+        // 4. Day / Night Solar Terminator Shadow
+        if showDayNightShadow {
+            for lat in stride(from: -85.0, through: 85.0, by: 10.0) {
+                for lon in stride(from: -180.0, through: 180.0, by: 10.0) {
+                    let coord = GeoCoordinate(latitude: lat, longitude: lon)
+                    let elev = SolarEphemeris.solarElevation(for: coord, at: liveDate)
+                    if elev < 0 {
+                        let pt = toFlatScreen(lat: lat, lon: lon)
+                        let w = size.width / 36.0
+                        let h = size.height / 18.0
+                        let alpha = elev < -6.0 ? 0.40 : 0.20
+                        context.fill(
+                            Path(CGRect(x: pt.x - w / 2, y: pt.y - h / 2, width: w, height: h)),
+                            with: .color(Color(red: 0.05, green: 0.08, blue: 0.15).opacity(alpha))
+                        )
+                    }
+                }
+            }
+        }
+
+        // 5. Home QTH Indicator
+        let homePt = toFlatScreen(lat: home.latitude, lon: home.longitude)
+        context.fill(Path(ellipseIn: CGRect(x: homePt.x - 6, y: homePt.y - 6, width: 12, height: 12)), with: .color(Color.green))
+        context.stroke(Path(ellipseIn: CGRect(x: homePt.x - 6, y: homePt.y - 6, width: 12, height: 12)), with: .color(Color.white), lineWidth: 2)
     }
 }

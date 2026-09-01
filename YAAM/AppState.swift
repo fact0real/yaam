@@ -571,6 +571,18 @@ nonisolated struct QSORecordModel: Identifiable, Sendable {
             searchDocument = Self.makeSearchDocument(fields: fields)
         }
     }
+
+    public func toADIFRecordString() -> String {
+        var adif = ""
+        for (k, val) in fields {
+            let clean = val.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !clean.isEmpty {
+                adif += "<\(k):\(clean.utf8.count)>\(clean) "
+            }
+        }
+        adif += "<EOR>"
+        return adif
+    }
 }
 
 // MARK: - Shared QRZ WebKit Session
@@ -1703,6 +1715,7 @@ class AppState: NSObject, ObservableObject {
         loadConnectivityState()
         loadContestCalendarCache()
         loadDXpeditionCache()
+        loadQRZAwardsCache()
         configureOperatorFeatureBridges()
         DispatchQueue.main.async {
             CredentialVault.prewarm()
@@ -2133,11 +2146,21 @@ class AppState: NSObject, ObservableObject {
             let result = await QRZAwardsScraper.shared.fetchAwards(username: username, password: password)
             if !result.awards.isEmpty {
                 self.qrzAwardSummaries = result.awards
+                if let data = try? JSONEncoder().encode(result.awards) {
+                    UserDefaults.standard.set(data, forKey: "cachedQRZAwards")
+                }
             }
             self.qrzAwardsStatus = result.message
             self.qrzAwardsLastUpdated = result.awards.isEmpty ? self.qrzAwardsLastUpdated : Date()
             self.isFetchingQRZAwards = false
             self.appendLog("QRZ Awards: \(result.message)")
+        }
+    }
+
+    private func loadQRZAwardsCache() {
+        if let data = UserDefaults.standard.data(forKey: "cachedQRZAwards"),
+           let cached = try? JSONDecoder().decode([QRZAwardSummary].self, from: data) {
+            self.qrzAwardSummaries = cached
         }
     }
     
