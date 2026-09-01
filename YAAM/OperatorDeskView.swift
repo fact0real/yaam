@@ -19,30 +19,7 @@ struct OperatorDeskView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 14) {
-                    stationLabel
-                    deskPicker
-                        .pickerStyle(.segmented)
-                        .frame(maxWidth: 1100)
-                    Spacer(minLength: 8)
-                    deskStatus
-                        .frame(maxWidth: 220, alignment: .trailing)
-                }
-
-                HStack(spacing: 10) {
-                    stationLabel
-                    Spacer(minLength: 6)
-                    deskPicker
-                        .pickerStyle(.menu)
-                        .frame(maxWidth: 260)
-                    deskStatus
-                        .frame(maxWidth: 180, alignment: .trailing)
-                }
-            }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 10)
-            .background(Color(nsColor: .controlBackgroundColor))
+            headerBar
 
             Divider()
 
@@ -69,38 +46,103 @@ struct OperatorDeskView: View {
                 ClubLogSpotsView()
             case 11:
                 SixMeterWatchView()
+            case 12:
+                GlobeAndGridTrackerWorkspaceView()
             default:
                 QuickLogPanel()
             }
         }
     }
 
-    private var stationLabel: some View {
-        Label(appState.currentStationCallsign, systemImage: "antenna.radiowaves.left.and.right")
-            .font(.system(.headline, design: .monospaced).weight(.bold))
-            .foregroundStyle(.green)
-            .lineLimit(1)
+    private struct DeskTabItem {
+        let tag: Int
+        let title: String
+        let icon: String
     }
 
-    private var deskPicker: some View {
-        Picker("Operator workspace", selection: $appState.operatorDeskSection) {
-            Label("Quick Log", systemImage: "plus.circle.fill").tag(0)
-            Label("DX Cluster", systemImage: "dot.radiowaves.left.and.right").tag(1)
-            Label("Club Log Spots", systemImage: "person.3.fill").tag(10)
-            Label("Sync Center", systemImage: "arrow.triangle.2.circlepath").tag(2)
-            Label("Radio Bridge", systemImage: "wave.3.right.circle").tag(3)
-            Label("Contest", systemImage: "flag.checkered").tag(4)
-            Label("QSL", systemImage: "arrow.left.arrow.right.circle").tag(5)
-            Label("Awards", systemImage: "medal").tag(6)
-            Label("Portable", systemImage: "figure.hiking").tag(7)
-            Label("Connect", systemImage: "network").tag(8)
-            Label("Calendar", systemImage: "calendar").tag(9)
-            Label("6m Magic Band", systemImage: "bolt.badge.clock.fill").tag(11)
+    private var deskTabs: [DeskTabItem] {
+        [
+            DeskTabItem(tag: 0, title: "Quick Log", icon: "plus.circle.fill"),
+            DeskTabItem(tag: 12, title: "3D Globe & Grid Tracker", icon: "globe.americas.fill"),
+            DeskTabItem(tag: 1, title: "DX Cluster", icon: "dot.radiowaves.left.and.right"),
+            DeskTabItem(tag: 10, title: "Club Log Spots", icon: "person.3.fill"),
+            DeskTabItem(tag: 2, title: "Sync Center", icon: "arrow.triangle.2.circlepath"),
+            DeskTabItem(tag: 3, title: "Radio Bridge", icon: "wave.3.right.circle"),
+            DeskTabItem(tag: 4, title: "Contest", icon: "flag.checkered"),
+            DeskTabItem(tag: 5, title: "QSL", icon: "arrow.left.arrow.right.circle"),
+            DeskTabItem(tag: 6, title: "Awards", icon: "medal"),
+            DeskTabItem(tag: 7, title: "Portable", icon: "figure.hiking"),
+            DeskTabItem(tag: 8, title: "Connect", icon: "network"),
+            DeskTabItem(tag: 9, title: "Calendar", icon: "calendar"),
+            DeskTabItem(tag: 11, title: "6m Magic Band", icon: "bolt.badge.clock.fill")
+        ]
+    }
+
+    private var headerBar: some View {
+        HStack(spacing: 12) {
+            // Station Callsign & Grid Badge (Fixed layout - Zero Overlap)
+            stationBadge
+                .fixedSize(horizontal: true, vertical: false)
+
+            Divider()
+                .frame(height: 20)
+
+            // Scrollable / Responsive Tab Bar
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 4) {
+                    ForEach(deskTabs, id: \.tag) { tab in
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.15)) {
+                                appState.operatorDeskSection = tab.tag
+                                UserDefaults.standard.set(tab.tag, forKey: "operatorDeskSection")
+                            }
+                        } label: {
+                            HStack(spacing: 5) {
+                                Image(systemName: tab.icon)
+                                Text(tab.title)
+                            }
+                            .font(.system(size: 12, weight: appState.operatorDeskSection == tab.tag ? .bold : .medium))
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 5)
+                            .background(
+                                appState.operatorDeskSection == tab.tag ?
+                                    Color.accentColor.opacity(0.18) : Color.clear,
+                                in: RoundedRectangle(cornerRadius: 6)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .stroke(appState.operatorDeskSection == tab.tag ? Color.accentColor : Color.clear, lineWidth: 1.0)
+                            )
+                            .foregroundStyle(appState.operatorDeskSection == tab.tag ? Color.accentColor : Color.primary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+
+            Spacer(minLength: 4)
+
+            deskStatus
+                .fixedSize(horizontal: true, vertical: false)
         }
-        .labelsHidden()
-        .onChange(of: appState.operatorDeskSection) { _, value in
-            UserDefaults.standard.set(value, forKey: "operatorDeskSection")
+        .padding(.horizontal, 14)
+        .padding(.vertical, 7)
+        .background(Color(nsColor: .controlBackgroundColor))
+    }
+
+    private var stationBadge: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "antenna.radiowaves.left.and.right")
+                .foregroundStyle(.green)
+            Text(appState.currentStationCallsign.isEmpty ? "NO CALL" : appState.currentStationCallsign)
+                .font(.system(.subheadline, design: .monospaced).weight(.bold))
+                .foregroundStyle(.green)
         }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(Color.green.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.green.opacity(0.3), lineWidth: 1.0))
     }
 
     @ViewBuilder

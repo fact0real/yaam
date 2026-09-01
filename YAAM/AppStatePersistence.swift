@@ -464,8 +464,8 @@ extension AppState {
         OnTheAirMonitorService.shared.setStation(
             callsign: profile.normalizedCallsign,
             grid: profile.normalizedGrid,
-            latitude: Double(profile.latitude ?? ""),
-            longitude: Double(profile.longitude ?? "")
+            latitude: Double(profile.latitude),
+            longitude: Double(profile.longitude)
         )
     }
 

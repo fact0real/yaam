@@ -287,7 +287,7 @@ extension AppState {
         return operatorUTCDateFormatter.date(from: date + String(time.prefix(6)))
     }
 
-    private func persistQuickLog(_ record: QSORecordModel) {
+    func persistQuickLog(_ record: QSORecordModel) {
         guard isMasterMode,
               let database = logbookDatabase,
               let profileID = activeStationProfileID,

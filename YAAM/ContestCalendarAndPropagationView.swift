@@ -363,9 +363,41 @@ struct ContestCalendarPanel: View {
                 }
 
                 Spacer(minLength: 0)
+
+                Button {
+                    let cleanTitle = item.title.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let words = cleanTitle.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
+                    let contestID = words.prefix(3).joined(separator: "-").uppercased()
+                    let matchedTemplate = ContestTemplate.catalog.first { tmpl in
+                        cleanTitle.localizedCaseInsensitiveContains(tmpl.id) ||
+                        cleanTitle.localizedCaseInsensitiveContains(tmpl.name)
+                    }
+
+                    var session = ContestSession(
+                        contestID: matchedTemplate?.id ?? contestID,
+                        contestName: matchedTemplate?.name ?? cleanTitle,
+                        sentExchange: matchedTemplate?.defaultSentExchange ?? "21",
+                        operatorCallsign: appState.currentStationCallsign
+                    )
+                    session.categoryMode = matchedTemplate?.defaultCategoryMode ?? (item.modes.contains("CW") ? "CW" : "SSB")
+                    appState.startContestSession(session)
+                    appState.selectedTab = 5
+                    appState.operatorDeskSection = 4
+                } label: {
+                    HStack(spacing: 3) {
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 8))
+                        Text("Start")
+                            .font(.system(size: 10, weight: .bold))
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.mini)
+                .tint(.orange)
+                .help("Launch Contest Workspace and start logging for \(item.title)")
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
             .background(Color(nsColor: .controlBackgroundColor).opacity(0.7))
         }
         .frame(height: 164)

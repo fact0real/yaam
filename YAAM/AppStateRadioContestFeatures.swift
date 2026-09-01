@@ -178,6 +178,92 @@ extension AppState {
         )
     }
 
+    @MainActor
+    func logContestFastQSO(
+        callsign: String,
+        band: String,
+        mode: String,
+        frequencyMHz: String,
+        rstSent: String,
+        rstReceived: String,
+        sentExchange: String,
+        receivedExchange: String
+    ) throws -> QSORecordModel {
+        guard let session = currentContestSession, session.isActive else {
+            throw QuickLogValidationError.invalidCallsign
+        }
+
+        let cleanCall = callsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard !cleanCall.isEmpty, isValidOperatorCallsign(cleanCall) else {
+            throw QuickLogValidationError.invalidCallsign
+        }
+
+        let now = Date()
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let components = calendar.dateComponents([.year, .month, .day, .hour, .minute, .second], from: now)
+        let qsoDateStr = String(format: "%04d%02d%02d", components.year ?? 0, components.month ?? 0, components.day ?? 0)
+        let qsoTimeStr = String(format: "%02d%02d%02d", components.hour ?? 0, components.minute ?? 0, components.second ?? 0)
+
+        var defaultFreq = "14.200"
+        let b = band.uppercased()
+        if b == "160M" { defaultFreq = "1.850" }
+        else if b == "80M" { defaultFreq = "3.700" }
+        else if b == "40M" { defaultFreq = "7.150" }
+        else if b == "20M" { defaultFreq = "14.200" }
+        else if b == "15M" { defaultFreq = "21.250" }
+        else if b == "10M" { defaultFreq = "28.500" }
+        else if b == "6M" { defaultFreq = "50.150" }
+
+        var fields: [String: String] = [
+            "QSO_DATE": qsoDateStr,
+            "TIME_ON": qsoTimeStr,
+            "CALL": cleanCall,
+            "FREQ": frequencyMHz.isEmpty ? defaultFreq : frequencyMHz,
+            "BAND": band.uppercased(),
+            "MODE": mode.uppercased(),
+            "RST_SENT": rstSent.isEmpty ? "59" : rstSent,
+            "RST_RCVD": rstReceived.isEmpty ? "59" : rstReceived,
+            "CONTEST_ID": session.contestID,
+            "STX": String(format: "%03d", session.nextSerial),
+            "STX_STRING": sentExchange.isEmpty ? session.sentExchange : sentExchange,
+            "SRX_STRING": receivedExchange,
+            "QSL_SENT": "N",
+            "QSL_RCVD": "N",
+            "OPERATOR": session.operatorCallsign.isEmpty ? currentStationCallsign : session.operatorCallsign,
+            "STATION_CALLSIGN": currentStationCallsign,
+            "APP_YAAM_SOURCE": "Contest Engine"
+        ]
+
+        if !receivedExchange.isEmpty && receivedExchange.allSatisfy(\.isNumber) {
+            fields["SRX"] = receivedExchange
+        }
+
+        fields = stationTaggedFields(fields)
+        let newRecord = QSORecordModel(index: qsoRecords.count + 1, fields: fields)
+
+        guard !qsoRecords.contains(where: { $0.uniqueKey == newRecord.uniqueKey }) else {
+            throw QuickLogValidationError.exactDuplicate
+        }
+
+        qsoRecords.append(newRecord)
+        persistQuickLog(newRecord)
+        advanceContestSerial()
+        playActivitySound(.success)
+
+        contestStatus = "Logged \(cleanCall) in \(session.displayName) (#\(fields["STX"] ?? "1"))"
+        return newRecord
+    }
+
+    func validateCurrentContestCabrillo() -> [CabrilloValidationIssue] {
+        guard let session = currentContestSession else { return [] }
+        return CabrilloPreFlightValidator.validate(
+            session: session,
+            station: activeStationProfile,
+            records: qsoRecords
+        )
+    }
+
     func exportCurrentContestCabrillo() {
         guard let session = currentContestSession else {
             contestStatus = "Start or load a contest session before exporting"

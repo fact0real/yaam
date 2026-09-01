@@ -851,7 +851,7 @@ struct ContentView: View {
         Task { @MainActor in
             do {
                 let (headers, records) = try await Task.detached(priority: .userInitiated) {
-                    try appState.loadDatabaseQSOsForExport(profileID: targetProfileID)
+                    try await appState.loadDatabaseQSOsForExport(profileID: targetProfileID)
                 }.value
                 guard conversionLoadID == loadID else { return }
 

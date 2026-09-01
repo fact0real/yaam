@@ -128,11 +128,23 @@ struct YAAMApp: App {
                 }
                 .keyboardShortcut("l", modifiers: .command)
 
+                Button("3D Globe & Grid Tracker") {
+                    appState.selectedTab = 5
+                    appState.operatorDeskSection = 12
+                }
+                .keyboardShortcut("g", modifiers: .command)
+
                 Button("6m Magic Band Watch") {
                     appState.selectedTab = 5
                     appState.operatorDeskSection = 11
                 }
                 .keyboardShortcut("6", modifiers: .command)
+
+                Button("Contest Operations & Cabrillo") {
+                    appState.selectedTab = 5
+                    appState.operatorDeskSection = 4
+                }
+                .keyboardShortcut("4", modifiers: .command)
 
                 Button("Contest Calendar") {
                     appState.selectedTab = 5
