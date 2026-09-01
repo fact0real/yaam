@@ -10,6 +10,7 @@ struct ConfirmationSyncRegression {
         testReportedLoTWAndQRZConfirmationsRemainIndependent()
         testPaperDirectRequiresExplicitProvenance()
         testIncrementalReplayWindow()
+        testQRZCountChangeTriggersFullReconciliation()
         testCheckpointInvalidationAfterLateImport()
         print("Confirmation sync regression tests passed.")
     }
@@ -199,6 +200,39 @@ struct ConfirmationSyncRegression {
         precondition(
             ConfirmationSyncPolicy.replayLoTWCursor("2026-08-23 12:00:00")
                 == "2026-08-09 12:00:00"
+        )
+    }
+
+    private static func testQRZCountChangeTriggersFullReconciliation() {
+        let checkpoint = Date(timeIntervalSince1970: 1_787_472_000)
+
+        precondition(
+            ConfirmationSyncPolicy.needsQRZFullReconciliation(
+                modifiedSince: checkpoint,
+                knownConfirmedCount: 120,
+                serverConfirmedCount: 121
+            )
+        )
+        precondition(
+            ConfirmationSyncPolicy.needsQRZFullReconciliation(
+                modifiedSince: checkpoint,
+                knownConfirmedCount: nil,
+                serverConfirmedCount: 121
+            )
+        )
+        precondition(
+            !ConfirmationSyncPolicy.needsQRZFullReconciliation(
+                modifiedSince: checkpoint,
+                knownConfirmedCount: 121,
+                serverConfirmedCount: 121
+            )
+        )
+        precondition(
+            !ConfirmationSyncPolicy.needsQRZFullReconciliation(
+                modifiedSince: checkpoint,
+                knownConfirmedCount: 120,
+                serverConfirmedCount: nil
+            )
         )
     }
 

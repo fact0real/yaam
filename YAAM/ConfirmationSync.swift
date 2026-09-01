@@ -9,6 +9,7 @@ nonisolated struct ConfirmationSyncCheckpoint: Codable, Equatable, Sendable {
     var baselineCompleted = false
     var lotwCursor: String?
     var lastSuccess: Date?
+    var qrzConfirmedCount: Int?
 }
 
 nonisolated enum ConfirmationSyncCheckpointStore {
@@ -54,6 +55,15 @@ nonisolated enum ConfirmationSyncPolicy {
         return formatLoTWCursor(date.addingTimeInterval(-replayWindow))
     }
 
+    static func needsQRZFullReconciliation(
+        modifiedSince: Date?,
+        knownConfirmedCount: Int?,
+        serverConfirmedCount: Int?
+    ) -> Bool {
+        guard modifiedSince != nil, let serverConfirmedCount else { return false }
+        return knownConfirmedCount != serverConfirmedCount
+    }
+
     private static func parseLoTWCursor(_ value: String) -> Date? {
         let formats = [
             "yyyy-MM-dd HH:mm:ss",
@@ -86,6 +96,7 @@ nonisolated struct ConfirmationFetchOutcome: Sendable {
     let records: [[String: String]]
     let nextCursor: String?
     let reportedCount: Int?
+    let accountConfirmedCount: Int?
     let pageCount: Int
     let detail: String
 
@@ -94,6 +105,7 @@ nonisolated struct ConfirmationFetchOutcome: Sendable {
         records: [[String: String]],
         nextCursor: String?,
         reportedCount: Int? = nil,
+        accountConfirmedCount: Int? = nil,
         pageCount: Int = 1,
         detail: String
     ) {
@@ -101,6 +113,7 @@ nonisolated struct ConfirmationFetchOutcome: Sendable {
         self.records = records
         self.nextCursor = nextCursor
         self.reportedCount = reportedCount
+        self.accountConfirmedCount = accountConfirmedCount
         self.pageCount = pageCount
         self.detail = detail
     }
@@ -160,15 +173,46 @@ nonisolated enum ConfirmationDownloadService {
         enabled: Bool,
         apiKey: String,
         modifiedSince: Date?,
+        knownConfirmedCount: Int?,
         userAgent: String
     ) async -> ConfirmationFetchAttempt {
         guard enabled else { return .skipped }
         do {
-            return ConfirmationFetchAttempt(
-                outcome: try await fetchQRZ(
+            let serverConfirmedCount: Int?
+            if modifiedSince == nil {
+                serverConfirmedCount = nil
+            } else {
+                serverConfirmedCount = try? await fetchQRZConfirmedCount(
                     apiKey: apiKey,
-                    modifiedSince: modifiedSince,
                     userAgent: userAgent
+                )
+            }
+            let reconcileFullHistory = ConfirmationSyncPolicy.needsQRZFullReconciliation(
+                modifiedSince: modifiedSince,
+                knownConfirmedCount: knownConfirmedCount,
+                serverConfirmedCount: serverConfirmedCount
+            )
+            let requestedModifiedSince = reconcileFullHistory ? nil : modifiedSince
+            let fetched = try await fetchQRZ(
+                apiKey: apiKey,
+                modifiedSince: requestedModifiedSince,
+                userAgent: userAgent
+            )
+            let detail = reconcileFullHistory
+                ? "QRZ now reports \(serverConfirmedCount ?? fetched.reportedCount ?? fetched.records.count) confirmed record(s); YAAM reconciled the full QRZ confirmation history in \(fetched.pageCount) page(s)."
+                : fetched.detail
+            let accountConfirmedCount = requestedModifiedSince == nil
+                ? (fetched.reportedCount ?? serverConfirmedCount)
+                : serverConfirmedCount
+            return ConfirmationFetchAttempt(
+                outcome: ConfirmationFetchOutcome(
+                    source: fetched.source,
+                    records: fetched.records,
+                    nextCursor: fetched.nextCursor,
+                    reportedCount: fetched.reportedCount,
+                    accountConfirmedCount: accountConfirmedCount,
+                    pageCount: fetched.pageCount,
+                    detail: detail
                 ),
                 errorMessage: nil
             )
@@ -291,7 +335,10 @@ nonisolated enum ConfirmationDownloadService {
                     reason.localizedCaseInsensitiveContains("not found") ||
                     (reason.isEmpty && parsedResponse.adif.isEmpty)
                 )
-                if noRecords { break }
+                if noRecords {
+                    totalReportedCount = 0
+                    break
+                }
                 throw ConfirmationDownloadError.service(
                     reason.isEmpty ? "QRZ Logbook returned RESULT=\(result)." : "QRZ Logbook: \(reason)"
                 )
@@ -339,8 +386,46 @@ nonisolated enum ConfirmationDownloadService {
             records: allRecords,
             nextCursor: nil,
             reportedCount: totalReportedCount,
+            accountConfirmedCount: modifiedSince == nil ? totalReportedCount : nil,
             pageCount: page,
             detail: "QRZ returned \(allRecords.count) confirmed logbook record(s) in \(page) page(s)."
+        )
+    }
+
+    private static func fetchQRZConfirmedCount(
+        apiKey: String,
+        userAgent: String
+    ) async throws -> Int {
+        guard let endpoint = URL(string: "https://logbook.qrz.com/api") else {
+            throw ConfirmationDownloadError.invalidEndpoint
+        }
+        var request = URLRequest(url: endpoint, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: 45)
+        request.httpMethod = "POST"
+        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        request.httpBody = formBody([
+            URLQueryItem(name: "KEY", value: apiKey),
+            URLQueryItem(name: "ACTION", value: "FETCH"),
+            URLQueryItem(name: "OPTION", value: "TYPE:LOGIDS,STATUS:CONFIRMED,MAX:0")
+        ])
+
+        let (data, httpResponse) = try await URLSession.shared.data(for: request)
+        try validateHTTP(httpResponse)
+        guard let raw = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) else {
+            throw ConfirmationDownloadError.invalidResponse("QRZ returned an unreadable response.")
+        }
+        let response = parseQRZResponse(raw)
+        if response.result == "OK" { return response.count }
+        let noRecords = response.count == 0 && (
+            response.reason.localizedCaseInsensitiveContains("no record") ||
+            response.reason.localizedCaseInsensitiveContains("not found") ||
+            (response.reason.isEmpty && response.adif.isEmpty)
+        )
+        if noRecords {
+            return 0
+        }
+        throw ConfirmationDownloadError.service(
+            response.reason.isEmpty ? "QRZ Logbook returned RESULT=\(response.result)." : "QRZ Logbook: \(response.reason)"
         )
     }
 
@@ -762,6 +847,7 @@ extension AppState {
                 enabled: syncQRZ,
                 apiKey: qrzAPIKey,
                 modifiedSince: qrzModifiedSince,
+                knownConfirmedCount: qrzCheckpoint.qrzConfirmedCount,
                 userAgent: userAgent
             )
             let (lotw, qrz) = await (lotwAttempt, qrzAttempt)
@@ -862,6 +948,9 @@ extension AppState {
                 var checkpoint = qrzCheckpoint
                 checkpoint.baselineCompleted = true
                 checkpoint.lastSuccess = syncStartedAt
+                if let confirmedCount = outcome.accountConfirmedCount {
+                    checkpoint.qrzConfirmedCount = confirmedCount
+                }
                 ConfirmationSyncCheckpointStore.save(checkpoint, profileID: profileID, source: .qrz)
                 UserDefaults.standard.set(completedAt, forKey: "lastQRZSyncDate")
                 self.appendLog(outcome.detail)
