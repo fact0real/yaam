@@ -23,6 +23,7 @@ struct StatisticsView: View {
     @State private var followUpScope: StatisticsFollowUpScope = .creditOpportunities
     @State private var emailLookupRecordID: UUID?
     @State private var selectedCountryBandDetails: StatisticsCountryBandDetailSelection?
+    @ObservedObject private var competitorStore = CompetitorTrackingStore.shared
 
     private var currentSnapshot: StatisticsSnapshot {
         snapshot
@@ -841,9 +842,12 @@ struct StatisticsView: View {
 
     private var confirmedProgressView: some View {
         let summary = progressSummary
+        let ownerCall = appState.currentStationCallsign.isEmpty ? "EP2AES" : appState.currentStationCallsign
+        let ownerConfirmedCount = appState.qsoRecords.filter(\.isConfirmed).count
 
         return ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 14) {
+                // Top Metric Cards
                 HStack(spacing: 10) {
                     ProgressMetricCard(title: "Today", value: "\(summary.todayCount)", icon: "calendar.day.timeline.left", color: .blue)
                     ProgressMetricCard(title: "This Week", value: "\(summary.weekCount)", icon: "calendar", color: .green)
@@ -851,19 +855,20 @@ struct StatisticsView: View {
                     ProgressMetricCard(title: "This Year", value: "\(summary.yearCount)", icon: "calendar.circle", color: .purple)
                 }
 
-                VStack(alignment: .leading, spacing: 8) {
+                // Main Multi-Station Confirmed Progress Chart Card
+                VStack(alignment: .leading, spacing: 10) {
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("Confirmed QSO Progress")
+                            Text("Confirmed QSO Progress & Competitor Comparison")
                                 .font(.headline)
-                            Text("Cumulative confirmed QSOs by confirmation date, with projection based on recent confirmed log history.")
+                            Text("Cumulative confirmed QSOs and growth trajectory vs competitors, with forecast projection.")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
                         Spacer()
-                        Text("Rate: \(String(format: "%.1f", summary.monthlyRate)) / month")
-                            .font(.system(.caption, design: .monospaced))
-                            .foregroundColor(.secondary)
+                        Text("Your Rate: \(String(format: "%.1f", summary.monthlyRate)) / mo")
+                            .font(.system(.caption, design: .monospaced).weight(.bold))
+                            .foregroundColor(.green)
                     }
 
                     if summary.chartPoints.count < 2 {
@@ -877,8 +882,14 @@ struct StatisticsView: View {
                         }
                         .frame(maxWidth: .infinity, minHeight: 240)
                     } else {
-                        ConfirmedProgressChart(points: summary.chartPoints)
-                            .frame(height: 240)
+                        MultiStationConfirmedProgressChart(
+                            ownerCallsign: ownerCall,
+                            ownerPoints: summary.chartPoints,
+                            ownerCurrentConfirmed: ownerConfirmedCount,
+                            ownerMonthlyRate: summary.monthlyRate,
+                            competitorStore: competitorStore
+                        )
+                        .frame(height: 270)
                     }
                 }
                 .padding(12)
@@ -886,6 +897,15 @@ struct StatisticsView: View {
                 .cornerRadius(6)
                 .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.gray.opacity(0.3), lineWidth: 1))
 
+                // Competitor Velocity & Overtake Projections Table
+                CompetitorVelocityComparisonTable(
+                    ownerCallsign: ownerCall,
+                    ownerConfirmedCount: ownerConfirmedCount,
+                    ownerMonthlyRate: summary.monthlyRate,
+                    competitorStore: competitorStore
+                )
+
+                // Forecast Cards
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Confirmed QSO Forecast")
                         .font(.headline)
@@ -918,6 +938,7 @@ struct StatisticsView: View {
 
                 QRZRankProjectionTable(forecasts: summary.forecasts)
             }
+            .padding(.bottom, 20)
         }
     }
 

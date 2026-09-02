@@ -101,7 +101,7 @@ struct OperatorDeskView: View {
     }
 
     private var headerBar: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 8) {
             // Station Callsign & Grid Badge (Fixed layout - Zero Overlap)
             stationBadge
                 .fixedSize(horizontal: true, vertical: false)
@@ -109,18 +109,34 @@ struct OperatorDeskView: View {
             Divider()
                 .frame(height: 20)
 
-            // Scrollable / Responsive Tab Bar with Auto-Scroll & Scroll Buttons
+            // Scrollable / Responsive Tab Bar with Left/Right Overflow Indicators & Fast Menu
             ScrollViewReader { scrollProxy in
                 HStack(spacing: 4) {
+                    // Left Overflow Indicator / Scroll Left Button (•••)
+                    Button {
+                        scrollLeft(proxy: scrollProxy)
+                    } label: {
+                        HStack(spacing: 1.5) {
+                            Image(systemName: "chevron.left")
+                                .font(.system(size: 9.5, weight: .bold))
+                            Image(systemName: "ellipsis")
+                                .font(.system(size: 8, weight: .bold))
+                        }
+                        .foregroundStyle(Color.accentColor)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 4)
+                        .background(Color.accentColor.opacity(0.12), in: Capsule())
+                        .overlay(Capsule().stroke(Color.accentColor.opacity(0.3), lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                    .help("Scroll left to previous Operator Desk panels")
+
+                    // Scrollable Horizontal Tabs
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 4) {
                             ForEach(deskTabs, id: \.tag) { tab in
                                 Button {
-                                    withAnimation(.easeInOut(duration: 0.15)) {
-                                        appState.operatorDeskSection = tab.tag
-                                        UserDefaults.standard.set(tab.tag, forKey: "operatorDeskSection")
-                                        scrollProxy.scrollTo(tab.tag, anchor: .center)
-                                    }
+                                    selectTab(tab.tag, proxy: scrollProxy)
                                 } label: {
                                     HStack(spacing: 4) {
                                         Image(systemName: tab.icon)
@@ -150,10 +166,32 @@ struct OperatorDeskView: View {
                         scrollProxy.scrollTo(appState.operatorDeskSection, anchor: .center)
                     }
                     .onChange(of: appState.operatorDeskSection) { _, newSection in
-                        withAnimation {
+                        withAnimation(.easeInOut(duration: 0.2)) {
                             scrollProxy.scrollTo(newSection, anchor: .center)
                         }
                     }
+
+                    // Right Overflow Indicator / Scroll Right Button (•••)
+                    Button {
+                        scrollRight(proxy: scrollProxy)
+                    } label: {
+                        HStack(spacing: 1.5) {
+                            Image(systemName: "ellipsis")
+                                .font(.system(size: 8, weight: .bold))
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 9.5, weight: .bold))
+                        }
+                        .foregroundStyle(Color.accentColor)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 4)
+                        .background(Color.accentColor.opacity(0.12), in: Capsule())
+                        .overlay(Capsule().stroke(Color.accentColor.opacity(0.3), lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                    .help("Scroll right to more Operator Desk panels")
+
+                    // All Panels Fast Jump Menu (•••)
+                    allPanelsMenu(proxy: scrollProxy)
                 }
             }
 
@@ -162,9 +200,78 @@ struct OperatorDeskView: View {
             deskStatus
                 .frame(maxWidth: 180, alignment: .trailing)
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, 10)
         .padding(.vertical, 6)
         .background(Color(nsColor: .controlBackgroundColor))
+    }
+
+    private func allPanelsMenu(proxy: ScrollViewProxy) -> some View {
+        Menu {
+            Section("📻 Live Operating") {
+                Button { selectTab(0, proxy: proxy) } label: { Label("Quick Log", systemImage: "plus.circle.fill") }
+                Button { selectTab(12, proxy: proxy) } label: { Label("Globe & Grids", systemImage: "globe.americas.fill") }
+                Button { selectTab(13, proxy: proxy) } label: { Label("Bandmap", systemImage: "waveform.path.ecg.rectangle") }
+                Button { selectTab(14, proxy: proxy) } label: { Label("CW Keyer", systemImage: "tuningfork") }
+                Button { selectTab(18, proxy: proxy) } label: { Label("WinKeyer", systemImage: "cable.connector.horizontal") }
+                Button { selectTab(17, proxy: proxy) } label: { Label("ON4KST Chat", systemImage: "bubble.left.and.bubble.right.fill") }
+                Button { selectTab(16, proxy: proxy) } label: { Label("TCI SDR", systemImage: "antenna.radiowaves.left.and.right") }
+                Button { selectTab(3, proxy: proxy) } label: { Label("Radio Bridge", systemImage: "wave.3.right.circle") }
+            }
+            Section("🌍 DX & Propagation") {
+                Button { selectTab(11, proxy: proxy) } label: { Label("6m Magic Band", systemImage: "bolt.badge.clock.fill") }
+                Button { selectTab(1, proxy: proxy) } label: { Label("DX Cluster", systemImage: "dot.radiowaves.left.and.right") }
+                Button { selectTab(10, proxy: proxy) } label: { Label("Club Log Spots", systemImage: "person.3.fill") }
+            }
+            Section("🏆 Contests & Awards") {
+                Button { selectTab(4, proxy: proxy) } label: { Label("Contest Mode", systemImage: "flag.checkered") }
+                Button { selectTab(9, proxy: proxy) } label: { Label("Contest Calendar", systemImage: "calendar") }
+                Button { selectTab(6, proxy: proxy) } label: { Label("Awards Center", systemImage: "medal") }
+                Button { selectTab(15, proxy: proxy) } label: { Label("Club Memberships", systemImage: "person.3.sequence.fill") }
+            }
+            Section("🔄 QSL & Station Hub") {
+                Button { selectTab(5, proxy: proxy) } label: { Label("QSL Hub", systemImage: "arrow.left.arrow.right.circle") }
+                Button { selectTab(19, proxy: proxy) } label: { Label("QSL Label Designer", systemImage: "printer.fill") }
+                Button { selectTab(2, proxy: proxy) } label: { Label("Sync Center", systemImage: "arrow.triangle.2.circlepath") }
+                Button { selectTab(7, proxy: proxy) } label: { Label("Portable (POTA/SOTA)", systemImage: "figure.hiking") }
+                Button { selectTab(8, proxy: proxy) } label: { Label("Connect & Companion", systemImage: "network") }
+            }
+        } label: {
+            HStack(spacing: 3) {
+                Image(systemName: "square.grid.2x2")
+                    .font(.system(size: 11, weight: .bold))
+                Text("Panels")
+                    .font(.system(size: 11, weight: .semibold))
+            }
+            .foregroundStyle(Color.primary)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 4)
+            .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.gray.opacity(0.25), lineWidth: 1))
+        }
+        .menuStyle(.borderlessButton)
+        .help("Jump directly to any of the 20 Operator Desk panels")
+    }
+
+    private func selectTab(_ tag: Int, proxy: ScrollViewProxy) {
+        withAnimation(.easeInOut(duration: 0.15)) {
+            appState.operatorDeskSection = tag
+            UserDefaults.standard.set(tag, forKey: "operatorDeskSection")
+            proxy.scrollTo(tag, anchor: .center)
+        }
+    }
+
+    private func scrollLeft(proxy: ScrollViewProxy) {
+        guard let currentIdx = deskTabs.firstIndex(where: { $0.tag == appState.operatorDeskSection }) else { return }
+        let targetIdx = max(0, currentIdx - 3)
+        let targetTag = deskTabs[targetIdx].tag
+        selectTab(targetTag, proxy: proxy)
+    }
+
+    private func scrollRight(proxy: ScrollViewProxy) {
+        guard let currentIdx = deskTabs.firstIndex(where: { $0.tag == appState.operatorDeskSection }) else { return }
+        let targetIdx = min(deskTabs.count - 1, currentIdx + 3)
+        let targetTag = deskTabs[targetIdx].tag
+        selectTab(targetTag, proxy: proxy)
     }
 
     private var stationBadge: some View {

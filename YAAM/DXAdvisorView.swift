@@ -467,6 +467,28 @@ struct DXAdvisorView: View {
                 emptyText("No known country coordinates found in the current log.")
             } else {
                 VStack(spacing: 0) {
+                    // Precise Column Header (100% aligned with rows)
+                    HStack(spacing: 12) {
+                        Text("Target Country / Path")
+                            .frame(width: 220, alignment: .leading)
+                        Text("Condition")
+                            .frame(width: 110, alignment: .center)
+                        Text("Optimum Band")
+                            .frame(width: 85, alignment: .center)
+                        Text("Reliability")
+                            .frame(width: 75, alignment: .trailing)
+                        Text("Propagation Window & Rationale")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .font(.caption.bold())
+                    .foregroundColor(.secondary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background(Color(NSColor.controlBackgroundColor).opacity(0.7))
+                    .cornerRadius(6)
+
+                    Divider()
+
                     ForEach(pathPredictions.prefix(18)) { prediction in
                         pathPredictionRow(prediction)
                         Divider()
@@ -475,6 +497,7 @@ struct DXAdvisorView: View {
                 .padding(10)
                 .background(Color(NSColor.controlBackgroundColor).opacity(0.35))
                 .cornerRadius(8)
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.2), lineWidth: 1))
             }
         }
     }
@@ -803,52 +826,66 @@ struct DXAdvisorView: View {
         let best = prediction.bestScore
 
         return HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
+            // Column 1: Target Country & Path Geometry (Fixed width: 220)
+            VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     Text(countryToFlag(prediction.country))
                     Text(prediction.country)
-                        .font(.subheadline)
-                        .bold()
+                        .font(.system(.subheadline, design: .default).weight(.semibold))
                         .lineLimit(1)
                     if prediction.needsConfirmation {
                         Text("Need QSL")
-                            .font(.caption2)
-                            .bold()
+                            .font(.system(size: 9, weight: .bold))
                             .foregroundColor(.black)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1.5)
                             .background(Color.orange)
-                            .cornerRadius(5)
+                            .cornerRadius(4)
                     }
                 }
 
-                Text("\(Int(prediction.distanceKm.rounded())) km, \(Int(prediction.bearing.rounded())) deg bearing")
-                    .font(.caption)
+                Text("\(Int(prediction.distanceKm.rounded())) km · \(Int(prediction.bearing.rounded()))° LP/SP")
+                    .font(.caption2)
                     .foregroundColor(.secondary)
             }
-            .frame(minWidth: 190, maxWidth: .infinity, alignment: .leading)
+            .frame(width: 220, alignment: .leading)
 
             if let best {
+                // Column 2: Condition Badge (Fixed width: 110)
                 conditionBadge(best.condition, icon: best.window == "day" ? "sun.max.fill" : "moon.fill")
+                    .frame(width: 110, alignment: .center)
 
+                // Column 3: Optimum Band (Fixed width: 85)
                 Text(best.band)
-                    .font(.system(.headline, design: .monospaced))
+                    .font(.system(.subheadline, design: .monospaced).weight(.bold))
                     .foregroundColor(conditionColor(for: best.band))
-                    .frame(width: 52, alignment: .center)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(conditionColor(for: best.band).opacity(0.12), in: RoundedRectangle(cornerRadius: 5))
+                    .overlay(RoundedRectangle(cornerRadius: 5).stroke(conditionColor(for: best.band).opacity(0.3), lineWidth: 1))
+                    .frame(width: 85, alignment: .center)
 
+                // Column 4: Reliability Score (Fixed width: 75)
                 Text("\(best.score)%")
-                    .font(.system(.headline, design: .rounded))
-                    .bold()
-                    .frame(width: 52, alignment: .trailing)
+                    .font(.system(.subheadline, design: .rounded).weight(.bold))
+                    .foregroundColor(best.score >= 70 ? .green : (best.score >= 40 ? .orange : .secondary))
+                    .frame(width: 75, alignment: .trailing)
 
+                // Column 5: Propagation Window & Rationale (Expands to fill)
                 Text(best.reason)
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .lineLimit(1)
-                    .frame(minWidth: 180, alignment: .leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                Text("No open band at this UTC hour")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .padding(.vertical, 7)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
     }
 
     private func bandOpportunityCard(_ band: String) -> some View {

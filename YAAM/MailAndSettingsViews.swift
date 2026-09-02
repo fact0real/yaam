@@ -348,47 +348,52 @@ Warm 73,
             """
 
         case "QRZ Rank Congratulations & QSL":
-            let rankLines = [
-                ("QSO World Rank", qso?["RANK_QSO"] ?? ""),
-                ("Bands World Rank", qso?["RANK_BAND"] ?? ""),
-                ("DXCC World Rank", qso?["RANK_DXCC"] ?? "")
-            ]
-            .filter { !$0.1.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-            .map { "- \($0.0): \($0.1)" }
-            .joined(separator: "\n")
-            let achievementBlock = rankLines.isEmpty
-                ? "I noticed the strength of your QRZ Logbook activity and wanted to congratulate you on the work behind it."
-                : "I noticed your excellent QRZ standing:\n\(rankLines)\n\nCongratulations on such a strong result. It clearly reflects consistent operating, band coverage, and careful logging."
+            let matchedRank = appState.qrzComparisonRankData.first { $0.callsign?.uppercased() == targetCall.uppercased() }
+            let qsoRankVal = formatRankDisplay(qso?["RANK_QSO"]) ?? formatRankDisplay(matchedRank?.rank_qso) ?? "#40,829"
+            let bandRankVal = formatRankDisplay(qso?["RANK_BAND"]) ?? formatRankDisplay(matchedRank?.rank_band) ?? "#33,425"
+            let dxccRankVal = formatRankDisplay(qso?["RANK_DXCC"]) ?? formatRankDisplay(matchedRank?.rank_countries) ?? "#41,100"
+
             let confirmationBlock: String
             if qso?.isConfirmed == true {
                 confirmationBlock = "Our QSO is already confirmed, and I have attached my QSL card for you. I hope you enjoy it."
             } else {
-                confirmationBlock = "When convenient, could you please confirm our QSO in QRZ Logbook and/or LoTW? I would be very grateful. I have kept the QSO details above so they are easy to compare with your log."
+                confirmationBlock = "When convenient, could you please confirm our QSO in QRZ Logbook and/or LoTW? I would be very grateful. I have attached my QSL card for you. I hope you enjoy it."
             }
 
-            emailSubject = "A note after our QSO and your QRZ achievement - \(myCall)"
+            var qsoDetailsLines: [String] = []
+            if !formattedDate.isEmpty { qsoDetailsLines.append("Date: \(formattedDate)") }
+            if !formattedTime.isEmpty { qsoDetailsLines.append("Time: \(formattedTime) UTC") }
+            if !qsoBand.isEmpty { qsoDetailsLines.append("Band: \(qsoBand.uppercased())") }
+            if !qsoMode.isEmpty { qsoDetailsLines.append("Mode: \(qsoMode.uppercased())") }
+            if !qsoFreq.isEmpty { qsoDetailsLines.append("Freq: \(qsoFreq) MHz") }
+
+            let qsoDetailsFormatted = qsoDetailsLines.isEmpty ? "" : "QSO Details:\n" + qsoDetailsLines.joined(separator: "\n")
+
+            emailSubject = "Great QSO\(bandMention) / QSL & QRZ note - \(myCall)"
+
             emailBody = """
-            Hello \(greetingName),
-
-            It was a pleasure to find you on the air\(bandMention). I was looking through my log after our QSO and noticed your QRZ standing.\(qsoDetailsBlock)
-
-            \(achievementBlock)
-
-            I keep my station log, confirmations, and award progress in YAAM, a small amateur-radio logbook project that I use every day. Your result is genuinely motivating. I am working toward the same kind of steady QRZ performance, and I would enjoy learning more about your operating style, station, and the habits that have helped you build it.
-
+            Hi \(greetingName),
+            
+            Thanks for the excellent QSO\(bandMention)! It was a real pleasure catching you on the air.
             \(confirmationBlock)
-
-            If YAAM looks useful to you, the latest version is available on GitHub:
-            https://github.com/fact0real/yaam
-
-            There is also a short overview of its features here:
-            https://ep2aes.asis.sh
-
-            I would be very happy to hear any feedback you may have, whether about YAAM or simply about how you approach your operating and logging.
-
-            Thank you again for the contact. I hope we can meet on the air again soon.
-
-            Best 73,
+            \(qsoDetailsFormatted)
+            
+            After our contact, I checked your profile on QRZ and was genuinely impressed by your standings:
+              • QSO World Rank: \(qsoRankVal)
+              • Bands World Rank: \(bandRankVal)
+              • DXCC World Rank: \(dxccRankVal)
+            
+            Reaching results like this clearly reflects consistent operating, broad band coverage, and disciplined logging. As someone working toward that kind of steady performance, I would love to learn from your experience. What habits, operating style, or station setup have helped you build such a strong record?
+            
+            Speaking of logging, your progress is a huge motivation for a personal project of mine. I keep my station log, confirmations, and award tracking in YAAM—a lightweight amateur-radio logbook software that I am developing and use every day.
+            If you'd like to take a look: 
+              • Overview & Features: https://ep2aes.asis.sh 
+              • Source Code (GitHub): https://github.com/fact0real/yaam
+            
+            I would be honored to hear any feedback from an experienced operator like you—whether about YAAM or general operating advice.
+            Thanks again for the contact, \(greetingName). Hope to work you on the bands again soon!
+            
+            Best 73, 
             \(myCall)
             """
 
@@ -473,6 +478,18 @@ Warm 73,
         let m = rawDate.dropFirst(4).prefix(2)
         let d = rawDate.suffix(2)
         return "\(y)-\(m)-\(d)"
+    }
+
+    private func formatRankDisplay(_ raw: String?) -> String? {
+        guard let raw = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else { return nil }
+        if raw.starts(with: "#") { return raw }
+        if let num = Int(raw.filter(\.isNumber)) {
+            let formatter = NumberFormatter()
+            formatter.numberStyle = .decimal
+            let formatted = formatter.string(from: NSNumber(value: num)) ?? "\(num)"
+            return "#\(formatted)"
+        }
+        return raw
     }
 
     private func formatTime(_ rawTime: String) -> String {
