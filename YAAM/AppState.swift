@@ -125,9 +125,37 @@ nonisolated struct UnconfirmedBandCountryStatModel: Identifiable, Sendable {
 }
 
 nonisolated struct UnconfirmedCountryStatModel: Identifiable, Sendable {
-    let id = UUID()
+    let id: UUID
     let country: String
     let qsoCount: Int
+    let latestQSODate: Date?
+    let latestQSODateString: String
+    let daysAgo: Int?
+    let callsigns: [String]
+    let emailsSentCount: Int
+    let lastEmailDate: Date?
+
+    init(
+        id: UUID = UUID(),
+        country: String,
+        qsoCount: Int,
+        latestQSODate: Date? = nil,
+        latestQSODateString: String = "",
+        daysAgo: Int? = nil,
+        callsigns: [String] = [],
+        emailsSentCount: Int = 0,
+        lastEmailDate: Date? = nil
+    ) {
+        self.id = id
+        self.country = country
+        self.qsoCount = qsoCount
+        self.latestQSODate = latestQSODate
+        self.latestQSODateString = latestQSODateString
+        self.daysAgo = daysAgo
+        self.callsigns = callsigns
+        self.emailsSentCount = emailsSentCount
+        self.lastEmailDate = lastEmailDate
+    }
 }
 
 struct UnconfirmedCallsignStatModel: Identifiable {

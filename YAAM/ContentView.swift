@@ -24,7 +24,11 @@ struct ContentView: View {
     @State private var conversionLoadID: UUID?
     
     // Conversion & Output Options
-    @State private var convertToCSV: Bool = true
+    @State private var selectedExportFormat: ExportLogFormat = .excelCSV
+    @State private var cabrilloContestID: String = "CQ-WW-SSB"
+    @State private var cabrilloOperatorCategory: String = "SINGLE-OP"
+    @State private var cabrilloPowerCategory: String = "HIGH"
+    @State private var cabrilloClaimedScore: String = "0"
     
     // Contest / UTC Time Filter Settings
     @State private var enableFilter: Bool = false
@@ -181,22 +185,94 @@ struct ContentView: View {
                             }
                         }
                         
-                        // Section 3: Output Options & Animated UTC Filter Card
+                        // Section 3: Multi-Format Output Options & Settings
                         VStack(alignment: .leading, spacing: 10) {
                             HStack {
-                                Toggle("Convert Output to CSV / Excel", isOn: $convertToCSV)
+                                Label("Export Format", systemImage: "square.and.arrow.up.circle.fill")
                                     .font(.headline)
-                                    .onChange(of: convertToCSV) { _, newValue in
-                                        updateOutputFileExtension(isCSV: newValue)
-                                    }
+                                    .foregroundColor(.primary)
 
                                 Spacer()
 
-                                Text(convertToCSV ? "CSV format (.csv)" : "ADIF format (.adi)")
+                                Picker("Format", selection: $selectedExportFormat) {
+                                    ForEach(ExportLogFormat.allCases) { fmt in
+                                        Label(fmt.rawValue, systemImage: fmt.icon).tag(fmt)
+                                    }
+                                }
+                                .pickerStyle(.menu)
+                                .frame(width: 250)
+                                .onChange(of: selectedExportFormat) { _, newFmt in
+                                    updateOutputFileExtension(format: newFmt)
+                                }
+                            }
+
+                            // Format Description Banner
+                            HStack(spacing: 8) {
+                                Image(systemName: selectedExportFormat.icon)
+                                    .font(.system(size: 14))
+                                    .foregroundColor(.accentColor)
+                                Text(selectedExportFormat.description)
                                     .font(.caption)
                                     .foregroundColor(.secondary)
                             }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
                             
+                            // Cabrillo Options Panel if selected
+                            if selectedExportFormat == .cabrillo {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Label("Cabrillo Contest Headers", systemImage: "flag.checkered")
+                                        .font(.caption.bold())
+                                        .foregroundColor(.orange)
+
+                                    HStack(spacing: 12) {
+                                        VStack(alignment: .leading, spacing: 3) {
+                                            Text("CONTEST ID:")
+                                                .font(.caption2)
+                                                .foregroundColor(.secondary)
+                                            TextField("CQ-WW-SSB", text: $cabrilloContestID)
+                                                .textFieldStyle(.roundedBorder)
+                                        }
+
+                                        VStack(alignment: .leading, spacing: 3) {
+                                            Text("OPERATOR:")
+                                                .font(.caption2)
+                                                .foregroundColor(.secondary)
+                                            Picker("", selection: $cabrilloOperatorCategory) {
+                                                Text("SINGLE-OP").tag("SINGLE-OP")
+                                                Text("MULTI-OP").tag("MULTI-OP")
+                                                Text("CHECKLOG").tag("CHECKLOG")
+                                            }
+                                            .pickerStyle(.menu)
+                                        }
+
+                                        VStack(alignment: .leading, spacing: 3) {
+                                            Text("POWER:")
+                                                .font(.caption2)
+                                                .foregroundColor(.secondary)
+                                            Picker("", selection: $cabrilloPowerCategory) {
+                                                Text("HIGH").tag("HIGH")
+                                                Text("LOW").tag("LOW")
+                                                Text("QRP").tag("QRP")
+                                            }
+                                            .pickerStyle(.menu)
+                                        }
+
+                                        VStack(alignment: .leading, spacing: 3) {
+                                            Text("CLAIMED SCORE:")
+                                                .font(.caption2)
+                                                .foregroundColor(.secondary)
+                                            TextField("0", text: $cabrilloClaimedScore)
+                                                .textFieldStyle(.roundedBorder)
+                                        }
+                                    }
+                                }
+                                .padding(10)
+                                .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+                                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.orange.opacity(0.25), lineWidth: 1))
+                            }
+
                             Divider()
                             
                             Toggle(isOn: $enableFilter.animation(.spring(response: 0.35, dampingFraction: 0.75))) {
@@ -207,10 +283,7 @@ struct ContentView: View {
                                         .font(.headline)
                                 }
                             }
-                            .onChange(of: enableFilter) { _, isFilterOn in
-                                if isFilterOn {
-                                    convertToCSV = false
-                                }
+                            .onChange(of: enableFilter) { _, _ in
                                 updateOutputPathForFilters()
                             }
                             
@@ -506,13 +579,7 @@ struct ContentView: View {
         let panel = NSSavePanel()
         let defaultName = proposedOutputFilename()
         panel.nameFieldStringValue = defaultName
-        if convertToCSV {
-            panel.allowedContentTypes = [.commaSeparatedText]
-        } else {
-            var types: [UTType] = [.plainText]
-            if let adiType = UTType(filenameExtension: "adi") { types.append(adiType) }
-            panel.allowedContentTypes = types
-        }
+        panel.allowedContentTypes = [selectedExportFormat.utType]
         
         if panel.runModal() == .OK, let url = panel.url {
             outputPath = url.path
@@ -520,10 +587,10 @@ struct ContentView: View {
         }
     }
 
-    private func updateOutputFileExtension(isCSV: Bool) {
+    private func updateOutputFileExtension(format: ExportLogFormat) {
         guard !outputPath.isEmpty else { return }
         let url = URL(fileURLWithPath: outputPath)
-        let newExt = isCSV ? "csv" : "adi"
+        let newExt = format.fileExtension
         outputPath = url.deletingPathExtension().appendingPathExtension(newExt).path
     }
 
@@ -550,7 +617,7 @@ struct ContentView: View {
     }
 
     private func proposedOutputFilename() -> String {
-        let ext = convertToCSV ? "csv" : "adi"
+        let ext = selectedExportFormat.fileExtension
         var baseName = "processed_log"
 
         if appState.convertSource == 0 {
@@ -752,30 +819,94 @@ struct ContentView: View {
         let dir = URL(fileURLWithPath: outputPath).deletingLastPathComponent()
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         
-        if convertToCSV {
+        let activeCallsign = appState.currentStationCallsign.isEmpty ? "NOCALL" : appState.currentStationCallsign
+
+        switch selectedExportFormat {
+        case .excelCSV:
             let csvContent = generateCSV(headers: exportHeaders, records: records)
             let bom = "\u{FEFF}"
             let finalCSV = bom + csvContent
-            
             do {
                 try finalCSV.write(toFile: outputPath, atomically: true, encoding: .utf8)
-                appState.appendLog("CSV conversion completed successfully!")
+                appState.appendLog("Excel / CSV conversion completed successfully!")
                 appState.appendLog("Output saved to: \(outputPath)")
             } catch {
                 appState.appendLog("Error saving CSV file: \(error.localizedDescription)")
             }
-        } else {
+
+        case .adif:
             let adifOutput = generateADIF(
                 originalContent: originalADIFContent ?? "",
                 records: records
             )
-            
             do {
                 try adifOutput.write(toFile: outputPath, atomically: true, encoding: .utf8)
                 appState.appendLog("ADIF export completed successfully!")
                 appState.appendLog("Output saved to: \(outputPath)")
             } catch {
                 appState.appendLog("Error saving ADIF file: \(error.localizedDescription)")
+            }
+
+        case .cabrillo:
+            var options = CabrilloExportOptions(
+                contestID: cabrilloContestID.isEmpty ? "CQ-WW-SSB" : cabrilloContestID,
+                callsign: activeCallsign,
+                categoryOperator: cabrilloOperatorCategory,
+                categoryPower: cabrilloPowerCategory,
+                claimedScore: Int(cabrilloClaimedScore) ?? 0
+            )
+            if let station = appState.activeStationProfile {
+                options.name = station.name
+                options.address = station.qth
+                options.country = station.country
+            }
+            let cabrilloOutput = LogExportEngine.generateCabrillo(records: records, options: options)
+            do {
+                try cabrilloOutput.write(toFile: outputPath, atomically: true, encoding: .utf8)
+                appState.appendLog("Cabrillo 3.0 contest log export completed successfully!")
+                appState.appendLog("Output saved to: \(outputPath)")
+            } catch {
+                appState.appendLog("Error saving Cabrillo file: \(error.localizedDescription)")
+            }
+
+        case .json:
+            let jsonOutput = LogExportEngine.generateJSON(records: records)
+            do {
+                try jsonOutput.write(toFile: outputPath, atomically: true, encoding: .utf8)
+                appState.appendLog("JSON database export completed successfully!")
+                appState.appendLog("Output saved to: \(outputPath)")
+            } catch {
+                appState.appendLog("Error saving JSON file: \(error.localizedDescription)")
+            }
+
+        case .html:
+            let htmlOutput = LogExportEngine.generateHTML(
+                headers: exportHeaders,
+                records: records,
+                title: "YAAM Station Logbook Report",
+                callsign: activeCallsign
+            )
+            do {
+                try htmlOutput.write(toFile: outputPath, atomically: true, encoding: .utf8)
+                appState.appendLog("Interactive HTML report generated successfully!")
+                appState.appendLog("Output saved to: \(outputPath)")
+            } catch {
+                appState.appendLog("Error saving HTML file: \(error.localizedDescription)")
+            }
+
+        case .textSummary:
+            let srcTitle = appState.convertSource == 1 ? "YAAM Database" : (inputPath.isEmpty ? "External File" : URL(fileURLWithPath: inputPath).lastPathComponent)
+            let textOutput = LogExportEngine.generateTextSummary(
+                records: records,
+                callsign: activeCallsign,
+                sourceName: srcTitle
+            )
+            do {
+                try textOutput.write(toFile: outputPath, atomically: true, encoding: .utf8)
+                appState.appendLog("Text summary report generated successfully!")
+                appState.appendLog("Output saved to: \(outputPath)")
+            } catch {
+                appState.appendLog("Error saving Text file: \(error.localizedDescription)")
             }
         }
     }

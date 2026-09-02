@@ -163,7 +163,8 @@ public struct GlobeAndGridTrackerWorkspaceView: View {
 
     @ViewBuilder
     private var mapStyleControl: some View {
-        if selectedProjection == .gridTracker || selectedProjection == .globe3D {
+        // Only in 2D Grid mode — the Divider is bundled so it only appears with the picker
+        if selectedProjection == .gridTracker {
             Picker("", selection: $mapKitStyle) {
                 Text("🗺 Map").tag(MKMapType.standard)
                 Text("🛰 Sat").tag(MKMapType.satellite)
@@ -171,7 +172,12 @@ public struct GlobeAndGridTrackerWorkspaceView: View {
             }
             .pickerStyle(.segmented)
             .controlSize(.small)
-            .frame(width: 155)
+            .frame(width: 175)
+
+            // ─── Spacer between Hybrid and All Activity ───
+            Divider()
+                .frame(height: 18)
+                .padding(.horizontal, 4)
         }
     }
 
@@ -354,6 +360,9 @@ public struct GlobeAndGridTrackerWorkspaceView: View {
                     withAnimation(.spring(response: 0.35)) { showStationCard = true }
                 }
             )
+            .overlay(alignment: .bottomLeading) {
+                mapLegendView
+            }
 
         case .globe3D:
             Globe3DMapView(
@@ -370,6 +379,9 @@ public struct GlobeAndGridTrackerWorkspaceView: View {
                     withAnimation(.spring(response: 0.35)) { showStationCard = true }
                 }
             )
+            .overlay(alignment: .bottomLeading) {
+                mapLegendView
+            }
 
         case .azimuthal:
             AzimuthalAndFlatMapCanvas(
@@ -646,6 +658,68 @@ public struct GlobeAndGridTrackerWorkspaceView: View {
                 .stroke(isConf ? Color.green.opacity(0.4) : Color.cyan.opacity(0.4), lineWidth: 1.2)
         )
         .shadow(color: Color.black.opacity(0.3), radius: 10, x: 0, y: 5)
+    }
+
+    // MARK: - Map Color Legend HUD
+
+    private var mapLegendView: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text("MAP LEGEND")
+                .font(.system(size: 8, weight: .black))
+                .foregroundStyle(.secondary)
+                .tracking(1.2)
+
+            Group {
+                legendRow(color: .green,  icon: "antenna.radiowaves.left.and.right", label: "Home Station")
+                legendRow(color: .red,    icon: "circle.fill",                         label: "Worked & Confirmed")
+                legendRow(color: .orange, icon: "circle.fill",                         label: "Worked — QSL Pending")
+                legendRow(color: .yellow, icon: "line.diagonal",                       label: "Great Circle Arc")
+            }
+
+            Divider()
+                .background(Color.white.opacity(0.15))
+
+            HStack(spacing: 4) {
+                Image(systemName: "sun.max.fill")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.orange)
+                Text("Orange line = Day/Night greyline terminator")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.secondary)
+            }
+
+            if selectedProjection == .gridTracker {
+                HStack(spacing: 4) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.cyan)
+                    Text("Scroll to zoom · Drag to pan · Click grid for details")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(.ultraThinMaterial.opacity(0.90), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.white.opacity(0.12), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.25), radius: 6, x: 0, y: 3)
+        .padding(10)
+    }
+
+    private func legendRow(color: Color, icon: String, label: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(color)
+                .frame(width: 14)
+            Text(label)
+                .font(.system(size: 10))
+                .foregroundStyle(.primary)
+        }
     }
 
     // MARK: - Bottom Grid Hunter & VUCC Footer HUD

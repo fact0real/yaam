@@ -262,14 +262,14 @@ struct OperatorDeskView: View {
 
     private func scrollLeft(proxy: ScrollViewProxy) {
         guard let currentIdx = deskTabs.firstIndex(where: { $0.tag == appState.operatorDeskSection }) else { return }
-        let targetIdx = max(0, currentIdx - 3)
+        let targetIdx = max(0, currentIdx - 1)
         let targetTag = deskTabs[targetIdx].tag
         selectTab(targetTag, proxy: proxy)
     }
 
     private func scrollRight(proxy: ScrollViewProxy) {
         guard let currentIdx = deskTabs.firstIndex(where: { $0.tag == appState.operatorDeskSection }) else { return }
-        let targetIdx = min(deskTabs.count - 1, currentIdx + 3)
+        let targetIdx = min(deskTabs.count - 1, currentIdx + 1)
         let targetTag = deskTabs[targetIdx].tag
         selectTab(targetTag, proxy: proxy)
     }

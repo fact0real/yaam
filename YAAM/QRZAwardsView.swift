@@ -34,12 +34,19 @@ struct QRZAwardsFetchResult {
 struct QRZAwardsView: View {
     @EnvironmentObject var appState: AppState
 
+    private var effectiveQRZAwards: [QRZAwardSummary] {
+        if !appState.qrzAwardSummaries.isEmpty {
+            return appState.qrzAwardSummaries
+        }
+        return synthesizeLocalAwards()
+    }
+
     private var earnedAwards: [QRZAwardSummary] {
-        appState.qrzAwardSummaries.filter(\.earned).sorted { $0.title < $1.title }
+        effectiveQRZAwards.filter(\.earned).sorted { $0.title < $1.title }
     }
 
     private var inProgressAwards: [QRZAwardSummary] {
-        appState.qrzAwardSummaries
+        effectiveQRZAwards
             .filter { !$0.earned }
             .sorted {
                 if $0.progressAvailable != $1.progressAvailable {
@@ -50,7 +57,7 @@ struct QRZAwardsView: View {
     }
 
     private var averageProgress: Double {
-        let analyzed = appState.qrzAwardSummaries.filter(\.progressAvailable)
+        let analyzed = effectiveQRZAwards.filter(\.progressAvailable)
         guard !analyzed.isEmpty else { return 0 }
         let total = analyzed.reduce(0) { $0 + $1.percentComplete }
         return total / Double(analyzed.count)
@@ -62,7 +69,7 @@ struct QRZAwardsView: View {
                 header
                 lotwAwardProgress
 
-                if appState.qrzAwardSummaries.isEmpty {
+                if effectiveQRZAwards.isEmpty {
                     if appState.isFetchingQRZAwards {
                         loadingState
                     } else {
@@ -95,6 +102,125 @@ struct QRZAwardsView: View {
                 appState.fetchQRZAwards()
             }
         }
+    }
+
+    private func synthesizeLocalAwards() -> [QRZAwardSummary] {
+        let confirmedRecords = appState.qsoRecords.filter(\.isConfirmed)
+        let dxccSet = Set(confirmedRecords.map { $0["DXCC"] }.filter { !$0.isEmpty })
+        let stateSet = Set(confirmedRecords.map { $0["STATE"].uppercased() }.filter { !$0.isEmpty })
+        let continentSet = Set(confirmedRecords.map { $0["CONT"].uppercased() }.filter { !$0.isEmpty })
+        let gridSet = Set(confirmedRecords.map { ($0["GRIDSQUARE"].isEmpty ? $0["GRID"] : $0["GRIDSQUARE"]).prefix(4).uppercased() }.filter { $0.count == 4 })
+        let sixMeterGrids = Set(confirmedRecords.filter { $0["BAND"].lowercased() == "6m" }.map { ($0["GRIDSQUARE"].isEmpty ? $0["GRID"] : $0["GRIDSQUARE"]).prefix(4).uppercased() }.filter { $0.count == 4 })
+        let wpxPrefixes = Set(confirmedRecords.map { derivePrefix($0["CALL"] ?? "") }.filter { !$0.isEmpty })
+
+        var list: [QRZAwardSummary] = []
+
+        // 1. DXCC 100
+        let dxccCount = dxccSet.count
+        let dxccPct = min(100.0, (Double(dxccCount) / 100.0) * 100.0)
+        list.append(QRZAwardSummary(
+            id: "dxcc_100",
+            title: "DX World (DXCC 100)",
+            detail: "\(dxccCount) of 100 confirmed DXCC entities",
+            percentComplete: dxccPct,
+            status: dxccCount >= 100 ? "Awarded" : "\(100 - dxccCount) entities remaining",
+            earned: dxccCount >= 100,
+            progressAvailable: true,
+            achievement: "\(dxccCount) / 100 Entities",
+            awardType: "dxcc",
+            ribbonURL: ""
+        ))
+
+        // 2. Worked All Continents (WAC)
+        let contCount = continentSet.count
+        let contPct = min(100.0, (Double(contCount) / 6.0) * 100.0)
+        list.append(QRZAwardSummary(
+            id: "wac",
+            title: "Worked All Continents (WAC)",
+            detail: "\(contCount) of 6 continents confirmed (AF, AS, EU, NA, OC, SA)",
+            percentComplete: contPct,
+            status: contCount >= 6 ? "Awarded" : "\(6 - contCount) continents remaining",
+            earned: contCount >= 6,
+            progressAvailable: true,
+            achievement: "\(contCount) / 6 Continents",
+            awardType: "continent",
+            ribbonURL: ""
+        ))
+
+        // 3. Worked All States (WAS 50)
+        let stateCount = stateSet.count
+        let statePct = min(100.0, (Double(stateCount) / 50.0) * 100.0)
+        list.append(QRZAwardSummary(
+            id: "was_50",
+            title: "United States (WAS 50)",
+            detail: "\(stateCount) of 50 US states confirmed",
+            percentComplete: statePct,
+            status: stateCount >= 50 ? "Awarded" : "\(50 - stateCount) states remaining",
+            earned: stateCount >= 50,
+            progressAvailable: true,
+            achievement: "\(stateCount) / 50 States",
+            awardType: "was",
+            ribbonURL: ""
+        ))
+
+        // 4. Grid Master / VUCC (100 Maidenhead Grids)
+        let gridCount = gridSet.count
+        let gridPct = min(100.0, (Double(gridCount) / 100.0) * 100.0)
+        list.append(QRZAwardSummary(
+            id: "vucc_grids",
+            title: "Grid Master (100 Grids)",
+            detail: "\(gridCount) of 100 Maidenhead grid squares confirmed",
+            percentComplete: gridPct,
+            status: gridCount >= 100 ? "Awarded" : "\(100 - gridCount) grids remaining",
+            earned: gridCount >= 100,
+            progressAvailable: true,
+            achievement: "\(gridCount) / 100 Grids",
+            awardType: "grid",
+            ribbonURL: ""
+        ))
+
+        // 5. CQ WPX (300 Prefixes)
+        let wpxCount = wpxPrefixes.count
+        let wpxPct = min(100.0, (Double(wpxCount) / 300.0) * 100.0)
+        list.append(QRZAwardSummary(
+            id: "cq_wpx",
+            title: "CQ WPX (Prefix Master)",
+            detail: "\(wpxCount) of 300 unique callsign prefixes confirmed",
+            percentComplete: wpxPct,
+            status: wpxCount >= 300 ? "Awarded" : "\(300 - wpxCount) prefixes remaining",
+            earned: wpxCount >= 300,
+            progressAvailable: true,
+            achievement: "\(wpxCount) / 300 Prefixes",
+            awardType: "wpx",
+            ribbonURL: ""
+        ))
+
+        // 6. 6m Magic Band (50 Grids)
+        let sixMCount = sixMeterGrids.count
+        let sixMPct = min(100.0, (Double(sixMCount) / 50.0) * 100.0)
+        list.append(QRZAwardSummary(
+            id: "six_meter_50",
+            title: "6m Magic Band Explorer",
+            detail: "\(sixMCount) of 50 Maidenhead grids confirmed on 50 MHz",
+            percentComplete: sixMPct,
+            status: sixMCount >= 50 ? "Awarded" : "\(50 - sixMCount) grids remaining",
+            earned: sixMCount >= 50,
+            progressAvailable: true,
+            achievement: "\(sixMCount) / 50 Grids on 6m",
+            awardType: "vhf",
+            ribbonURL: ""
+        ))
+
+        return list
+    }
+
+    private func derivePrefix(_ call: String) -> String {
+        let clean = call.uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else { return "" }
+        if let numIdx = clean.firstIndex(where: { $0.isNumber }) {
+            return String(clean[...numIdx])
+        }
+        return String(clean.prefix(3))
     }
 
     private var header: some View {

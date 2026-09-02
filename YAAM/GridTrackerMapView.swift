@@ -127,8 +127,10 @@ public struct GridTrackerMapView: NSViewRepresentable {
         mapView.showsScale = true
         mapView.isPitchEnabled = false
         mapView.isRotateEnabled = false
+        mapView.isZoomEnabled = true      // ← explicit: pinch/scroll to zoom
+        mapView.isScrollEnabled = true    // ← explicit: drag to pan
 
-        // Set initial region centered on Europe / Middle East / Asia
+        // Set initial region centered on home
         let center = CLLocationCoordinate2D(latitude: homeCoordinate.latitude, longitude: homeCoordinate.longitude)
         let span = MKCoordinateSpan(latitudeDelta: 65, longitudeDelta: 100)
         mapView.setRegion(MKCoordinateRegion(center: center, span: span), animated: false)
@@ -300,27 +302,54 @@ public struct GridTrackerMapView: NSViewRepresentable {
         public func mapView(_ mapView: MKMapView, viewFor annotation: MKAnnotation) -> MKAnnotationView? {
             guard let customAnn = annotation as? GridTrackerStationAnnotation else { return nil }
 
-            let identifier = customAnn.isHome ? "HomeStationPin" : "GridTrackerPin"
-            var pinView = mapView.dequeueReusableAnnotationView(withIdentifier: identifier) as? MKMarkerAnnotationView
-
-            if pinView == nil {
-                pinView = MKMarkerAnnotationView(annotation: customAnn, reuseIdentifier: identifier)
-                pinView?.canShowCallout = true
-            } else {
-                pinView?.annotation = customAnn
-            }
-
             if customAnn.isHome {
+                let identifier = "HomeStationPin"
+                var pinView = mapView.dequeueReusableAnnotationView(withIdentifier: identifier) as? MKMarkerAnnotationView
+                if pinView == nil {
+                    pinView = MKMarkerAnnotationView(annotation: customAnn, reuseIdentifier: identifier)
+                    pinView?.canShowCallout = true
+                } else {
+                    pinView?.annotation = customAnn
+                }
                 pinView?.markerTintColor = NSColor.systemGreen
                 pinView?.glyphImage = NSImage(systemSymbolName: "antenna.radiowaves.left.and.right", accessibilityDescription: "Home")
                 pinView?.displayPriority = .required
-            } else {
-                pinView?.markerTintColor = customAnn.isConfirmed ? NSColor.systemRed : NSColor.systemOrange
-                pinView?.glyphText = "📍"
-                pinView?.displayPriority = .defaultHigh
+                pinView?.animatesWhenAdded = false   // ← no pulse on home pin either
+                return pinView
             }
 
-            return pinView
+            // Non-home stations: use a compact, static (non-pulsing) circle dot
+            let identifier = "CompactDotPin"
+            var dotView = mapView.dequeueReusableAnnotationView(withIdentifier: identifier)
+            if dotView == nil {
+                dotView = MKAnnotationView(annotation: customAnn, reuseIdentifier: identifier)
+                dotView?.canShowCallout = true
+            } else {
+                dotView?.annotation = customAnn
+            }
+
+            // Draw a small filled circle (no pulse, no animation)
+            let dotSize: CGFloat = customAnn.isConfirmed ? 12 : 10
+            let dotColor: NSColor = customAnn.isConfirmed ? NSColor.systemRed : NSColor.systemOrange
+
+            let renderer = NSGraphicsContext.current?.cgContext
+            _ = renderer  // suppress unused warning — we draw via NSImage
+            let img = NSImage(size: NSSize(width: dotSize + 2, height: dotSize + 2), flipped: false) { rect in
+                let inset = rect.insetBy(dx: 1, dy: 1)
+                let path = NSBezierPath(ovalIn: inset)
+                dotColor.withAlphaComponent(0.92).setFill()
+                path.fill()
+                NSColor.white.withAlphaComponent(0.7).setStroke()
+                path.lineWidth = 1.0
+                path.stroke()
+                return true
+            }
+            dotView?.image = img
+            dotView?.frame = CGRect(origin: .zero, size: NSSize(width: dotSize + 2, height: dotSize + 2))
+            dotView?.centerOffset = CGPoint(x: 0, y: -(dotSize / 2))
+            dotView?.displayPriority = .defaultHigh
+
+            return dotView
         }
 
         public func mapView(_ mapView: MKMapView, didSelect view: MKAnnotationView) {
@@ -360,41 +389,58 @@ public final class MaidenheadGridRenderer: MKOverlayRenderer {
     public override func draw(_ mapRect: MKMapRect, zoomScale: MKZoomScale, in context: CGContext) {
         let zoom = Double(zoomScale)
 
-        // 1. Draw 2-Character Maidenhead Field Lines (Every 20° lon, 10° lat)
         context.saveGState()
-        context.setStrokeColor(NSColor(white: 0.15, alpha: 0.75).cgColor)
+
+        // ── 1. 2-Character Field Lines (Every 20° lon, 10° lat) ──────────
+        context.setStrokeColor(NSColor(white: 0.15, alpha: 0.70).cgColor)
         context.setLineWidth(CGFloat(1.2 / zoom))
 
-        // Latitude Field Lines (-80° to +80°)
         for lat in stride(from: -80.0, through: 80.0, by: 10.0) {
-            let start = MKMapPoint(CLLocationCoordinate2D(latitude: lat, longitude: -180.0))
-            let end = MKMapPoint(CLLocationCoordinate2D(latitude: lat, longitude: 180.0))
-            let pt1 = point(for: start)
-            let pt2 = point(for: end)
+            let pt1 = point(for: MKMapPoint(CLLocationCoordinate2D(latitude: lat, longitude: -180.0)))
+            let pt2 = point(for: MKMapPoint(CLLocationCoordinate2D(latitude: lat, longitude: 180.0)))
             context.move(to: pt1)
             context.addLine(to: pt2)
         }
-
-        // Longitude Field Lines (-180° to +180°)
         for lon in stride(from: -180.0, through: 180.0, by: 20.0) {
-            let start = MKMapPoint(CLLocationCoordinate2D(latitude: 85.0, longitude: lon))
-            let end = MKMapPoint(CLLocationCoordinate2D(latitude: -85.0, longitude: lon))
-            let pt1 = point(for: start)
-            let pt2 = point(for: end)
+            let pt1 = point(for: MKMapPoint(CLLocationCoordinate2D(latitude: 85.0, longitude: lon)))
+            let pt2 = point(for: MKMapPoint(CLLocationCoordinate2D(latitude: -85.0, longitude: lon)))
             context.move(to: pt1)
             context.addLine(to: pt2)
         }
         context.strokePath()
 
-        // 2. Draw Bold 2-Character Field Labels (LM, JN, KO, etc.)
-        let fontSize = CGFloat(16.0 / zoom)
-        if fontSize > 5.0 && fontSize < 60.0 {
-            let font = NSFont.systemFont(ofSize: fontSize, weight: .black)
+        // ── 2. 4-Character Square Lines (Every 2° lon, 1° lat) ──────────
+        // Only draw at higher zoom (smaller zoom scale = more zoomed in)
+        let squareFontSize = CGFloat(10.0 / zoom)
+        let drawSquareGrid = squareFontSize > 4.0 && squareFontSize < 30.0
+
+        if drawSquareGrid {
+            context.setStrokeColor(NSColor(white: 0.25, alpha: 0.40).cgColor)
+            context.setLineWidth(CGFloat(0.5 / zoom))
+
+            for lat in stride(from: -80.0, through: 80.0, by: 1.0) where Int(lat) % 10 != 0 {
+                let pt1 = point(for: MKMapPoint(CLLocationCoordinate2D(latitude: lat, longitude: -180.0)))
+                let pt2 = point(for: MKMapPoint(CLLocationCoordinate2D(latitude: lat, longitude: 180.0)))
+                context.move(to: pt1)
+                context.addLine(to: pt2)
+            }
+            for lon in stride(from: -180.0, through: 180.0, by: 2.0) where Int(lon) % 20 != 0 {
+                let pt1 = point(for: MKMapPoint(CLLocationCoordinate2D(latitude: 85.0, longitude: lon)))
+                let pt2 = point(for: MKMapPoint(CLLocationCoordinate2D(latitude: -85.0, longitude: lon)))
+                context.move(to: pt1)
+                context.addLine(to: pt2)
+            }
+            context.strokePath()
+        }
+
+        // ── 3. 2-Character Field Labels (AA, JN, LM …) ──────────────────
+        let fieldFontSize = CGFloat(16.0 / zoom)
+        if fieldFontSize > 5.0 && fieldFontSize < 60.0 {
+            let font = NSFont.systemFont(ofSize: fieldFontSize, weight: .black)
             let attrs: [NSAttributedString.Key: Any] = [
                 .font: font,
-                .foregroundColor: NSColor(red: 0.10, green: 0.35, blue: 0.55, alpha: 0.85)
+                .foregroundColor: NSColor(red: 0.10, green: 0.35, blue: 0.55, alpha: 0.80)
             ]
-
             for fieldLat in 0..<18 {
                 for fieldLon in 0..<18 {
                     let minLon = Double(fieldLon) * 20.0 - 180.0
@@ -404,23 +450,72 @@ public final class MaidenheadGridRenderer: MKOverlayRenderer {
 
                     let charA = Character(UnicodeScalar(UInt8(Character("A").asciiValue! + UInt8(fieldLon))))
                     let charB = Character(UnicodeScalar(UInt8(Character("A").asciiValue! + UInt8(fieldLat))))
-                    let text = "\(charA)\(charB)"
-
-                    let str = NSAttributedString(string: text, attributes: attrs)
-                    let strSize = str.size()
-
-                    let textRect = CGRect(
-                        x: centerPt.x - strSize.width / 2.0,
-                        y: centerPt.y - strSize.height / 2.0,
-                        width: strSize.width,
-                        height: strSize.height
-                    )
-
+                    let str = NSAttributedString(string: "\(charA)\(charB)", attributes: attrs)
+                    let sz = str.size()
                     context.saveGState()
                     let ctLine = CTLineCreateWithAttributedString(str)
-                    context.textPosition = CGPoint(x: textRect.minX, y: textRect.maxY)
+                    context.textPosition = CGPoint(x: centerPt.x - sz.width / 2.0, y: centerPt.y + sz.height / 2.0)
                     CTLineDraw(ctLine, context)
                     context.restoreGState()
+                }
+            }
+        }
+
+        // ── 4. 4-Character Grid Square Labels (JN35, LM55 …) ────────────
+        // Only draw when zoomed in enough that labels don't crowd each other
+        if drawSquareGrid && squareFontSize > 6.0 {
+            let font = NSFont.monospacedSystemFont(ofSize: squareFontSize, weight: .semibold)
+            let bgColor = NSColor(white: 0.0, alpha: 0.45)
+            let textColor = NSColor(red: 0.85, green: 0.95, blue: 1.0, alpha: 0.92)
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: font,
+                .foregroundColor: textColor
+            ]
+
+            for fieldLat in 0..<18 {
+                for fieldLon in 0..<18 {
+                    let fieldMinLon = Double(fieldLon) * 20.0 - 180.0
+                    let fieldMinLat = Double(fieldLat) * 10.0 - 90.0
+                    let charA = Character(UnicodeScalar(UInt8(Character("A").asciiValue! + UInt8(fieldLon))))
+                    let charB = Character(UnicodeScalar(UInt8(Character("A").asciiValue! + UInt8(fieldLat))))
+
+                    // Each field has 10 lon squares (0-9) and 10 lat squares (0-9)
+                    for sqLon in 0..<10 {
+                        for sqLat in 0..<10 {
+                            let squareLon = fieldMinLon + Double(sqLon) * 2.0
+                            let squareLat = fieldMinLat + Double(sqLat) * 1.0
+                            let centerCoord = CLLocationCoordinate2D(
+                                latitude: squareLat + 0.5,
+                                longitude: squareLon + 1.0
+                            )
+                            let centerPt = point(for: MKMapPoint(centerCoord))
+
+                            // Check if this square's center is in the current draw rect
+                            let squareMapPt = MKMapPoint(centerCoord)
+                            guard mapRect.contains(squareMapPt) else { continue }
+
+                            let label = "\(charA)\(charB)\(sqLon)\(sqLat)"
+                            let str = NSAttributedString(string: label, attributes: attrs)
+                            let sz = str.size()
+                            let textX = centerPt.x - sz.width / 2.0
+                            let textY = centerPt.y + sz.height / 2.0
+
+                            // Draw subtle background pill behind label
+                            let padding: CGFloat = 2.0
+                            let bgRect = CGRect(x: textX - padding, y: textY - sz.height - padding,
+                                                width: sz.width + padding * 2, height: sz.height + padding * 2)
+                            context.setFillColor(bgColor.cgColor)
+                            let clipPath = CGPath(roundedRect: bgRect, cornerWidth: 2, cornerHeight: 2, transform: nil)
+                            context.addPath(clipPath)
+                            context.fillPath()
+
+                            context.saveGState()
+                            let ctLine = CTLineCreateWithAttributedString(str)
+                            context.textPosition = CGPoint(x: textX, y: textY)
+                            CTLineDraw(ctLine, context)
+                            context.restoreGState()
+                        }
+                    }
                 }
             }
         }
@@ -435,15 +530,51 @@ public final class SolarTerminatorRenderer: MKOverlayRenderer {
     public override func draw(_ mapRect: MKMapRect, zoomScale: MKZoomScale, in context: CGContext) {
         let zoom = Double(zoomScale)
         let subSolar = SolarEphemeris.calculate(at: Date())
-        let terminator = SolarEphemeris.terminatorCoordinates(at: Date(), stepDegrees: 2.0)
+        let terminator = SolarEphemeris.terminatorCoordinates(at: Date(), stepDegrees: 1.5)
         guard terminator.count >= 3 else { return }
 
         context.saveGState()
 
-        // 1. Draw Day/Night Terminator Boundary Stroke
-        context.setStrokeColor(NSColor.systemOrange.withAlphaComponent(0.85).cgColor)
+        // ── 1. Night-side Dark Polygon ──────────────────────────────────
+        // Build a path that covers the entire map rect, then subtract the day side.
+        // Strategy: trace the terminator, close via top or bottom of the map rect.
+        let terminatorPts = terminator.map { coord -> CGPoint in
+            let mp = MKMapPoint(CLLocationCoordinate2D(latitude: coord.latitude, longitude: coord.longitude))
+            return point(for: mp)
+        }
+
+        // Determine which pole is in the night side based on subsolar declination
+        let isNorthernDaySide = subSolar.latitude > 0
+        // Night side top/bottom edge in map coordinates
+        let topEdgeCoord    = CLLocationCoordinate2D(latitude:  85.0, longitude: 0)
+        let bottomEdgeCoord = CLLocationCoordinate2D(latitude: -85.0, longitude: 0)
+        let topEdgeY    = point(for: MKMapPoint(topEdgeCoord)).y
+        let bottomEdgeY = point(for: MKMapPoint(bottomEdgeCoord)).y
+        let leftEdgeX   = point(for: MKMapPoint(CLLocationCoordinate2D(latitude: 0, longitude: -180))).x
+        let rightEdgeX  = point(for: MKMapPoint(CLLocationCoordinate2D(latitude: 0, longitude:  180))).x
+
+        let nightEdgeY: CGFloat = isNorthernDaySide ? bottomEdgeY : topEdgeY
+
+        context.beginPath()
+        // Start at left edge of the night hemisphere boundary
+        context.move(to: CGPoint(x: leftEdgeX, y: nightEdgeY))
+        context.addLine(to: terminatorPts[0])
+        for pt in terminatorPts.dropFirst() {
+            context.addLine(to: pt)
+        }
+        context.addLine(to: CGPoint(x: rightEdgeX, y: nightEdgeY))
+        context.addLine(to: CGPoint(x: rightEdgeX, y: isNorthernDaySide ? bottomEdgeY : topEdgeY))
+        context.addLine(to: CGPoint(x: leftEdgeX, y: isNorthernDaySide ? bottomEdgeY : topEdgeY))
+        context.closePath()
+
+        context.setFillColor(NSColor.black.withAlphaComponent(0.34).cgColor)
+        context.fillPath()
+
+        // ── 2. Terminator Boundary Line ─────────────────────────────────
+        context.setStrokeColor(NSColor.systemOrange.withAlphaComponent(0.80).cgColor)
         context.setLineWidth(CGFloat(2.0 / zoom))
 
+        context.beginPath()
         var started = false
         for coord in terminator {
             let mapPoint = MKMapPoint(CLLocationCoordinate2D(latitude: coord.latitude, longitude: coord.longitude))
@@ -457,11 +588,16 @@ public final class SolarTerminatorRenderer: MKOverlayRenderer {
         }
         context.strokePath()
 
-        // 2. Draw Sun Icon at Subsolar Point
+        // ── 3. Sun Icon at Subsolar Point ────────────────────────────────
         let sunPoint = point(for: MKMapPoint(CLLocationCoordinate2D(latitude: subSolar.latitude, longitude: subSolar.longitude)))
         let sunRadius = CGFloat(8.0 / zoom)
-        context.setFillColor(NSColor.systemYellow.cgColor)
+        context.setFillColor(NSColor.systemYellow.withAlphaComponent(0.9).cgColor)
         context.fillEllipse(in: CGRect(x: sunPoint.x - sunRadius, y: sunPoint.y - sunRadius, width: sunRadius * 2, height: sunRadius * 2))
+        // Sun halo
+        context.setStrokeColor(NSColor.systemYellow.withAlphaComponent(0.35).cgColor)
+        context.setLineWidth(CGFloat(3.0 / zoom))
+        let haloRadius = sunRadius * 1.8
+        context.strokeEllipse(in: CGRect(x: sunPoint.x - haloRadius, y: sunPoint.y - haloRadius, width: haloRadius * 2, height: haloRadius * 2))
 
         context.restoreGState()
     }

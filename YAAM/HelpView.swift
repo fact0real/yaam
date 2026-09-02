@@ -6,7 +6,7 @@
 import SwiftUI
 
 private enum HelpTopic: String, CaseIterable, Identifiable {
-    case start, stations, logTable, quickLog, dxCluster, radioBridge, contest, contestCalendar, dxpeditions, magicBand, syncCenter, qslHub, confirmations, statistics, qrzIncoming, logAssistant, awards, portable, connectivity, importReview, dataSafety, credentials, workflows, faq
+    case start, stations, logTable, quickLog, convertExport, globeGrids, cwWinKeyer, competitors, tciSdr, dxCluster, on4kst, radioBridge, contest, contestCalendar, dxpeditions, magicBand, syncCenter, qslHub, confirmations, statistics, qrzIncoming, logAssistant, awards, portable, connectivity, importReview, dataSafety, credentials, workflows, faq
     var id: String { rawValue }
 
     var title: String {
@@ -15,7 +15,13 @@ private enum HelpTopic: String, CaseIterable, Identifiable {
         case .stations: return "Station Profiles"
         case .logTable: return "Log Table & Filters"
         case .quickLog: return "Quick Log"
+        case .convertExport: return "Convert & Export"
+        case .globeGrids: return "3D Globe & GridTracker"
+        case .cwWinKeyer: return "CW Keyer & WinKeyer"
+        case .competitors: return "Competitor Tracking"
+        case .tciSdr: return "TCI & SDR Integration"
         case .dxCluster: return "DX Cluster"
+        case .on4kst: return "ON4KST Chat & Microwave"
         case .radioBridge: return "Radio, Icom & FT8"
         case .contest: return "Contest Workspace"
         case .contestCalendar: return "Contest Calendar"
@@ -27,14 +33,14 @@ private enum HelpTopic: String, CaseIterable, Identifiable {
         case .statistics: return "Statistics & Action Center"
         case .qrzIncoming: return "QRZ Incoming Requests"
         case .logAssistant: return "Log Assistant"
-        case .awards: return "Awards"
+        case .awards: return "Awards & Achievements"
         case .portable: return "Portable Activities"
         case .connectivity: return "Cloud & Mobile"
         case .importReview: return "Import Review"
         case .dataSafety: return "Backup & Restore"
         case .credentials: return "Credentials"
         case .workflows: return "Log Workflows"
-        case .faq: return "FAQ"
+        case .faq: return "FAQ & Knowledge Base"
         }
     }
 
@@ -44,12 +50,18 @@ private enum HelpTopic: String, CaseIterable, Identifiable {
         case .stations: return "antenna.radiowaves.left.and.right"
         case .logTable: return "tablecells"
         case .quickLog: return "plus.circle.fill"
+        case .convertExport: return "square.and.arrow.up.circle.fill"
+        case .globeGrids: return "globe.americas.fill"
+        case .cwWinKeyer: return "cable.connector.horizontal"
+        case .competitors: return "chart.line.uptrend.xyaxis"
+        case .tciSdr: return "waveform.path.ecg.rectangle"
         case .dxCluster: return "dot.radiowaves.left.and.right"
+        case .on4kst: return "bubble.left.and.bubble.right.fill"
         case .radioBridge: return "wave.3.right.circle"
         case .contest: return "flag.checkered"
         case .contestCalendar: return "calendar.badge.clock"
         case .dxpeditions: return "binoculars.fill"
-        case .magicBand: return "dot.radiowaves.left.and.right"
+        case .magicBand: return "bolt.badge.clock.fill"
         case .syncCenter: return "arrow.triangle.2.circlepath"
         case .qslHub: return "arrow.left.arrow.right.circle"
         case .confirmations: return "checklist"
@@ -63,24 +75,28 @@ private enum HelpTopic: String, CaseIterable, Identifiable {
         case .dataSafety: return "externaldrive.fill.badge.checkmark"
         case .credentials: return "lock.shield.fill"
         case .workflows: return "arrow.triangle.2.circlepath"
-        case .faq: return "questionmark.circle"
+        case .faq: return "questionmark.circle.fill"
         }
     }
 
     var searchTerms: String {
         switch self {
+        case .convertExport:
+            return "\(title) excel csv cabrillo adif json html text export format contest slice utc band mode"
+        case .globeGrids:
+            return "\(title) 3d globe gridtracker maidenhead grid square solar terminator grayline propagation day night map"
+        case .cwWinKeyer:
+            return "\(title) cw keyer winkeyer k1el paddle speed wpm macro f1 f12 sidetone"
+        case .competitors:
+            return "\(title) competitor rival confirmed qso progress progression curve velocity monthly forecast overtake"
+        case .tciSdr:
+            return "\(title) tci sdr expertsdr sunsdr cat waterfall vfo transceiver"
+        case .on4kst:
+            return "\(title) on4kst chat microwave vhf uhf 50mhz 144mhz 432mhz 1296mhz"
         case .logTable:
             return "\(title) chronological UTC row number numbering advanced filters columns hidden database ID"
-        case .dxpeditions:
-            return "\(title) DX-World weekly bulletin magazine 425 DX News DXPing source announcement expedition"
         case .awards:
-            return "\(title) QRZ LoTW local progress achievement granted DXCC WAS VUCC WAC"
-        case .confirmations:
-            return "\(title) QRZ LoTW QSL full history counts unmatched reconciliation"
-        case .statistics:
-            return "\(title) analytics totals providers LoTW QRZ eQSL confirmation rate follow up email QSL country band grid progress"
-        case .contestCalendar:
-            return "\(title) WA7BNM schedule preferences modes reminders"
+            return "\(title) QRZ LoTW local progress achievement granted DXCC WAS VUCC WAC WPX 6m grids"
         default:
             return title
         }
@@ -133,7 +149,13 @@ struct HelpView: View {
         case .stations: stationProfiles
         case .logTable: logTable
         case .quickLog: quickLog
+        case .convertExport: convertExportView
+        case .globeGrids: globeGridsView
+        case .cwWinKeyer: cwWinKeyerView
+        case .competitors: competitorsView
+        case .tciSdr: tciSdrView
         case .dxCluster: dxCluster
+        case .on4kst: on4kstView
         case .radioBridge: radioBridge
         case .contest: contest
         case .contestCalendar: contestCalendar
@@ -776,29 +798,157 @@ struct HelpView: View {
         }
     }
 
+    private var convertExportView: some View {
+        Group {
+            helpHeader(
+                title: "Convert & Export Formats",
+                subtitle: "Export logs to Excel/CSV, Cabrillo 3.0 contest format, standard ADIF 3.1.4, JSON database array, interactive HTML report, or clean text summaries.",
+                icon: "square.and.arrow.up.circle.fill",
+                color: .blue
+            )
+            HelpFlow(steps: [
+                HelpFlowStep(icon: "tray.full.fill", title: "1. Select Source", detail: "Choose External File (.adi, .smartsdrlog) or active YAAM SQLite Database."),
+                HelpFlowStep(icon: "slider.horizontal.3", title: "2. Set Filters", detail: "Optionally apply UTC Contest window, Band, or Mode filters."),
+                HelpFlowStep(icon: "doc.text.badge.plus", title: "3. Choose Format", detail: "Select Excel/CSV, Cabrillo 3.0, ADIF, JSON, HTML, or Text."),
+                HelpFlowStep(icon: "square.and.arrow.up", title: "4. Convert & Save", detail: "Output is written atomically and can be opened with one click.")
+            ])
+
+            helpSection("Supported Export Formats") {
+                HelpDefinition(icon: "tablecells.badge.ellipsis", title: "Excel / CSV (.csv)", text: "Formatted spreadsheet with UTF-8 BOM encoding. Opens cleanly in Microsoft Excel, Apple Numbers, and Google Sheets without character corruption.")
+                HelpDefinition(icon: "flag.checkered.circle.fill", title: "Cabrillo 3.0 (.cbr / .log)", text: "Official contest format compliant with CQ WW, ARRL, and IARU robots. Includes configurable Contest ID, Category, Power, Operator, and Claimed Score.")
+                HelpDefinition(icon: "doc.text.fill", title: "ADIF 3.1.4 (.adi)", text: "Standard amateur radio interchange format recognized by LoTW, QRZ.com, eQSL, Club Log, and all logging software.")
+                HelpDefinition(icon: "curlybraces", title: "JSON Database (.json)", text: "Structured JSON array of QSO objects suitable for web applications, scripting, and cloud backups.")
+                HelpDefinition(icon: "safari.fill", title: "Interactive HTML Report (.html)", text: "Self-contained dark/light styled HTML table with station metadata, band statistics breakdown, and sortable QSO records viewable in any web browser.")
+                HelpDefinition(icon: "doc.plaintext", title: "Text Summary & Matrix (.txt)", text: "Human-readable ASCII log summary report with band/mode statistics matrix and formatted QSO lines.")
+            }
+
+            helpCallout(icon: "timer", title: "UTC Contest Time Slicing", text: "When 'Enable UTC Time Filter' is active, start and end times operate in true UTC, allowing you to slice contest sessions across midnight seamlessly.", color: .orange)
+        }
+    }
+
+    private var globeGridsView: some View {
+        Group {
+            helpHeader(
+                title: "3D Globe & GridTracker",
+                subtitle: "Visualize DX contacts, real-time cluster spots, Maidenhead grid squares, and the solar terminator in high-performance Metal 3D or 2D projections.",
+                icon: "globe.americas.fill",
+                color: .cyan
+            )
+            HelpFlow(steps: [
+                HelpFlowStep(icon: "globe.americas", title: "Projection", detail: "Switch between 3D Spherical Globe, 2D Equirectangular, or Mercator views."),
+                HelpFlowStep(icon: "sun.max.fill", title: "Solar Terminator", detail: "Real-time grayline calculation showing day/night boundaries and solar subpoint."),
+                HelpFlowStep(icon: "square.grid.3x3.fill", title: "Grid Overlays", detail: "View Maidenhead grid squares (4-char & 6-char) color-coded by worked/confirmed status."),
+                HelpFlowStep(icon: "dot.radiowaves.left.and.right", title: "Live Spots", detail: "Cluster spots render as interactive glowing pins with bearing and distance.")
+            ])
+
+            helpSection("Key Capabilities") {
+                HelpDefinition(icon: "sparkles", title: "High-Performance Rendering", text: "Hardware-accelerated via Apple Metal and SceneKit with zero CPU stutter and smooth 60 FPS rotation.")
+                HelpDefinition(icon: "antenna.radiowaves.left.and.right", title: "GridTracker Integration", text: "Instantly identify worked, confirmed, and unworked Maidenhead grid squares for VUCC, 6m Magic Band, and Satellite awards.")
+                HelpDefinition(icon: "moon.stars.fill", title: "Grayline Propagation", text: "Easily spot sunrise/sunset greyline openings on low bands (160m, 80m, 40m) where ionospheric D-layer absorption drops.")
+            }
+        }
+    }
+
+    private var cwWinKeyerView: some View {
+        Group {
+            helpHeader(
+                title: "CW Keyer & WinKeyer Integration",
+                subtitle: "Precision Morse code transmission via software keyer or dedicated K1EL WinKeyer hardware USB interfaces.",
+                icon: "cable.connector.horizontal",
+                color: .yellow
+            )
+            HelpFlow(steps: [
+                HelpFlowStep(icon: "cable.connector", title: "Connect Port", detail: "Select your serial port (USB-to-UART / WinKeyer) in Settings or Operator Desk."),
+                HelpFlowStep(icon: "speedometer", title: "Speed Control", detail: "Adjust speed from 5 to 50 WPM with real-time speed pot sync."),
+                HelpFlowStep(icon: "keyboard", title: "Macros F1–F12", detail: "One-click transmission of CQ, exchange, TU, serial numbers, and callsigns."),
+                HelpFlowStep(icon: "tuningfork", title: "Paddle & Sidetone", detail: "Configure Iambic A/B, Ultimatic, paddle reverse, and internal sidetone frequency.")
+            ])
+
+            helpSection("WinKeyer Protocol Features") {
+                HelpDefinition(icon: "waveform", title: "Hardware Timing", text: "WinKeyer generates pristine Morse code directly on the microcontroller, eliminating macOS USB latency jitter.")
+                HelpDefinition(icon: "textformat.abc", title: "Prosigns & Cut Numbers", text: "Supports standard prosigns (AR, SK, KN, BT) and contest cut numbers (e.g. 5NN for 599).")
+            }
+        }
+    }
+
+    private var competitorsView: some View {
+        Group {
+            helpHeader(
+                title: "Competitor & Rival Tracking",
+                subtitle: "Track activity, growth rates, and confirmed QSO progression curves against regional and global rivals over time.",
+                icon: "chart.line.uptrend.xyaxis",
+                color: .purple
+            )
+            HelpFlow(steps: [
+                HelpFlowStep(icon: "person.crop.circle.badge.plus", title: "Add Rival", detail: "Enter competitor callsign, baseline confirmed QSOs, and monthly rate."),
+                HelpFlowStep(icon: "chart.xyaxis.line", title: "Progression Curve", detail: "Compare your station's growth against all rivals over -12m to +12m timelines."),
+                HelpFlowStep(icon: "speedometer", title: "Velocity Table", detail: "Head-to-head table showing monthly velocity (QSO/mo) and trend indicators."),
+                HelpFlowStep(icon: "calendar.badge.clock", title: "Overtake Forecast", detail: "Mathematical forecast predicting exact dates when you will overtake a competitor.")
+            ])
+
+            helpSection("Trend Indicators") {
+                HelpDefinition(icon: "arrow.up.right", title: "Surging (↑↑)", text: "Competitor is expanding activity at over 150 QSO/month.", color: .green)
+                HelpDefinition(icon: "arrow.right", title: "Steady (→)", text: "Consistent operating pace between 30 and 80 QSO/month.", color: .blue)
+                HelpDefinition(icon: "arrow.down.right", title: "Cooling (↘)", text: "Activity has slowed below 30 QSO/month.", color: .orange)
+            }
+        }
+    }
+
+    private var tciSdrView: some View {
+        Group {
+            helpHeader(
+                title: "TCI & SDR Integration",
+                subtitle: "Direct IP connection to ExpertSDR / SunSDR transceivers for zero-latency frequency sync, spot tuning, and dual VFO control.",
+                icon: "waveform.path.ecg.rectangle",
+                color: .mint
+            )
+            HelpFlow(steps: [
+                HelpFlowStep(icon: "network", title: "Enable TCI", detail: "Start TCI server in ExpertSDR (default port 40001)."),
+                HelpFlowStep(icon: "link", title: "Connect in YAAM", detail: "Enter host and port in Operator Desk > TCI SDR panel."),
+                HelpFlowStep(icon: "arrow.triangle.2.circlepath", title: "Bidirectional Sync", detail: "VFO frequency, mode, and modulation sync automatically in real time."),
+                HelpFlowStep(icon: "dot.radiowaves.left.and.right", title: "Click-to-Tune", detail: "Clicking any cluster spot instantly QSYs your SDR to the exact frequency.")
+            ])
+        }
+    }
+
+    private var on4kstView: some View {
+        Group {
+            helpHeader(
+                title: "ON4KST Chat & Microwave",
+                subtitle: "Real-time communication and spot coordination with VHF, UHF, and Microwave operators across 50 MHz, 144 MHz, 432 MHz, and 1.2+ GHz.",
+                icon: "bubble.left.and.bubble.right.fill",
+                color: .indigo
+            )
+            helpSection("Chat Rooms") {
+                HelpDefinition(icon: "antenna.radiowaves.left.and.right", title: "50/70 MHz (6m & 4m)", text: "Real-time Sporadic-E, TEP, and F2 opening alerts.")
+                HelpDefinition(icon: "wave.3.forward", title: "144/432 MHz (2m & 70cm)", text: "Tropo ducting, meteor scatter (MSK144), and aurora skeds.")
+                HelpDefinition(icon: "sparkle", title: "Microwave (1.2 GHz+)", text: "Rain scatter, EME (Earth-Moon-Earth), and line-of-sight tests.")
+            }
+        }
+    }
+
     private var faq: some View {
         Group {
-            helpHeader(title: "Frequently Asked Questions", subtitle: "Short answers for the workflows operators use most often.", icon: "questionmark.circle.fill", color: .blue)
-            FAQItem(question: "Where is the WSJT-X ADIF log on macOS?", answer: "In WSJT-X choose File > Open log directory and select wsjtx_log.adi. A common location is ~/.local/share/WSJT-X/wsjtx_log.adi.")
-            FAQItem(question: "Can I open a log without merging it?", answer: "Yes. Choose Open as Guest Log in the import prompt. Guest edits are saved or exported separately and do not change the active station Master Log.")
+            helpHeader(
+                title: "FAQ & Knowledge Base",
+                subtitle: "Answers to common operating questions, data format tips, synchronization details, and troubleshooting.",
+                icon: "questionmark.circle.fill",
+                color: .blue
+            )
+            FAQItem(question: "How do I export my logbook to Microsoft Excel without character issues?", answer: "Open Convert & Export, select 'Excel / CSV (.csv)', and click Convert. YAAM automatically embeds a UTF-8 BOM (Byte Order Mark), so Persian, Arabic, accented characters, and Cyrillic names open with 100% precision in Excel, Apple Numbers, and Google Sheets.")
+            FAQItem(question: "How do I export a contest log in Cabrillo format for CQ WW / ARRL?", answer: "In Convert & Export, select 'Cabrillo 3.0 (.cbr / .log)'. Enter your Contest ID (e.g. CQ-WW-SSB), category (SINGLE-OP), power (HIGH/LOW/QRP), and Claimed Score. YAAM generates official Cabrillo 3.0 output ready for robot email submission.")
+            FAQItem(question: "Why does the Awards page show instant progress now?", answer: "YAAM calculates real-time DXCC 100, WAC, WAS, VUCC Grids, WPX, and 6m Magic Band progress directly from your local master log in milliseconds, and caches QRZ award summaries so you never have to wait or repeatedly press refresh.")
             FAQItem(question: "How does the UTC contest filter handle time and midnight?", answer: "Both pickers and the displayed range are true UTC values rounded to the minute. The start is included and the end is excluded, so 19:00 to 21:00 includes contacts from 19:00:00 through 20:59:59 and can safely cross UTC midnight.")
             FAQItem(question: "Can Convert filter FT8 records stored as MFSK?", answer: "Yes. Mode filtering checks both ADIF MODE and SUBMODE, so selecting FT8 matches records stored as MODE=MFSK and SUBMODE=FT8. Band filtering can also infer a missing BAND from FREQ.")
-            FAQItem(question: "Can I import SmartSDR.smartsdrlog without exporting ADIF first?", answer: "Yes. Choose File > Import Log File or select it in Convert. YAAM reads SDR Control's binary property list directly, skips Deleted entries, and normalizes QSO date/time. For SDR-Control only, a same-callsign QSO in the same minute is consolidated when one copy has rounded seconds and frequency and the other has precise values; the precise identity wins and confirmations and useful fields are merged.")
+            FAQItem(question: "Can I import SmartSDR.smartsdrlog without exporting ADIF first?", answer: "Yes. Choose File > Import Log File or select it in Convert. YAAM reads SDR Control's binary property list directly, skips Deleted entries, and normalizes QSO date/time.")
             FAQItem(question: "Does DX Advisor use the active station?", answer: "Yes. Grid Locator, radio, power, antenna, and height come from the active station profile.")
             FAQItem(question: "What frequency formats does Quick Log accept?", answer: "MHz, kHz, and Hz are accepted. For 20-meter FT8, 14.074, 14074, and 14074000 resolve to the same frequency and band.")
             FAQItem(question: "Why is a DX spot marked as new?", answer: "Status is calculated from the active station's Master Log. New Callsign means no prior QSO; New Band means the callsign exists but not on that band.")
             FAQItem(question: "Why did Sync All skip a source?", answer: "Only configured sources run. Open the source card or its Settings section and supply the required file, password, or station API key.")
-            FAQItem(question: "How do QRZ and LoTW confirmation downloads stay complete?", answer: "Sync QSLs downloads incremental changes. Use the visible Full QSL History button to retrieve both providers from the beginning. YAAM reports downloaded, locally matched, unmatched, and updated counts separately, and never marks an incomplete QRZ page sequence as a successful baseline.")
+            FAQItem(question: "How do QRZ and LoTW confirmation downloads stay complete?", answer: "Sync QSLs downloads incremental changes. Use the visible Full QSL History button to retrieve both providers from the beginning. YAAM reports downloaded, locally matched, unmatched, and updated counts separately.")
             FAQItem(question: "What happens when duplicate QSOs are removed?", answer: "YAAM keeps the record with the strongest confirmation evidence and most complete data, fills its missing fields from the duplicates, and removes only the selected extras. A database checkpoint is created first so the operation remains recoverable.")
-            FAQItem(question: "Why are Russia, European Russia, and Asiatic Russia separate?", answer: "European Russia and Asiatic Russia are separate DXCC entities, while a plain Russia value is ambiguous source data. YAAM therefore keeps all three labels distinct instead of assigning credit to the wrong entity. A future callsign or DXCC-identifier resolution can safely replace an ambiguous Russia value.")
-            FAQItem(question: "Where are the detailed Convert and sync messages?", answer: "Open Tools > Activity Console. The searchable, resizable console keeps verbose import and service diagnostics out of Convert while preserving the same live activity history.")
-            FAQItem(question: "Why are tracked rankings unavailable?", answer: "YAAM restores the tracked callsign list and last valid snapshots locally. Live refresh needs a valid personal QRZ Rank API token in Settings > Rank Service. A service or quota failure never deletes saved rivals.")
-            FAQItem(question: "How does Daily Rank choose callsigns?", answer: "It processes each unique callsign with missing QSO, Band, or DXCC rank once per day, newest QSOs first. Existing rank values are copied to duplicate contacts locally before any online request, so they do not consume the daily allowance.")
-            FAQItem(question: "How is the QRZ Rank allowance calculated?", answer: "The service assigns the allowance to your token. YAAM reads the quota endpoint before Daily Rank and updates the visible remaining count from each successful response. Unknown callsigns follow the service contract and do not consume a request; unlimited accounts are not given an artificial local ceiling.")
-            FAQItem(question: "Why can I not delete a station?", answer: "The active station cannot be deleted, and a profile that owns QSOs is protected. Activate another profile and preserve or relocate its contacts first.")
-            FAQItem(question: "What happens if a restore fails?", answer: "YAAM validates the selected SQLite file and creates a rollback version before replacement. If reopening fails, it attempts to restore the database that was active immediately before the operation.")
-            FAQItem(question: "How do I refresh QRZ award data in Awards?", answer: "Use QRZ Login in the Log Table toolbar, complete any QRZ browser challenge, then return to Awards and press Refresh. LoTW evidence is refreshed through Sync QSLs or Full QSL History.")
-            FAQItem(question: "What password should Gmail SMTP use?", answer: "Use a Google App Password, not the normal Google account password. YAAM stores it in macOS Keychain.")
+            FAQItem(question: "Why are Russia, European Russia, and Asiatic Russia separate?", answer: "European Russia and Asiatic Russia are separate DXCC entities, while a plain Russia value is ambiguous source data. YAAM therefore keeps all three labels distinct instead of assigning credit to the wrong entity.")
+            FAQItem(question: "What password should Gmail SMTP use?", answer: "Use a Google App Password, not the normal Google account password. YAAM stores it safely in macOS Keychain.")
         }
     }
 

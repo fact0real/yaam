@@ -377,18 +377,53 @@ struct StatisticsView: View {
                                 .frame(maxWidth: .infinity, minHeight: 220)
                             } else {
                                 ForEach(visibleUnconfirmedBandCountryStatistics) { bandStat in
+                                    let totalQSOs = bandStat.countries.reduce(0) { $0 + $1.qsoCount }
+                                    let totalCallsigns = Set(bandStat.countries.flatMap { $0.callsigns }).count
                                     VStack(alignment: .leading, spacing: 8) {
-                                        HStack {
+                                        // ── Band Header Row ─────────────────────────────────
+                                        HStack(spacing: 10) {
                                             Text(bandStat.band)
                                                 .font(.system(.headline, design: .monospaced))
                                                 .foregroundColor(.accentColor)
                                             Spacer()
-                                            Text("\(bandStat.countries.count) unconfirmed DXCC")
+                                            // Total unconfirmed QSOs
+                                            HStack(spacing: 4) {
+                                                Image(systemName: "dot.radiowaves.left.and.right")
+                                                    .font(.system(size: 10, weight: .semibold))
+                                                    .foregroundColor(.orange)
+                                                Text("\(totalQSOs) QSOs")
+                                                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                                    .foregroundColor(.orange)
+                                            }
+                                            .padding(.horizontal, 7)
+                                            .padding(.vertical, 3)
+                                            .background(Color.orange.opacity(0.12), in: Capsule())
+                                            // Total unique callsigns
+                                            HStack(spacing: 4) {
+                                                Image(systemName: "person.2.wave.2.fill")
+                                                    .font(.system(size: 10, weight: .semibold))
+                                                    .foregroundColor(.purple)
+                                                Text("\(totalCallsigns) calls")
+                                                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                                    .foregroundColor(.purple)
+                                            }
+                                            .padding(.horizontal, 7)
+                                            .padding(.vertical, 3)
+                                            .background(Color.purple.opacity(0.12), in: Capsule())
+                                            // Country count
+                                            Text("\(bandStat.countries.count) DXCC")
                                                 .font(.caption)
                                                 .foregroundColor(.secondary)
                                         }
 
-                                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 145), spacing: 8)], alignment: .leading, spacing: 8) {
+                                        // ── Country Cards Grid ───────────────────────────────
+                                        // adaptive(min,max with same value) ensures all cards are equal width
+                                        // and each card uses maxWidth:.infinity to eliminate trailing gaps
+                                        LazyVGrid(
+                                            columns: [GridItem(.adaptive(minimum: 148), spacing: 8)],
+                                            alignment: .leading,
+                                            spacing: 8
+                                        ) {
                                             ForEach(bandStat.countries) { countryStat in
                                                 UnconfirmedCountryButton(
                                                     band: bandStat.band,
@@ -613,13 +648,18 @@ struct StatisticsView: View {
     private func refreshSnapshot() {
         let records = appState.qsoRecords
         let ownerRankData = appState.ownerRankData
+        let emailHistory = appState.emailHistory
         snapshotGeneration += 1
         let generation = snapshotGeneration
         isRefreshingSnapshot = true
 
         Task {
             let refreshed = await Task.detached(priority: .userInitiated) {
-                StatisticsSnapshot.make(records: records, ownerRankData: ownerRankData)
+                StatisticsSnapshot.make(
+                    records: records,
+                    ownerRankData: ownerRankData,
+                    emailHistory: emailHistory
+                )
             }.value
             guard generation == snapshotGeneration else { return }
             snapshot = refreshed
@@ -1475,30 +1515,136 @@ struct UnconfirmedCountryButton: View {
     let countryStat: UnconfirmedCountryStatModel
     let action: () -> Void
 
+    // Age-based Chroma: Bright green (fresh) -> Amber -> Brown (oldest)
+    private var ageColor: Color {
+        guard let daysAgo = countryStat.daysAgo else {
+            return Color(red: 0.85, green: 0.45, blue: 0.15)
+        }
+        switch daysAgo {
+        case 0...7:   return Color(red: 0.10, green: 0.76, blue: 0.42)  // Emerald Green
+        case 8...30:  return Color(red: 0.45, green: 0.78, blue: 0.20)  // Lime Green
+        case 31...90: return Color(red: 0.95, green: 0.65, blue: 0.12)  // Golden Amber
+        case 91...240:return Color(red: 0.85, green: 0.42, blue: 0.12)  // Terracotta
+        default:      return Color(red: 0.58, green: 0.28, blue: 0.14)  // Mahogany Brown
+        }
+    }
+
+    private var dateBadgeText: String {
+        guard !countryStat.latestQSODateString.isEmpty else { return "—" }
+        if let d = countryStat.daysAgo {
+            if d == 0  { return "Today" }
+            if d == 1  { return "1d ago" }
+            if d < 30  { return "\(d)d ago" }
+            if d < 90  { return "\(max(1, d/7))w ago" }
+            if d < 365 { return "\(max(1, d/30))mo ago" }
+            return "\(max(1, d/365))yr ago"
+        }
+        return countryStat.latestQSODateString
+    }
+
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 6) {
-                Text(countryToFlag(countryStat.country))
-                Text(countryStat.country)
-                    .font(.caption)
-                    .lineLimit(1)
-                Spacer(minLength: 4)
-                Text("\(countryStat.qsoCount)")
-                    .font(.system(.caption2, design: .monospaced))
-                    .foregroundColor(.orange)
-                    .bold()
+            VStack(alignment: .leading, spacing: 5) {
+
+                // ── Row 1: Flag + Country Name ─────────────────────────
+                HStack(spacing: 5) {
+                    Text(countryToFlag(countryStat.country))
+                        .font(.system(size: 14))
+                    Text(countryStat.country)
+                        .font(.system(size: 11, weight: .semibold))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Spacer(minLength: 0)
+                }
+
+                // ── Row 2: Date · Email · Stats ────────────────────────
+                HStack(spacing: 4) {
+                    // Age / Date badge
+                    HStack(spacing: 2) {
+                        Image(systemName: "calendar")
+                            .font(.system(size: 7, weight: .medium))
+                        Text(dateBadgeText)
+                            .font(.system(size: 8.5, weight: .medium, design: .monospaced))
+                            .lineLimit(1)
+                    }
+                    .foregroundColor(ageColor)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 2)
+                    .background(ageColor.opacity(0.15), in: RoundedRectangle(cornerRadius: 4))
+
+                    Spacer(minLength: 2)
+
+                    // Email badge
+                    if countryStat.emailsSentCount > 0 {
+                        HStack(spacing: 2) {
+                            Image(systemName: "envelope.fill")
+                                .font(.system(size: 7.5))
+                            Text("\(countryStat.emailsSentCount)")
+                                .font(.system(size: 8.5, weight: .bold, design: .monospaced))
+                        }
+                        .foregroundColor(Color(red: 0.35, green: 0.65, blue: 1.0))
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 2)
+                        .background(Color(red: 0.35, green: 0.65, blue: 1.0).opacity(0.15), in: RoundedRectangle(cornerRadius: 4))
+                    }
+
+                    // QSO count (radio waves icon = contacts on the air)
+                    HStack(spacing: 2) {
+                        Image(systemName: "dot.radiowaves.left.and.right")
+                            .font(.system(size: 7, weight: .semibold))
+                        Text("\(countryStat.qsoCount)")
+                            .font(.system(size: 8.5, weight: .heavy, design: .monospaced))
+                    }
+                    .foregroundColor(ageColor)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 2)
+                    .background(ageColor.opacity(0.20), in: RoundedRectangle(cornerRadius: 4))
+
+                    // Callsign count (person icon = unique operators)
+                    if !countryStat.callsigns.isEmpty {
+                        HStack(spacing: 2) {
+                            Image(systemName: "antenna.radiowaves.left.and.right")
+                                .font(.system(size: 7, weight: .semibold))
+                            Text("\(countryStat.callsigns.count)")
+                                .font(.system(size: 8.5, weight: .heavy, design: .monospaced))
+                        }
+                        .foregroundColor(.purple)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 2)
+                        .background(Color.purple.opacity(0.16), in: RoundedRectangle(cornerRadius: 4))
+                    }
+                }
             }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 7)
+            .frame(maxWidth: .infinity, minHeight: 62, alignment: .topLeading)
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
-        .background(Color.orange.opacity(0.12))
-        .cornerRadius(6)
+        .frame(maxWidth: .infinity, minHeight: 66)
+        .background(ageColor.opacity(0.08))
+        .cornerRadius(7)
         .overlay(
-            RoundedRectangle(cornerRadius: 6)
-                .stroke(Color.orange.opacity(0.25), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 7)
+                .stroke(ageColor.opacity(0.30), lineWidth: 1)
         )
         .buttonStyle(.plain)
-        .help("Show unconfirmed \(countryStat.country) QSOs on \(band)")
+        .help(tooltipText)
+    }
+
+    private var tooltipText: String {
+        var lines = ["Show unconfirmed \(countryStat.country) QSOs on \(band)"]
+        if !countryStat.latestQSODateString.isEmpty {
+            let desc = countryStat.daysAgo.map { " (\($0) days ago)" } ?? ""
+            lines.append("📅 Latest: \(countryStat.latestQSODateString)\(desc)")
+        }
+        if !countryStat.callsigns.isEmpty {
+            let preview = countryStat.callsigns.prefix(5).joined(separator: ", ")
+            let more = countryStat.callsigns.count > 5 ? " +\(countryStat.callsigns.count - 5) more" : ""
+            lines.append("📡 \(preview)\(more)")
+        }
+        if countryStat.emailsSentCount > 0 {
+            lines.append("✉️ \(countryStat.emailsSentCount) email(s) sent")
+        }
+        return lines.joined(separator: "\n")
     }
 }
 
@@ -1618,7 +1764,11 @@ nonisolated struct StatisticsSnapshot: Sendable {
         )
     )
 
-    static func make(records: [QSORecordModel], ownerRankData: QRZRankResponse?) -> StatisticsSnapshot {
+    static func make(
+        records: [QSORecordModel],
+        ownerRankData: QRZRankResponse?,
+        emailHistory: [EmailHistoryEntry] = []
+    ) -> StatisticsSnapshot {
         let availableCountries = Set(
             records.compactMap { record -> String? in
                 let country = canonicalCountryName(record["COUNTRY"])
@@ -1696,7 +1846,7 @@ nonisolated struct StatisticsSnapshot: Sendable {
             recentConfirmedRecords: Array(recentConfirmedRecords),
             bandStatistics: makeBandStatistics(records: records),
             countryStatistics: makeCountryStatistics(records: records),
-            unconfirmedBandCountryStatistics: makeUnconfirmedBandCountryStatistics(records: records),
+            unconfirmedBandCountryStatistics: makeUnconfirmedBandCountryStatistics(records: records, emailHistory: emailHistory),
             countryBandCoverage: opportunityIndex.countryBandCoverage,
             progressSummary: ConfirmedProgressAnalyzer.makeSummary(records: records, ownerRankData: ownerRankData)
         )
@@ -1770,9 +1920,20 @@ nonisolated struct StatisticsSnapshot: Sendable {
     }
 
     private static func makeUnconfirmedBandCountryStatistics(
-        records: [QSORecordModel]
+        records: [QSORecordModel],
+        emailHistory: [EmailHistoryEntry] = []
     ) -> [UnconfirmedBandCountryStatModel] {
-        var values: [String: [String: (total: Int, confirmed: Int)]] = [:]
+        var values: [String: [String: (total: Int, confirmed: Int, dates: [Date], dateStrings: [String], callsigns: Set<String>)]] = [:]
+
+        // Fast lookup map for sent email requests by callsign
+        var emailCountsByCall: [String: (count: Int, lastDate: Date)] = [:]
+        for entry in emailHistory {
+            let call = entry.callsign.uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !call.isEmpty else { continue }
+            let existing = emailCountsByCall[call]?.count ?? 0
+            let lastDate = emailCountsByCall[call]?.lastDate ?? entry.date
+            emailCountsByCall[call] = (existing + 1, max(lastDate, entry.date))
+        }
 
         for record in records {
             let normalizedBand = ConfirmationOpportunityIndex.normalizedBand(for: record)
@@ -1781,17 +1942,80 @@ nonisolated struct StatisticsSnapshot: Sendable {
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             let country = canonical.isEmpty ? "Unknown" : canonical
             var countryValues = values[band] ?? [:]
-            var value = countryValues[country] ?? (0, 0)
+            var value = countryValues[country] ?? (total: 0, confirmed: 0, dates: [], dateStrings: [], callsigns: Set<String>())
             value.total += 1
             if record.isConfirmed { value.confirmed += 1 }
+
+            let call = record["CALL"].uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
+            if !call.isEmpty { value.callsigns.insert(call) }
+
+            let dateRaw = record["QSO_DATE"].filter(\.isNumber)
+            if !dateRaw.isEmpty {
+                value.dateStrings.append(dateRaw)
+                if let parsedDate = parseADIFDate(dateRaw) {
+                    value.dates.append(parsedDate)
+                }
+            }
+
             countryValues[country] = value
             values[band] = countryValues
         }
 
+        let now = Date()
+        let calendar = Calendar(identifier: .gregorian)
+
         return values.compactMap { band, countryValues in
             let countries = countryValues.compactMap { country, value -> UnconfirmedCountryStatModel? in
                 guard value.total > 0, value.confirmed == 0 else { return nil }
-                return UnconfirmedCountryStatModel(country: country, qsoCount: value.total)
+
+                // Find latest QSO date
+                let sortedDates = value.dates.sorted(by: >)
+                let latestDate = sortedDates.first
+
+                let latestDateString: String
+                if let latest = latestDate {
+                    let year = calendar.component(.year, from: latest)
+                    let month = calendar.component(.month, from: latest)
+                    let day = calendar.component(.day, from: latest)
+                    latestDateString = String(format: "%04d-%02d-%02d", year, month, day)
+                } else if let rawString = value.dateStrings.sorted(by: >).first, rawString.count == 8 {
+                    latestDateString = "\(rawString.prefix(4))-\(rawString.dropFirst(4).prefix(2))-\(rawString.suffix(2))"
+                } else {
+                    latestDateString = value.dateStrings.sorted(by: >).first ?? ""
+                }
+
+                let daysAgo: Int?
+                if let latest = latestDate {
+                    let diff = calendar.dateComponents([.day], from: calendar.startOfDay(for: latest), to: calendar.startOfDay(for: now)).day
+                    daysAgo = max(0, diff ?? 0)
+                } else {
+                    daysAgo = nil
+                }
+
+                // Check emails sent to any callsign for this unconfirmed country/band
+                var sentEmails = 0
+                var latestEmailDate: Date? = nil
+                for call in value.callsigns {
+                    if let stat = emailCountsByCall[call] {
+                        sentEmails += stat.count
+                        if let currentLatest = latestEmailDate {
+                            latestEmailDate = max(currentLatest, stat.lastDate)
+                        } else {
+                            latestEmailDate = stat.lastDate
+                        }
+                    }
+                }
+
+                return UnconfirmedCountryStatModel(
+                    country: country,
+                    qsoCount: value.total,
+                    latestQSODate: latestDate,
+                    latestQSODateString: latestDateString,
+                    daysAgo: daysAgo,
+                    callsigns: Array(value.callsigns).sorted(),
+                    emailsSentCount: sentEmails,
+                    lastEmailDate: latestEmailDate
+                )
             }
             .sorted { lhs, rhs in
                 if lhs.qsoCount != rhs.qsoCount { return lhs.qsoCount > rhs.qsoCount }
@@ -1849,6 +2073,19 @@ nonisolated struct StatisticsSnapshot: Sendable {
         let date = record["QSO_DATE"].filter(\.isNumber)
         let time = record["TIME_ON"].filter(\.isNumber)
         return "\(date)\(time.padding(toLength: 6, withPad: "0", startingAt: 0))\(String(format: "%012d", record.index))"
+    }
+
+    // Reusable ADIF date parser (yyyyMMdd -> Date)
+    private static func parseADIFDate(_ raw: String) -> Date? {
+        let clean = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard clean.count == 8 else { return nil }
+        var components = DateComponents()
+        components.calendar = Calendar(identifier: .gregorian)
+        components.timeZone = TimeZone(secondsFromGMT: 0)
+        components.year = Int(clean.prefix(4))
+        components.month = Int(clean.dropFirst(4).prefix(2))
+        components.day = Int(clean.suffix(2))
+        return components.date
     }
 }
 
