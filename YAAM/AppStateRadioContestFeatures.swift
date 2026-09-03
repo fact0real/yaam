@@ -35,6 +35,115 @@ extension AppState {
             .receive(on: RunLoop.main)
             .sink { [weak self] events in self?.ingestWSJTXEvents(events) }
             .store(in: &operatorFeatureCancellables)
+
+        // Bridge FT8 Station Engine with AppState Logbook
+        ft8Engine.logQSOHandler = { [weak self] call, grid, sent, rcvd, band, freq in
+            Task { @MainActor in
+                self?.logFT8StationQSO(call: call, grid: grid, sentRST: sent, rcvdRST: rcvd, band: band, freqMHz: freq)
+            }
+        }
+
+        ft8Engine.isCountryWorkedOnBand = { [weak self] country, band in
+            guard let self else { return true }
+            let targetBand = band.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            let targetCountry = country.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            return self.qsoRecords.contains { rec in
+                let recBand = (rec.fields["BAND"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                let recCountry = (rec.fields["COUNTRY"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                return recBand == targetBand && recCountry == targetCountry
+            }
+        }
+
+        ft8Engine.isCallWorkedToday = { [weak self] call, band in
+            guard let self else { return false }
+            let dateFormatter = DateFormatter()
+            dateFormatter.locale = Locale(identifier: "en_US_POSIX")
+            dateFormatter.timeZone = TimeZone(secondsFromGMT: 0)
+            dateFormatter.dateFormat = "yyyyMMdd"
+            let todayStr = dateFormatter.string(from: Date())
+
+            let targetBand = band.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            let targetCall = call.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            return self.qsoRecords.contains { rec in
+                let recBand = (rec.fields["BAND"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                let recCall = (rec.fields["CALL"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+                let recDate = rec.fields["QSO_DATE"] ?? ""
+                return recBand == targetBand && recCall == targetCall && recDate == todayStr
+            }
+        }
+
+        ft8Engine.isCallWorked = { [weak self] call in
+            guard let self else { return false }
+            let targetCall = call.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            return self.qsoRecords.contains { rec in
+                (rec.fields["CALL"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == targetCall
+            }
+        }
+
+        ft8Engine.isGridWorked = { [weak self] grid in
+            guard let self else { return false }
+            let targetGrid = grid.trimmingCharacters(in: .whitespacesAndNewlines).uppercased().prefix(4)
+            return self.qsoRecords.contains { rec in
+                (rec.fields["GRIDSQUARE"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased().hasPrefix(targetGrid)
+            }
+        }
+    }
+
+    func logFT8StationQSO(call: String, grid: String, sentRST: String, rcvdRST: String, band: String, freqMHz: Double) {
+        let cleanCall = call.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard !cleanCall.isEmpty else { return }
+
+        let now = Date()
+        let dateFormatter = DateFormatter()
+        dateFormatter.locale = Locale(identifier: "en_US_POSIX")
+        dateFormatter.timeZone = TimeZone(secondsFromGMT: 0)
+
+        dateFormatter.dateFormat = "yyyyMMdd"
+        let qsoDate = dateFormatter.string(from: now)
+
+        dateFormatter.dateFormat = "HHmmss"
+        let timeOn = dateFormatter.string(from: now)
+
+        let entity = DXCCDatabase.resolve(callsign: cleanCall)
+
+        var fields: [String: String] = [
+            "CALL": cleanCall,
+            "BAND": band,
+            "MODE": "FT8",
+            "FREQ": String(format: "%.6f", freqMHz),
+            "QSO_DATE": qsoDate,
+            "TIME_ON": timeOn,
+            "TIME_OFF": timeOn,
+            "RST_SENT": sentRST.isEmpty ? "-10" : sentRST,
+            "RST_RCVD": rcvdRST.isEmpty ? "-10" : rcvdRST,
+            "COUNTRY": entity.entityName,
+            "CONT": entity.continent,
+            "CQZ": "\(entity.cqZone)",
+            "ITUZ": "\(entity.ituZone)",
+            "COMMENT": "Logged via YAAM FT8 Station",
+            "APP_YAAM_SOURCE": "FT8 Station"
+        ]
+        if !grid.isEmpty {
+            fields["GRIDSQUARE"] = grid
+        }
+
+        fields = stationTaggedFields(fields)
+        let newRecord = QSORecordModel(index: qsoRecords.count + 1, fields: fields)
+
+        guard !qsoRecords.contains(where: { $0.uniqueKey == newRecord.uniqueKey }) else {
+            return
+        }
+
+        qsoRecords.append(newRecord)
+        persistQuickLog(newRecord)
+        WavelogSyncEngine.shared.autoPushSingleQSO(record: newRecord)
+        if HRDLogClient.shared.autoUploadEnabled {
+            Task { _ = await HRDLogClient.shared.uploadSingleQSO(record: newRecord) }
+        }
+        if HamQTHUploadClient.shared.autoUploadEnabled {
+            Task { _ = await HamQTHUploadClient.shared.uploadSingleQSO(record: newRecord) }
+        }
+        playActivitySound(.success)
     }
 
     func applyRigSnapshotToQuickLog(_ snapshot: RigSnapshot) {

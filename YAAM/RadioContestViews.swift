@@ -38,28 +38,35 @@ struct RadioBridgePanel: View {
     @State private var workspace: Workspace = .bridge
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                header
-                Divider()
-                if workspace == .bridge {
-                    rigSection
-                    Divider()
-                    wsjtxSection
-                    Divider()
-                    pendingSection
-                } else if workspace == .flrig {
-                    flrigSection
-                } else if workspace == .tci {
-                    TCIControlView()
-                } else if workspace == .rotator {
-                    rotatorSection
-                } else {
-                    FT8StationView(
-                        engine: appState.ft8Engine,
-                        radio: appState.icomNetworkRadio,
-                        rig: rig
-                    )
+        VStack(alignment: .leading, spacing: 0) {
+            header
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+            Divider()
+            if workspace == .ft8 {
+                FT8StationView(
+                    engine: appState.ft8Engine,
+                    radio: appState.icomNetworkRadio,
+                    rig: rig
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        if workspace == .bridge {
+                            rigSection
+                            Divider()
+                            wsjtxSection
+                            Divider()
+                            pendingSection
+                        } else if workspace == .flrig {
+                            flrigSection
+                        } else if workspace == .tci {
+                            TCIControlView()
+                        } else if workspace == .rotator {
+                            rotatorSection
+                        }
+                    }
                 }
             }
         }

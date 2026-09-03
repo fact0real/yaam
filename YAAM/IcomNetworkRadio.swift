@@ -8,15 +8,21 @@ import Darwin
 import Foundation
 
 nonisolated enum IcomNetworkModel: String, CaseIterable, Identifiable, Sendable {
-    case ic7300MKII = "IC-7300MKII"
     case ic705 = "IC-705"
+    case ic7300 = "IC-7300"
+    case ic7300MKII = "IC-7300MKII"
+    case ic7610 = "IC-7610"
+    case ic9700 = "IC-9700"
 
     var id: String { rawValue }
 
     var civAddress: UInt8 {
         switch self {
-        case .ic7300MKII: return 0xB6
         case .ic705: return 0xA4
+        case .ic7300: return 0x94
+        case .ic7300MKII: return 0xB6
+        case .ic7610: return 0x98
+        case .ic9700: return 0xA2
         }
     }
 }
@@ -42,6 +48,11 @@ nonisolated enum IcomNetworkConnectionState: Equatable, Sendable {
 
     var isConnected: Bool {
         if case .connected = self { return true }
+        return false
+    }
+
+    var isFailed: Bool {
+        if case .failed = self { return true }
         return false
     }
 
@@ -123,6 +134,7 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
     @MainActor @Published private(set) var isTransmitting = false
     @MainActor @Published private(set) var receivedAudioPackets = 0
     @MainActor @Published private(set) var lastAudioAt: Date?
+    @MainActor @Published private(set) var activeRemoteSettingsSummary: String = ""
     @MainActor @Published var transmitArmed = false {
         didSet {
             if !transmitArmed, isTransmitting { setPTT(false) }
@@ -237,6 +249,9 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
     private var pttWatchdog: DispatchWorkItem?
     private var _audioSampleHandler: (@Sendable ([Float], Date) -> Void)?
     private var isStopping = false
+    private var savedOriginalMode: UInt8?
+    private var savedOriginalDataMod: UInt8?
+    private var savedOriginalDataModLevel: UInt8?
 
     deinit {
         keepaliveTimer?.cancel()
@@ -329,6 +344,7 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
             self.generation = id
             self.isStopping = true
             self.sendPTT(false)
+            self.restoreOriginalSettingsOnQueue()
             self.releaseSessionIfNeeded()
             self.sendControl(type: 0x05, tracked: false, sequence: 0, on: .civ)
             self.sendControl(type: 0x05, tracked: false, sequence: 0, on: .audio)
@@ -340,12 +356,33 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
         isTransmitting = false
         transmitArmed = false
         state = .disconnected
-        lastMessage = "Direct Icom LAN disconnected"
+        lastMessage = "Direct Icom LAN disconnected; original settings restored"
     }
 
     @MainActor
     func refresh() {
         queue.async { [weak self] in
+            self?.sendCIV(command: [0x03])
+            self?.sendCIV(command: [0x04])
+        }
+    }
+
+    @MainActor
+    func powerOn() {
+        queue.async { [weak self] in
+            self?.sendPowerOnOnQueue()
+        }
+    }
+
+    private func sendPowerOnOnQueue() {
+        guard let model = settings?.model else { return }
+        // 50x 0xFE wake-up preamble followed by CI-V Power ON [18 01]
+        var bytes = Array(repeating: UInt8(0xFE), count: 50)
+        bytes.append(contentsOf: [0xFE, 0xFE, model.civAddress, 0xE0, 0x18, 0x01, 0xFD])
+        sendRawCIV(bytes: bytes)
+
+        // After waking, request frequency and mode
+        queue.asyncAfter(deadline: .now() + 1.2) { [weak self] in
             self?.sendCIV(command: [0x03])
             self?.sendCIV(command: [0x04])
         }
@@ -367,6 +404,8 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
             guard let self else { return }
             self.sendCIV(command: [0x06, 0x01])
             self.sendCIV(command: [0x1A, 0x06, 0x01, 0x01])
+            // Set DATA MOD source to LAN (CI-V 1A 05 00 66 03)
+            self.sendCIV(command: [0x1A, 0x05, 0x00, 0x66, 0x03])
         }
     }
 
@@ -399,14 +438,14 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
         DispatchQueue.main.asyncAfter(deadline: .now() + max(1, maximumDuration), execute: watchdog)
     }
 
-    /// Streams mono float audio as 48 kHz LPCM16 in real time. Each 20 ms frame
-    /// is split at Icom's 1,364-byte payload limit before the next frame is due.
+    /// Streams mono float audio as 48 kHz LPCM16 in real time. Each 10 ms frame
+    /// (480 samples = 960 bytes) fits perfectly inside standard MTU with zero fragmentation.
     @MainActor
     func transmit(samples: [Float], gain: Float) async throws {
         guard state.isConnected else { throw IcomNetworkError.disconnected }
         guard transmitArmed else { throw IcomNetworkError.transmitNotArmed }
-        let boundedGain = max(0.02, min(1, gain))
-        let framesPerPacket = 960
+        let boundedGain = max(0.15, min(1.0, gain))
+        let framesPerPacket = 480 // 10 ms at 48 kHz
         var index = 0
         while index < samples.count {
             try Task.checkCancellation()
@@ -420,7 +459,7 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
                 }
             }
             index = end
-            try await Task.sleep(for: .milliseconds(20))
+            try await Task.sleep(for: .milliseconds(10))
         }
     }
 
@@ -763,11 +802,11 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
             packet.writeCString(capability.name, at: 64, maximum: 32)
             packet.writeBytes(Self.obfuscated(settings.username), at: 96, maximum: 16)
             packet[112] = 1
-            packet[113] = capability.supportsTX ? 1 : 0
+            packet[113] = 1
             packet[114] = 0x04
-            packet[115] = capability.supportsTX ? 0x04 : 0
+            packet[115] = 0x04
             packet.writeUInt32BE(48_000, at: 116)
-            packet.writeUInt32BE(capability.supportsTX ? 48_000 : 0, at: 120)
+            packet.writeUInt32BE(48_000, at: 120)
             packet.writeUInt32BE(UInt32(civ.localPort), at: 124)
             packet.writeUInt32BE(UInt32(audio.localPort), at: 128)
             packet.writeUInt32BE(150, at: 132)
@@ -807,8 +846,42 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
             self.lastMessage = "\(name) LAN, CI-V, RX audio, and TX audio are ready"
         }
         startTokenRenewal(generation: generation)
+        sendPowerOnOnQueue()
+        backupAndApplyDigitalSettingsOnQueue()
         sendCIV(command: [0x03])
         sendCIV(command: [0x04])
+    }
+
+    private func backupAndApplyDigitalSettingsOnQueue() {
+        guard civReady else { return }
+        sendCIV(command: [0x04])
+        sendCIV(command: [0x1A, 0x05, 0x00, 0x66])
+        sendCIV(command: [0x1A, 0x05, 0x00, 0x67])
+
+        queue.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+            guard let self, self.civReady else { return }
+            self.sendCIV(command: [0x06, 0x01])
+            self.sendCIV(command: [0x1A, 0x06, 0x01, 0x01])
+            self.sendCIV(command: [0x1A, 0x05, 0x00, 0x66, 0x03])
+            self.sendCIV(command: [0x1A, 0x05, 0x00, 0x67, 0x01, 0x28])
+            DispatchQueue.main.async {
+                self.activeRemoteSettingsSummary = "Remote Settings: USB-D, DATA MOD=LAN, Level=50% (restores on disconnect)"
+            }
+        }
+    }
+
+    private func restoreOriginalSettingsOnQueue() {
+        guard civReady else { return }
+        if let origMod = savedOriginalDataMod {
+            sendCIV(command: [0x1A, 0x05, 0x00, 0x66, origMod])
+        }
+        if let origLvl = savedOriginalDataModLevel {
+            sendCIV(command: [0x1A, 0x05, 0x00, 0x67, origLvl])
+        }
+        if let origMode = savedOriginalMode {
+            sendCIV(command: [0x06, origMode])
+        }
+        usleep(150_000)
     }
 
     private func sendLogin() {
@@ -885,8 +958,21 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
         sendTracked(packet, on: .civ)
     }
 
+    private func sendRawCIV(bytes: [UInt8]) {
+        guard civReady else { return }
+        var packet = basePacket(size: 21, on: .civ)
+        packet[16] = 0xC1
+        packet.writeUInt16LE(UInt16(bytes.count), at: 17)
+        packet.writeUInt16BE(civDataSequence, at: 19)
+        civDataSequence &+= 1
+        packet.append(contentsOf: bytes)
+        packet.writeUInt32LE(UInt32(packet.count), at: 0)
+        sendTracked(packet, on: .civ)
+    }
+
     private func sendPTT(_ enabled: Bool) {
         sendCIV(command: [0x1C, 0x00, enabled ? 0x01 : 0x00])
+        sendCIV(command: [0x1C, 0x01, enabled ? 0x01 : 0x00])
     }
 
     private func receiveCIVPayload(_ data: Data) {
@@ -897,23 +983,40 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
         let frame = Data(payload[start...end])
         guard frame.count >= 6 else { return }
         let command = frame[4]
+
+        if frame.count >= 8, frame[4] == 0x1A, frame[5] == 0x05 {
+            if frame.count >= 9, frame[6] == 0x00, frame[7] == 0x66 {
+                if self.savedOriginalDataMod == nil {
+                    self.savedOriginalDataMod = frame[8]
+                }
+            } else if frame.count >= 9, frame[6] == 0x00, frame[7] == 0x67 {
+                if self.savedOriginalDataModLevel == nil {
+                    self.savedOriginalDataModLevel = frame[8]
+                }
+            }
+        }
+
         if (command == 0x00 || command == 0x03), frame.count >= 11 {
             let frequency = Self.frequencyFromBCD(Array(frame[5..<10]))
+            let modeCode = frame.count >= 12 ? frame[10] : nil
             DispatchQueue.main.async {
-                let old = self.snapshot
+                let modeStr = modeCode != nil ? Self.modeName(modeCode!) : (self.snapshot?.mode ?? "USB-D")
                 self.snapshot = IcomNetworkSnapshot(
                     frequencyHz: frequency,
-                    mode: old?.mode ?? "USB-D",
+                    mode: modeStr,
                     updatedAt: Date()
                 )
             }
-        } else if command == 0x04, frame.count >= 7 {
-            let mode = Self.modeName(frame[5])
+        } else if command == 0x04, frame.count >= 6 {
+            if self.savedOriginalMode == nil {
+                self.savedOriginalMode = frame[5]
+            }
+            let modeStr = Self.modeName(frame[5])
             DispatchQueue.main.async {
-                let old = self.snapshot
+                let currentFreq = self.snapshot?.frequencyHz ?? 0
                 self.snapshot = IcomNetworkSnapshot(
-                    frequencyHz: old?.frequencyHz ?? 0,
-                    mode: mode,
+                    frequencyHz: currentFreq,
+                    mode: modeStr,
                     updatedAt: Date()
                 )
             }
@@ -945,25 +1048,22 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
         guard audioReady, !samples.isEmpty else { return }
         var payload = Data(capacity: samples.count * 2)
         for sample in samples {
-            let scaled = max(-1, min(1, sample * gain))
-            let value = UInt16(bitPattern: Int16((scaled * 32_767).rounded()))
+            let scaled = max(-1.0, min(1.0, sample * gain))
+            let value = UInt16(bitPattern: Int16(clamping: Int(round(scaled * 32_767.0))))
             payload.append(UInt8(value & 0xFF))
             payload.append(UInt8((value >> 8) & 0xFF))
         }
-        var offset = 0
-        while offset < payload.count {
-            let end = min(payload.count, offset + 1_364)
-            let part = payload[offset..<end]
-            var packet = basePacket(size: 24, on: .audio)
-            packet.writeUInt16LE(part.count == 160 ? 0x9781 : 0x0080, at: 16)
-            packet.writeUInt16BE(audioDataSequence, at: 18)
-            packet.writeUInt16BE(UInt16(part.count), at: 22)
-            audioDataSequence &+= 1
-            packet.append(part)
-            packet.writeUInt32LE(UInt32(packet.count), at: 0)
-            sendTracked(packet, on: .audio)
-            offset = end
-        }
+        var packet = basePacket(size: 24, on: .audio)
+        packet[16] = 0x80
+        packet[17] = 0x00
+        packet.writeUInt16BE(audioDataSequence, at: 18)
+        audioDataSequence &+= 1
+        packet[20] = 0x00
+        packet[21] = 0x00
+        packet.writeUInt16BE(UInt16(payload.count), at: 22)
+        packet.append(payload)
+        packet.writeUInt32LE(UInt32(packet.count), at: 0)
+        sendTracked(packet, on: .audio)
     }
 
     private func sendControl(type: UInt16, tracked: Bool, sequence: UInt16, on stream: StreamKind) {
