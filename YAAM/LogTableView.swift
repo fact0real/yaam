@@ -610,32 +610,35 @@ struct LogTableView: View {
                 let w = columnWidths[header] ?? defaultColumnWidth(for: header)
                 let isDerived = ConfirmationCreditColumn.isDerived(header)
                 let isSorted = !isDerived && appState.sortHeader == header
+                let meta = headerMeta(for: header)
                 
                 HStack(spacing: 0) {
-                    HStack(spacing: 4) {
-                        Text(displayTitle(for: header))
+                    HStack(spacing: 3.5) {
+                        Image(systemName: meta.icon)
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundColor(.white.opacity(0.85))
+
+                        Text(meta.title)
                             .font(.system(size: 11, weight: .bold))
                             .foregroundColor(.white)
                             .lineLimit(1)
                         
                         if isSorted {
                             Image(systemName: appState.sortAscending ? "arrow.up" : "arrow.down")
-                                .font(.system(size: 9, weight: .bold))
+                                .font(.system(size: 8.5, weight: .bold))
                                 .foregroundColor(.yellow)
                         }
-                        
-                        Spacer(minLength: 0)
                         
                         if !isDerived {
                             Button(action: { appState.deleteColumn(header: header) }) {
                                 Image(systemName: "xmark")
-                                    .font(.system(size: 8, weight: .bold))
-                                    .foregroundColor(.white.opacity(0.8))
+                                    .font(.system(size: 7.5, weight: .bold))
+                                    .foregroundColor(.white.opacity(0.65))
                             }
                             .buttonStyle(.plain)
                         }
                     }
-                    .padding(.horizontal, 6)
+                    .padding(.horizontal, 4)
                     .frame(width: max(0, w - 6), height: 28, alignment: tableAlignment(for: header))
                     .contentShape(Rectangle())
                     .onTapGesture {
@@ -992,42 +995,119 @@ struct LogTableView: View {
         editingText = value
     }
 
+    private struct HeaderMeta {
+        let title: String
+        let icon: String
+    }
+
+    private func headerMeta(for header: String) -> HeaderMeta {
+        switch header {
+        case "QSO_DATE":
+            return HeaderMeta(title: "Date", icon: "calendar")
+        case "TIME_ON", "TIME":
+            return HeaderMeta(title: "Time", icon: "clock")
+        case "TIME_OFF":
+            return HeaderMeta(title: "Time Off", icon: "clock.badge.checkmark")
+        case "CALL":
+            return HeaderMeta(title: "Callsign", icon: "antenna.radiowaves.left.and.right")
+        case "FREQ", "FREQ_RX":
+            return HeaderMeta(title: "Frequency", icon: "waveform.path")
+        case "BAND", "BAND_RX":
+            return HeaderMeta(title: "Band", icon: "wave.3.left")
+        case "MODE":
+            return HeaderMeta(title: "Mode", icon: "bolt.fill")
+        case "SUBMODE":
+            return HeaderMeta(title: "Submode", icon: "bolt")
+        case "RST_SENT":
+            return HeaderMeta(title: "Sent", icon: "arrow.up.circle.fill")
+        case "RST_RCVD":
+            return HeaderMeta(title: "Rcvd", icon: "arrow.down.circle.fill")
+        case "NAME":
+            return HeaderMeta(title: "Name", icon: "person.fill")
+        case "QTH":
+            return HeaderMeta(title: "QTH", icon: "house.fill")
+        case "COUNTRY":
+            return HeaderMeta(title: "Country", icon: "globe.europe.africa.fill")
+        case "CONT":
+            return HeaderMeta(title: "Continent", icon: "map.fill")
+        case "GRIDSQUARE", "GRID":
+            return HeaderMeta(title: "Grid", icon: "square.grid.3x3.fill")
+        case "DXCC":
+            return HeaderMeta(title: "DXCC", icon: "flag.fill")
+        case "CQZ":
+            return HeaderMeta(title: "CQ Zone", icon: "circle.grid.cross.fill")
+        case "ITUZ":
+            return HeaderMeta(title: "ITU Zone", icon: "circle.grid.3x3.fill")
+        case "STATE":
+            return HeaderMeta(title: "State", icon: "mappin.circle.fill")
+        case "EMAIL":
+            return HeaderMeta(title: "Email", icon: "envelope.fill")
+        case "QRZ_URL", "QRZ":
+            return HeaderMeta(title: "QRZ", icon: "safari.fill")
+        case "RANK_QSO":
+            return HeaderMeta(title: "QSO Rank", icon: "trophy.fill")
+        case "RANK_BAND":
+            return HeaderMeta(title: "Band Rank", icon: "medal.fill")
+        case "RANK_DXCC":
+            return HeaderMeta(title: "DXCC Rank", icon: "rosette")
+        case ConfirmationCreditColumn.countryBand:
+            return HeaderMeta(title: "Band Credit", icon: "sparkles")
+        case ConfirmationCreditColumn.grid:
+            return HeaderMeta(title: "Grid Credit", icon: "square.grid.3x3.fill")
+        case "APP_YAAM_LAST_EMAIL":
+            return HeaderMeta(title: "Last Email", icon: "envelope.badge.fill")
+        case "COMMENT":
+            return HeaderMeta(title: "Comment", icon: "bubble.left.fill")
+        case "PROP_MODE":
+            return HeaderMeta(title: "Propagation", icon: "rays")
+        case "SAT_NAME":
+            return HeaderMeta(title: "Satellite", icon: "orbit")
+        default:
+            return HeaderMeta(title: header, icon: "tag.fill")
+        }
+    }
+
     private func defaultColumnWidth(for header: String) -> CGFloat {
         switch header {
-        case "EMAIL": return 150
+        case "EMAIL": return 160
         case "APP_YAAM_LAST_EMAIL": return 260
-        case "QRZ_URL", "QRZ": return 34
-        case "RANK_QSO", "RANK_BAND", "RANK_DXCC": return 90
-        case ConfirmationCreditColumn.countryBand, ConfirmationCreditColumn.grid: return 94
-        case "QSO_DATE": return 90
-        case "TIME", "TIME_ON", "TIME_OFF": return 58
-        case "CALL": return 74
-        case "FREQ", "FREQ_RX": return 68
-        case "BAND", "BAND_RX", "MODE", "SUBMODE": return 52
-        case "CONT": return 48
-        case "RST_SENT", "RST_RCVD": return 70
+        case "QRZ_URL", "QRZ": return 52
+        case "RANK_QSO", "RANK_BAND", "RANK_DXCC": return 108
+        case ConfirmationCreditColumn.countryBand: return 110
+        case ConfirmationCreditColumn.grid: return 102
+        case "QSO_DATE": return 96
+        case "TIME", "TIME_ON", "TIME_OFF": return 76
+        case "CALL": return 92
+        case "FREQ", "FREQ_RX": return 88
+        case "BAND", "BAND_RX": return 76
+        case "MODE", "SUBMODE": return 76
+        case "CONT": return 78
+        case "RST_SENT", "RST_RCVD": return 76
         case "NAME": return 140
         case "COUNTRY": return 130
+        case "GRIDSQUARE", "GRID": return 82
+        case "DXCC": return 76
+        case "CQZ", "ITUZ": return 86
         case "COMMENT": return 180
-        default: return 85
+        default: return 88
         }
+    }
+
+    /// Columns that remain left-aligned: Name, Email, and Leaderboard Ranks
+    private func isLeftAlignedColumn(_ header: String) -> Bool {
+        header == "NAME" || header == "EMAIL" || header.hasPrefix("RANK_")
     }
 
     private func isCompactCenteredColumn(_ header: String) -> Bool {
-        compactCenteredColumns.contains(header)
+        !isLeftAlignedColumn(header)
     }
 
     private func tableAlignment(for header: String) -> Alignment {
-        isCompactCenteredColumn(header) ? .center : .leading
+        isLeftAlignedColumn(header) ? .leading : .center
     }
 
     private func displayTitle(for header: String) -> String {
-        switch header {
-        case "TIME_ON": return "TIME"
-        case ConfirmationCreditColumn.countryBand: return "BAND CREDIT"
-        case ConfirmationCreditColumn.grid: return "GRID CREDIT"
-        default: return header
-        }
+        headerMeta(for: header).title
     }
 
     private var hiddenColumnCount: Int {

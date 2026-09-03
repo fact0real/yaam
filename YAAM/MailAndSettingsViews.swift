@@ -308,14 +308,13 @@ Warm 73,
         
         let bandMention = !qsoBand.isEmpty ? " on \(qsoBand)" : ""
         let bandTag = !qsoBand.isEmpty ? " (\(qsoBand))" : ""
-        let qsoName = qso?["NAME"].trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let greetingName = qsoName.isEmpty ? targetCall : qsoName
+        let greetingName = appState.resolveFirstName(for: targetCall, explicitName: qso?["NAME"])
         
         switch template {
         case "QSL Card Request":
             emailSubject = "QSL Card Request for our QSO\(bandMention) - \(myCall)"
             emailBody = """
-            Hello \(targetCall),
+            Hello \(greetingName),
 
             Thanks for the nice QSO\(bandMention). I would love to exchange QSL cards with you. Please let me know if you prefer direct or via bureau.\(qsoDetailsBlock)
 
@@ -327,7 +326,7 @@ Warm 73,
             let skedBands = !qsoBand.isEmpty ? qsoBand : "20m or 15m"
             emailSubject = "Sked Request - \(myCall)"
             emailBody = """
-            Hi \(targetCall),
+            Hi \(greetingName),
 
             I am trying to work your DXCC. Are you available for a sked on \(skedBands) sometime this week?
 
@@ -338,7 +337,7 @@ Warm 73,
         case "LoTW/QRZ Confirmation":
             emailSubject = "LoTW/QRZ Confirmation Reminder\(bandTag) - \(myCall)"
             emailBody = """
-            Hello \(targetCall),
+            Hello \(greetingName),
 
             Just a quick reminder regarding our QSO\(bandMention):
             Could you please upload our QSO to LoTW or QRZ? It would help me a lot with my DXCC and Band awards.\(qsoDetailsBlock)

@@ -5857,11 +5857,50 @@ class AppState: NSObject, ObservableObject {
         )
     }
 
+    // MARK: - Email Recipient Name & Title-Case Formatting
+
+    public func formatFirstName(from rawName: String, fallbackCallsign: String = "") -> String {
+        let trimmed = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return fallbackCallsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        }
+        let cleaned = trimmed.replacingOccurrences(
+            of: "^(Dr\\.?|Mr\\.?|Mrs\\.?|Ms\\.?|Prof\\.?|Om|Op\\.?)\\s+",
+            with: "",
+            options: [.regularExpression, .caseInsensitive]
+        )
+        let parts = cleaned.components(separatedBy: CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: ",;/-\"()"))).filter { !$0.isEmpty }
+        guard let firstWord = parts.first else {
+            return fallbackCallsign.isEmpty ? trimmed : fallbackCallsign.uppercased()
+        }
+        if firstWord.uppercased() == fallbackCallsign.uppercased() {
+            return fallbackCallsign.uppercased()
+        }
+        let lower = firstWord.lowercased()
+        return lower.prefix(1).uppercased() + lower.dropFirst()
+    }
+
+    func resolveFirstName(for callsign: String, explicitName: String? = nil) -> String {
+        let cleanCall = callsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if let explicit = explicitName?.trimmingCharacters(in: .whitespacesAndNewlines), !explicit.isEmpty {
+            return formatFirstName(from: explicit, fallbackCallsign: cleanCall)
+        }
+        if let lookup = quickLogLookup, lookup.callsign.uppercased() == cleanCall && !lookup.name.isEmpty {
+            return formatFirstName(from: lookup.name, fallbackCallsign: cleanCall)
+        }
+        if let loggedName = qsoRecords.first(where: {
+            $0["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == cleanCall &&
+            !$0["NAME"].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        })?["NAME"] {
+            return formatFirstName(from: loggedName, fallbackCallsign: cleanCall)
+        }
+        return cleanCall
+    }
+
     private func qslCardDeliveryMessage(for record: QSORecordModel) -> (subject: String, body: String) {
         let myCall = currentStationCallsign == "DEFAULT" ? "NOCALL" : currentStationCallsign
         let targetCall = record["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        let name = record["NAME"].trimmingCharacters(in: .whitespacesAndNewlines)
-        let greeting = name.isEmpty ? targetCall : name
+        let greeting = resolveFirstName(for: targetCall, explicitName: record["NAME"])
         let details = confirmationRequestDetailsBlock(for: [record])
 
         return (
@@ -5885,13 +5924,14 @@ class AppState: NSObject, ObservableObject {
 
     private func friendlyRecentConfirmationReminderMessage(for recipient: BulkEmailRecipient) -> (subject: String, body: String) {
         let myCall = currentStationCallsign == "DEFAULT" ? "NOCALL" : currentStationCallsign
+        let greeting = resolveFirstName(for: recipient.callsign, explicitName: recipient.qso?["NAME"])
         let qsoText = recipient.qsoCount == 1 ? "one recent QSO" : "\(recipient.qsoCount) recent QSOs"
         let details = confirmationRequestDetailsBlock(for: recipient.unconfirmedQSOs)
 
         return (
             "Friendly QSO confirmation reminder - \(myCall)",
             """
-            Hi \(recipient.callsign),
+            Hi \(greeting),
 
             I hope you are doing well. Thank you for \(qsoText) during the last week.
 
@@ -5912,6 +5952,7 @@ class AppState: NSObject, ObservableObject {
     private func bulkEmailMessage(for recipient: BulkEmailRecipient, templateName: String) -> (subject: String, body: String) {
         let myCall = currentStationCallsign
         let qsos = recipient.unconfirmedQSOs.isEmpty ? recipient.qso.map { [$0] } ?? [] : recipient.unconfirmedQSOs
+        let greeting = resolveFirstName(for: recipient.callsign, explicitName: recipient.qso?["NAME"])
         let bandCount = uniqueBandCount(in: qsos)
         let details = confirmationRequestDetailsBlock(for: qsos)
         let qsoText = qsos.count == 1 ? "1 unconfirmed QSO" : "\(qsos.count) unconfirmed QSOs"
@@ -5922,7 +5963,7 @@ class AppState: NSObject, ObservableObject {
             return (
                 "QSL request for \(qsoText) on \(bandText) - \(myCall)",
                 """
-                Hello \(recipient.callsign),
+                Hello \(greeting),
 
                 Thank you for our QSOs. I currently have \(qsoText) with you across \(bandText) that are still not confirmed in my log.
 
@@ -5938,7 +5979,7 @@ class AppState: NSObject, ObservableObject {
             return (
                 "LoTW/QRZ confirmation request for \(qsoText) on \(bandText) - \(myCall)",
                 """
-                Hello \(recipient.callsign),
+                Hello \(greeting),
 
                 Could you please upload or confirm our QSOs on LoTW or QRZ? I currently have \(qsoText) with you across \(bandText) that are still not confirmed.
 
@@ -5960,6 +6001,7 @@ class AppState: NSObject, ObservableObject {
     ) -> (subject: String, body: String) {
         let myCall = currentStationCallsign
         let normalizedCall = callsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let greeting = resolveFirstName(for: normalizedCall, explicitName: qsos.first?["NAME"])
         let bandCount = uniqueBandCount(in: qsos)
         let qsoText = qsos.count == 1 ? "1 unconfirmed QSO" : "\(qsos.count) unconfirmed QSOs"
         let bandText = bandCount == 1 ? "1 band" : "\(bandCount) bands"
@@ -5970,7 +6012,7 @@ class AppState: NSObject, ObservableObject {
             return (
                 "QSL request for \(qsoText) on \(bandText) - \(myCall)",
                 """
-                Hello \(normalizedCall),
+                Hello \(greeting),
 
                 Thank you for our QSOs. I currently have \(qsoText) with you across \(bandText) that are still not confirmed in my log.
 
@@ -5986,7 +6028,7 @@ class AppState: NSObject, ObservableObject {
             return (
                 "LoTW/QRZ confirmation request for \(qsoText) on \(bandText) - \(myCall)",
                 """
-                Hello \(normalizedCall),
+                Hello \(greeting),
 
                 Could you please upload or confirm our QSOs on LoTW or QRZ? I currently have \(qsoText) with you across \(bandText) that are still not confirmed.
 

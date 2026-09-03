@@ -181,6 +181,13 @@ struct LeaderboardView: View {
                         )
                         .padding(.horizontal, 24)
 
+                        Leaderboard360RadarView(
+                            owner: owner,
+                            rivals: appState.qrzComparisonRankData,
+                            stationRecords: appState.qsoRecords
+                        )
+                        .padding(.horizontal, 24)
+
                         LeaderboardInvestmentPanel(owner: owner, rivals: appState.qrzComparisonRankData)
                             .padding(.horizontal, 24)
 
@@ -253,6 +260,13 @@ struct LeaderboardView: View {
                         )
                         .padding(.horizontal, 24)
 
+                        Leaderboard360RadarView(
+                            owner: owner,
+                            rivals: appState.qrzComparisonRankData.isEmpty ? [searched] : appState.qrzComparisonRankData,
+                            stationRecords: appState.qsoRecords
+                        )
+                        .padding(.horizontal, 24)
+
                         LeaderboardInvestmentPanel(owner: owner, rivals: [searched])
                             .padding(.horizontal, 24)
                         
@@ -301,16 +315,51 @@ struct LeaderboardView: View {
                 .background(Color(NSColor.textBackgroundColor))
                 
             } else {
-                VStack(spacing: 16) {
-                    Image(systemName: "trophy.circle.fill")
-                        .font(.system(size: 70))
-                        .foregroundColor(.orange.opacity(0.4))
-                    Text("Search any Callsign to launch Head-to-Head Comparison!")
-                        .font(.title3)
-                        .bold()
-                        .foregroundColor(.secondary)
+                let owner = appState.ownerRankData
+
+                ScrollView {
+                    LazyVStack(spacing: 20) {
+                        PlayerCard(
+                            title: "YOU (STATION)",
+                            callsign: owner?.callsign ?? appState.currentStationCallsign,
+                            countryIso: owner?.country_iso,
+                            isOwner: true
+                        )
+                        .padding(.horizontal, 24)
+                        .padding(.top, 20)
+
+                        RankPerformanceMonitor(
+                            metric: $selectedHistoryMetric,
+                            series: appState.rankTrendSeries(metric: selectedHistoryMetric),
+                            trackedCallsigns: appState.trackedRankCallsigns,
+                            isRefreshing: appState.isRefreshingRankHistory,
+                            status: appState.rankHistoryStatus,
+                            refreshAction: { appState.refreshTrackedRankHistoryIfNeeded(force: true) },
+                            removeAction: { appState.removeTrackedRankCallsign($0) }
+                        )
+                        .padding(.horizontal, 24)
+
+                        Leaderboard360RadarView(
+                            owner: owner,
+                            rivals: [],
+                            stationRecords: appState.qsoRecords
+                        )
+                        .padding(.horizontal, 24)
+
+                        HStack(spacing: 10) {
+                            Image(systemName: "swords")
+                                .foregroundColor(.orange)
+                            Text("Type rival callsigns above and click Compare to launch side-by-side head-to-head rankings.")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Spacer()
+                        }
+                        .padding(12)
+                        .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+                        .padding(.horizontal, 24)
+                        .padding(.bottom, 30)
+                    }
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color(NSColor.textBackgroundColor))
             }
         }
@@ -406,8 +455,13 @@ struct RankPerformanceMonitor: View {
             } else {
                 HStack(alignment: .top, spacing: 14) {
                     VStack(alignment: .leading, spacing: 3) {
-                        Text("Daily QRZ rank movement")
-                            .font(.subheadline.weight(.semibold))
+                        HStack(spacing: 8) {
+                            Text("Daily QRZ rank movement")
+                                .font(.subheadline.weight(.semibold))
+                            Text("• Click any bullet to inspect rank & daily delta")
+                                .font(.caption2.weight(.medium))
+                                .foregroundColor(.cyan)
+                        }
                         Text("Every line starts at zero. Above the center line means that operator climbed; below it means they slipped.")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
@@ -692,6 +746,20 @@ struct RankMovementTrendChart: View {
 
     private let maximumVisibleDays = 90
 
+    @State private var selectedPointDetail: SelectedPointDetail? = nil
+
+    private struct SelectedPointDetail: Identifiable {
+        var id: String { "\(callsign)-\(point.id)" }
+        let callsign: String
+        let countryIso: String?
+        let isOwner: Bool
+        let point: RankTrendPoint
+        let movement: Int
+        let deltaFromPrev: Int?
+        let color: Color
+        let position: CGPoint
+    }
+
     private struct PlottedPoint: Identifiable {
         var id: String { point.id }
         let point: RankTrendPoint
@@ -761,16 +829,62 @@ struct RankMovementTrendChart: View {
                             )
 
                         ForEach(plotted) { plottedPoint in
-                            Circle()
-                                .fill(color)
-                                .overlay {
-                                    if item.isOwner {
-                                        Circle().stroke(Color.white.opacity(0.8), lineWidth: 1)
+                            let isSelected = selectedPointDetail?.id == "\(item.callsign)-\(plottedPoint.point.id)"
+                            ZStack {
+                                Color.clear
+                                    .frame(width: 28, height: 28)
+                                    .contentShape(Rectangle())
+
+                                if isSelected {
+                                    Circle()
+                                        .stroke(Color.white, lineWidth: 2)
+                                        .frame(width: 15, height: 15)
+                                    Circle()
+                                        .fill(color.opacity(0.35))
+                                        .frame(width: 20, height: 20)
+                                }
+                                Circle()
+                                    .fill(color)
+                                    .overlay {
+                                        if item.isOwner {
+                                            Circle().stroke(Color.white.opacity(0.85), lineWidth: 1)
+                                        }
+                                    }
+                                    .frame(width: isSelected ? 10 : (item.isOwner ? 8 : 7), height: isSelected ? 10 : (item.isOwner ? 8 : 7))
+                            }
+                            .frame(width: 28, height: 28)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                withAnimation(.spring(response: 0.25)) {
+                                    if isSelected {
+                                        selectedPointDetail = nil
+                                    } else {
+                                        let sorted = visiblePoints(item.points)
+                                        let idx = sorted.firstIndex(where: { $0.id == plottedPoint.point.id }) ?? 0
+                                        let prev = idx > 0 ? sorted[idx - 1] : nil
+                                        let delta = prev.map { $0.rank - plottedPoint.point.rank }
+                                        selectedPointDetail = SelectedPointDetail(
+                                            callsign: item.callsign,
+                                            countryIso: item.countryIso,
+                                            isOwner: item.isOwner,
+                                            point: plottedPoint.point,
+                                            movement: plottedPoint.movement,
+                                            deltaFromPrev: delta,
+                                            color: color,
+                                            position: plottedPoint.position
+                                        )
                                     }
                                 }
-                                .frame(width: item.isOwner ? 8 : 7, height: item.isOwner ? 8 : 7)
-                                .position(plottedPoint.position)
-                                .help(pointHelp(item: item, plottedPoint: plottedPoint))
+                            }
+                            .onHover { isHovered in
+                                if isHovered {
+                                    NSCursor.pointingHand.push()
+                                } else {
+                                    NSCursor.pop()
+                                }
+                            }
+                            .help(pointHelp(item: item, plottedPoint: plottedPoint))
+                            .position(plottedPoint.position)
                         }
                     }
 
@@ -789,9 +903,93 @@ struct RankMovementTrendChart: View {
                         dateLabel(last)
                             .position(x: geometry.size.width - 38, y: geometry.size.height - 10)
                     }
+
+                    // Interactive day bullet vertical guide and details card popover
+                    if let detail = selectedPointDetail {
+                        Path { path in
+                            path.move(to: CGPoint(x: detail.position.x, y: 12))
+                            path.addLine(to: CGPoint(x: detail.position.x, y: 12 + plotHeight))
+                        }
+                        .stroke(detail.color.opacity(0.6), style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
+
+                        pointDetailPopover(detail, in: geometry.size)
+                    }
                 }
             }
         }
+    }
+
+    private func pointDetailPopover(_ detail: SelectedPointDetail, in size: CGSize) -> some View {
+        let cardWidth: CGFloat = 220
+        let cardHeight: CGFloat = 82
+        let posX = min(max(detail.position.x, cardWidth / 2 + 10), size.width - cardWidth / 2 - 10)
+        let posY = detail.position.y > 90 ? detail.position.y - 52 : detail.position.y + 52
+
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d, yyyy"
+
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 5) {
+                Circle().fill(detail.color).frame(width: 8, height: 8)
+                Text(countryToFlag(detail.countryIso ?? ""))
+                    .font(.caption)
+                Text(detail.callsign)
+                    .font(.system(size: 11.5, weight: .heavy, design: .monospaced))
+                    .foregroundColor(.primary)
+                if detail.isOwner {
+                    Text("YOU")
+                        .font(.system(size: 7.5, weight: .black))
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(Color.blue.opacity(0.2), in: Capsule())
+                        .foregroundStyle(.blue)
+                }
+                Spacer()
+                Button {
+                    withAnimation(.spring(response: 0.2)) { selectedPointDetail = nil }
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+
+            Divider()
+
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(formatter.string(from: detail.point.date))
+                        .font(.system(size: 9.5))
+                        .foregroundStyle(.secondary)
+                    Text("Rank: #\(detail.point.rank.formatted())")
+                        .font(.system(size: 12, weight: .bold, design: .monospaced))
+                        .foregroundStyle(.primary)
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 2) {
+                    let net = detail.movement
+                    Text(net >= 0 ? "▲ +\(net)" : "▼ \(net)")
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .foregroundStyle(net > 0 ? .green : (net < 0 ? .orange : .secondary))
+                    if let d = detail.deltaFromPrev {
+                        Text(d >= 0 ? "(+\(d) daily)" : "(\(d) daily)")
+                            .font(.system(size: 8.5, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(d >= 0 ? .green : .red)
+                    }
+                }
+            }
+        }
+        .padding(8)
+        .frame(width: cardWidth, height: cardHeight)
+        .background(Color(NSColor.windowBackgroundColor))
+        .cornerRadius(8)
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(detail.color, lineWidth: 1.5)
+        )
+        .shadow(color: .black.opacity(0.35), radius: 6, x: 0, y: 3)
+        .position(x: posX, y: posY)
     }
 
     private func visiblePoints(_ points: [RankTrendPoint]) -> [RankTrendPoint] {
@@ -1066,3 +1264,347 @@ struct ComparisonRow: View {
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.gray.opacity(0.2), lineWidth: 1))
     }
 }
+
+// MARK: - 360° Radial Performance & Rank Radar Dashboard
+
+struct Leaderboard360RadarView: View {
+    let owner: QRZRankResponse?
+    let rivals: [QRZRankResponse]
+    let stationRecords: [QSORecordModel]
+
+    @State private var selectedOperatorCall: String = ""
+
+    private var availableOperators: [(title: String, isOwner: Bool, response: QRZRankResponse)] {
+        var list: [(title: String, isOwner: Bool, response: QRZRankResponse)] = []
+        if let owner, let call = owner.callsign, !call.isEmpty {
+            list.append(("YOU (\(call))", true, owner))
+        }
+        for r in rivals {
+            if let call = r.callsign, !call.isEmpty, call.uppercased() != owner?.callsign?.uppercased() {
+                list.append((call, false, r))
+            }
+        }
+        return list
+    }
+
+    private var activeOperator: (title: String, isOwner: Bool, response: QRZRankResponse)? {
+        if let found = availableOperators.first(where: { $0.response.callsign?.uppercased() == selectedOperatorCall.uppercased() }) {
+            return found
+        }
+        return availableOperators.first
+    }
+
+    // QRZ Leaderboard Potentials:
+    // 12 amateur bands * 340 active entities = 4,080 total Band-Countries
+    private let totalBandCountriesPotential: Double = 4080.0
+    // 340 currently active DXCC entities
+    private let totalActiveDXCCEntities: Double = 340.0
+
+    // 360° Percentile & Coverage Calculations (0.02 to 1.0)
+    private func qsoPercentile(for rankStr: String?) -> Double {
+        guard let rank = parseRankInt(rankStr), rank > 0 else { return 0.25 }
+        let normalized = max(0.05, min(1.0, 1.0 - (Double(rank) / 75_000.0)))
+        return normalized
+    }
+
+    private func bandCoverage(for scoreBandStr: String?, isOwner: Bool) -> Double {
+        let count: Double
+        if let parsed = parseRankInt(scoreBandStr), parsed > 0 {
+            count = Double(parsed)
+        } else if isOwner {
+            var uniqueBandCountries = Set<String>()
+            for r in stationRecords {
+                let country = r["COUNTRY"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+                let band = r["BAND"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+                if !country.isEmpty && !band.isEmpty {
+                    uniqueBandCountries.insert("\(country)|\(band)")
+                }
+            }
+            count = Double(uniqueBandCountries.count)
+        } else {
+            count = 0
+        }
+        return max(0.02, min(1.0, count / totalBandCountriesPotential))
+    }
+
+    private func dxccCoverage(for scoreCountriesStr: String?, isOwner: Bool) -> Double {
+        let count: Double
+        if let parsed = parseRankInt(scoreCountriesStr), parsed > 0 {
+            count = Double(parsed)
+        } else if isOwner {
+            let uniqueCountries = Set(stationRecords.map { $0["COUNTRY"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased() }.filter { !$0.isEmpty })
+            count = Double(uniqueCountries.count)
+        } else {
+            count = 0
+        }
+        return max(0.02, min(1.0, count / totalActiveDXCCEntities))
+    }
+
+    private var todaysQSOCount: Int {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyyMMdd"
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        let todayStr = formatter.string(from: Date())
+        return stationRecords.filter { $0["QSO_DATE"].replacingOccurrences(of: "-", with: "") == todayStr }.count
+    }
+
+    var body: some View {
+        let op = activeOperator
+        let target = op?.response
+        let isOwner = op?.isOwner ?? true
+
+        let qsoVal = qsoPercentile(for: target?.rank_qso)
+        let bandVal = bandCoverage(for: target?.score_band, isOwner: isOwner)
+        let dxccVal = dxccCoverage(for: target?.score_countries, isOwner: isOwner)
+        let composite = Int(((qsoVal + bandVal + dxccVal) / 3.0) * 100.0)
+
+        VStack(alignment: .leading, spacing: 14) {
+            // Header with title and operator segmented picker
+            HStack(spacing: 12) {
+                HStack(spacing: 6) {
+                    Image(systemName: "circle.circle.fill")
+                        .foregroundColor(.cyan)
+                    Text("360° Radar Performance & Rank Dashboard")
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                }
+
+                Spacer()
+
+                if availableOperators.count > 1 {
+                    Picker("Operator", selection: Binding(
+                        get: { activeOperator?.response.callsign ?? "" },
+                        set: { selectedOperatorCall = $0 }
+                    )) {
+                        ForEach(availableOperators, id: \.response.callsign) { item in
+                            Text(item.title).tag(item.response.callsign ?? "")
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .controlSize(.small)
+                    .frame(maxWidth: 340)
+                }
+            }
+
+            HStack(alignment: .center, spacing: 22) {
+                // ─── 1. Concentric 360° Radial Gauge ───
+                ZStack {
+                    // Radar crosshair lines
+                    Circle()
+                        .stroke(Color.white.opacity(0.06), lineWidth: 1)
+                        .frame(width: 190, height: 190)
+
+                    Path { path in
+                        path.move(to: CGPoint(x: 95, y: 0))
+                        path.addLine(to: CGPoint(x: 95, y: 190))
+                        path.move(to: CGPoint(x: 0, y: 95))
+                        path.addLine(to: CGPoint(x: 190, y: 95))
+                    }
+                    .stroke(Color.white.opacity(0.08), style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
+                    .frame(width: 190, height: 190)
+
+                    // Outer Ring: QSO World Standing (360°)
+                    Circle()
+                        .stroke(Color.blue.opacity(0.14), lineWidth: 10)
+                        .frame(width: 176, height: 176)
+                    Circle()
+                        .trim(from: 0, to: CGFloat(qsoVal))
+                        .stroke(
+                            LinearGradient(colors: [.blue, .cyan], startPoint: .top, endPoint: .bottom),
+                            style: StrokeStyle(lineWidth: 10, lineCap: .round)
+                        )
+                        .frame(width: 176, height: 176)
+                        .rotationEffect(.degrees(-90))
+
+                    // Middle Ring: Band Coverage (360°)
+                    Circle()
+                        .stroke(Color.orange.opacity(0.14), lineWidth: 10)
+                        .frame(width: 146, height: 146)
+                    Circle()
+                        .trim(from: 0, to: CGFloat(bandVal))
+                        .stroke(
+                            LinearGradient(colors: [.orange, .yellow], startPoint: .top, endPoint: .bottom),
+                            style: StrokeStyle(lineWidth: 10, lineCap: .round)
+                        )
+                        .frame(width: 146, height: 146)
+                        .rotationEffect(.degrees(-90))
+
+                    // Inner Ring: DXCC Countries Reach (360°)
+                    Circle()
+                        .stroke(Color.green.opacity(0.14), lineWidth: 10)
+                        .frame(width: 116, height: 116)
+                    Circle()
+                        .trim(from: 0, to: CGFloat(dxccVal))
+                        .stroke(
+                            LinearGradient(colors: [.green, .mint], startPoint: .top, endPoint: .bottom),
+                            style: StrokeStyle(lineWidth: 10, lineCap: .round)
+                        )
+                        .frame(width: 116, height: 116)
+                        .rotationEffect(.degrees(-90))
+
+                    // Center Hub Core
+                    VStack(spacing: 1) {
+                        Text(countryToFlag(target?.country_iso ?? ""))
+                            .font(.title3)
+                        Text("\(composite)%")
+                            .font(.system(size: 20, weight: .black, design: .rounded))
+                            .foregroundStyle(.primary)
+                        Text("360° INDEX")
+                            .font(.system(size: 7, weight: .black))
+                            .foregroundStyle(.secondary)
+                            .tracking(1)
+                    }
+                }
+                .frame(width: 195, height: 195)
+
+                // ─── 2. Multi-Metric Performance Cards ───
+                VStack(spacing: 10) {
+                    HStack(spacing: 12) {
+                        radarMetricTile(
+                            title: "QSO WORLD STANDING",
+                            value: target?.rank_qso ?? "N/A",
+                            subtitle: "\(Int(qsoVal * 100))th Percentile Tier",
+                            icon: "antenna.radiowaves.left.and.right",
+                            color: .blue,
+                            progress: qsoVal
+                        )
+
+                        radarMetricTile(
+                            title: "BAND COVERAGE",
+                            value: target?.rank_band ?? "N/A",
+                            subtitle: "\(target?.score_band ?? "0") / 4,080 Band-Countries",
+                            icon: "waveform.path.ecg",
+                            color: .orange,
+                            progress: bandVal
+                        )
+                    }
+
+                    HStack(spacing: 12) {
+                        radarMetricTile(
+                            title: "DXCC ENTITY REACH",
+                            value: target?.rank_countries ?? "N/A",
+                            subtitle: "\(target?.score_countries ?? "0") / 340 Active DXCC",
+                            icon: "globe.americas.fill",
+                            color: .green,
+                            progress: dxccVal
+                        )
+
+                        radarDailyVelocityTile(
+                            isOwner: isOwner,
+                            todaysQSOs: todaysQSOCount,
+                            target: target
+                        )
+                    }
+                }
+            }
+        }
+        .padding(14)
+        .background(Color(NSColor.controlBackgroundColor).opacity(0.65))
+        .cornerRadius(8)
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.cyan.opacity(0.25), lineWidth: 1))
+    }
+
+    private func radarMetricTile(
+        title: String,
+        value: String,
+        subtitle: String,
+        icon: String,
+        color: Color,
+        progress: Double
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 5) {
+                Image(systemName: icon)
+                    .font(.caption.weight(.bold))
+                    .foregroundColor(color)
+                Text(title)
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundColor(.secondary)
+                    .tracking(0.5)
+                Spacer()
+                Text("\(Int(round(progress * 100)))%")
+                    .font(.system(size: 9, weight: .heavy, design: .monospaced))
+                    .foregroundColor(color)
+            }
+
+            Text(value)
+                .font(.system(size: 15, weight: .bold, design: .monospaced))
+                .foregroundColor(.primary)
+
+            ProgressView(value: progress)
+                .progressViewStyle(.linear)
+                .tint(color)
+
+            Text(subtitle)
+                .font(.caption2)
+                .foregroundColor(.secondary)
+                .lineLimit(1)
+        }
+        .padding(9)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(NSColor.textBackgroundColor))
+        .cornerRadius(7)
+        .overlay(RoundedRectangle(cornerRadius: 7).stroke(color.opacity(0.2), lineWidth: 1))
+    }
+
+    private func radarDailyVelocityTile(
+        isOwner: Bool,
+        todaysQSOs: Int,
+        target: QRZRankResponse?
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 5) {
+                Image(systemName: "bolt.fill")
+                    .font(.caption.weight(.bold))
+                    .foregroundColor(.cyan)
+                Text("DAILY PERFORMANCE")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundColor(.secondary)
+                    .tracking(0.5)
+                Spacer()
+                if isOwner {
+                    Text("LIVE")
+                        .font(.system(size: 8, weight: .black))
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(Color.green.opacity(0.2), in: Capsule())
+                        .foregroundColor(.green)
+                }
+            }
+
+            if isOwner {
+                Text("\(todaysQSOs) QSOs Today")
+                    .font(.system(size: 15, weight: .bold, design: .monospaced))
+                    .foregroundColor(.primary)
+
+                ProgressView(value: min(1.0, Double(todaysQSOs) / 25.0))
+                    .progressViewStyle(.linear)
+                    .tint(.cyan)
+
+                Text(todaysQSOs >= 20 ? "🔥 Outstanding daily logging pace!" : (todaysQSOs > 0 ? "Steady daily activity." : "No QSOs logged today yet."))
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+            } else {
+                Text(target?.callsign ?? "RIVAL")
+                    .font(.system(size: 15, weight: .bold, design: .monospaced))
+                    .foregroundColor(.primary)
+
+                ProgressView(value: 0.75)
+                    .progressViewStyle(.linear)
+                    .tint(.purple)
+
+                Text("Tracked rival in Leaderboard")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+            }
+        }
+        .padding(9)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(NSColor.textBackgroundColor))
+        .cornerRadius(7)
+        .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.cyan.opacity(0.2), lineWidth: 1))
+    }
+}
+
