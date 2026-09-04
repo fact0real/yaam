@@ -4,6 +4,7 @@
 //
 
 import SwiftUI
+import FT8Codec
 import FT8808Engine
 
 struct FT8StationView: View {
@@ -43,6 +44,8 @@ struct FT8StationView: View {
     @State private var credentialStatus = ""
     @State private var showHardwareSettings = false
     @State private var selectedTxMessageIndex = 1
+    @State private var showChecksheetPopover = false
+    @State private var showCabrilloExportSheet = false
 
     private var icomModel: Binding<IcomNetworkModel> {
         Binding(
@@ -74,6 +77,12 @@ struct FT8StationView: View {
                 Divider()
             }
 
+            // 2.5 Gold Standard Contest Command Ribbon & Live Multipliers HUD
+            if engine.isContestMode {
+                contestCommandHUD
+                Divider()
+            }
+
             // 3. Smart Auto-Hunter AI HUD Ribbon
             autoHunterHUD
                 .padding(.horizontal, 14)
@@ -83,6 +92,12 @@ struct FT8StationView: View {
             stationAlertBanners
 
             Divider()
+
+            // 3.8 Live Radio Transceiver Meters HUD (RF Power, SWR, ALC, S-Meter)
+            if radioPathConnected {
+                radioMetersHUD
+                Divider()
+            }
 
             // 4. SDR-Control Style RF Spectrum & Color Waterfall Display
             FT8SpectrumWaterfallView(
@@ -128,6 +143,13 @@ struct FT8StationView: View {
         .onChange(of: engine.audioPath) { _, _ in engine.stopMonitoring() }
         .onChange(of: radio.state) { _, state in
             if !state.isConnected, engine.audioPath == .icomLAN { engine.stopMonitoring() }
+        }
+        .sheet(isPresented: $showCabrilloExportSheet) {
+            DigitalContestCabrilloExportView(
+                engine: engine.contestEngine,
+                defaultCall: appState.currentStationCallsign,
+                defaultGrid: appState.activeStationProfile?.normalizedGrid ?? engine.myGrid
+            )
         }
     }
 
@@ -281,12 +303,39 @@ struct FT8StationView: View {
             .buttonStyle(.borderedProminent)
             .tint(engine.state.isMonitoring ? Color.green : Color.secondary.opacity(0.25))
             .disabled(!radioPathConnected && !engine.state.isMonitoring)
-            .help(radioPathConnected ? "Start / Stop receiving FT8 audio" : "Connect the radio first before starting receive")
+            .help(radioPathConnected ? "Start / Stop receiving FT8/FT4 audio" : "Connect the radio first before starting receive")
+
+            // Operating Protocol Pill: FT8 (15s) vs FT4 (7.5s)
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    engine.toggleOperatingProtocol()
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    if engine.operatingProtocol == .ft4 {
+                        Image(systemName: "bolt.fill")
+                            .foregroundStyle(Color.yellow)
+                    }
+                    Text(engine.operatingProtocol == .ft4 ? "FT4 (7.5s)" : "FT8 (15s)")
+                        .font(.system(size: 11, weight: .heavy, design: .monospaced))
+                }
+                .padding(.horizontal, 7)
+                .padding(.vertical, 4)
+            }
+            .buttonStyle(.bordered)
+            .tint(engine.operatingProtocol == .ft4 ? Color.yellow : Color.secondary)
+            .help("Toggle between FT8 (15-second cycles) and high-rate FT4 (7.5-second cycles)")
 
             // Band Presets Picker
             Picker("Band", selection: $engine.dialFrequencyHz) {
-                ForEach(FT8BandPreset.common) { preset in
-                    Text(preset.band).tag(preset.frequencyHz)
+                if engine.operatingProtocol == .ft4 {
+                    ForEach(FT4BandPreset.common) { preset in
+                        Text(preset.band).tag(preset.frequencyHz)
+                    }
+                } else {
+                    ForEach(FT8BandPreset.common) { preset in
+                        Text(preset.band).tag(preset.frequencyHz)
+                    }
                 }
             }
             .frame(width: 75)
@@ -302,12 +351,31 @@ struct FT8StationView: View {
                 .padding(.vertical, 4)
                 .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
 
+            // Contest Mode Toggle Button
+            Button {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                    engine.toggleContestMode()
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "trophy.fill")
+                        .foregroundStyle(engine.isContestMode ? Color.yellow : Color.secondary)
+                    Text("CONTEST")
+                        .font(.system(size: 11, weight: .heavy))
+                }
+                .padding(.horizontal, 7)
+                .padding(.vertical, 4)
+            }
+            .buttonStyle(.bordered)
+            .tint(engine.isContestMode ? Color.yellow : Color.secondary)
+            .help("Toggle Digital Contest Mode (CQ WW Digi / ARRL Digi rules, multipliers, and live rate)")
+
             // Auto-Sequence Toggle
             Toggle("Auto", isOn: $engine.autoSequenceEnabled)
                 .toggleStyle(.button)
                 .buttonStyle(.bordered)
                 .tint(engine.autoSequenceEnabled ? Color.accentColor : Color.secondary)
-                .help("Automatically progress through FT8 QSO sequence")
+                .help("Automatically progress through QSO sequence")
 
             // Erase Tables Button
             Button {
@@ -692,6 +760,185 @@ struct FT8StationView: View {
         .background(Color.secondary.opacity(0.1), in: Capsule())
     }
 
+    // MARK: - 2.5 Gold Standard Contest Command Ribbon & Live Multipliers HUD
+
+    private var contestCommandHUD: some View {
+        HStack(spacing: 12) {
+            // Contest Selector & Mode Pill
+            Menu {
+                ForEach(DigitalContestType.allCases) { contest in
+                    Button {
+                        engine.contestEngine.configureContest(type: contest, myCall: engine.myCall, myGrid: engine.myGrid)
+                    } label: {
+                        HStack {
+                            Text(contest.rawValue)
+                            if engine.contestEngine.contestType == contest {
+                                Image(systemName: "checkmark")
+                            }
+                        }
+                    }
+                }
+                Divider()
+                Button("Reset Contest Session...", role: .destructive) {
+                    engine.contestEngine.resetContestSession()
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "trophy.fill")
+                        .foregroundStyle(Color.yellow)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(engine.contestEngine.contestType.shortCode)
+                            .font(.system(size: 11, weight: .heavy, design: .monospaced))
+                            .foregroundStyle(.primary)
+                        Text(engine.contestEngine.contestType.exchangeDescription)
+                            .font(.system(size: 9))
+                            .foregroundStyle(.secondary)
+                    }
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.yellow.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+
+            Divider()
+                .frame(height: 28)
+
+            // Claimed Score Card
+            VStack(alignment: .leading, spacing: 1) {
+                Text("CLAIMED SCORE")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(.secondary)
+                Text(engine.contestEngine.claimedScore.formatted())
+                    .font(.system(size: 16, weight: .black, design: .monospaced))
+                    .foregroundStyle(Color.yellow)
+            }
+            .padding(.horizontal, 6)
+
+            Divider()
+                .frame(height: 28)
+
+            // QSOs & Points & Mults
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("QSOS")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(.secondary)
+                    Text("\(engine.contestEngine.totalQSOs)")
+                        .font(.system(size: 13, weight: .bold, design: .monospaced))
+                }
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("POINTS")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(.secondary)
+                    Text("\(engine.contestEngine.totalPoints)")
+                        .font(.system(size: 13, weight: .bold, design: .monospaced))
+                }
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("MULTS")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(.secondary)
+                    HStack(spacing: 4) {
+                        Text("\(engine.contestEngine.totalMultipliers)")
+                            .font(.system(size: 13, weight: .bold, design: .monospaced))
+                            .foregroundStyle(Color.orange)
+                        Text("(\(engine.contestEngine.totalGridMultipliers)G·\(engine.contestEngine.totalDXCCMultipliers)D)")
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            Divider()
+                .frame(height: 28)
+
+            // Live Rate Meter (QSOs/hr)
+            HStack(spacing: 10) {
+                HStack(spacing: 4) {
+                    Image(systemName: "speedometer")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(Color.green)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("10m RATE")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(.secondary)
+                        Text("\(engine.contestEngine.rate10Min) /hr")
+                            .font(.system(size: 12, weight: .heavy, design: .monospaced))
+                            .foregroundStyle(Color.green)
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("60m RATE")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(.secondary)
+                    Text("\(engine.contestEngine.rate60Min) /hr")
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .foregroundStyle(.primary)
+                }
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("PEAK")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(.secondary)
+                    Text("\(engine.contestEngine.peakRate) /hr")
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Spacer()
+
+            // Cabrillo 3.0 Export Button
+            Button {
+                showCabrilloExportSheet = true
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "square.and.arrow.up")
+                    Text("Export Cabrillo 3.0")
+                }
+                .font(.system(size: 11, weight: .bold))
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.green)
+
+            // Checksheet Popover Button
+            Button {
+                showChecksheetPopover.toggle()
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "tablecells")
+                    Text("Checksheet")
+                }
+                .font(.system(size: 11, weight: .semibold))
+            }
+            .buttonStyle(.bordered)
+            .popover(isPresented: $showChecksheetPopover) {
+                ContestChecksheetPopoverView(engine: engine.contestEngine) {
+                    showChecksheetPopover = false
+                    showCabrilloExportSheet = true
+                }
+                .frame(width: 490, height: 350)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 6)
+        .background(
+            LinearGradient(
+                colors: [
+                    Color(red: 0.16, green: 0.12, blue: 0.05).opacity(0.8),
+                    Color(nsColor: .controlBackgroundColor).opacity(0.8)
+                ],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+        )
+    }
+
     // MARK: - 3. Smart Auto-Hunter HUD
 
     private var autoHunterHUD: some View {
@@ -899,22 +1146,48 @@ struct FT8StationView: View {
             HStack(spacing: 4) {
                 Text(row.text)
                     .font(.system(size: 11, design: .monospaced).weight(row.isDirectedToMe ? .bold : .medium))
+                    .foregroundStyle(row.contestStatus.isDupe ? Color.secondary.opacity(0.6) : (row.isDirectedToMe ? Color.red : Color.primary))
                     .lineLimit(1)
 
-                if row.isNewDXCC {
-                    Text("NEW")
-                        .font(.system(size: 7, weight: .black))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 3)
-                        .padding(.vertical, 1)
-                        .background(Color.purple, in: RoundedRectangle(cornerRadius: 2))
-                } else if row.isNewGrid {
-                    Text("GRID")
-                        .font(.system(size: 7, weight: .black))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 3)
-                        .padding(.vertical, 1)
-                        .background(Color.blue, in: RoundedRectangle(cornerRadius: 2))
+                if engine.isContestMode {
+                    if row.contestStatus.isMultiplier {
+                        Text(row.contestStatus.badgeLabel)
+                            .font(.system(size: 8, weight: .black, design: .monospaced))
+                            .foregroundStyle(.black)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1.5)
+                            .background(Color(red: 1.0, green: 0.72, blue: 0.15), in: RoundedRectangle(cornerRadius: 3))
+                    } else if row.contestStatus.isDupe {
+                        Text("DUPE")
+                            .font(.system(size: 7, weight: .black))
+                            .foregroundStyle(.white.opacity(0.7))
+                            .padding(.horizontal, 3)
+                            .padding(.vertical, 1)
+                            .background(Color.secondary.opacity(0.5), in: RoundedRectangle(cornerRadius: 2))
+                    } else if row.contestStatus.points > 0 {
+                        Text("+\(row.contestStatus.points) PTS")
+                            .font(.system(size: 8, weight: .heavy, design: .monospaced))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 3)
+                            .padding(.vertical, 1)
+                            .background(Color(red: 0.15, green: 0.75, blue: 0.38), in: RoundedRectangle(cornerRadius: 2))
+                    }
+                } else {
+                    if row.isNewDXCC {
+                        Text("NEW")
+                            .font(.system(size: 7, weight: .black))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 3)
+                            .padding(.vertical, 1)
+                            .background(Color.purple, in: RoundedRectangle(cornerRadius: 2))
+                    } else if row.isNewGrid {
+                        Text("GRID")
+                            .font(.system(size: 7, weight: .black))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 3)
+                            .padding(.vertical, 1)
+                            .background(Color.blue, in: RoundedRectangle(cornerRadius: 2))
+                    }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -958,12 +1231,23 @@ struct FT8StationView: View {
     private func rowBackground(for row: FT8DecodedRow) -> Color {
         if row.isDirectedToMe {
             return Color.red.opacity(0.32)
+        } else if engine.isContestMode {
+            if row.contestStatus.isMultiplier {
+                return Color.orange.opacity(0.24)
+            } else if row.contestStatus.isDupe {
+                return Color.secondary.opacity(0.04)
+            } else if row.isCQ || row.contestStatus.points > 0 {
+                return Color.green.opacity(0.18)
+            } else {
+                let slotInt = Int(row.slotStart.timeIntervalSince1970 / engine.slotDuration)
+                return slotInt.isMultiple(of: 2) ? Color.secondary.opacity(0.04) : Color.clear
+            }
         } else if row.isNewDXCC {
             return Color.purple.opacity(0.28)
         } else if row.isCQ {
             return Color.green.opacity(0.26)
         } else {
-            let slotInt = Int(row.slotStart.timeIntervalSince1970 / 15.0)
+            let slotInt = Int(row.slotStart.timeIntervalSince1970 / engine.slotDuration)
             return slotInt.isMultiple(of: 2) ? Color.secondary.opacity(0.04) : Color.clear
         }
     }
@@ -1048,11 +1332,21 @@ struct FT8StationView: View {
                                         .frame(width: 32, alignment: .trailing)
                                     Text("\(Int(row.audioFrequencyHz.rounded()))")
                                         .font(.system(size: 10, design: .monospaced))
-                                        .frame(width: 44, alignment: .trailing)
-                                    Text(row.text)
-                                        .font(.system(size: 11, design: .monospaced).weight(.bold))
-                                        .foregroundStyle(row.isDirectedToMe ? Color.red : Color.primary)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                    HStack(spacing: 4) {
+                                        Text(row.text)
+                                            .font(.system(size: 11, design: .monospaced).weight(.bold))
+                                            .foregroundStyle(row.isDirectedToMe ? Color.red : Color.primary)
+
+                                        if engine.isContestMode && row.contestStatus.isMultiplier {
+                                            Text(row.contestStatus.badgeLabel)
+                                                .font(.system(size: 8, weight: .black, design: .monospaced))
+                                                .foregroundStyle(.black)
+                                                .padding(.horizontal, 4)
+                                                .padding(.vertical, 1)
+                                                .background(Color(red: 1.0, green: 0.72, blue: 0.15), in: RoundedRectangle(cornerRadius: 3))
+                                        }
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
                                 }
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 3)
@@ -1137,32 +1431,166 @@ struct FT8StationView: View {
 
             Spacer()
 
-            // Transmit Watchdog Badge
+            // Transmit Watchdog Badge (matches protocol slot duration: 15s for FT8, 7.5s for FT4)
             HStack(spacing: 4) {
                 Image(systemName: "shield.checkered")
                     .font(.caption2)
                     .foregroundStyle(.orange)
-                Text("Watchdog 16s")
+                Text("Watchdog \(Int(engine.slotDuration.rounded()))s")
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
             }
 
             Divider().frame(height: 14)
 
-            // Transmit progress bar
-            ProgressView(value: engine.transmitProgress)
-                .frame(width: 90)
-                .opacity(engine.state == .transmitting ? 1 : 0.25)
+            // Slot & Transmit Progress
+            if engine.state == .transmitting {
+                HStack(spacing: 6) {
+                    ProgressView(value: Double(engine.transmitProgress))
+                        .frame(width: 80)
+                        .tint(.red)
+                    Text("TX: \((Double(engine.transmitProgress) * engine.slotDuration).formatted(.number.precision(.fractionLength(1))))s")
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .foregroundStyle(.red)
+                        .frame(width: 75, alignment: .trailing)
+                }
+            } else {
+                HStack(spacing: 6) {
+                    ProgressView(value: engine.slotProgress)
+                        .frame(width: 80)
+                        .tint(.accentColor)
+                    Text("Slot: \(engine.slotRemainingSeconds.formatted(.number.precision(.fractionLength(1))))s")
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.primary)
+                        .frame(width: 75, alignment: .trailing)
+                }
+            }
 
-            // Slot Countdown
-            Text("Next: \(engine.secondsToNextTX.formatted(.number.precision(.fractionLength(1))))s")
-                .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                .foregroundStyle(.primary)
-                .frame(width: 80, alignment: .trailing)
+            if engine.transmitArmed {
+                Text("TX in: \(engine.secondsToNextTX.formatted(.number.precision(.fractionLength(1))))s")
+                    .font(.system(size: 10, weight: .heavy, design: .monospaced))
+                    .foregroundStyle(.orange)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.orange.opacity(0.15))
+                    .cornerRadius(3)
+            }
         }
         .padding(.horizontal, 14)
         .frame(height: 32)
         .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    // MARK: - Live Radio Transceiver Meters HUD (RF Power, SWR, ALC, S-Meter)
+    private var radioMetersHUD: some View {
+        HStack(spacing: 16) {
+            // Radio Model & PTT status badge
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(engine.state == .transmitting ? Color.red : Color.green)
+                    .frame(width: 8, height: 8)
+                Text(engine.state == .transmitting ? "TX ACTIVE" : "RX LISTENING")
+                    .font(.system(size: 10, weight: .heavy, design: .monospaced))
+                    .foregroundStyle(engine.state == .transmitting ? Color.red : Color.green)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background((engine.state == .transmitting ? Color.red : Color.green).opacity(0.12))
+            .cornerRadius(4)
+
+            Divider().frame(height: 18)
+
+            // RF Power Meter (Po)
+            HStack(spacing: 6) {
+                Text("PWR")
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                meterBar(
+                    value: engine.state == .transmitting ? min(1.0, max(0.0, engine.livePowerWatts / 100.0)) : 0.0,
+                    tint: Color.cyan,
+                    width: 65
+                )
+                Text("\(Int(engine.state == .transmitting ? engine.livePowerWatts : 0)) W")
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundStyle(engine.state == .transmitting ? Color.cyan : Color.secondary)
+                    .frame(width: 42, alignment: .trailing)
+            }
+
+            Divider().frame(height: 18)
+
+            // SWR Meter
+            HStack(spacing: 6) {
+                Text("SWR")
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                let swrVal = engine.state == .transmitting ? engine.liveSWR : 1.0
+                let swrColor: Color = swrVal <= 1.5 ? .green : (swrVal <= 2.0 ? .orange : .red)
+                meterBar(
+                    value: min(1.0, max(0.0, (swrVal - 1.0) / 2.0)),
+                    tint: swrColor,
+                    width: 65
+                )
+                Text(String(format: "%.1f", swrVal))
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundStyle(swrColor)
+                    .frame(width: 28, alignment: .trailing)
+            }
+
+            Divider().frame(height: 18)
+
+            // ALC Meter
+            HStack(spacing: 6) {
+                Text("ALC")
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                let alcVal = engine.state == .transmitting ? engine.liveALC : 0.0
+                let alcColor: Color = alcVal <= 50 ? .green : (alcVal <= 80 ? .orange : .red)
+                meterBar(
+                    value: min(1.0, max(0.0, alcVal / 100.0)),
+                    tint: alcColor,
+                    width: 65
+                )
+                Text("\(Int(alcVal))%")
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundStyle(alcColor)
+                    .frame(width: 34, alignment: .trailing)
+            }
+
+            Divider().frame(height: 18)
+
+            // S-Meter / RX Signal Level
+            HStack(spacing: 6) {
+                Text("SIG")
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                let sVal = engine.state == .transmitting ? 0.0 : engine.liveSMeter
+                meterBar(
+                    value: min(1.0, max(0.0, sVal / 9.0)),
+                    tint: Color.green,
+                    width: 65
+                )
+                Text(sVal >= 9.0 ? "S9+" : "S\(Int(min(9, sVal)))")
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundStyle(Color.green)
+                    .frame(width: 28, alignment: .trailing)
+            }
+
+            Spacer()
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 5)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.25))
+    }
+
+    private func meterBar(value: Double, tint: Color, width: CGFloat) -> some View {
+        ZStack(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 2)
+                .fill(Color.white.opacity(0.08))
+                .frame(width: width, height: 6)
+            RoundedRectangle(cornerRadius: 2)
+                .fill(tint)
+                .frame(width: max(0, min(width, width * CGFloat(value))), height: 6)
+        }
     }
 
     private func loadIdentity() {
@@ -1244,6 +1672,13 @@ private struct FT8SpectrumWaterfallView: View {
                 context.draw(context.resolve(text), at: CGPoint(x: 18, y: y - 5))
             }
 
+            // Translucent Active Digital Filter Passband Box (SDR-Control style)
+            let pbLeft = xForFrequency(minFreq + 50, width: cSize.width)
+            let pbRight = xForFrequency(maxFreq - 50, width: cSize.width)
+            let pbRect = CGRect(x: pbLeft, y: 0, width: max(0, pbRight - pbLeft), height: cSize.height)
+            context.fill(Path(pbRect), with: .color(Color(red: 0.04, green: 0.18, blue: 0.38).opacity(0.20)))
+            context.stroke(Path(pbRect), with: .color(Color(red: 0.1, green: 0.5, blue: 0.9).opacity(0.35)), lineWidth: 1.0)
+
             // Draw RF Spectrum Curve
             let mags = engine.latestSpectrumMagnitudes
             if !mags.isEmpty {
@@ -1261,19 +1696,22 @@ private struct FT8SpectrumWaterfallView: View {
                 curvePath.closeSubpath()
 
                 let gradient = Gradient(colors: [
-                    Color(red: 0.1, green: 0.6, blue: 0.9).opacity(0.45),
-                    Color(red: 0.05, green: 0.25, blue: 0.55).opacity(0.10)
+                    Color(red: 1.0, green: 0.45, blue: 0.10).opacity(0.70), // Warm orange/red peak
+                    Color(red: 0.95, green: 0.80, blue: 0.15).opacity(0.55), // Golden yellow
+                    Color(red: 0.15, green: 0.85, blue: 0.40).opacity(0.40), // Emerald green mid
+                    Color(red: 0.05, green: 0.35, blue: 0.70).opacity(0.20), // Cyan/blue
+                    Color(red: 0.02, green: 0.08, blue: 0.20).opacity(0.05)  // Navy base
                 ])
                 context.fill(curvePath, with: .linearGradient(gradient, startPoint: CGPoint(x: 0, y: 0), endPoint: CGPoint(x: 0, y: cSize.height)))
 
-                // Stroke line
+                // Glowing Stroke line
                 var linePath = Path()
                 for (idx, val) in mags.enumerated() {
                     let x = CGFloat(idx) * step
                     let y = cSize.height * (1.0 - CGFloat(min(1.0, max(0.0, val * 0.95 + 0.05))))
                     if idx == 0 { linePath.move(to: CGPoint(x: x, y: y)) } else { linePath.addLine(to: CGPoint(x: x, y: y)) }
                 }
-                context.stroke(linePath, with: .color(Color(red: 0.3, green: 0.8, blue: 1.0)), lineWidth: 1.0)
+                context.stroke(linePath, with: .color(Color(red: 0.25, green: 0.95, blue: 0.55)), lineWidth: 1.2)
             }
 
             // Draw RX Frequency Marker (Green)
@@ -1389,7 +1827,8 @@ private struct FT8SpectrumWaterfallView: View {
 
         var pixels = [UInt32](repeating: 0, count: width * height)
         for r in 0..<height {
-            let row = rows[r]
+            // Invert row index so newest row (rows.last) appears at r = 0 (top line directly under frequency ruler)
+            let row = rows[height - 1 - r]
             let rowOffset = r * width
             let colCount = min(width, row.count)
             for c in 0..<colCount {
@@ -1422,31 +1861,46 @@ private struct FT8SpectrumWaterfallView: View {
         let r: UInt8
         let g: UInt8
         let b: UInt8
-        if v < 0.15 {
-            r = UInt8(v * 20)
-            g = UInt8(v * 60)
-            b = UInt8(40 + v * 500)
-        } else if v < 0.35 {
-            let t = (v - 0.15) / 0.20
-            r = UInt8(10 + t * 40)
-            g = UInt8(40 + t * 160)
-            b = UInt8(140 + t * 115)
-        } else if v < 0.60 {
-            let t = (v - 0.35) / 0.25
-            r = UInt8(50 + t * 180)
-            g = UInt8(200 + t * 35)
-            b = UInt8(255 - t * 200)
+
+        if v < 0.10 {
+            // Inky space black to deep midnight navy (noise floor)
+            let t = v / 0.10
+            r = UInt8(1 * t)
+            g = UInt8(2 * t)
+            b = UInt8(10 * t)
+        } else if v < 0.25 {
+            // Faint noise: Deep navy to rich cobalt blue
+            let t = (v - 0.10) / 0.15
+            r = UInt8(1 + t * 5)
+            g = UInt8(2 + t * 35)
+            b = UInt8(10 + t * 135)
+        } else if v < 0.45 {
+            // Weak FT8 signal tones: Cobalt blue to electric glowing cyan
+            let t = (v - 0.25) / 0.20
+            r = UInt8(6 + t * 14)
+            g = UInt8(37 + t * 185)
+            b = UInt8(145 + t * 110)
+        } else if v < 0.65 {
+            // Solid FT8 tones: Electric cyan to brilliant neon emerald green
+            let t = (v - 0.45) / 0.20
+            r = UInt8(20 + t * 65)
+            g = UInt8(222 + t * 33)
+            b = UInt8(255 - t * 215)
         } else if v < 0.85 {
-            let t = (v - 0.60) / 0.25
-            r = UInt8(230 + t * 25)
-            g = UInt8(235 - t * 140)
-            b = UInt8(55 - t * 40)
+            // Strong signals: Neon green to bright sun yellow and amber
+            let t = (v - 0.65) / 0.20
+            r = UInt8(85 + t * 170)
+            g = UInt8(255 - t * 45)
+            b = UInt8(40 - t * 30)
         } else {
+            // S9+ local signals: Flaming orange to white-hot peak
             let t = (v - 0.85) / 0.15
             r = 255
-            g = UInt8(95 + t * 160)
-            b = UInt8(15 + t * 240)
+            let gVal = 210 * (1.0 - t * 0.4)
+            g = UInt8(max(0, min(255, gVal)))
+            b = UInt8(10 + t * 235)
         }
+
         return (0xFF << 24) | (UInt32(b) << 16) | (UInt32(g) << 8) | UInt32(r)
     }
 
@@ -1455,3 +1909,120 @@ private struct FT8SpectrumWaterfallView: View {
         return max(0, min(width, frac * width))
     }
 }
+
+// MARK: - Contest Checksheet & Multiplier Sheet Popover
+
+struct ContestChecksheetPopoverView: View {
+    @ObservedObject var engine: DigitalContestEngine
+    var onOpenCabrilloExport: (() -> Void)? = nil
+    @Environment(\.dismiss) private var dismiss
+    @State private var confirmReset = false
+
+    var body: some View {
+        VStack(spacing: 12) {
+            HStack {
+                Label("Contest Multipliers & Band Checksheet", systemImage: "trophy.fill")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(Color.yellow)
+                Spacer()
+                Button("Done") { dismiss() }
+                    .keyboardShortcut(.defaultAction)
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 12)
+
+            Divider()
+
+            // Band Breakdown Table
+            ScrollView {
+                VStack(spacing: 8) {
+                    Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
+                        GridRow {
+                            Text("Band").font(.system(size: 10, weight: .bold)).foregroundStyle(.secondary)
+                            Text("QSOs").font(.system(size: 10, weight: .bold)).foregroundStyle(.secondary)
+                            Text("Points").font(.system(size: 10, weight: .bold)).foregroundStyle(.secondary)
+                            Text("Grid Fields").font(.system(size: 10, weight: .bold)).foregroundStyle(.secondary)
+                            Text("DXCC").font(.system(size: 10, weight: .bold)).foregroundStyle(.secondary)
+                        }
+                        Divider()
+                        ForEach(engine.bandBreakdowns) { b in
+                            GridRow {
+                                Text(b.band).font(.system(size: 11, weight: .heavy, design: .monospaced))
+                                Text("\(b.qsoCount)").font(.system(size: 11, weight: .medium, design: .monospaced))
+                                Text("\(b.qsoPoints)").font(.system(size: 11, weight: .medium, design: .monospaced))
+                                HStack(spacing: 3) {
+                                    Text("\(b.gridMultCount)")
+                                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                        .foregroundStyle(Color.orange)
+                                    if !b.gridFields.isEmpty {
+                                        Text("(\(b.gridFields.sorted().joined(separator: " ")))")
+                                            .font(.system(size: 9, design: .monospaced))
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                    }
+                                }
+                                HStack(spacing: 3) {
+                                    Text("\(b.dxccMultCount)")
+                                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                        .foregroundStyle(Color.blue)
+                                }
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 14)
+
+                    Divider()
+                        .padding(.vertical, 4)
+
+                    // Export & Reset actions
+                    HStack(spacing: 10) {
+                        if let onOpenCabrilloExport {
+                            Button {
+                                onOpenCabrilloExport()
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "square.and.arrow.up")
+                                    Text("Export Cabrillo 3.0...")
+                                }
+                                .font(.system(size: 11, weight: .semibold))
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(.green)
+                            .controlSize(.small)
+                        }
+
+                        Spacer()
+
+                        if confirmReset {
+                            Text("Reset all contest QSOs and multipliers?")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(.red)
+                            Button("Yes, Reset", role: .destructive) {
+                                engine.resetContestSession()
+                                confirmReset = false
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(.red)
+                            .controlSize(.small)
+
+                            Button("Cancel") { confirmReset = false }
+                                .controlSize(.small)
+                        } else {
+                            Button {
+                                confirmReset = true
+                            } label: {
+                                Label("Reset Session...", systemImage: "arrow.counterclockwise")
+                                    .font(.system(size: 11))
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        }
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 10)
+                }
+            }
+        }
+    }
+}
+

@@ -145,6 +145,10 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
     @MainActor @Published private(set) var receivedAudioPackets = 0
     @MainActor @Published private(set) var lastAudioAt: Date?
     @MainActor @Published private(set) var activeRemoteSettingsSummary: String = ""
+    @MainActor @Published private(set) var rfPowerWatts: Double = 0.0
+    @MainActor @Published private(set) var swr: Double = 1.0
+    @MainActor @Published private(set) var alcLevel: Double = 0.0
+    @MainActor @Published private(set) var sMeterUnits: Double = 0.0
     @MainActor @Published var transmitArmed = false {
         didSet {
             if !transmitArmed, isTransmitting { setPTT(false) }
@@ -605,7 +609,19 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
                 noteHandshakeSend()
             }
         case .connected:
-            if sessionTicks.isMultiple(of: 10) { sendCIV(command: [0x03]) }
+            if isTransmitActive {
+                let meterStep = sessionTicks % 3
+                if meterStep == 0 {
+                    sendCIV(command: [0x15, 0x02]) // Po (RF Power Meter)
+                } else if meterStep == 1 {
+                    sendCIV(command: [0x15, 0x11]) // SWR Meter
+                } else {
+                    sendCIV(command: [0x15, 0x12]) // ALC Meter
+                }
+            } else {
+                if sessionTicks.isMultiple(of: 10) { sendCIV(command: [0x03]) } // Frequency
+                if sessionTicks % 10 == 5 { sendCIV(command: [0x15, 0x01]) } // S-Meter during RX
+            }
         }
     }
 
@@ -1153,6 +1169,11 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
         } else {
             // Transmit PTT OFF (Command 1C 00)
             sendCIV(command: [0x1C, 0x00, 0x00])
+            DispatchQueue.main.async { [weak self] in
+                self?.rfPowerWatts = 0.0
+                self?.swr = 1.0
+                self?.alcLevel = 0.0
+            }
         }
     }
 
@@ -1216,7 +1237,58 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
                     updatedAt: Date()
                 )
             }
+        } else if command == 0x15, frame.count >= 7 {
+            let subCmd = frame[5]
+            let valBytes = Array(frame[6..<(frame.count - 1)])
+            let raw = Self.decodeMeterBCD(valBytes)
+
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                switch subCmd {
+                case 0x01: // S-meter
+                    if raw <= 120 {
+                        self.sMeterUnits = (Double(raw) / 120.0) * 9.0
+                    } else {
+                        self.sMeterUnits = 9.0 + (Double(raw - 120) / 121.0) * 60.0
+                    }
+                case 0x02: // Po (RF Power Meter)
+                    let watts = min(100.0, max(0.0, (Double(raw) / 143.0) * 100.0))
+                    self.rfPowerWatts = round(watts * 10) / 10.0
+                case 0x11: // SWR Meter
+                    let swrCalc: Double
+                    if raw <= 0 {
+                        swrCalc = 1.0
+                    } else if raw <= 48 {
+                        swrCalc = 1.0 + (Double(raw) / 48.0) * 0.5
+                    } else if raw <= 80 {
+                        swrCalc = 1.5 + (Double(raw - 48) / 32.0) * 0.5
+                    } else if raw <= 120 {
+                        swrCalc = 2.0 + (Double(raw - 80) / 40.0) * 1.0
+                    } else {
+                        swrCalc = 3.0 + Double(raw - 120) * 0.05
+                    }
+                    self.swr = round(swrCalc * 10) / 10.0
+                case 0x12: // ALC Meter
+                    let alc = min(100.0, max(0.0, (Double(raw) / 120.0) * 100.0))
+                    self.alcLevel = round(alc)
+                default:
+                    break
+                }
+            }
         }
+    }
+
+    static func decodeMeterBCD(_ bytes: [UInt8]) -> Int {
+        guard !bytes.isEmpty else { return 0 }
+        var result = 0
+        for b in bytes {
+            let high = Int(b >> 4)
+            let low = Int(b & 0x0F)
+            if high < 10 && low < 10 {
+                result = result * 100 + high * 10 + low
+            }
+        }
+        return result
     }
 
     private func receiveAudioPayload(_ data: Data) {

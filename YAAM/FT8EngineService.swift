@@ -62,40 +62,28 @@ nonisolated struct FT8BandPreset: Identifiable, Hashable, Sendable {
     ]
 }
 
-nonisolated func calculateMaidenheadDistanceKm(grid1: String, grid2: String) -> Double? {
-    func parseGrid(_ grid: String) -> (lat: Double, lon: Double)? {
-        let clean = grid.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        guard clean.count >= 4 else { return nil }
-        let chars = Array(clean)
-        guard chars[0] >= "A" && chars[0] <= "R",
-              chars[1] >= "A" && chars[1] <= "R",
-              chars[2] >= "0" && chars[2] <= "9",
-              chars[3] >= "0" && chars[3] <= "9" else { return nil }
-        let lonField = Double(chars[0].asciiValue! - Character("A").asciiValue!) * 20.0 - 180.0
-        let latField = Double(chars[1].asciiValue! - Character("A").asciiValue!) * 10.0 - 90.0
-        let lonSquare = Double(chars[2].asciiValue! - Character("0").asciiValue!) * 2.0
-        let latSquare = Double(chars[3].asciiValue! - Character("0").asciiValue!) * 1.0
-        var lon = lonField + lonSquare + 1.0
-        var lat = latField + latSquare + 0.5
-        if clean.count >= 6, chars[4] >= "A" && chars[4] <= "X", chars[5] >= "A" && chars[5] <= "X" {
-            let lonSub = Double(chars[4].asciiValue! - Character("A").asciiValue!) * (5.0 / 60.0)
-            let latSub = Double(chars[5].asciiValue! - Character("A").asciiValue!) * (2.5 / 60.0)
-            lon = lonField + lonSquare + lonSub + (2.5 / 60.0)
-            lat = latField + latSquare + latSub + (1.25 / 60.0)
-        }
-        return (lat, lon)
-    }
+nonisolated struct FT4BandPreset: Identifiable, Hashable, Sendable {
+    let band: String
+    let frequencyHz: UInt64
 
-    guard let c1 = parseGrid(grid1), let c2 = parseGrid(grid2) else { return nil }
-    let earthRadiusKm = 6371.0
-    let dLat = (c2.lat - c1.lat) * .pi / 180.0
-    let dLon = (c2.lon - c1.lon) * .pi / 180.0
-    let lat1Rad = c1.lat * .pi / 180.0
-    let lat2Rad = c2.lat * .pi / 180.0
-    let a = sin(dLat / 2) * sin(dLat / 2) + cos(lat1Rad) * cos(lat2Rad) * sin(dLon / 2) * sin(dLon / 2)
-    let c = 2 * atan2(sqrt(a), sqrt(1 - a))
-    return earthRadiusKm * c
+    var id: UInt64 { frequencyHz }
+    var label: String { "\(band)  \(formattedMHz)" }
+    var formattedMHz: String { AmateurBandPlan.formattedMHz(Double(frequencyHz) / 1_000_000) }
+
+    static let common: [FT4BandPreset] = [
+        .init(band: "160m", frequencyHz: 1_840_000),
+        .init(band: "80m", frequencyHz: 3_575_000),
+        .init(band: "40m", frequencyHz: 7_047_500),
+        .init(band: "30m", frequencyHz: 10_140_000),
+        .init(band: "20m", frequencyHz: 14_080_000),
+        .init(band: "17m", frequencyHz: 18_104_000),
+        .init(band: "15m", frequencyHz: 21_140_000),
+        .init(band: "12m", frequencyHz: 24_919_000),
+        .init(band: "10m", frequencyHz: 28_180_000),
+        .init(band: "6m", frequencyHz: 50_318_000)
+    ]
 }
+
 
 nonisolated func resolveCountryAndFlag(for callsign: String) -> (name: String, flag: String) {
     let clean = callsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
@@ -206,6 +194,7 @@ nonisolated struct FT8DecodedRow: Identifiable, Sendable {
     var isNewDXCC: Bool
     var isNewGrid: Bool
     var isNewCall: Bool
+    var contestStatus: DecodedContestStatus = .none
 
     init(message: FT8Message, slotStart: Date, myCall: String, myGrid: String = "") {
         self.id = UUID()
@@ -240,12 +229,13 @@ nonisolated struct FT8DecodedRow: Identifiable, Sendable {
         self.isNewDXCC = false
         self.isNewGrid = false
         self.isNewCall = false
+        self.contestStatus = .none
     }
 
     private static func extractCaller(from msg: String) -> String? {
         let parts = msg.split(separator: " ").map(String.init)
         if parts.count >= 2 && parts[0] == "CQ" {
-            return parts.count >= 3 && parts[1].count <= 3 ? parts[2] : parts[1]
+            return parts.count >= 3 && parts[1].count <= 4 ? parts[2] : parts[1]
         }
         return parts.first
     }
@@ -332,7 +322,7 @@ nonisolated enum SmartHunterCriteria: String, CaseIterable, Identifiable, Sendab
 /// bounded waterfall frames. Every mutable member is protected by `lock`.
 nonisolated final class IcomFT8AudioSource: AudioSource, @unchecked Sendable {
     private let lock = NSLock()
-    private var accumulator = SlotAccumulator(sampleRate: 48_000)
+    private var accumulator: SlotAccumulator
     private let spectrum = StreamingSpectrum(
         sampleRate: 48_000,
         fftSize: 8192,
@@ -342,6 +332,16 @@ nonisolated final class IcomFT8AudioSource: AudioSource, @unchecked Sendable {
     )
     private var slotSink: (@Sendable (AudioSlot) -> Void)?
     private var frameSink: (@Sendable (SpectrumFrame) -> Void)?
+
+    init(slotSeconds: Double = 15.0) {
+        self.accumulator = SlotAccumulator(sampleRate: 48_000, slotSeconds: slotSeconds)
+    }
+
+    func setSlotSeconds(_ slotSeconds: Double) {
+        lock.lock()
+        self.accumulator = SlotAccumulator(sampleRate: 48_000, slotSeconds: slotSeconds)
+        lock.unlock()
+    }
 
     func slots() -> AsyncStream<AudioSlot> {
         AsyncStream(AudioSlot.self, bufferingPolicy: .bufferingNewest(4)) { continuation in
@@ -400,6 +400,12 @@ final class FT8EngineService: ObservableObject {
     @Published private(set) var decodedRows: [FT8DecodedRow] = []
     @Published private(set) var waterfallRows: [[Float]] = []
     @Published private(set) var secondsToNextTX = 0.0
+    @Published private(set) var slotProgress: Double = 0.0
+    @Published private(set) var slotRemainingSeconds: Double = 15.0
+    @Published private(set) var livePowerWatts: Double = 0.0
+    @Published private(set) var liveSWR: Double = 1.0
+    @Published private(set) var liveALC: Double = 0.0
+    @Published private(set) var liveSMeter: Double = 0.0
     @Published private(set) var transmitProgress: Float = 0
     @Published private(set) var selfTestStatus = "Not run"
     @Published private(set) var sequencePhase = "Manual"
@@ -420,6 +426,41 @@ final class FT8EngineService: ObservableObject {
     @Published var autoSequenceEnabled = false
     @Published private(set) var inputDevices: [AudioInputDevice] = []
     @Published private(set) var outputDevices: [AudioInputDevice] = []
+
+    // ─── Protocol & Contest Mode (FT4 & High-Rate Contesting) ───
+    @Published var operatingProtocol: FT8Protocol = .ft8
+    @Published var isContestMode: Bool = false
+    @Published var contestEngine: DigitalContestEngine = DigitalContestEngine.shared
+
+    var slotDuration: Double {
+        operatingProtocol == .ft4 ? 7.5 : 15.0
+    }
+
+    var currentBandName: String {
+        if operatingProtocol == .ft4 {
+            if let b = FT4BandPreset.common.first(where: { $0.frequencyHz == dialFrequencyHz })?.band {
+                return b
+            }
+        }
+        if let b = FT8BandPreset.common.first(where: { $0.frequencyHz == dialFrequencyHz })?.band {
+            return b
+        }
+        let mhz = Double(dialFrequencyHz) / 1_000_000.0
+        switch mhz {
+        case 1.8...2.0: return "160m"
+        case 3.5...4.0: return "80m"
+        case 5.2...5.5: return "60m"
+        case 7.0...7.3: return "40m"
+        case 10.1...10.15: return "30m"
+        case 14.0...14.35: return "20m"
+        case 18.068...18.168: return "17m"
+        case 21.0...21.45: return "15m"
+        case 24.89...24.99: return "12m"
+        case 28.0...29.7: return "10m"
+        case 50.0...54.0: return "6m"
+        default: return "20m"
+        }
+    }
 
     // ─── Operational Properties for Dual-Pane Console & Spectrum ───
     @Published var rxAudioFrequencyHz: Float = 1_500
@@ -464,6 +505,8 @@ final class FT8EngineService: ObservableObject {
     private var txPlayer: WaveformPlayer?
     private var sequencer: QSOSequencer?
     private var waterfallFrameCounter = 0
+    private var smoothedNoiseFloor: Float = 0.0
+    private var smoothedRange: Float = 25.0
 
     init() {
         refreshAudioDevices()
@@ -483,6 +526,47 @@ final class FT8EngineService: ObservableObject {
     func configureStation(callsign: String, grid: String) {
         myCall = callsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         myGrid = String(grid.trimmingCharacters(in: .whitespacesAndNewlines).uppercased().prefix(4))
+        contestEngine.configureContest(type: contestEngine.contestType, myCall: myCall, myGrid: myGrid)
+    }
+
+    func setOperatingProtocol(_ proto: FT8Protocol) {
+        guard operatingProtocol != proto else { return }
+        operatingProtocol = proto
+        let band = currentBandName
+        if proto == .ft4 {
+            if let preset = FT4BandPreset.common.first(where: { $0.band == band }) {
+                dialFrequencyHz = preset.frequencyHz
+            }
+        } else {
+            if let preset = FT8BandPreset.common.first(where: { $0.band == band }) {
+                dialFrequencyHz = preset.frequencyHz
+            }
+        }
+        applyDialAndMode()
+
+        if state.isMonitoring {
+            if audioPath == .icomLAN, let r = activeIcom {
+                startIcomMonitoring(radio: r)
+            } else if audioPath == .coreAudio, let rig = activeRig {
+                startCoreAudioMonitoring(rig: rig, inputDevice: inputDevices.first?.uid, outputDevice: activeOutputDevice)
+            }
+        }
+        status = "Switched to \(proto == .ft4 ? "FT4 (7.5s slot)" : "FT8 (15s slot)") on \(formattedDial)"
+    }
+
+    func toggleOperatingProtocol() {
+        setOperatingProtocol(operatingProtocol == .ft8 ? .ft4 : .ft8)
+    }
+
+    func toggleContestMode() {
+        isContestMode.toggle()
+        contestEngine.isContestActive = isContestMode
+        if isContestMode {
+            contestEngine.configureContest(type: contestEngine.contestType, myCall: myCall, myGrid: myGrid)
+            status = "Contest Mode: ACTIVE (\(contestEngine.contestTitle))"
+        } else {
+            status = "Contest Mode: OFF (Standard FT8/FT4)"
+        }
     }
 
     func refreshAudioDevices() {
@@ -500,7 +584,7 @@ final class FT8EngineService: ObservableObject {
         audioPath = .icomLAN
         activeIcom = radio
         activeRig = nil
-        let source = IcomFT8AudioSource()
+        let source = IcomFT8AudioSource(slotSeconds: slotDuration)
         icomSource = source
         radio.setAudioSampleHandler { [weak source] samples, date in
             source?.push(samples, at: date)
@@ -508,7 +592,7 @@ final class FT8EngineService: ObservableObject {
         launchDecode(source: source)
         launchWaterfall(frames: source.frames())
         state = .monitoring
-        status = "Listening to 48 kHz audio from \(radio.radioName.isEmpty ? "Icom LAN" : radio.radioName)"
+        status = "Listening to 48 kHz audio from \(radio.radioName.isEmpty ? "Icom LAN" : radio.radioName) (\(operatingProtocol == .ft4 ? "FT4" : "FT8"))"
     }
 
     func startCoreAudioMonitoring(
@@ -524,7 +608,7 @@ final class FT8EngineService: ObservableObject {
 
         let source = LiveRadioSource(
             device: cleanDevice(inputDevice: inputDevice),
-            slotSeconds: 15,
+            slotSeconds: slotDuration,
             fftSize: 2048,
             hop: 512,
             fMin: 200,
@@ -534,7 +618,7 @@ final class FT8EngineService: ObservableObject {
         launchDecode(source: source)
         launchWaterfall(frames: source.frames())
         state = .monitoring
-        status = "Listening to the selected Core Audio input"
+        status = "Listening to the selected Core Audio input (\(operatingProtocol == .ft4 ? "FT4" : "FT8"))"
     }
 
     func stopMonitoring() {
@@ -686,10 +770,19 @@ final class FT8EngineService: ObservableObject {
     func beginCQ() {
         guard validateIdentity() else { return }
         dxCall = ""
-        sequencer = QSOSequencer(callCQ: myCall, myGrid: myGrid)
-        txText = sequencer?.message() ?? ""
-        sequencePhase = "CQ"
-        status = "CQ prepared; review the message and arm TX when ready"
+        if isContestMode {
+            switch contestEngine.contestType {
+            case .cqWWDigi, .arrlRoundup, .generalContest:
+                txText = "CQ TEST \(myCall) \(myGrid)"
+            }
+            sequencePhase = "Contest CQ"
+            status = "Contest CQ prepared: \(txText); review and arm TX"
+        } else {
+            sequencer = QSOSequencer(callCQ: myCall, myGrid: myGrid)
+            txText = sequencer?.message() ?? ""
+            sequencePhase = "CQ"
+            status = "CQ prepared; review the message and arm TX when ready"
+        }
     }
 
     func startContinuousCQ() {
@@ -705,7 +798,7 @@ final class FT8EngineService: ObservableObject {
 
     func stopContinuousCQ() {
         isCallingCQContinually = false
-        if sequencer?.phase == .cq {
+        if sequencer?.phase == .cq || sequencePhase.contains("CQ") {
             cancelTransmission(reason: "CQ stopped by operator")
         }
     }
@@ -726,7 +819,8 @@ final class FT8EngineService: ObservableObject {
         }
 
         // Add to active QSO stream
-        qsoStreamItems.append(.status(id: UUID(), time: Date(), text: "~ Engaging \(caller) (\(row.countryName))", isMilestone: true))
+        let multTag = row.contestStatus.isMultiplier ? " 🌟 [\(row.contestStatus.badgeLabel)]" : ""
+        qsoStreamItems.append(.status(id: UUID(), time: Date(), text: "~ Engaging \(caller) (\(row.countryName))\(multTag)", isMilestone: true))
         qsoStreamItems.append(.rx(row))
 
         selectForReply(row)
@@ -738,8 +832,8 @@ final class FT8EngineService: ObservableObject {
     }
 
     func selectForReply(_ row: FT8DecodedRow) {
-        guard validateIdentity(), let parsed = row.parsed, let caller = row.callerCall, !caller.isEmpty else {
-            fail("The selected decode is not a standard FT8 message with a callsign.")
+        guard validateIdentity(), let caller = row.callerCall, !caller.isEmpty else {
+            fail("The selected decode is not a valid message with a callsign.")
             return
         }
         selectedDecodeID = row.id
@@ -748,43 +842,77 @@ final class FT8EngineService: ObservableObject {
         let heard = normalizedReport(row.estimatedSNR)
         dxReport = String(format: "%+03d", heard)
 
-        if parsed.isCQ || row.isCQ {
-            sequencer = QSOSequencer(
-                answer: caller,
-                dxGrid: parsed.grid,
-                heardSnr: heard,
-                myCall: myCall,
-                myGrid: myGrid
-            )
-        } else if parsed.toCall == myCall {
-            sequencer = QSOSequencer(
-                resuming: parsed,
-                dxGrid: parsed.grid,
-                heardSnr: heard,
-                myCall: myCall,
-                myGrid: myGrid
-            )
+        if isContestMode {
+            // Contest exchange sequencing
+            if row.isCQ {
+                // We answer their CQ with our call + exchange
+                txText = "\(caller) \(myCall) \(myGrid)"
+                sequencePhase = "Contest Answer"
+            } else if row.text.contains(" R ") || row.text.contains(" R+") || row.text.contains(" R-") {
+                // They sent roger + report/grid -> We send confirmation RR73
+                txText = "\(caller) \(myCall) RR73"
+                sequencePhase = "Contest RR73"
+            } else {
+                // They answered our CQ with their exchange -> We send Roger + our exchange
+                txText = "\(caller) \(myCall) R \(myGrid)"
+                sequencePhase = "Contest Roger"
+            }
+            txParity = DigitalSlotClock.parity(at: row.slotStart, slotSeconds: slotDuration).toggled
+            status = "Contest exchange queued for \(caller) (Slot \(txParity == .even ? "Even" : "Odd"))"
         } else {
-            fail("Choose a CQ or a message addressed to \(myCall).")
-            return
+            if let parsed = row.parsed {
+                if parsed.isCQ || row.isCQ {
+                    sequencer = QSOSequencer(
+                        answer: caller,
+                        dxGrid: parsed.grid,
+                        heardSnr: heard,
+                        myCall: myCall,
+                        myGrid: myGrid
+                    )
+                } else if parsed.toCall == myCall {
+                    sequencer = QSOSequencer(
+                        resuming: parsed,
+                        dxGrid: parsed.grid,
+                        heardSnr: heard,
+                        myCall: myCall,
+                        myGrid: myGrid
+                    )
+                } else {
+                    sequencer = QSOSequencer(
+                        answer: caller,
+                        dxGrid: parsed.grid,
+                        heardSnr: heard,
+                        myCall: myCall,
+                        myGrid: myGrid
+                    )
+                }
+            } else {
+                sequencer = QSOSequencer(
+                    answer: caller,
+                    dxGrid: row.callerGrid,
+                    heardSnr: heard,
+                    myCall: myCall,
+                    myGrid: myGrid
+                )
+            }
+            txText = sequencer?.message() ?? ""
+            sequencePhase = sequencer?.phase.rawValue ?? "Reply"
+            txParity = DigitalSlotClock.parity(at: row.slotStart, slotSeconds: slotDuration).toggled
+            status = "Reply to \(caller) prepared for the opposite sequence"
         }
-        txText = sequencer?.message() ?? ""
-        sequencePhase = sequencer?.phase.rawValue ?? "Reply"
-        txParity = SlotClock.parity(at: row.slotStart).toggled
-        status = "Reply to \(caller) prepared for the opposite FT8 sequence"
     }
 
     func scheduleTransmission() {
         guard transmitTask == nil else { return }
         guard transmitArmed else {
-            fail("Arm TX before scheduling an FT8 transmission.")
+            fail("Arm TX before scheduling a transmission.")
             return
         }
         guard validateIdentity() else { return }
 
         let message = txText.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         guard !message.isEmpty else {
-            fail("Enter or prepare an FT8 message first.")
+            fail("Enter or prepare a transmission message first.")
             return
         }
 
@@ -795,6 +923,8 @@ final class FT8EngineService: ObservableObject {
         let icom = activeIcom
         let rig = activeRig
         let outputDevice = activeOutputDevice
+        let proto = operatingProtocol
+        let slotSecs = slotDuration
 
         switch path {
         case .icomLAN:
@@ -818,14 +948,14 @@ final class FT8EngineService: ObservableObject {
                     try FT8Codec.transmitAudio(
                         message,
                         baseFrequencyHz: audioFrequency,
-                        protocol: .ft8,
+                        protocol: proto,
                         sampleRate: sampleRate,
-                        slotSeconds: 15
+                        slotSeconds: slotSecs
                     )
                 }.value
 
                 applyDialAndMode()
-                let slot = SlotClock.nextSlotStart(parity: parity, after: Date())
+                let slot = DigitalSlotClock.nextSlotStart(parity: parity, after: Date(), slotSeconds: slotSecs)
                 state = .waiting(slot)
                 status = "TX queued for \(Self.utcTime(slot)) UTC"
                 let keyAt = slot.addingTimeInterval(-0.20)
@@ -842,17 +972,18 @@ final class FT8EngineService: ObservableObject {
                 qsoStreamItems.append(.tx(txEntry))
                 if qsoStreamItems.count > 150 { qsoStreamItems.removeFirst(qsoStreamItems.count - 150) }
                 let dialMHzStr = String(format: "%.6f", Double(dialFrequencyHz) / 1_000_000.0)
-                appendAllTextLog(line: "\(Self.utcTime(Date())) \(dialMHzStr) Tx FT8 \(Int(audioFrequency)) \(message)")
+                let protoStr = proto == .ft4 ? "FT4" : "FT8"
+                appendAllTextLog(line: "\(Self.utcTime(Date())) \(dialMHzStr) Tx \(protoStr) \(Int(audioFrequency)) \(message)")
 
                 switch path {
                 case .icomLAN:
                     guard let icom else { throw IcomNetworkError.disconnected }
-                    icom.setPTT(true, maximumDuration: 16)
+                    icom.setPTT(true, maximumDuration: slotSecs)
                     defer {
                         icom.setPTT(false)
                         icom.transmitArmed = false
                     }
-                    let progressTask = startProgressClock(duration: 15)
+                    let progressTask = startProgressClock(duration: slotSecs)
                     defer { progressTask.cancel() }
                     try await icom.transmit(samples: waveform, gain: gain)
                 case .coreAudio:
@@ -861,7 +992,7 @@ final class FT8EngineService: ObservableObject {
                     let output = TxAudioOutput(player: player, sampleRate: 48_000, device: outputDevice)
                     txPlayer = player
                     txOutput = output
-                    rig.setPTT(true, maximumDuration: 16)
+                    rig.setPTT(true, maximumDuration: slotSecs)
                     defer {
                         output.stop()
                         rig.setPTT(false)
@@ -878,11 +1009,11 @@ final class FT8EngineService: ObservableObject {
 
                 transmitProgress = 1
                 state = decodeTask == nil ? .idle : .monitoring
-                status = "FT8 transmission completed; PTT released"
+                status = "\(protoStr) transmission completed; PTT released"
             } catch is CancellationError {
                 releasePTT()
                 state = decodeTask == nil ? .idle : .monitoring
-                status = "FT8 transmission cancelled; PTT released"
+                status = "\(proto == .ft4 ? "FT4" : "FT8") transmission cancelled; PTT released"
             } catch {
                 releasePTT()
                 fail(error.localizedDescription)
@@ -952,8 +1083,9 @@ final class FT8EngineService: ObservableObject {
     }
 
     private func launchDecode<Source: AudioSource>(source: Source) {
+        let proto = operatingProtocol
         decodeTask = Task.detached(priority: .userInitiated) { [weak self] in
-            let decoder = DecodeEngine(proto: .ft8, spectrumColumns: 120, passband: 200...3_000)
+            let decoder = DecodeEngine(proto: proto, spectrumColumns: 120, passband: 200...3_000)
             for await result in decoder.results(from: source) {
                 guard !Task.isCancelled else { break }
                 await self?.consume(result)
@@ -972,11 +1104,25 @@ final class FT8EngineService: ObservableObject {
 
     private func consume(_ result: SlotResult) {
         let start = result.startTime ?? Date()
-        let currentBand = FT8BandPreset.common.first(where: { $0.frequencyHz == dialFrequencyHz })?.band ?? "20m"
+        let currentBand = currentBandName
         let dialMHzStr = String(format: "%.6f", Double(dialFrequencyHz) / 1_000_000.0)
         let slotUtc = Self.utcTime(start)
+        let protoStr = operatingProtocol == .ft4 ? "FT4" : "FT8"
 
         var rows = result.messages.map { FT8DecodedRow(message: $0, slotStart: start, myCall: myCall, myGrid: myGrid) }
+
+        // Contest multiplier & dupe analysis:
+        if isContestMode {
+            for i in rows.indices {
+                if let caller = rows[i].callerCall, !caller.isEmpty {
+                    rows[i].contestStatus = contestEngine.analyzeDecodedStation(
+                        callsign: caller,
+                        grid: rows[i].callerGrid,
+                        band: currentBand
+                    )
+                }
+            }
+        }
 
         // Determine if new DXCC, new Grid, or new Call
         for i in rows.indices {
@@ -998,14 +1144,15 @@ final class FT8EngineService: ObservableObject {
             let snrStr = String(format: "%+03d", Int(rows[i].estimatedSNR.rounded()))
             let dtStr = String(format: "%+.1f", rows[i].timeOffset)
             let freqStr = String(format: "%04d", Int(rows[i].audioFrequencyHz.rounded()))
-            appendAllTextLog(line: "\(slotUtc) \(dialMHzStr) Rx FT8 \(snrStr) \(dtStr) \(freqStr) \(rows[i].text)")
+            appendAllTextLog(line: "\(slotUtc) \(dialMHzStr) Rx \(protoStr) \(snrStr) \(dtStr) \(freqStr) \(rows[i].text)")
 
-            // Check for high-value opportunity alert (New DXCC or New Grid calling CQ)
-            if rows[i].isCQ && (rows[i].isNewDXCC || rows[i].isNewGrid) && rows[i].callerCall != myCall {
+            // Check for high-value opportunity alert (New Multiplier, New DXCC or New Grid calling CQ)
+            let isHighValue = rows[i].contestStatus.isMultiplier || rows[i].isNewDXCC || rows[i].isNewGrid
+            if rows[i].isCQ && isHighValue && rows[i].callerCall != myCall {
                 if let call = rows[i].callerCall {
                     latestOpportunityAlert = FT8OpportunityAlert(
                         callsign: call,
-                        entityName: rows[i].countryName,
+                        entityName: rows[i].contestStatus.isMultiplier ? rows[i].contestStatus.badgeLabel : rows[i].countryName,
                         flag: rows[i].countryFlag,
                         continent: rows[i].continent,
                         grid: rows[i].callerGrid ?? "",
@@ -1071,16 +1218,26 @@ final class FT8EngineService: ObservableObject {
 
     private func consume(_ frame: SpectrumFrame) {
         waterfallFrameCounter += 1
-        guard waterfallFrameCounter.isMultiple(of: 2) else { return }
+        guard waterfallFrameCounter.isMultiple(of: 5) else { return }
         let normalized = normalizeSpectrum(frame.magnitudesDB)
         guard !normalized.isEmpty else { return }
         waterfallRows.append(normalized)
-        if waterfallRows.count > 80 { waterfallRows.removeFirst(waterfallRows.count - 80) }
+        if waterfallRows.count > 240 { waterfallRows.removeFirst(waterfallRows.count - 240) }
         latestSpectrumMagnitudes = normalized
     }
 
     private func greedyScore(_ row: FT8DecodedRow) -> Int {
         var score = 0
+        if isContestMode {
+            if row.contestStatus.isMultiplier {
+                score += 500 // Multipliers take highest priority in contesting!
+            }
+            if row.contestStatus.isDupe {
+                score -= 1000 // Heavily penalize dupes
+            } else {
+                score += row.contestStatus.points * 25
+            }
+        }
         if row.isNewDXCC { score += 100 }
         if row.isNewGrid { score += 50 }
         if row.isNewCall { score += 30 }
@@ -1097,7 +1254,7 @@ final class FT8EngineService: ObservableObject {
         }
 
         let minSNR = Float(autoHunterMinSNR)
-        let currentBand = FT8BandPreset.common.first(where: { $0.frequencyHz == dialFrequencyHz })?.band ?? "20m"
+        let currentBand = currentBandName
 
         let cqs = rows.filter { row in
             guard row.isCQ, let caller = row.callerCall, !caller.isEmpty else { return false }
@@ -1139,12 +1296,12 @@ final class FT8EngineService: ObservableObject {
     private func consumeSequence(_ rows: [FT8DecodedRow]) {
         // Continuous CQ handling:
         if isCallingCQContinually {
-            // Greedy pileup selection if multiple stations answered our CQ!
             let callers = rows.filter { $0.isDirectedToMe }
             if !callers.isEmpty {
                 isCallingCQContinually = false
                 let bestCaller = callers.max(by: { greedyScore($0) < greedyScore($1) }) ?? callers[0]
-                qsoStreamItems.append(.status(id: UUID(), time: Date(), text: "~ Answered by \(bestCaller.callerCall ?? "") (Score \(greedyScore(bestCaller)))! Engaging...", isMilestone: true))
+                let multBadge = bestCaller.contestStatus.isMultiplier ? " 🌟 [\(bestCaller.contestStatus.badgeLabel)]" : ""
+                qsoStreamItems.append(.status(id: UUID(), time: Date(), text: "~ Answered by \(bestCaller.callerCall ?? "")\(multBadge) (Score \(greedyScore(bestCaller)))! Engaging...", isMilestone: true))
                 answerCallsign(bestCaller)
                 return
             } else if autoSequenceEnabled && transmitArmed && transmitTask == nil {
@@ -1152,6 +1309,65 @@ final class FT8EngineService: ObservableObject {
                 beginCQ()
                 scheduleTransmission()
                 return
+            }
+        }
+
+        if isContestMode {
+            // Contest Sequence Handler
+            if !dxCall.isEmpty {
+                if let targetRow = rows.first(where: { $0.callerCall == dxCall && ($0.isDirectedToMe || $0.text.contains(myCall)) }) {
+                    if targetRow.text.contains("RR73") || targetRow.text.contains(" 73") {
+                        // Contest QSO Finished & Logged!
+                        let completedDX = dxCall
+                        let currentBand = currentBandName
+                        let dialMHz = Double(dialFrequencyHz) / 1_000_000.0
+
+                        let logged = contestEngine.logContestQSO(
+                            callsign: completedDX,
+                            band: currentBand,
+                            mode: operatingProtocol == .ft4 ? "FT4" : "FT8",
+                            frequencyHz: dialFrequencyHz,
+                            sentReport: dxReport,
+                            rcvdReport: String(format: "%+03d", normalizedReport(targetRow.estimatedSNR)),
+                            sentExchange: myGrid,
+                            rcvdExchange: dxGrid,
+                            grid: dxGrid
+                        )
+
+                        let multBadge = logged?.isGridMultiplier == true || logged?.isDXCCMultiplier == true ? " 🌟 [MULT!]" : ""
+                        qsoStreamItems.append(.status(id: UUID(), time: Date(), text: "🏆 Contest QSO with \(completedDX) LOGGED! +\(logged?.points ?? 0) PTS\(multBadge)", isMilestone: true))
+                        status = "Contest QSO with \(completedDX) logged! Claimed Score: \(contestEngine.claimedScore)"
+
+                        logQSOHandler?(
+                            completedDX,
+                            dxGrid,
+                            dxReport,
+                            String(format: "%+03d", normalizedReport(targetRow.estimatedSNR)),
+                            currentBand,
+                            dialMHz
+                        )
+                        appendAllTextLog(line: "\(Self.utcTime(Date())) \(dialMHz) Contest QSO Logged: \(completedDX) \(dxGrid) \(operatingProtocol == .ft4 ? "FT4" : "FT8") \(currentBand)")
+
+                        dxCall = ""
+                        if resumeCQAfterQSO {
+                            Task { @MainActor in
+                                try? await Task.sleep(for: .seconds(1))
+                                if self.resumeCQAfterQSO && self.transmitArmed {
+                                    self.startContinuousCQ()
+                                }
+                            }
+                        }
+                        return
+                    } else if targetRow.text.contains(" R ") || targetRow.text.contains(" R+") || targetRow.text.contains(" R-") || targetRow.callerGrid != nil {
+                        // Received Roger/Exchange, reply with confirmation RR73
+                        txText = "\(dxCall) \(myCall) RR73"
+                        sequencePhase = "Contest RR73"
+                        if autoSequenceEnabled && transmitArmed && transmitTask == nil {
+                            scheduleTransmission()
+                        }
+                        return
+                    }
+                }
             }
         }
 
@@ -1166,7 +1382,7 @@ final class FT8EngineService: ObservableObject {
                 if sequencer.isComplete {
                     autoSequenceEnabled = false
                     let completedDX = sequencer.dxCall
-                    let currentBand = FT8BandPreset.common.first(where: { $0.frequencyHz == dialFrequencyHz })?.band ?? "20m"
+                    let currentBand = currentBandName
                     let dialMHz = Double(dialFrequencyHz) / 1_000_000.0
 
                     qsoStreamItems.append(.status(id: UUID(), time: Date(), text: "★ QSO with \(completedDX) successfully finished and logged!", isMilestone: true))
@@ -1181,7 +1397,7 @@ final class FT8EngineService: ObservableObject {
                         currentBand,
                         dialMHz
                     )
-                    appendAllTextLog(line: "\(Self.utcTime(Date())) \(dialMHz) QSO Logged: \(completedDX) \(dxGrid) FT8 \(currentBand)")
+                    appendAllTextLog(line: "\(Self.utcTime(Date())) \(dialMHz) QSO Logged: \(completedDX) \(dxGrid) \(operatingProtocol == .ft4 ? "FT4" : "FT8") \(currentBand)")
 
                     // Resume CQ if desired
                     if resumeCQAfterQSO {
@@ -1202,12 +1418,27 @@ final class FT8EngineService: ObservableObject {
 
     private func normalizeSpectrum(_ values: [Float]) -> [Float] {
         let finite = values.filter(\.isFinite).sorted()
-        guard finite.count > 4 else { return [] }
-        let floor = finite[finite.count / 5]
-        let ceiling = max(floor + 18, finite[(finite.count * 19) / 20])
+        guard finite.count > 10 else { return [] }
+        let currentFloor = finite[finite.count / 4]
+        let currentPeak = finite[(finite.count * 49) / 50]
+
+        if smoothedNoiseFloor == 0 {
+            smoothedNoiseFloor = currentFloor
+            smoothedRange = max(18.0, currentPeak - currentFloor)
+        } else {
+            smoothedNoiseFloor = 0.94 * smoothedNoiseFloor + 0.06 * currentFloor
+            let currentSpan = max(20.0, currentPeak - smoothedNoiseFloor)
+            smoothedRange = 0.94 * smoothedRange + 0.06 * currentSpan
+        }
+
+        let floor = smoothedNoiseFloor
+        let span = max(18.0, smoothedRange)
+
         return values.map { value in
             guard value.isFinite else { return 0 }
-            return min(1, max(0, (value - floor) / (ceiling - floor)))
+            let norm = (value - floor) / span
+            let clamped = min(1.0, max(0.0, norm))
+            return pow(clamped, 1.15)
         }
     }
 
@@ -1216,7 +1447,21 @@ final class FT8EngineService: ObservableObject {
         clockTask = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
-                secondsToNextTX = SlotClock.secondsUntilNextSlot(parity: txParity, after: Date())
+                let now = Date().timeIntervalSince1970
+                let elapsedInSlot = now.truncatingRemainder(dividingBy: slotDuration)
+                let remaining = max(0, slotDuration - elapsedInSlot)
+                slotProgress = min(1.0, max(0.0, elapsedInSlot / slotDuration))
+                slotRemainingSeconds = remaining
+                secondsToNextTX = DigitalSlotClock.secondsUntilNextSlot(parity: txParity, after: Date(), slotSeconds: slotDuration)
+
+                // Sync live meters from radio
+                if let icom = self.activeIcom {
+                    self.livePowerWatts = icom.rfPowerWatts
+                    self.liveSWR = icom.swr
+                    self.liveALC = icom.alcLevel
+                    self.liveSMeter = icom.sMeterUnits
+                }
+
                 try? await Task.sleep(for: .milliseconds(100))
             }
         }
