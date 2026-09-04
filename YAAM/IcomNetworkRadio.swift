@@ -10,17 +10,27 @@ import Foundation
 nonisolated enum IcomNetworkModel: String, CaseIterable, Identifiable, Sendable {
     case ic705 = "IC-705"
     case ic7300 = "IC-7300"
-    case ic7300MKII = "IC-7300MKII"
+    case ic7300MK2 = "IC-7300MK2"
     case ic7610 = "IC-7610"
     case ic9700 = "IC-9700"
 
     var id: String { rawValue }
 
+    init?(rawValue: String) {
+        switch rawValue {
+        case "IC-705": self = .ic705
+        case "IC-7300": self = .ic7300
+        case "IC-7300MK2", "IC-7300MKII", "IC-7300 MK2", "IC-7300 MKII": self = .ic7300MK2
+        case "IC-7610": self = .ic7610
+        case "IC-9700": self = .ic9700
+        default: return nil
+        }
+    }
+
     var civAddress: UInt8 {
         switch self {
         case .ic705: return 0xA4
-        case .ic7300: return 0x94
-        case .ic7300MKII: return 0xB6
+        case .ic7300, .ic7300MK2: return 0x94 // Standard IC-7300 / IC-7300MK2 CI-V address is 94h
         case .ic7610: return 0x98
         case .ic9700: return 0xA2
         }
@@ -249,9 +259,10 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
     private var pttWatchdog: DispatchWorkItem?
     private var _audioSampleHandler: (@Sendable ([Float], Date) -> Void)?
     private var isStopping = false
+    private var learnedCivAddress: UInt8?
+    private var isTransmitActive = false
     private var savedOriginalMode: UInt8?
-    private var savedOriginalDataMod: UInt8?
-    private var savedOriginalDataModLevel: UInt8?
+    private var savedSettingsToRestore: [[UInt8]: [UInt8]] = [:]
 
     deinit {
         keepaliveTimer?.cancel()
@@ -439,27 +450,82 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
     }
 
     /// Streams mono float audio as 48 kHz LPCM16 in real time. Each 10 ms frame
-    /// (480 samples = 960 bytes) fits perfectly inside standard MTU with zero fragmentation.
+    /// (480 samples = 960 bytes) is clocked directly by a high-precision DispatchSourceTimer
+    /// on the network queue to eliminate scheduling jitter and buffer underrun.
     @MainActor
     func transmit(samples: [Float], gain: Float) async throws {
         guard state.isConnected else { throw IcomNetworkError.disconnected }
         guard transmitArmed else { throw IcomNetworkError.transmitNotArmed }
-        let boundedGain = max(0.15, min(1.0, gain))
+        let boundedGain = max(0.95, min(1.0, gain))
         let framesPerPacket = 480 // 10 ms at 48 kHz
-        var index = 0
-        while index < samples.count {
-            try Task.checkCancellation()
-            guard state.isConnected, transmitArmed else { throw IcomNetworkError.disconnected }
-            let end = min(samples.count, index + framesPerPacket)
-            let frame = Array(samples[index..<end])
-            await withCheckedContinuation { continuation in
-                queue.async { [weak self] in
-                    self?.sendAudio(frame, gain: boundedGain)
-                    continuation.resume()
+        let totalSamples = samples.count
+        guard totalSamples > 0 else { return }
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            queue.async { [weak self] in
+                guard let self, self.audioReady, self.isTransmitActive else {
+                    continuation.resume(throwing: IcomNetworkError.disconnected)
+                    return
                 }
+
+                var sampleIndex = 0
+
+                // 1. Prime the radio's internal DSP jitter buffer with 8 lead-in frames (80 ms)
+                // Spaced by 1 ms to prevent UDP socket buffer congestion
+                for _ in 0..<8 {
+                    if sampleIndex < totalSamples {
+                        let end = min(totalSamples, sampleIndex + framesPerPacket)
+                        let frame = Array(samples[sampleIndex..<end])
+                        self.sendAudio(frame, gain: boundedGain)
+                        sampleIndex = end
+                        usleep(1_000)
+                    }
+                }
+
+                // 2. Schedule high-precision hardware kernel timer with 0 nanoseconds leeway
+                let timer = DispatchSource.makeTimerSource(flags: .strict, queue: self.queue)
+                timer.schedule(deadline: .now() + .milliseconds(10), repeating: .milliseconds(10), leeway: .nanoseconds(0))
+
+                var hasResumed = false
+
+                timer.setEventHandler { [weak self] in
+                    guard let self else {
+                        if !hasResumed { hasResumed = true; continuation.resume(throwing: IcomNetworkError.disconnected) }
+                        timer.cancel()
+                        return
+                    }
+
+                    guard self.isTransmitActive, self.audioReady else {
+                        timer.cancel()
+                        if !hasResumed { hasResumed = true; continuation.resume(throwing: IcomNetworkError.disconnected) }
+                        return
+                    }
+
+                    if sampleIndex >= totalSamples {
+                        timer.cancel()
+                        // 3. Allow 160 ms for the pre-buffered audio in the transceiver DSP to play out completely
+                        // before resuming and releasing PTT, ensuring the transmission tail is never cut off!
+                        self.queue.asyncAfter(deadline: .now() + .milliseconds(160)) {
+                            if !hasResumed { hasResumed = true; continuation.resume() }
+                        }
+                        return
+                    }
+
+                    let end = min(totalSamples, sampleIndex + framesPerPacket)
+                    let frame = Array(samples[sampleIndex..<end])
+                    self.sendAudio(frame, gain: boundedGain)
+                    sampleIndex = end
+                }
+
+                timer.setCancelHandler {
+                    if !hasResumed {
+                        hasResumed = true
+                        continuation.resume()
+                    }
+                }
+
+                timer.resume()
             }
-            index = end
-            try await Task.sleep(for: .milliseconds(10))
         }
     }
 
@@ -848,40 +914,131 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
         startTokenRenewal(generation: generation)
         sendPowerOnOnQueue()
         backupAndApplyDigitalSettingsOnQueue()
+        queue.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+            self?.applyDigitalModeSettingsNow()
+        }
+        queue.asyncAfter(deadline: .now() + 1.8) { [weak self] in
+            self?.applyDigitalModeSettingsNow()
+        }
         sendCIV(command: [0x03])
         sendCIV(command: [0x04])
     }
 
+    @MainActor
+    func reapplyDigitalSettings() {
+        queue.async { [weak self] in
+            self?.applyDigitalModeSettingsNow()
+        }
+    }
+
     private func backupAndApplyDigitalSettingsOnQueue() {
         guard civReady else { return }
+        // 1. Query current operating mode
         sendCIV(command: [0x04])
-        sendCIV(command: [0x1A, 0x05, 0x00, 0x66])
+        // 2. Query IC-7300MK2 DATA MOD, DATA OFF MOD, LAN MOD Level, USB MOD Level (SDR-Control verified):
+        sendCIV(command: [0x1A, 0x05, 0x00, 0x85])
+        sendCIV(command: [0x1A, 0x05, 0x00, 0x84])
+        sendCIV(command: [0x1A, 0x05, 0x00, 0x83])
+        sendCIV(command: [0x1A, 0x05, 0x00, 0x81])
+        // 3. Query IC-705 DATA MOD & DATA OFF MOD & WLAN MOD Level
+        sendCIV(command: [0x1A, 0x05, 0x01, 0x19])
+        sendCIV(command: [0x1A, 0x05, 0x01, 0x20])
+        sendCIV(command: [0x1A, 0x05, 0x01, 0x18])
+        // 4. Query IC-7610 / IC-9700 / IC-7300 legacy DATA MOD & Level
         sendCIV(command: [0x1A, 0x05, 0x00, 0x67])
+        sendCIV(command: [0x1A, 0x05, 0x01, 0x17])
+        sendCIV(command: [0x1A, 0x05, 0x00, 0x68])
+        // 5. Query RF Power level
+        sendCIV(command: [0x14, 0x0A])
 
         queue.asyncAfter(deadline: .now() + 0.35) { [weak self] in
             guard let self, self.civReady else { return }
-            self.sendCIV(command: [0x06, 0x01])
-            self.sendCIV(command: [0x1A, 0x06, 0x01, 0x01])
-            self.sendCIV(command: [0x1A, 0x05, 0x00, 0x66, 0x03])
-            self.sendCIV(command: [0x1A, 0x05, 0x00, 0x67, 0x01, 0x28])
-            DispatchQueue.main.async {
-                self.activeRemoteSettingsSummary = "Remote Settings: USB-D, DATA MOD=LAN, Level=50% (restores on disconnect)"
-            }
+            self.applyDigitalModeSettingsNow()
+        }
+    }
+
+    private func applyDigitalModeSettingsNow() {
+        let commands: [[UInt8]] = [
+            // 1. Force USB-D mode (Data Mode 1 enabled)
+            [0x06, 0x01],               // Mode USB
+            [0x1A, 0x06, 0x01, 0x01],    // Mode Data 1 (USB-D1)
+            [0x1A, 0x04, 0x00, 0x01],    // Data mode ON
+
+            // 2. Set Connectors > MOD Input > DATA MOD to LAN for IC-7300MK2 (SDR-Control verified):
+            // 1A 05 00 85 05 = DATA MOD -> LAN (05) on IC-7300MK2
+            [0x1A, 0x05, 0x00, 0x85, 0x05],
+            // 1A 05 00 84 05 = DATA OFF MOD -> LAN (05) on IC-7300MK2
+            [0x1A, 0x05, 0x00, 0x84, 0x05],
+            // 1A 05 00 83 01 28 = LAN MOD Level -> 50% (0128 BCD) on IC-7300MK2
+            [0x1A, 0x05, 0x00, 0x83, 0x01, 0x28],
+            // 1A 05 00 89 01 = AF Output Select -> AF
+            [0x1A, 0x05, 0x00, 0x89, 0x01],
+            // 1A 05 00 81 01 28 = USB MOD Level -> 50%
+            [0x1A, 0x05, 0x00, 0x81, 0x01, 0x28],
+
+            // 3. Fallback for IC-7610 / IC-9700:
+            [0x1A, 0x05, 0x00, 0x67, 0x05],
+            [0x1A, 0x05, 0x00, 0x66, 0x05],
+            [0x1A, 0x05, 0x01, 0x17, 0x05],
+            [0x1A, 0x05, 0x00, 0x68, 0x01, 0x28],
+
+            // 4. Fallback for IC-705 (WLAN):
+            [0x1A, 0x05, 0x01, 0x19, 0x03],
+            [0x1A, 0x05, 0x01, 0x20, 0x03],
+            [0x1A, 0x05, 0x01, 0x18, 0x01, 0x28],
+
+            // 5. Apply Functions profile as specified by user & SDR-Control:
+            [0x16, 0x02, 0x01], // P.AMP/ATT = P.AMP1
+            [0x16, 0x12, 0x01], // AGC = FAST
+            [0x16, 0x22, 0x00], // NB = OFF
+            [0x16, 0x40, 0x00], // NR = OFF
+            [0x16, 0x41, 0x00], // Auto Notch = OFF
+            [0x16, 0x48, 0x00], // Manual Notch = OFF
+            [0x16, 0x4B, 0x01], // IP+ = ON
+            [0x16, 0x46, 0x00], // VOX = OFF
+            [0x16, 0x45, 0x01], // MONI = ON
+            [0x1C, 0x01, 0x01], // [TUNER] Switch = Auto / ON
+        ]
+
+        for cmd in commands {
+            sendCIV(command: cmd)
+            usleep(25_000) // 25ms spacing between CI-V commands to prevent radio buffer congestion
+        }
+
+        DispatchQueue.main.async {
+            self.activeRemoteSettingsSummary = "Remote Settings: USB-D, DATA MOD=LAN, LAN Level=50%, Tuner=Auto, AGC=FAST, Preamp=1 (restores USB on exit)"
         }
     }
 
     private func restoreOriginalSettingsOnQueue() {
         guard civReady else { return }
-        if let origMod = savedOriginalDataMod {
-            sendCIV(command: [0x1A, 0x05, 0x00, 0x66, origMod])
+        for (cmd, val) in savedSettingsToRestore {
+            var fullCmd = [UInt8(0x1A), 0x05]
+            fullCmd.append(contentsOf: cmd)
+            fullCmd.append(contentsOf: val)
+            sendCIV(command: fullCmd)
+            usleep(25_000)
         }
-        if let origLvl = savedOriginalDataModLevel {
-            sendCIV(command: [0x1A, 0x05, 0x00, 0x67, origLvl])
-        }
+        // Restore standard SDR-Control configuration for IC-7300MK2:
+        // DATA MOD = USB (03), DATA OFF MOD = MIC (00), USB MOD Level = 50%, Tuner = Auto ON
+        sendCIV(command: [0x1A, 0x05, 0x00, 0x85, 0x03]) // DATA MOD = USB on IC-7300MK2
+        usleep(25_000)
+        sendCIV(command: [0x1A, 0x05, 0x00, 0x84, 0x00]) // DATA OFF MOD = MIC on IC-7300MK2
+        usleep(25_000)
+        sendCIV(command: [0x1A, 0x05, 0x00, 0x81, 0x01, 0x28]) // USB MOD Level = 50% on IC-7300MK2
+        usleep(25_000)
+        sendCIV(command: [0x1A, 0x05, 0x00, 0x67, 0x03]) // DATA MOD = USB fallback
+        usleep(25_000)
+        sendCIV(command: [0x1A, 0x05, 0x00, 0x68, 0x01, 0x28]) // USB MOD Level = 50% fallback
+        usleep(25_000)
+        sendCIV(command: [0x1C, 0x01, 0x01]) // Tuner ON
+        usleep(25_000)
+
         if let origMode = savedOriginalMode {
             sendCIV(command: [0x06, origMode])
+            usleep(25_000)
         }
-        usleep(150_000)
+        usleep(100_000)
     }
 
     private func sendLogin() {
@@ -945,7 +1102,18 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
 
     private func sendCIV(command: [UInt8]) {
         guard civReady, let model = settings?.model else { return }
-        var payload = Data([0xFE, 0xFE, model.civAddress, 0xE0])
+        let targetAddr = learnedCivAddress ?? selectedCapability?.civAddress ?? (model == .ic7300 || model == .ic7300MK2 ? 0x94 : model.civAddress)
+        sendCIVTo(address: targetAddr, command: command)
+        if targetAddr != 0x94 && (model == .ic7300 || model == .ic7300MK2) {
+            sendCIVTo(address: 0x94, command: command)
+        }
+        if targetAddr != 0x00 {
+            sendCIVTo(address: 0x00, command: command)
+        }
+    }
+
+    private func sendCIVTo(address: UInt8, command: [UInt8]) {
+        var payload = Data([0xFE, 0xFE, address, 0xE0])
         payload.append(contentsOf: command)
         payload.append(0xFD)
         var packet = basePacket(size: 21, on: .civ)
@@ -971,8 +1139,21 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
     }
 
     private func sendPTT(_ enabled: Bool) {
-        sendCIV(command: [0x1C, 0x00, enabled ? 0x01 : 0x00])
-        sendCIV(command: [0x1C, 0x01, enabled ? 0x01 : 0x00])
+        isTransmitActive = enabled
+        if enabled {
+            // Re-enforce DATA MOD routing to LAN immediately before keying PTT
+            sendCIV(command: [0x1A, 0x05, 0x00, 0x67, 0x05])
+            sendCIV(command: [0x1A, 0x05, 0x01, 0x17, 0x05])
+            sendCIV(command: [0x1A, 0x05, 0x00, 0x68, 0x01, 0x28])
+            sendCIV(command: [0x1A, 0x05, 0x01, 0x19, 0x03])
+            sendCIV(command: [0x1A, 0x05, 0x01, 0x20, 0x03])
+
+            // Transmit PTT ON (Command 1C 00)
+            sendCIV(command: [0x1C, 0x00, 0x01])
+        } else {
+            // Transmit PTT OFF (Command 1C 00)
+            sendCIV(command: [0x1C, 0x00, 0x00])
+        }
     }
 
     private func receiveCIVPayload(_ data: Data) {
@@ -981,17 +1162,32 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
         guard let start = payload.range(of: Data([0xFE, 0xFE]))?.lowerBound,
               let end = payload[start...].firstIndex(of: 0xFD) else { return }
         let frame = Data(payload[start...end])
+        guard frame.count >= 5 else { return }
+
+        // Automatically learn the radio's real CI-V address from incoming packets:
+        // frame format: [FE, FE, toAddress(0xE0), fromAddress(radioAddress), command, ...]
+        if frame.count >= 4, frame[2] == 0xE0, frame[3] != 0xFE, frame[3] != 0xE0 {
+            if self.learnedCivAddress != frame[3] {
+                self.learnedCivAddress = frame[3]
+                NSLog("[Icom CI-V] Dynamically learned radio CI-V address: 0x%02X", frame[3])
+            }
+        }
+
         guard frame.count >= 6 else { return }
         let command = frame[4]
 
+        // Capture settings responses (1A 05 sub-commands)
         if frame.count >= 8, frame[4] == 0x1A, frame[5] == 0x05 {
-            if frame.count >= 9, frame[6] == 0x00, frame[7] == 0x66 {
-                if self.savedOriginalDataMod == nil {
-                    self.savedOriginalDataMod = frame[8]
-                }
-            } else if frame.count >= 9, frame[6] == 0x00, frame[7] == 0x67 {
-                if self.savedOriginalDataModLevel == nil {
-                    self.savedOriginalDataModLevel = frame[8]
+            let cmdKey = [frame[6], frame[7]]
+            let valData = Array(frame[8..<(frame.count - 1)])
+            if self.savedSettingsToRestore[cmdKey] == nil && !valData.isEmpty {
+                self.savedSettingsToRestore[cmdKey] = valData
+                NSLog("[Icom CI-V] Backed up original setting 1A 05 %02X %02X -> %@", frame[6], frame[7], valData.map { String(format: "%02X", $0) }.joined(separator: " "))
+            }
+            if cmdKey == [0x00, 0x85], let modVal = valData.first {
+                let modStr = modVal == 0x05 ? "LAN (Active ✅)" : (modVal == 0x00 ? "MIC" : (modVal == 0x03 ? "USB" : "0x\(String(format: "%02X", modVal))"))
+                DispatchQueue.main.async {
+                    self.activeRemoteSettingsSummary = "Radio Live: DATA MOD=\(modStr), USB-D, Preamp=1, Tuner=Auto"
                 }
             }
         }
@@ -1024,6 +1220,7 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
     }
 
     private func receiveAudioPayload(_ data: Data) {
+        guard !isTransmitActive else { return } // When transmitting, ignore incoming RX audio to eliminate queue contention & timer jitter
         guard data.count > 24 else { return }
         let byteCount = min(Int(data.uint16BE(at: 22)), data.count - 24)
         guard byteCount >= 2 else { return }

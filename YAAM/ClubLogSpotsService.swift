@@ -49,6 +49,50 @@ nonisolated struct ClubLogSpotModel: Identifiable, Sendable {
         return m == "FT8" || m == "FT4" || m == "RTTY" || m == "PSK" || m == "PSK31" || m == "JS8" || m == "DATA" || m == "DIGI" || m == "Q65" || m == "MSK144" || m.contains("FT") || c.contains("FT8") || c.contains("FT4") || c.contains("RTTY") || c.contains("PSK")
     }
 
+    var localTimeStr: String {
+        let trimmed = timeStr.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+
+        let formats = [
+            "yyyy-MM-dd HH:mm:ss",
+            "yyyy-MM-dd HH:mm",
+            "yyyy/MM/dd HH:mm:ss",
+            "yyyy/MM/dd HH:mm",
+            "HH:mm:ss",
+            "HH:mm",
+            "HHmm"
+        ]
+
+        let utcFormatter = DateFormatter()
+        utcFormatter.timeZone = TimeZone(secondsFromGMT: 0)
+        utcFormatter.locale = Locale(identifier: "en_US_POSIX")
+
+        var parsedDate: Date?
+        var hadDate = false
+
+        for format in formats {
+            utcFormatter.dateFormat = format
+            if let d = utcFormatter.date(from: trimmed) {
+                parsedDate = d
+                hadDate = format.contains("yyyy")
+                break
+            }
+        }
+
+        guard let date = parsedDate else { return trimmed }
+
+        let localFormatter = DateFormatter()
+        localFormatter.timeZone = TimeZone.current
+        localFormatter.locale = Locale.current
+
+        if hadDate {
+            localFormatter.dateFormat = "yyyy-MM-dd HH:mm"
+        } else {
+            localFormatter.dateFormat = "HH:mm"
+        }
+        return localFormatter.string(from: date)
+    }
+
     var isVoice: Bool {
         let m = mode.uppercased()
         let c = comment.uppercased()

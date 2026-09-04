@@ -1295,8 +1295,8 @@ struct Leaderboard360RadarView: View {
     }
 
     // QRZ Leaderboard Potentials:
-    // 12 amateur bands * 340 active entities = 4,080 total Band-Countries
-    private let totalBandCountriesPotential: Double = 4080.0
+    // 11 amateur bands * 340 active entities = 3,740 total Band-Countries
+    private let totalBandCountriesPotential: Double = 3740.0
     // 340 currently active DXCC entities
     private let totalActiveDXCCEntities: Double = 340.0
 
@@ -1340,12 +1340,92 @@ struct Leaderboard360RadarView: View {
         return max(0.02, min(1.0, count / totalActiveDXCCEntities))
     }
 
-    private var todaysQSOCount: Int {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyyMMdd"
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
-        let todayStr = formatter.string(from: Date())
-        return stationRecords.filter { $0["QSO_DATE"].replacingOccurrences(of: "-", with: "") == todayStr }.count
+    struct DailyConfirmedPerformance {
+        struct DayEntry: Identifiable {
+            let id: String // "yyyyMMdd"
+            let dateStr: String // "MM/dd"
+            let confirmedCount: Int
+            let totalCount: Int
+        }
+
+        let todaysConfirmed: Int
+        let todaysTotal: Int
+        let latestDayConfirmed: Int
+        let latestDayTotal: Int
+        let latestDayLabel: String
+        let avgConfirmedPerDay: Double
+        let totalConfirmed: Int
+        let totalActiveDays: Int
+        let recentDays: [DayEntry]
+    }
+
+    private var dailyConfirmedPerformance: DailyConfirmedPerformance {
+        var dayCounts: [String: (total: Int, confirmed: Int)] = [:]
+
+        for r in stationRecords {
+            let cleanDate = r["QSO_DATE"].filter(\.isNumber)
+            guard cleanDate.count >= 8 else { continue }
+            let key = String(cleanDate.prefix(8))
+            var entry = dayCounts[key] ?? (0, 0)
+            entry.total += 1
+            if r.isConfirmed {
+                entry.confirmed += 1
+            }
+            dayCounts[key] = entry
+        }
+
+        let sortedKeys = dayCounts.keys.sorted()
+        let totalConfirmed = stationRecords.filter(\.isConfirmed).count
+        let totalActiveDays = sortedKeys.count
+        let avgConfirmed = totalActiveDays > 0 ? Double(totalConfirmed) / Double(totalActiveDays) : 0.0
+
+        let todayUTC: String = {
+            let fmt = DateFormatter()
+            fmt.dateFormat = "yyyyMMdd"
+            fmt.timeZone = TimeZone(secondsFromGMT: 0)
+            return fmt.string(from: Date())
+        }()
+        let todayLocal: String = {
+            let fmt = DateFormatter()
+            fmt.dateFormat = "yyyyMMdd"
+            fmt.timeZone = TimeZone.current
+            return fmt.string(from: Date())
+        }()
+
+        let todayEntry = dayCounts[todayLocal] ?? dayCounts[todayUTC] ?? (0, 0)
+
+        let latestKey = sortedKeys.last ?? ""
+        let latestEntry = dayCounts[latestKey] ?? (0, 0)
+        let latestFormatted: String = {
+            guard latestKey.count >= 8 else { return "N/A" }
+            let m = latestKey.dropFirst(4).prefix(2)
+            let d = latestKey.dropFirst(6).prefix(2)
+            return "\(m)/\(d)"
+        }()
+
+        let recentDays: [DailyConfirmedPerformance.DayEntry] = sortedKeys.suffix(6).map { key in
+            let item = dayCounts[key] ?? (0, 0)
+            let m = key.dropFirst(4).prefix(2)
+            let d = key.dropFirst(6).prefix(2)
+            return DailyConfirmedPerformance.DayEntry(
+                id: key,
+                dateStr: "\(m)/\(d)",
+                confirmedCount: item.confirmed,
+                totalCount: item.total
+            )
+        }
+
+        return DailyConfirmedPerformance(
+            todaysConfirmed: todayEntry.confirmed,
+            todaysTotal: todayEntry.total,
+            latestDayConfirmed: latestEntry.confirmed,
+            latestDayTotal: latestEntry.total,
+            latestDayLabel: latestFormatted,
+            avgConfirmedPerDay: avgConfirmed,
+            totalConfirmed: totalConfirmed,
+            totalActiveDays: totalActiveDays,
+            recentDays: recentDays
+        )
     }
 
     var body: some View {
@@ -1472,7 +1552,7 @@ struct Leaderboard360RadarView: View {
                         radarMetricTile(
                             title: "BAND COVERAGE",
                             value: target?.rank_band ?? "N/A",
-                            subtitle: "\(target?.score_band ?? "0") / 4,080 Band-Countries",
+                            subtitle: "\(target?.score_band ?? "0") / 3,740 Band-Countries (11 Bands)",
                             icon: "waveform.path.ecg",
                             color: .orange,
                             progress: bandVal
@@ -1491,7 +1571,7 @@ struct Leaderboard360RadarView: View {
 
                         radarDailyVelocityTile(
                             isOwner: isOwner,
-                            todaysQSOs: todaysQSOCount,
+                            perf: dailyConfirmedPerformance,
                             target: target
                         )
                     }
@@ -1549,12 +1629,12 @@ struct Leaderboard360RadarView: View {
 
     private func radarDailyVelocityTile(
         isOwner: Bool,
-        todaysQSOs: Int,
+        perf: DailyConfirmedPerformance,
         target: QRZRankResponse?
     ) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 5) {
-                Image(systemName: "bolt.fill")
+                Image(systemName: "checkmark.seal.fill")
                     .font(.caption.weight(.bold))
                     .foregroundColor(.cyan)
                 Text("DAILY PERFORMANCE")
@@ -1563,7 +1643,7 @@ struct Leaderboard360RadarView: View {
                     .tracking(0.5)
                 Spacer()
                 if isOwner {
-                    Text("LIVE")
+                    Text("CONFIRMED")
                         .font(.system(size: 8, weight: .black))
                         .padding(.horizontal, 4)
                         .padding(.vertical, 1)
@@ -1573,16 +1653,62 @@ struct Leaderboard360RadarView: View {
             }
 
             if isOwner {
-                Text("\(todaysQSOs) QSOs Today")
-                    .font(.system(size: 15, weight: .bold, design: .monospaced))
-                    .foregroundColor(.primary)
+                HStack(alignment: .firstTextBaseline) {
+                    if perf.todaysConfirmed > 0 {
+                        Text("\(perf.todaysConfirmed) Confirmed Today")
+                            .font(.system(size: 14, weight: .bold, design: .monospaced))
+                            .foregroundColor(.primary)
+                    } else {
+                        Text("\(String(format: "%.1f", perf.avgConfirmedPerDay)) Confirmed / Day")
+                            .font(.system(size: 14, weight: .bold, design: .monospaced))
+                            .foregroundColor(.primary)
+                    }
+                    Spacer()
+                    Text("Avg: \(Int(round(perf.avgConfirmedPerDay)))/day")
+                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                        .foregroundColor(.cyan)
+                }
 
-                ProgressView(value: min(1.0, Double(todaysQSOs) / 25.0))
-                    .progressViewStyle(.linear)
-                    .tint(.cyan)
+                // Mini daily confirmed sparkline bars (recent active days)
+                if !perf.recentDays.isEmpty {
+                    let maxRecent = max(1, perf.recentDays.map(\.confirmedCount).max() ?? 1)
+                    HStack(alignment: .bottom, spacing: 5) {
+                        ForEach(perf.recentDays) { day in
+                            VStack(spacing: 2) {
+                                Text("\(day.confirmedCount)")
+                                    .font(.system(size: 7, weight: .bold, design: .monospaced))
+                                    .foregroundColor(.secondary)
 
-                Text(todaysQSOs >= 20 ? "🔥 Outstanding daily logging pace!" : (todaysQSOs > 0 ? "Steady daily activity." : "No QSOs logged today yet."))
-                    .font(.caption2)
+                                RoundedRectangle(cornerRadius: 2)
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [.cyan, .blue],
+                                            startPoint: .top,
+                                            endPoint: .bottom
+                                        )
+                                    )
+                                    .frame(
+                                        width: 18,
+                                        height: max(4, CGFloat(day.confirmedCount) / CGFloat(maxRecent) * 16)
+                                    )
+
+                                Text(day.dateStr)
+                                    .font(.system(size: 7, design: .monospaced))
+                                    .foregroundColor(.secondary)
+                            }
+                            .help("\(day.dateStr): \(day.confirmedCount) confirmed / \(day.totalCount) QSOs")
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.vertical, 1)
+                } else {
+                    ProgressView(value: min(1.0, perf.avgConfirmedPerDay / 50.0))
+                        .progressViewStyle(.linear)
+                        .tint(.cyan)
+                }
+
+                Text("Latest: \(perf.latestDayConfirmed) confirmed (\(perf.latestDayLabel)) · \(perf.totalConfirmed) total confirmed")
+                    .font(.system(size: 8))
                     .foregroundColor(.secondary)
                     .lineLimit(1)
             } else {

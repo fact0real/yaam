@@ -407,7 +407,7 @@ final class FT8EngineService: ObservableObject {
     @Published var audioPath: FT8AudioPath = .icomLAN
     @Published var dialFrequencyHz: UInt64 = 14_074_000
     @Published var txAudioFrequencyHz: Float = 1_500
-    @Published var txGain: Float = 0.35
+    @Published var txGain: Float = 0.80
     @Published var txParity: SlotParity = .even
     @Published var txText = ""
     @Published var myCall = ""

@@ -526,12 +526,19 @@ struct ClubLogSpotsView: View {
                         }
                         .width(min: 80, ideal: 110)
 
-                        TableColumn("Time (UTC)") { spot in
-                            Text(spot.timeStr)
-                                .font(.caption2)
-                                .foregroundColor(.secondary)
+                        TableColumn("Time (Local)") { spot in
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(spot.localTimeStr)
+                                    .font(.caption2.monospacedDigit())
+                                    .foregroundColor(.primary)
+                                if !spot.timeStr.isEmpty {
+                                    Text("\(spot.timeStr) UTC")
+                                        .font(.system(size: 9))
+                                        .foregroundColor(.secondary)
+                                }
+                            }
                         }
-                        .width(min: 70, ideal: 90)
+                        .width(min: 85, ideal: 110)
 
                         TableColumn("Actions") { spot in
                             HStack(spacing: 6) {

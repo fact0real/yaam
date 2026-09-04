@@ -82,6 +82,9 @@ struct DXAdvisorView: View {
     @State private var selectedBulkEmailCallsigns: Set<String> = []
     @State private var fetchingEmailCallsigns: Set<String> = []
     @State private var logSnapshot = DXAdvisorLogSnapshot.empty
+    @State private var selectedAdvisorTab = 0
+    @State private var voacapSearchQuery = ""
+    @State private var voacapFilterMode = "All"
 
     private var utcHour: Int {
         Calendar(identifier: .gregorian).component(.hour, from: Date())
@@ -158,6 +161,24 @@ struct DXAdvisorView: View {
         cachedPathPredictions
     }
 
+    private var filteredPathPredictions: [DXPathPrediction] {
+        pathPredictions.filter { pred in
+            if voacapFilterMode == "Needed" && !pred.needsConfirmation {
+                return false
+            }
+            if voacapFilterMode == "High Score" && (pred.bestScore?.score ?? 0) < 70 {
+                return false
+            }
+            if !voacapSearchQuery.trimmingCharacters(in: .whitespaces).isEmpty {
+                let query = voacapSearchQuery.trimmingCharacters(in: .whitespaces).lowercased()
+                if !pred.country.lowercased().contains(query) {
+                    return false
+                }
+            }
+            return true
+        }
+    }
+
     private func makePathPredictions() -> [DXPathPrediction] {
         guard let origin = stationCoordinate else { return [] }
 
@@ -210,22 +231,21 @@ struct DXAdvisorView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
+            tabSelector
             Divider()
 
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 16) {
-                    propagationSummary
-                    voacapPlannerSection
-                    bandOpportunityMatrixSection
-                    bandRecommendationSection
-                    unconfirmedCountriesSection
-                    unconfirmedCallsignSection
-                    bulkEmailSection
-                    emailHistorySection
-                }
-                .padding(16)
+            switch selectedAdvisorTab {
+            case 0:
+                spaceWeatherView
+            case 1:
+                voacapPlannerView
+            case 2:
+                bandOpportunitiesAndTargetsView
+            case 3:
+                qslEmailOutreachView
+            default:
+                spaceWeatherView
             }
-            .background(Color(NSColor.textBackgroundColor))
         }
         .onAppear {
             if appState.propagationSnapshot.updatedAt == nil {
@@ -246,6 +266,86 @@ struct DXAdvisorView: View {
         .onChange(of: bulkEmailRecipients.count) { _, _ in syncBulkEmailSelection() }
     }
 
+    private var tabSelector: some View {
+        HStack(spacing: 12) {
+            Picker("", selection: $selectedAdvisorTab) {
+                Label("Space Weather & Solar", systemImage: "sun.max.fill").tag(0)
+                Label("VOACAP Path Planner", systemImage: "safari.fill").tag(1)
+                Label("Band Targets & DXCC", systemImage: "target").tag(2)
+                Label("QSL Email Outreach", systemImage: "envelope.badge.fill").tag(3)
+            }
+            .pickerStyle(.segmented)
+            .frame(maxWidth: 680)
+
+            Spacer()
+
+            Text(tabContextBadge)
+                .font(.caption2)
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
+                .cornerRadius(5)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(Color(NSColor.windowBackgroundColor))
+    }
+
+    private var tabContextBadge: String {
+        switch selectedAdvisorTab {
+        case 0: return "NOAA SWPC & HamQSL Live"
+        case 1: return "\(pathPredictions.count) DX Paths Evaluated"
+        case 2: return "\(unconfirmedCountries.count) Unconfirmed Countries"
+        case 3: return "\(bulkEmailRecipients.count) Email Candidates"
+        default: return ""
+        }
+    }
+
+    private var spaceWeatherView: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                propagationSummary
+            }
+            .padding(16)
+        }
+        .background(Color(NSColor.textBackgroundColor))
+    }
+
+    private var voacapPlannerView: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                voacapPlannerSection
+            }
+            .padding(16)
+        }
+        .background(Color(NSColor.textBackgroundColor))
+    }
+
+    private var bandOpportunitiesAndTargetsView: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                bandRecommendationSection
+                bandOpportunityMatrixSection
+                unconfirmedCountriesSection
+                unconfirmedCallsignSection
+            }
+            .padding(16)
+        }
+        .background(Color(NSColor.textBackgroundColor))
+    }
+
+    private var qslEmailOutreachView: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                bulkEmailSection
+                emailHistorySection
+            }
+            .padding(16)
+        }
+        .background(Color(NSColor.textBackgroundColor))
+    }
+
     private var header: some View {
         HStack(spacing: 10) {
             Image(systemName: "scope")
@@ -255,7 +355,7 @@ struct DXAdvisorView: View {
                 Text("DX Advisor")
                     .font(.title3)
                     .bold()
-                Text("Heuristic band and confirmation targets from your YAAM log")
+                Text(headerSubtitle)
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -274,6 +374,21 @@ struct DXAdvisorView: View {
         }
         .padding(12)
         .background(Color(NSColor.windowBackgroundColor))
+    }
+
+    private var headerSubtitle: String {
+        switch selectedAdvisorTab {
+        case 0:
+            return "Real-time solar indices, NOAA 27-day forecast, and HF/VHF ionospheric conditions"
+        case 1:
+            return "VOACAP ionospheric path predictions, Great Circle bearings, and optimal bands"
+        case 2:
+            return "Diurnal band opportunities and unconfirmed DXCC targets from your log"
+        case 3:
+            return "Bulk QSL request email dispatch and communication audit trail"
+        default:
+            return "Heuristic band and confirmation targets from your YAAM log"
+        }
     }
 
     private var propagationSummary: some View {
@@ -459,12 +574,53 @@ struct DXAdvisorView: View {
                     .foregroundColor(.secondary)
             }
 
+            if stationCoordinate != nil && !pathPredictions.isEmpty {
+                HStack(spacing: 10) {
+                    Picker("", selection: $voacapFilterMode) {
+                        Text("All Paths (\(pathPredictions.count))").tag("All")
+                        Text("Needed DXCC (\(pathPredictions.filter(\.needsConfirmation).count))").tag("Needed")
+                        Text("High Score (>70)").tag("High Score")
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 360)
+
+                    HStack(spacing: 4) {
+                        Image(systemName: "magnifyingglass")
+                            .foregroundColor(.secondary)
+                            .font(.caption)
+                        TextField("Search country...", text: $voacapSearchQuery)
+                            .textFieldStyle(.plain)
+                            .font(.caption)
+                        if !voacapSearchQuery.isEmpty {
+                            Button { voacapSearchQuery = "" } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundColor(.secondary)
+                                    .font(.caption)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color(NSColor.textBackgroundColor))
+                    .cornerRadius(6)
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.gray.opacity(0.3), lineWidth: 1))
+                    .frame(maxWidth: 220)
+
+                    Spacer()
+
+                    Text("\(filteredPathPredictions.count) matching")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+            }
+
             if stationCoordinate == nil {
                 emptyText("Enter your station Grid Locator in Settings to calculate path distance, bearing, local day/night and band suggestions.")
             } else if isCalculatingPathPredictions {
                 emptyText("Calculating path predictions...")
-            } else if pathPredictions.isEmpty {
-                emptyText("No known country coordinates found in the current log.")
+            } else if filteredPathPredictions.isEmpty {
+                emptyText("No matching path predictions found for the current filter.")
             } else {
                 VStack(spacing: 0) {
                     // Precise Column Header (100% aligned with rows)
@@ -489,7 +645,7 @@ struct DXAdvisorView: View {
 
                     Divider()
 
-                    ForEach(pathPredictions.prefix(18)) { prediction in
+                    ForEach(filteredPathPredictions.prefix(50)) { prediction in
                         pathPredictionRow(prediction)
                         Divider()
                     }

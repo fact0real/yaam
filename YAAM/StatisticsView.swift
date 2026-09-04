@@ -163,6 +163,7 @@ struct StatisticsView: View {
                 Text("Unconfirmed DXCC").tag(3)
                 Text("Country Bands").tag(4)
                 Text("Progress").tag(5)
+                Text("Activity Matrix").tag(6)
             }
             .pickerStyle(.segmented)
             .padding(.vertical, 2)
@@ -452,8 +453,13 @@ struct StatisticsView: View {
                 }
             } else if selectedTab == 4 {
                 countryBandCoverageView
-            } else {
+            } else if selectedTab == 5 {
                 confirmedProgressView
+            } else {
+                LocalActivityMatrixView(
+                    records: appState.qsoRecords,
+                    onShowInLog: showRecordInLog
+                )
             }
             
             Spacer()

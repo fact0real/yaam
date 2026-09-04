@@ -201,6 +201,20 @@ struct FT8StationView: View {
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.primary)
                 Spacer()
+
+                Button {
+                    radio.reapplyDigitalSettings()
+                } label: {
+                    HStack(spacing: 3) {
+                        Image(systemName: "arrow.clockwise")
+                        Text("Re-apply to Radio")
+                    }
+                    .font(.system(size: 9, weight: .semibold))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+                .help("Re-sends CI-V DATA MOD=LAN/WLAN and USB-D configuration to the radio")
+
                 Text("Auto-reverts on disconnect")
                     .font(.system(size: 9))
                     .foregroundStyle(.secondary)

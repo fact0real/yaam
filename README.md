@@ -25,6 +25,12 @@ YAAM, short for Yet Another ADIF Manager, is a native macOS amateur-radio logboo
 4. Sync LoTW and QRZ confirmations to keep local counts aligned with cloud logbooks.
 5. Track QRZ Rank competitors and use the leaderboard recommendation to decide whether to invest in QSO volume, band coverage, DXCC reach, or 6m opportunities.
 
+## Developer Documentation & Architecture Guides
+
+Comprehensive architectural blueprints and engineering guides are available for core contributors:
+- [English Developer & Architecture Guide](DEVELOPER_DOCUMENTATION.md): Deep-dive into system layers, Icom UDP protocols (CI-V MK2 registers, audio jitter avoidance), SQLite persistence, ESM contest engines, FT8 modems, and 11-band calculations.
+- [Persian Developer Guide (راهنمای جامع معماری و توسعه به فارسی)](DEVELOPER_GUIDE_FA.md): تفکیک کامل لایه‌ها، پروتکل‌های شبکه رادیویی، ساختار لاگ‌بوک و نکات کلیدی برای توسعه‌دهندگان بعدی.
+
 ## Product Position
 
 A detailed, source-linked comparison with established amateur-radio loggers is available in [COMPETITIVE_ANALYSIS_FA.md](COMPETITIVE_ANALYSIS_FA.md).
