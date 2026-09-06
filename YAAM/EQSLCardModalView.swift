@@ -209,6 +209,7 @@ public struct EQSLCardModalView: View {
         // Fetch from eQSL API
         Task {
             do {
+                let effectivePassword = !eqslPassword.isEmpty ? eqslPassword : CredentialVault.value(for: .eqslPassword)
                 let downloadedURL = try await eqslService.downloadCardImage(
                     callsign: callsign,
                     date: date,
@@ -216,7 +217,7 @@ public struct EQSLCardModalView: View {
                     band: band,
                     mode: mode,
                     username: eqslUsername,
-                    password: eqslPassword
+                    password: effectivePassword
                 )
                 if let downloadedImg = NSImage(contentsOf: downloadedURL) {
                     self.image = downloadedImg

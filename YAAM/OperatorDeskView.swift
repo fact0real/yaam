@@ -1177,7 +1177,7 @@ private struct QuickLogPanel: View {
 
     private var bandMatrixSection: some View {
         let callsign = appState.quickLogDraft.normalizedCallsign
-        let commonBands = ["160m", "80m", "40m", "30m", "20m", "17m", "15m", "12m", "10m", "6m", "2m", "70cm"]
+        let commonBands = AmateurBandSettings.shared.orderedActiveBands()
         let matchingRecords = appState.qsoRecords.filter {
             $0["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == callsign
         }

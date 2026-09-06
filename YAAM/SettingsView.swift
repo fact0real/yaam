@@ -12,7 +12,7 @@ import UniformTypeIdentifiers
 // MARK: - macOS Preferences & Credentials Settings Sheet
 struct SettingsView: View {
     private enum Tabs: Hashable {
-        case stations, dataSafety, qrz, qrzRank, clubLog, lotw, eqsl, wavelog, clubs, tci, winkeyer, on4kst, hrdlog, hamqth, smtp, externalADIF, sdrControl, assistant
+        case stations, dataSafety, bands, qrz, qrzRank, clubLog, lotw, eqsl, wavelog, clubs, tci, winkeyer, on4kst, hrdlog, hamqth, smtp, externalADIF, sdrControl, assistant
     }
 
     @EnvironmentObject var appState: AppState
@@ -83,9 +83,15 @@ struct SettingsView: View {
                 DataSafetySettingsView()
                     .environmentObject(appState)
                     .tabItem {
-                        Label("Data Safety", systemImage: "externaldrive.fill.badge.checkmark")
+                        Label("Safety", systemImage: "externaldrive.fill.badge.checkmark")
                     }
                     .tag(Tabs.dataSafety)
+
+                AmateurBandsSettingsView()
+                    .tabItem {
+                        Label("Bands", systemImage: "waveform.path")
+                    }
+                    .tag(Tabs.bands)
 
             // MARK: - QRZ.com Settings Tab
             Form {
@@ -179,7 +185,7 @@ struct SettingsView: View {
                 .padding()
             }
             .tabItem {
-                Label("QRZ.com", systemImage: "q.circle.fill")
+                Label("QRZ", systemImage: "q.circle.fill")
             }
             .tag(Tabs.qrz)
 
@@ -224,7 +230,7 @@ struct SettingsView: View {
                 .padding()
             }
             .tabItem {
-                Label("Rank Service", systemImage: "chart.line.uptrend.xyaxis")
+                Label("Rank", systemImage: "chart.line.uptrend.xyaxis")
             }
             .tag(Tabs.qrzRank)
 
@@ -483,7 +489,7 @@ struct SettingsView: View {
                 .padding()
             }
             .tabItem {
-                Label("eQSL.cc", systemImage: "photo.badge.checkmark.fill")
+                Label("eQSL", systemImage: "photo.badge.checkmark.fill")
             }
             .tag(Tabs.eqsl)
             .onAppear {
@@ -702,7 +708,7 @@ struct SettingsView: View {
                 .padding()
             }
             .tabItem {
-                Label("TCI (SDR)", systemImage: "antenna.radiowaves.left.and.right")
+                Label("TCI", systemImage: "antenna.radiowaves.left.and.right")
             }
             .tag(Tabs.tci)
 
@@ -1001,7 +1007,7 @@ struct SettingsView: View {
                 .padding()
             }
             .tabItem {
-                Label("External ADIF", systemImage: "arrow.triangle.2.circlepath.doc.on.clipboard")
+                Label("ADIF Sync", systemImage: "arrow.triangle.2.circlepath.doc.on.clipboard")
             }
             .tag(Tabs.externalADIF)
 
@@ -1059,12 +1065,13 @@ struct SettingsView: View {
                 .padding()
             }
             .tabItem {
-                Label("SDR-Control", systemImage: "antenna.radiowaves.left.and.right")
+                Label("SDR-Ctrl", systemImage: "antenna.radiowaves.left.and.right")
             }
             .tag(Tabs.sdrControl)
             }
         }
         .padding(10)
+        .background(SettingsWindowConfigurator().frame(width: 0, height: 0))
         .onAppear {
             refreshSDRControlPath()
         }
@@ -1153,3 +1160,41 @@ struct SettingsView: View {
         sdrControlLogbookPath = UserDefaults.standard.string(forKey: "sdrControlLogbookPath") ?? ""
     }
 }
+
+// MARK: - Settings Window Toolbar & Frame Configurator
+private struct SettingsWindowConfigurator: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        DispatchQueue.main.async {
+            configure(view.window)
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async {
+            configure(nsView.window)
+        }
+    }
+
+    private func configure(_ window: NSWindow?) {
+        guard let window else { return }
+        window.toolbar?.sizeMode = .small
+
+        let targetWidth: CGFloat = 1360
+        let targetHeight: CGFloat = 720
+        window.contentMinSize = NSSize(width: 1200, height: 640)
+
+        if window.frame.width < targetWidth || window.frame.height < targetHeight {
+            var newFrame = window.frame
+            let widthDiff = max(0, targetWidth - newFrame.width)
+            let heightDiff = max(0, targetHeight - newFrame.height)
+            newFrame.origin.x = max(0, newFrame.origin.x - widthDiff / 2)
+            newFrame.origin.y = max(0, newFrame.origin.y - heightDiff / 2)
+            newFrame.size.width = max(newFrame.size.width, targetWidth)
+            newFrame.size.height = max(newFrame.size.height, targetHeight)
+            window.setFrame(newFrame, display: true, animate: false)
+        }
+    }
+}
+

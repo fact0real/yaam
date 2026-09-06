@@ -10,8 +10,10 @@ import AppKit
 
 // MARK: - Interactive Log Statistics Window
 struct StatisticsView: View {
+    var isEmbeddedInTab: Bool = false
     @EnvironmentObject var appState: AppState
     @Environment(\.dismissWindow) private var dismissWindow
+    @Environment(\.openWindow) private var openWindow
     
     @State private var selectedTab = 0
     @State private var selectedUnconfirmedBand = "All Bands"
@@ -128,6 +130,15 @@ struct StatisticsView: View {
                     Label("Reconcile", systemImage: "arrow.triangle.2.circlepath")
                 }
                 .help("Compare local, LoTW, and QRZ confirmation totals")
+
+                if isEmbeddedInTab {
+                    Button {
+                        openWindow(id: YAAMWindowID.statistics)
+                    } label: {
+                        Label("Pop Out", systemImage: "arrow.up.right.square")
+                    }
+                    .help("Open Statistics in a separate dedicated window")
+                }
             }
             .padding(.top, 4)
             
@@ -462,22 +473,24 @@ struct StatisticsView: View {
                 )
             }
             
-            Spacer()
-            Divider()
-            
-            HStack {
+            if !isEmbeddedInTab {
                 Spacer()
-                Button("Close") { dismissWindow(id: YAAMWindowID.statistics) }
-                    .keyboardShortcut(.defaultAction)
-                    .frame(width: 90)
+                Divider()
+                
+                HStack {
+                    Spacer()
+                    Button("Close") { dismissWindow(id: YAAMWindowID.statistics) }
+                        .keyboardShortcut(.defaultAction)
+                        .frame(width: 90)
+                }
             }
         }
         .padding(16)
         .frame(
-            minWidth: 900,
+            minWidth: isEmbeddedInTab ? 0 : 900,
             idealWidth: 1180,
             maxWidth: .infinity,
-            minHeight: 620,
+            minHeight: isEmbeddedInTab ? 0 : 620,
             idealHeight: 780,
             maxHeight: .infinity
         )
@@ -501,6 +514,9 @@ struct StatisticsView: View {
         }
         .onAppear {
             appState.refreshOwnerQRZRankIfNeeded()
+            refreshSnapshot()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .amateurBandsConfigurationDidChange)) { _ in
             refreshSnapshot()
         }
     }
@@ -850,6 +866,23 @@ struct StatisticsView: View {
                             icon: "scope",
                             color: .secondary
                         )
+
+                        Button {
+                            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "slider.horizontal.3")
+                                    .font(.system(size: 10, weight: .bold))
+                                Text("Bands (\(AmateurBandSettings.shared.activeBands.count))")
+                                    .font(.system(size: 10.5, weight: .semibold))
+                            }
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 5)
+                            .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.12)))
+                            .foregroundColor(.primary)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Open Settings > Bands to choose which amateur radio bands to monitor")
                     }
 
                     ScrollView {

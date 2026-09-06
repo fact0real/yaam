@@ -44,16 +44,13 @@ struct ContentView: View {
     var body: some View {
         VStack(spacing: 0) {
             // MARK: - Top Global Tab Navigation Selector
-            Picker("", selection: $appState.selectedTab) {
-                Text("Log Table").tag(0)
-                Text("Operator Desk").tag(5)
-                Text("Convert & Export").tag(1)
-                Text("Leaderboard").tag(2)
-                Text("DX Advisor").tag(3)
-                Text("Awards").tag(4)
+            HStack {
+                Spacer()
+                TopNavigationTabBar(selectedTab: $appState.selectedTab)
+                Spacer()
             }
-            .pickerStyle(.segmented)
-            .padding(12)
+            .padding(.vertical, 8)
+            .padding(.horizontal, 12)
             .background(Color(NSColor.windowBackgroundColor))
             .onChange(of: appState.selectedTab) { _, value in
                 UserDefaults.standard.set(value, forKey: "selectedTab")
@@ -62,11 +59,14 @@ struct ContentView: View {
             Divider()
             
             // MARK: - Tab Views Routing
-            if appState.selectedTab == 0 {
-                // Tab 0: ADIFMaster High-Performance Table Grid
-                LogTableView()
+            Group {
+                if appState.selectedTab == 0 {
+                    // Tab 0: ADIFMaster High-Performance Table Grid
+                    LogTableView()
             } else if appState.selectedTab == 5 {
                 OperatorDeskView()
+            } else if appState.selectedTab == 6 {
+                StatisticsView(isEmbeddedInTab: true)
             } else if appState.selectedTab == 1 {
                 // Tab 1: Conversion & Database Log Export Tool
                 ScrollView {
@@ -499,6 +499,8 @@ struct ContentView: View {
             } else if appState.selectedTab == 4 {
                 QRZAwardsView()
             }
+            }
+            .transaction { $0.animation = nil }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .sheet(isPresented: $appState.showAboutSheet) {
@@ -549,7 +551,7 @@ struct ContentView: View {
         .onChange(of: appState.showStatsSheet) { _, shouldOpen in
             guard shouldOpen else { return }
             appState.showStatsSheet = false
-            openWindow(id: YAAMWindowID.statistics)
+            appState.selectedTab = 6
         }
     }
 
@@ -1182,5 +1184,88 @@ struct ContentView: View {
 
     private func fileSafeFilterName(_ value: String) -> String {
         value.map { $0.isLetter || $0.isNumber || $0 == "." ? String($0) : "_" }.joined()
+    }
+}
+
+// MARK: - Top Navigation Tab Bar with SF Symbols & Native macOS Pill Aesthetics
+struct TopNavigationTabBar: View {
+    @Binding var selectedTab: Int
+
+    struct TabItem: Identifiable {
+        let tag: Int
+        let title: String
+        let icon: String
+        var id: Int { tag }
+    }
+
+    private let tabs: [TabItem] = [
+        TabItem(tag: 0, title: "Log Table", icon: "tablecells"),
+        TabItem(tag: 5, title: "Operator Desk", icon: "antenna.radiowaves.left.and.right"),
+        TabItem(tag: 6, title: "Stats", icon: "chart.bar.xaxis"),
+        TabItem(tag: 4, title: "Awards", icon: "trophy"),
+        TabItem(tag: 2, title: "Leaderboard", icon: "crown"),
+        TabItem(tag: 3, title: "DX Advisor", icon: "globe.americas"),
+        TabItem(tag: 1, title: "Convert & Export", icon: "arrow.triangle.2.circlepath.circle")
+    ]
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(tabs) { tab in
+                TabButton(
+                    item: tab,
+                    isSelected: selectedTab == tab.tag
+                ) {
+                    selectedTab = tab.tag
+                }
+            }
+        }
+        .padding(3)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color(NSColor.controlBackgroundColor).opacity(0.75))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color(NSColor.separatorColor).opacity(0.45), lineWidth: 0.8)
+        )
+    }
+}
+
+private struct TabButton: View {
+    let item: TopNavigationTabBar.TabItem
+    let isSelected: Bool
+    let action: () -> Void
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: item.icon)
+                    .font(.system(size: 12.5, weight: isSelected ? .semibold : .medium))
+                    .foregroundColor(isSelected ? .accentColor : (isHovered ? .primary : .secondary))
+                
+                Text(item.title)
+                    .font(.system(size: 12, weight: isSelected ? .semibold : .medium))
+                    .foregroundColor(isSelected ? .primary : (isHovered ? .primary : .secondary))
+            }
+            .padding(.horizontal, 11)
+            .padding(.vertical, 5)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(isSelected ? Color(NSColor.windowBackgroundColor) : (isHovered ? Color(NSColor.textColor).opacity(0.06) : Color.clear))
+                    .shadow(color: isSelected ? Color.black.opacity(0.14) : Color.clear, radius: 2, x: 0, y: 1)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .stroke(isSelected ? Color(NSColor.separatorColor).opacity(0.5) : Color.clear, lineWidth: 0.5)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .animation(.easeInOut(duration: 0.12), value: isSelected)
+        .animation(.easeInOut(duration: 0.12), value: isHovered)
+        .onHover { hovering in
+            isHovered = hovering
+        }
     }
 }

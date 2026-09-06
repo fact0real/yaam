@@ -33,10 +33,10 @@ nonisolated enum AmateurBandPlan {
         (24_000.0...24_250.0, "1.25cm")
     ]
 
-    static let commonBands = [
-        "2190m", "630m", "160m", "80m", "60m", "40m", "30m", "20m", "17m",
-        "15m", "12m", "10m", "6m", "4m", "2m", "1.25m", "70cm", "33cm", "23cm"
-    ]
+    @MainActor
+    static var commonBands: [String] {
+        AmateurBandSettings.shared.orderedActiveBands()
+    }
 
     static func normalizedMHz(_ rawValue: String) -> Double? {
         let clean = rawValue

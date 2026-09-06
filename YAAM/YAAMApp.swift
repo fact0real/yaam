@@ -163,8 +163,14 @@ struct YAAMApp: App {
 
                 Divider()
 
-                Button("Log Statistics...") { openWindow(id: YAAMWindowID.statistics) }
-                    .keyboardShortcut("t", modifiers: .command)
+                Button("Log Statistics") {
+                    appState.selectedTab = 6
+                }
+                .keyboardShortcut("t", modifiers: .command)
+
+                Button("Log Statistics in Separate Window...") {
+                    openWindow(id: YAAMWindowID.statistics)
+                }
 
                 Button("Activity Console...") { openWindow(id: YAAMWindowID.console) }
             }
@@ -187,14 +193,14 @@ struct YAAMApp: App {
             SettingsView()
                 .environmentObject(appState)
                 .frame(
-                    minWidth: 820,
-                    idealWidth: 980,
+                    minWidth: 1200,
+                    idealWidth: 1360,
                     maxWidth: .infinity,
-                    minHeight: 620,
-                    idealHeight: 700,
+                    minHeight: 640,
+                    idealHeight: 740,
                     maxHeight: .infinity
                 )
-                .resizablePresentation(minWidth: 820, minHeight: 620)
+                .resizablePresentation(minWidth: 1200, minHeight: 640)
         }
         #endif
 

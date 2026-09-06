@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import AppKit
 
 // MARK: - Helper to parse rank strings like "#16,278" into Int
 func parseRankInt(_ rankStr: String?) -> Int? {
@@ -466,7 +467,7 @@ struct RankPerformanceMonitor: View {
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                         RankMovementTrendChart(series: series)
-                            .frame(minHeight: 240)
+                            .frame(minHeight: 255)
                     }
 
                     VStack(alignment: .leading, spacing: 8) {
@@ -747,6 +748,13 @@ struct RankMovementTrendChart: View {
     private let maximumVisibleDays = 90
 
     @State private var zoomScale: CGFloat = 1.0
+    @State private var panOffset: CGFloat = 0
+    @State private var dragStartOffset: CGFloat = 0
+    @State private var isDragging: Bool = false
+    @State private var isChartHovered: Bool = false
+    @State private var isDraggingScrollbar: Bool = false
+    @State private var currentMaxPan: CGFloat = 0
+    @State private var scrollMonitor: Any? = nil
     @State private var selectedPointDetail: SelectedPointDetail? = nil
 
     private struct SelectedPointDetail: Identifiable {
@@ -792,10 +800,10 @@ struct RankMovementTrendChart: View {
             // Zoom controls and status toolbar
             HStack(spacing: 8) {
                 if zoomScale > 1.0 {
-                    HStack(spacing: 4) {
+                    HStack(spacing: 5) {
                         Image(systemName: "arrow.left.and.right")
-                            .font(.system(size: 9))
-                        Text("Zoomed \(String(format: "%.1f", zoomScale))x · Scroll horizontally to pan dates")
+                            .font(.system(size: 9, weight: .bold))
+                        Text("Zoomed \(String(format: "%.1f", zoomScale))x · Drag chart, scroll wheel, or use ◀ ▶ to pan")
                             .font(.caption2.weight(.medium))
                     }
                     .foregroundColor(.cyan)
@@ -808,6 +816,36 @@ struct RankMovementTrendChart: View {
                 Spacer()
 
                 HStack(spacing: 4) {
+                    if zoomScale > 1.0 {
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.18)) {
+                                panOffset = max(0, panOffset - 120)
+                                dragStartOffset = panOffset
+                            }
+                        } label: {
+                            Image(systemName: "chevron.left")
+                                .font(.system(size: 9, weight: .bold))
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.mini)
+                        .disabled(panOffset <= 0.5)
+                        .help("Pan to earlier dates (Left)")
+
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.18)) {
+                                panOffset = min(currentMaxPan, panOffset + 120)
+                                dragStartOffset = panOffset
+                            }
+                        } label: {
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 9, weight: .bold))
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.mini)
+                        .disabled(currentMaxPan > 0 ? panOffset >= currentMaxPan - 0.5 : true)
+                        .help("Pan to later dates (Right)")
+                    }
+
                     Button {
                         withAnimation(.easeInOut(duration: 0.2)) {
                             zoomScale = max(1.0, zoomScale - 0.5)
@@ -843,6 +881,8 @@ struct RankMovementTrendChart: View {
                         Button {
                             withAnimation(.easeInOut(duration: 0.2)) {
                                 zoomScale = 1.0
+                                panOffset = 0
+                                dragStartOffset = 0
                             }
                         } label: {
                             Text("Reset")
@@ -872,132 +912,250 @@ struct RankMovementTrendChart: View {
                     let yAxisWidth: CGFloat = 52
                     let basePlotWidth = max(100, geometry.size.width - yAxisWidth - 14)
                     let plotContentWidth = basePlotWidth * zoomScale
-                    let plotHeight = max(1, geometry.size.height - 30)
+                    let maxPan = max(0, plotContentWidth - basePlotWidth)
+                    let plotHeight = max(1, geometry.size.height - (zoomScale > 1.0 ? 46 : 28))
                     let origin = CGPoint(x: 18, y: 10 + plotHeight / 2)
                     let step = visibleDates.count > 1
                         ? (plotContentWidth - 36) / CGFloat(visibleDates.count - 1)
                         : 0
                     let yScale = max(1, plotHeight / 2 - 10) / CGFloat(maxAbsMovement)
 
-                    HStack(alignment: .top, spacing: 0) {
-                        // Pinned Y-Axis column
-                        ZStack(alignment: .trailing) {
-                            axisLabel("▲ +\(formattedNumber(maxAbsMovement))", color: .green)
-                                .position(x: yAxisWidth - 4, y: 14)
-                            axisLabel("0", color: .secondary)
-                                .position(x: yAxisWidth - 4, y: origin.y)
-                            axisLabel("▼ -\(formattedNumber(maxAbsMovement))", color: .orange)
-                                .position(x: yAxisWidth - 4, y: 10 + plotHeight)
-                        }
-                        .frame(width: yAxisWidth, height: geometry.size.height)
+                    VStack(alignment: .leading, spacing: 0) {
+                        HStack(alignment: .top, spacing: 0) {
+                            // Pinned Y-Axis column
+                            ZStack(alignment: .trailing) {
+                                axisLabel("▲ +\(formattedNumber(maxAbsMovement))", color: .green)
+                                    .position(x: yAxisWidth - 4, y: 14)
+                                axisLabel("0", color: .secondary)
+                                    .position(x: yAxisWidth - 4, y: origin.y)
+                                axisLabel("▼ -\(formattedNumber(maxAbsMovement))", color: .orange)
+                                    .position(x: yAxisWidth - 4, y: 10 + plotHeight)
+                            }
+                            .frame(width: yAxisWidth, height: 10 + plotHeight + 20)
 
-                        // Horizontally scrollable plot area
-                        ScrollView(.horizontal, showsIndicators: zoomScale > 1.0) {
+                            // Plot area clipped to basePlotWidth with offset(-panOffset)
                             ZStack(alignment: .topLeading) {
-                                chartGrid(width: plotContentWidth, height: plotHeight, origin: origin)
+                                ZStack(alignment: .topLeading) {
+                                    chartGrid(width: plotContentWidth, height: plotHeight, origin: origin)
 
-                                ForEach(Array(series.enumerated()), id: \.element.id) { index, item in
-                                    let color = rankTrendPalette[index % rankTrendPalette.count]
-                                    let plotted = plottedPoints(
-                                        for: item.points,
-                                        origin: origin,
-                                        plotWidth: plotContentWidth - 36,
-                                        step: step,
-                                        yScale: yScale
-                                    )
-
-                                    linePath(plotted.map(\.position))
-                                        .stroke(
-                                            color,
-                                            style: StrokeStyle(
-                                                lineWidth: item.isOwner ? 3.6 : 2.5,
-                                                lineCap: .round,
-                                                lineJoin: .round
-                                            )
+                                    ForEach(Array(series.enumerated()), id: \.element.id) { index, item in
+                                        let color = rankTrendPalette[index % rankTrendPalette.count]
+                                        let plotted = plottedPoints(
+                                            for: item.points,
+                                            origin: origin,
+                                            plotWidth: plotContentWidth - 36,
+                                            step: step,
+                                            yScale: yScale
                                         )
 
-                                    ForEach(plotted) { plottedPoint in
-                                        let isSelected = selectedPointDetail?.id == "\(item.callsign)-\(plottedPoint.point.id)"
-                                        ZStack {
-                                            Color.clear
-                                                .frame(width: 30, height: 30)
-                                                .contentShape(Rectangle())
+                                        linePath(plotted.map(\.position))
+                                            .stroke(
+                                                color,
+                                                style: StrokeStyle(
+                                                    lineWidth: item.isOwner ? 3.6 : 2.5,
+                                                    lineCap: .round,
+                                                    lineJoin: .round
+                                                )
+                                            )
 
-                                            if isSelected {
+                                        ForEach(plotted) { plottedPoint in
+                                            let isSelected = selectedPointDetail?.id == "\(item.callsign)-\(plottedPoint.point.id)"
+                                            ZStack {
+                                                Color.clear
+                                                    .frame(width: 30, height: 30)
+                                                    .contentShape(Rectangle())
+
+                                                if isSelected {
+                                                    Circle()
+                                                        .stroke(Color.white, lineWidth: 2)
+                                                        .frame(width: 15, height: 15)
+                                                    Circle()
+                                                        .fill(color.opacity(0.35))
+                                                        .frame(width: 22, height: 22)
+                                                }
                                                 Circle()
-                                                    .stroke(Color.white, lineWidth: 2)
-                                                    .frame(width: 15, height: 15)
-                                                Circle()
-                                                    .fill(color.opacity(0.35))
-                                                    .frame(width: 22, height: 22)
+                                                    .fill(color)
+                                                    .overlay {
+                                                        if item.isOwner {
+                                                            Circle().stroke(Color.white.opacity(0.85), lineWidth: 1)
+                                                        }
+                                                    }
+                                                    .frame(width: isSelected ? 11 : (item.isOwner ? 8.5 : 7.5), height: isSelected ? 11 : (item.isOwner ? 8.5 : 7.5))
                                             }
-                                            Circle()
-                                                .fill(color)
-                                                .overlay {
-                                                    if item.isOwner {
-                                                        Circle().stroke(Color.white.opacity(0.85), lineWidth: 1)
+                                            .frame(width: 30, height: 30)
+                                            .contentShape(Rectangle())
+                                            .onTapGesture {
+                                                withAnimation(.spring(response: 0.25)) {
+                                                    if isSelected {
+                                                        selectedPointDetail = nil
+                                                    } else {
+                                                        let sorted = visiblePoints(item.points)
+                                                        let idx = sorted.firstIndex(where: { $0.id == plottedPoint.point.id }) ?? 0
+                                                        let prev = idx > 0 ? sorted[idx - 1] : nil
+                                                        let delta = prev.map { $0.rank - plottedPoint.point.rank }
+                                                        let startRank = sorted.first?.rank ?? plottedPoint.point.rank
+                                                        let startDate = sorted.first?.date
+                                                        selectedPointDetail = SelectedPointDetail(
+                                                            callsign: item.callsign,
+                                                            countryIso: item.countryIso,
+                                                            isOwner: item.isOwner,
+                                                            point: plottedPoint.point,
+                                                            startingRank: startRank,
+                                                            startingDate: startDate,
+                                                            movement: plottedPoint.movement,
+                                                            deltaFromPrev: delta,
+                                                            color: color,
+                                                            position: plottedPoint.position
+                                                        )
                                                     }
                                                 }
-                                                .frame(width: isSelected ? 11 : (item.isOwner ? 8.5 : 7.5), height: isSelected ? 11 : (item.isOwner ? 8.5 : 7.5))
-                                        }
-                                        .frame(width: 30, height: 30)
-                                        .contentShape(Rectangle())
-                                        .onTapGesture {
-                                            withAnimation(.spring(response: 0.25)) {
-                                                if isSelected {
-                                                    selectedPointDetail = nil
+                                            }
+                                            .onHover { isHovered in
+                                                if isHovered {
+                                                    NSCursor.pointingHand.push()
                                                 } else {
-                                                    let sorted = visiblePoints(item.points)
-                                                    let idx = sorted.firstIndex(where: { $0.id == plottedPoint.point.id }) ?? 0
-                                                    let prev = idx > 0 ? sorted[idx - 1] : nil
-                                                    let delta = prev.map { $0.rank - plottedPoint.point.rank }
-                                                    let startRank = sorted.first?.rank ?? plottedPoint.point.rank
-                                                    let startDate = sorted.first?.date
-                                                    selectedPointDetail = SelectedPointDetail(
-                                                        callsign: item.callsign,
-                                                        countryIso: item.countryIso,
-                                                        isOwner: item.isOwner,
-                                                        point: plottedPoint.point,
-                                                        startingRank: startRank,
-                                                        startingDate: startDate,
-                                                        movement: plottedPoint.movement,
-                                                        deltaFromPrev: delta,
-                                                        color: color,
-                                                        position: plottedPoint.position
-                                                    )
+                                                    NSCursor.pop()
                                                 }
                                             }
+                                            .help(pointHelp(item: item, plottedPoint: plottedPoint))
+                                            .position(plottedPoint.position)
                                         }
-                                        .onHover { isHovered in
-                                            if isHovered {
-                                                NSCursor.pointingHand.push()
-                                            } else {
-                                                NSCursor.pop()
-                                            }
+                                    }
+
+                                    // Date Labels along the bottom
+                                    dateLabelsRow(step: step, origin: origin, plotHeight: plotHeight, width: plotContentWidth)
+
+                                    // Selected Point Guide Line & Popover
+                                    if let detail = selectedPointDetail {
+                                        Path { path in
+                                            path.move(to: CGPoint(x: detail.position.x, y: 10))
+                                            path.addLine(to: CGPoint(x: detail.position.x, y: 10 + plotHeight))
                                         }
-                                        .help(pointHelp(item: item, plottedPoint: plottedPoint))
-                                        .position(plottedPoint.position)
+                                        .stroke(detail.color.opacity(0.6), style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
+
+                                        pointDetailPopover(detail, in: plotContentWidth)
                                     }
                                 }
-
-                                // Date Labels along the bottom
-                                dateLabelsRow(step: step, origin: origin, plotHeight: plotHeight, width: plotContentWidth)
-
-                                // Selected Point Guide Line & Popover
-                                if let detail = selectedPointDetail {
-                                    Path { path in
-                                        path.move(to: CGPoint(x: detail.position.x, y: 10))
-                                        path.addLine(to: CGPoint(x: detail.position.x, y: 10 + plotHeight))
-                                    }
-                                    .stroke(detail.color.opacity(0.6), style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
-
-                                    pointDetailPopover(detail, in: plotContentWidth)
+                                .frame(width: plotContentWidth, height: 10 + plotHeight + 20, alignment: .topLeading)
+                                .offset(x: -panOffset)
+                            }
+                            .frame(width: basePlotWidth, height: 10 + plotHeight + 20, alignment: .topLeading)
+                            .clipped()
+                            .contentShape(Rectangle())
+                            .onHover { hovering in
+                                isChartHovered = hovering
+                                if hovering && zoomScale > 1.0 {
+                                    NSCursor.openHand.push()
+                                } else if !hovering && zoomScale > 1.0 {
+                                    NSCursor.pop()
                                 }
                             }
-                            .frame(width: plotContentWidth, height: geometry.size.height)
+                            .gesture(
+                                zoomScale > 1.0 ?
+                                    DragGesture(minimumDistance: 4)
+                                        .onChanged { gesture in
+                                            if !isDragging {
+                                                isDragging = true
+                                                NSCursor.closedHand.push()
+                                            }
+                                            let newOffset = dragStartOffset - gesture.translation.width
+                                            panOffset = min(max(0, newOffset), maxPan)
+                                        }
+                                        .onEnded { _ in
+                                            isDragging = false
+                                            dragStartOffset = panOffset
+                                            NSCursor.pop()
+                                        }
+                                    : nil
+                            )
+                        }
+
+                        // Custom Interactive Timeline Scrollbar / Scrubber (visible when zoomed)
+                        if zoomScale > 1.0 && maxPan > 0 {
+                            HStack(spacing: 0) {
+                                Color.clear
+                                    .frame(width: yAxisWidth, height: 14)
+
+                                let scrollbarWidth = basePlotWidth
+                                let thumbWidth = max(40, scrollbarWidth * (basePlotWidth / plotContentWidth))
+                                let maxThumbTravel = max(1, scrollbarWidth - thumbWidth)
+                                let thumbOffset = (panOffset / maxPan) * maxThumbTravel
+
+                                ZStack(alignment: .leading) {
+                                    // Track
+                                    RoundedRectangle(cornerRadius: 3.5)
+                                        .fill(Color(NSColor.separatorColor).opacity(0.25))
+                                        .frame(width: scrollbarWidth, height: 7)
+                                        .contentShape(Rectangle())
+                                        .onTapGesture { location in
+                                            let clickRatio = location.x / scrollbarWidth
+                                            withAnimation(.easeInOut(duration: 0.15)) {
+                                                panOffset = min(max(0, clickRatio * maxPan), maxPan)
+                                                dragStartOffset = panOffset
+                                            }
+                                        }
+
+                                    // Thumb
+                                    RoundedRectangle(cornerRadius: 3.5)
+                                        .fill(isDraggingScrollbar ? Color.cyan : Color.secondary.opacity(0.6))
+                                        .frame(width: thumbWidth, height: 7)
+                                        .offset(x: thumbOffset)
+                                        .shadow(color: Color.black.opacity(0.15), radius: 1, x: 0, y: 0.5)
+                                        .gesture(
+                                            DragGesture(minimumDistance: 1)
+                                                .onChanged { gesture in
+                                                    isDraggingScrollbar = true
+                                                    let currentThumbX = (dragStartOffset / maxPan) * maxThumbTravel
+                                                    let newThumbX = min(max(0, currentThumbX + gesture.translation.width), maxThumbTravel)
+                                                    panOffset = (newThumbX / maxThumbTravel) * maxPan
+                                                }
+                                                .onEnded { _ in
+                                                    isDraggingScrollbar = false
+                                                    dragStartOffset = panOffset
+                                                }
+                                        )
+                                }
+                                .frame(width: scrollbarWidth, height: 14)
+                            }
+                            .padding(.top, 4)
+                        }
+                    }
+                    .onAppear {
+                        currentMaxPan = maxPan
+                    }
+                    .onChange(of: geometry.size.width) { _, _ in
+                        currentMaxPan = maxPan
+                    }
+                    .onChange(of: zoomScale) { _, newZoom in
+                        currentMaxPan = maxPan
+                        if newZoom <= 1.0 {
+                            panOffset = 0
+                            dragStartOffset = 0
+                        } else {
+                            panOffset = min(panOffset, maxPan)
+                            dragStartOffset = panOffset
                         }
                     }
                 }
+            }
+        }
+        .onAppear {
+            scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { event in
+                guard isChartHovered && zoomScale > 1.0 && currentMaxPan > 0 else { return event }
+                let delta = event.scrollingDeltaX != 0 ? event.scrollingDeltaX : event.scrollingDeltaY
+                if abs(delta) > 0.1 {
+                    let speed: CGFloat = event.hasPreciseScrollingDeltas ? 1.0 : 10.0
+                    panOffset = min(max(0, panOffset - delta * speed), currentMaxPan)
+                    dragStartOffset = panOffset
+                    return nil
+                }
+                return event
+            }
+        }
+        .onDisappear {
+            if let monitor = scrollMonitor {
+                NSEvent.removeMonitor(monitor)
+                scrollMonitor = nil
             }
         }
     }

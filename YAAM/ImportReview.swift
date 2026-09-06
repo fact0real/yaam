@@ -79,7 +79,9 @@ nonisolated enum ImportReviewAnalyzer {
         existing: [QSORecordModel]
     ) -> PendingImportReview {
         let exactLookup = Dictionary(grouping: existing, by: { normalizedUniqueKey($0.fields) })
+        let baseLookup = Dictionary(grouping: existing, by: { QSOIdentity.baseKey(fields: $0.fields) })
         let relaxedLookup = Dictionary(grouping: existing, by: { relaxedKey($0.fields) })
+        let callDateBandLookup = Dictionary(grouping: existing, by: { QSOIdentity.callDateBandKey(fields: $0.fields) })
 
         let items = incoming.map { rawFields -> ImportReviewItem in
             let fields = normalizedFields(rawFields)
@@ -97,7 +99,12 @@ nonisolated enum ImportReviewAnalyzer {
                 )
             }
 
-            if let match = exactLookup[normalizedUniqueKey(fields)]?.first {
+            let exactMatch = exactLookup[normalizedUniqueKey(fields)]?.first ??
+                baseLookup[QSOIdentity.baseKey(fields: fields)]?.first(where: {
+                    QSOIdentity.areModesCompatible(QSOIdentity.effectiveMode(fields), QSOIdentity.effectiveMode($0.fields))
+                })
+
+            if let match = exactMatch {
                 let updates = meaningfulUpdates(incoming: fields, existing: match.fields)
                 if updates.isEmpty {
                     return ImportReviewItem(
@@ -119,8 +126,12 @@ nonisolated enum ImportReviewAnalyzer {
                 )
             }
 
-            if let candidates = relaxedLookup[relaxedKey(fields)],
-               let candidate = candidates.min(by: {
+            let relaxedCandidates = relaxedLookup[relaxedKey(fields)] ??
+                (callDateBandLookup[QSOIdentity.callDateBandKey(fields: fields)]?.filter {
+                    QSOIdentity.areModesCompatible(QSOIdentity.effectiveMode(fields), QSOIdentity.effectiveMode($0.fields))
+                } ?? [])
+
+            if let candidate = relaxedCandidates.min(by: {
                    timeDistance($0.fields, fields) < timeDistance($1.fields, fields)
                }),
                timeDistance(candidate.fields, fields) <= 300 {

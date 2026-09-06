@@ -129,6 +129,7 @@ struct LocalActivityMatrixView: View {
     @State private var selectedSlotWeekday: Int? = nil
     @State private var selectedSlotHour: Int? = nil
     @State private var selectedSlotBand: String? = nil
+    @State private var is3DIsometricView: Bool = false
 
     // Cache parsed QSOs
     @State private var parsedQSOs: [ParsedLocalQSO] = []
@@ -202,14 +203,25 @@ struct LocalActivityMatrixView: View {
                     matrixHeaderInfo
 
                     ScrollView([.horizontal, .vertical]) {
-                        switch matrixMode {
-                        case .dayVsHour:
-                            dayVsHourMatrixView
-                        case .bandVsHour:
-                            bandVsHourMatrixView
-                        case .dayVsBand:
-                            dayVsBandMatrixView
+                        VStack {
+                            switch matrixMode {
+                            case .dayVsHour:
+                                dayVsHourMatrixView
+                            case .bandVsHour:
+                                bandVsHourMatrixView
+                            case .dayVsBand:
+                                dayVsBandMatrixView
+                            }
                         }
+                        .padding(is3DIsometricView ? 24 : 0)
+                        .rotation3DEffect(
+                            is3DIsometricView ? .degrees(22) : .degrees(0),
+                            axis: (x: 1, y: 0, z: 0),
+                            anchor: .center,
+                            perspective: 0.35
+                        )
+                        .scaleEffect(is3DIsometricView ? 0.96 : 1.0)
+                        .animation(.spring(response: 0.35, dampingFraction: 0.75), value: is3DIsometricView)
                     }
                     .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
                     .cornerRadius(8)
@@ -405,6 +417,26 @@ struct LocalActivityMatrixView: View {
                 .foregroundColor(.secondary)
 
             Spacer()
+
+            // 3D Perspective Toggle Button
+            Button {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+                    is3DIsometricView.toggle()
+                }
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: is3DIsometricView ? "cube.transparent.fill" : "cube.fill")
+                        .font(.system(size: 10))
+                    Text(is3DIsometricView ? "3D Isometric (Active)" : "3D Isometric View")
+                        .font(.system(size: 10, weight: .semibold))
+                }
+                .foregroundColor(is3DIsometricView ? .cyan : .secondary)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
+            .help("Toggle 3D isometric landscape perspective")
+
+            Divider().frame(height: 14)
 
             // Solar Phase Legend
             HStack(spacing: 8) {
@@ -1095,7 +1127,7 @@ struct LocalActivityMatrixView: View {
 
 // MARK: - Supporting Subviews & Models
 
-// Single Heatmap Grid Cell
+// MARK: - 3D Volumetric Extruded Heatmap Grid Cell
 private struct HeatmapCell: View {
     let count: Int
     let maxCount: Int
@@ -1103,47 +1135,171 @@ private struct HeatmapCell: View {
     let width: CGFloat
     let height: CGFloat
 
+    @State private var isHovered: Bool = false
+
     private var intensity: Double {
         guard maxCount > 0, count > 0 else { return 0.0 }
-        return min(1.0, max(0.12, Double(count) / Double(maxCount)))
+        return min(1.0, max(0.08, Double(count) / Double(maxCount)))
     }
 
-    private var cellColor: Color {
-        guard count > 0 else {
-            return Color(NSColor.controlBackgroundColor).opacity(0.2)
-        }
+    // The vertical extrusion height in points (scales with QSO density)
+    private var lift: CGFloat {
+        guard count > 0 else { return 0 }
+        let baseLift = 2.0 + CGFloat(intensity) * 8.5
+        let hoverLift: CGFloat = isHovered ? 2.5 : 0.0
+        let selectLift: CGFloat = isSelected ? 3.0 : 0.0
+        return baseLift + hoverLift + selectLift
+    }
 
+    private struct CellColors {
+        let topColor: Color
+        let mainColor: Color
+        let wallColor: Color
+        let glowColor: Color
+    }
+
+    private var colors: CellColors {
         let ratio = intensity
         if ratio < 0.25 {
-            return Color.blue.opacity(0.35 + ratio * 0.5)
+            return CellColors(
+                topColor: Color(red: 0.40, green: 0.78, blue: 0.98),
+                mainColor: Color(red: 0.18, green: 0.58, blue: 0.88),
+                wallColor: Color(red: 0.08, green: 0.32, blue: 0.55),
+                glowColor: Color.blue.opacity(0.4)
+            )
         } else if ratio < 0.55 {
-            return Color.teal.opacity(0.5 + ratio * 0.6)
+            return CellColors(
+                topColor: Color(red: 0.35, green: 0.90, blue: 0.78),
+                mainColor: Color(red: 0.12, green: 0.72, blue: 0.62),
+                wallColor: Color(red: 0.06, green: 0.42, blue: 0.36),
+                glowColor: Color.teal.opacity(0.45)
+            )
         } else if ratio < 0.80 {
-            return Color.orange.opacity(0.65 + ratio * 0.4)
+            return CellColors(
+                topColor: Color(red: 1.00, green: 0.76, blue: 0.25),
+                mainColor: Color(red: 0.96, green: 0.54, blue: 0.12),
+                wallColor: Color(red: 0.68, green: 0.32, blue: 0.06),
+                glowColor: Color.orange.opacity(0.5)
+            )
         } else {
-            return Color.red.opacity(0.85 + ratio * 0.15)
+            return CellColors(
+                topColor: Color(red: 1.00, green: 0.45, blue: 0.38),
+                mainColor: Color(red: 0.92, green: 0.20, blue: 0.22),
+                wallColor: Color(red: 0.58, green: 0.08, blue: 0.12),
+                glowColor: Color.red.opacity(0.55)
+            )
         }
     }
 
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 4)
-                .fill(cellColor)
+            if count == 0 {
+                // Empty Slot: Recessed floor socket
+                RoundedRectangle(cornerRadius: 3.5)
+                    .fill(Color(NSColor.controlBackgroundColor).opacity(0.25))
+                    .frame(width: width - 2, height: height - 4)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 3.5)
+                            .stroke(Color.secondary.opacity(0.12), lineWidth: 0.8)
+                    )
+            } else {
+                let c = colors
+                let hLift = lift
 
-            if isSelected {
+                // 1. Dynamic Floor Cast Shadow (Deepens and shifts with pillar height)
                 RoundedRectangle(cornerRadius: 4)
-                    .stroke(Color.white, lineWidth: 2)
-                    .shadow(color: .white.opacity(0.8), radius: 3)
-            }
+                    .fill(Color.black.opacity(0.22 + intensity * 0.24))
+                    .frame(width: width - 2, height: height - 5)
+                    .offset(y: 2 + hLift * 0.4)
+                    .blur(radius: 1.2 + CGFloat(intensity) * 2.8)
 
-            if count > 0 {
+                // 2. Ambient Colored Glow for high traffic pillars
+                if intensity > 0.45 {
+                    RoundedRectangle(cornerRadius: 5)
+                        .fill(c.glowColor)
+                        .frame(width: width + 2, height: height - 2)
+                        .offset(y: 1)
+                        .blur(radius: 3 + CGFloat(intensity) * 2)
+                        .opacity(isHovered ? 0.8 : 0.45)
+                }
+
+                // 3. Extruded 3D Front Wall (Vertical depth body)
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(
+                        LinearGradient(
+                            colors: [c.wallColor.opacity(0.95), c.wallColor],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .frame(width: width - 2, height: height - 4)
+                    .offset(y: -hLift / 2)
+                    .overlay(
+                        // Dark bottom rim of the pillar
+                        VStack {
+                            Spacer()
+                            Rectangle()
+                                .fill(Color.black.opacity(0.35))
+                                .frame(height: 1.5)
+                        }
+                        .cornerRadius(4)
+                        .offset(y: -hLift / 2)
+                    )
+
+                // 4. Elevated Top Face (Roof Cap)
+                RoundedRectangle(cornerRadius: 3.5)
+                    .fill(
+                        LinearGradient(
+                            colors: [c.topColor, c.mainColor],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .frame(width: width - 2, height: height - 5)
+                    .offset(y: -hLift)
+
+                // 5. Specular Highlight Edge & Gloss Sheen
+                RoundedRectangle(cornerRadius: 3.5)
+                    .stroke(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(0.75),
+                                Color.white.opacity(0.25),
+                                Color.clear
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        ),
+                        lineWidth: 0.9
+                    )
+                    .frame(width: width - 2, height: height - 5)
+                    .offset(y: -hLift)
+
+                // 6. Contact Count Label on the raised face
                 Text("\(count)")
-                    .font(.system(size: count > 99 ? 8 : 9, weight: .bold, design: .monospaced))
-                    .foregroundColor(intensity > 0.45 ? .white : .primary)
+                    .font(.system(size: count > 99 ? 8.5 : 9.5, weight: .bold, design: .monospaced))
+                    .foregroundColor(.white)
+                    .shadow(color: Color.black.opacity(0.65), radius: 1, x: 0, y: 1)
+                    .offset(y: -hLift)
+
+                // 7. Selection Ring
+                if isSelected {
+                    RoundedRectangle(cornerRadius: 4)
+                        .stroke(Color.white, lineWidth: 2)
+                        .shadow(color: Color.cyan, radius: 4)
+                        .frame(width: width - 1, height: height - 4)
+                        .offset(y: -hLift)
+                }
             }
         }
         .frame(width: width, height: height)
         .contentShape(Rectangle())
+        .zIndex(isHovered || isSelected ? 50 : (count > 0 ? Double(intensity) * 10 : 0))
+        .onHover { hovering in
+            isHovered = hovering
+        }
+        .animation(.spring(response: 0.22, dampingFraction: 0.68), value: isHovered)
+        .animation(.spring(response: 0.22, dampingFraction: 0.68), value: isSelected)
     }
 }
 

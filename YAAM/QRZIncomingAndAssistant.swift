@@ -14,13 +14,29 @@ nonisolated struct QRZIncomingConfirmation: Identifiable, Hashable, Codable, Sen
     let qsoDate: String
     let requestedAt: String
     let rawSummary: String
+    let qsoID: String
 
-    init(callsign: String, qsoDate: String, requestedAt: String, rawSummary: String) {
+    enum CodingKeys: String, CodingKey {
+        case id, callsign, qsoDate, requestedAt, rawSummary, qsoID
+    }
+
+    init(callsign: String, qsoDate: String, requestedAt: String, rawSummary: String, qsoID: String = "") {
         self.callsign = callsign
         self.qsoDate = qsoDate
         self.requestedAt = requestedAt
         self.rawSummary = rawSummary
+        self.qsoID = qsoID
         id = "\(callsign)|\(qsoDate)|\(requestedAt)|\(rawSummary)"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        callsign = try container.decode(String.self, forKey: .callsign)
+        qsoDate = try container.decode(String.self, forKey: .qsoDate)
+        requestedAt = try container.decode(String.self, forKey: .requestedAt)
+        rawSummary = try container.decode(String.self, forKey: .rawSummary)
+        qsoID = (try? container.decode(String.self, forKey: .qsoID)) ?? ""
+        id = (try? container.decode(String.self, forKey: .id)) ?? "\(callsign)|\(qsoDate)|\(requestedAt)|\(rawSummary)"
     }
 }
 
@@ -28,6 +44,11 @@ nonisolated struct QRZIncomingFetchResult: Sendable {
     let requests: [QRZIncomingConfirmation]
     let message: String
     let succeeded: Bool
+}
+
+nonisolated struct QRZRejectResult: Sendable {
+    let succeeded: Bool
+    let message: String
 }
 
 private let qrzIncomingRequestsCacheKey = "qrzIncomingRequests.v1"
@@ -40,9 +61,16 @@ final class QRZIncomingScraper: NSObject, WKNavigationDelegate {
 
     private var webView: WKWebView!
     private var continuation: CheckedContinuation<QRZIncomingFetchResult, Never>?
+    private var rejectContinuation: CheckedContinuation<QRZRejectResult, Never>?
     private var timeoutTask: Task<Void, Never>?
     private var pollCount = 0
     private var hasOpenedIncoming = false
+
+    private var pendingRejectTarget: QRZIncomingConfirmation?
+    private var pendingRejectReason: String = ""
+    private var pendingRejectComments: String = ""
+    private var isSubmittingReject = false
+    private var rejectVerifyCount = 0
 
     override init() {
         super.init()
@@ -83,21 +111,79 @@ final class QRZIncomingScraper: NSObject, WKNavigationDelegate {
         }
     }
 
+    func rejectIncoming(request: QRZIncomingConfirmation, reason: String, comments: String) async -> QRZRejectResult {
+        if rejectContinuation != nil {
+            finishReject(QRZRejectResult(succeeded: false, message: "The previous QRZ rejection was replaced."))
+        }
+        if continuation != nil {
+            finish(QRZIncomingFetchResult(requests: [], message: "Fetch cancelled by rejection.", succeeded: false))
+        }
+
+        return await withCheckedContinuation { continuation in
+            self.rejectContinuation = continuation
+            self.pendingRejectTarget = request
+            self.pendingRejectReason = reason
+            self.pendingRejectComments = comments
+            self.isSubmittingReject = false
+            self.rejectVerifyCount = 0
+            self.pollCount = 0
+            self.hasOpenedIncoming = false
+
+            self.timeoutTask = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 45_000_000_000)
+                guard !Task.isCancelled, self.rejectContinuation != nil else { return }
+                self.webView.stopLoading()
+                self.finishReject(QRZRejectResult(
+                    succeeded: false,
+                    message: "QRZ rejection timed out. Check your QRZ login session and connection."
+                ))
+            }
+
+            QRZSessionStore.restoreToWebKit { [weak self] in
+                guard let self else { return }
+                // If webView is already on logbook.qrz.com, inspect immediately
+                if let currentURL = self.webView.url, currentURL.host?.contains("qrz.com") == true {
+                    self.inspectPageForReject()
+                } else {
+                    guard let url = URL(string: "https://logbook.qrz.com/logbook") else {
+                        self.finishReject(QRZRejectResult(succeeded: false, message: "Invalid QRZ Logbook URL."))
+                        return
+                    }
+                    self.webView.load(QRZWebKitSession.browserLikeRequest(url: url, timeoutInterval: 30))
+                }
+            }
+        }
+    }
+
     nonisolated func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        Task { @MainActor in self.inspectPage() }
+        Task { @MainActor in
+            if self.rejectContinuation != nil {
+                self.inspectPageForReject()
+            } else {
+                self.inspectPage()
+            }
+        }
     }
 
     nonisolated func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         Task { @MainActor in
             guard (error as NSError).code != NSURLErrorCancelled else { return }
-            self.finish(QRZIncomingFetchResult(requests: [], message: "QRZ Incoming navigation failed: \(error.localizedDescription)", succeeded: false))
+            if self.rejectContinuation != nil {
+                self.finishReject(QRZRejectResult(succeeded: false, message: "QRZ Incoming navigation failed: \(error.localizedDescription)"))
+            } else {
+                self.finish(QRZIncomingFetchResult(requests: [], message: "QRZ Incoming navigation failed: \(error.localizedDescription)", succeeded: false))
+            }
         }
     }
 
     nonisolated func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         Task { @MainActor in
             guard (error as NSError).code != NSURLErrorCancelled else { return }
-            self.finish(QRZIncomingFetchResult(requests: [], message: "QRZ Incoming navigation failed: \(error.localizedDescription)", succeeded: false))
+            if self.rejectContinuation != nil {
+                self.finishReject(QRZRejectResult(succeeded: false, message: "QRZ Incoming navigation failed: \(error.localizedDescription)"))
+            } else {
+                self.finish(QRZIncomingFetchResult(requests: [], message: "QRZ Incoming navigation failed: \(error.localizedDescription)", succeeded: false))
+            }
         }
     }
 
@@ -128,6 +214,39 @@ final class QRZIncomingScraper: NSObject, WKNavigationDelegate {
         }
     }
 
+    private func inspectPageForReject() {
+        guard rejectContinuation != nil else { return }
+
+        // If we already triggered form submission, verify whether the request has been removed
+        if isSubmittingReject {
+            verifyRejection()
+            return
+        }
+
+        webView.evaluateJavaScript(Self.navigationScript(shouldOpenRequests: !hasOpenedIncoming)) { [weak self] result, error in
+            guard let self, self.rejectContinuation != nil else { return }
+            if let error {
+                self.finishReject(QRZRejectResult(succeeded: false, message: "Unable to inspect QRZ Incoming: \(error.localizedDescription)"))
+                return
+            }
+            let payload = result as? [String: Any] ?? [:]
+            switch payload["action"] as? String ?? "" {
+            case "incoming-ready":
+                self.executeReject()
+            case "open-incoming":
+                self.hasOpenedIncoming = true
+                self.pollReject(after: 0.8)
+            case "login-required":
+                self.finishReject(QRZRejectResult(
+                    succeeded: false,
+                    message: "QRZ Login is required. Open QRZ Login, complete login, then retry rejection."
+                ))
+            default:
+                self.pollReject(after: 0.5)
+            }
+        }
+    }
+
     private func poll(after delay: TimeInterval) {
         pollCount += 1
         guard pollCount <= 50 else {
@@ -136,6 +255,94 @@ final class QRZIncomingScraper: NSObject, WKNavigationDelegate {
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             self?.inspectPage()
+        }
+    }
+
+    private func pollReject(after delay: TimeInterval) {
+        pollCount += 1
+        guard pollCount <= 50 else {
+            finishReject(QRZRejectResult(succeeded: false, message: "QRZ Incoming did not finish loading. Open QRZ Login once, then retry."))
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            self?.inspectPageForReject()
+        }
+    }
+
+    private func executeReject() {
+        guard let target = pendingRejectTarget else {
+            finishReject(QRZRejectResult(succeeded: false, message: "No target request specified for rejection."))
+            return
+        }
+
+        let script = Self.buildRejectScript(
+            qsoID: target.qsoID,
+            callsign: target.callsign,
+            qsoDate: target.qsoDate,
+            reason: pendingRejectReason,
+            comments: pendingRejectComments
+        )
+
+        webView.evaluateJavaScript(script) { [weak self] result, error in
+            guard let self, self.rejectContinuation != nil else { return }
+            if let error {
+                self.finishReject(QRZRejectResult(succeeded: false, message: "Failed to execute QRZ rejection: \(error.localizedDescription)"))
+                return
+            }
+            let payload = result as? [String: Any] ?? [:]
+            let action = payload["action"] as? String ?? ""
+
+            if action == "submitted" {
+                self.isSubmittingReject = true
+                // Check if page reloads or update happens in-place
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
+                    self?.verifyRejection()
+                }
+            } else if action == "not-found" {
+                let msg = payload["message"] as? String ?? "Request not found on QRZ page."
+                self.finishReject(QRZRejectResult(succeeded: false, message: msg))
+            } else {
+                let msg = payload["message"] as? String ?? "Unexpected response while submitting rejection."
+                self.finishReject(QRZRejectResult(succeeded: false, message: msg))
+            }
+        }
+    }
+
+    private func verifyRejection() {
+        guard let target = pendingRejectTarget, rejectContinuation != nil else { return }
+        rejectVerifyCount += 1
+
+        let script = Self.buildVerifyScript(qsoID: target.qsoID, callsign: target.callsign)
+        webView.evaluateJavaScript(script) { [weak self] result, error in
+            guard let self, self.rejectContinuation != nil else { return }
+            if let error {
+                if self.rejectVerifyCount <= 5 {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+                        self?.verifyRejection()
+                    }
+                } else {
+                    self.finishReject(QRZRejectResult(succeeded: false, message: "Verification error: \(error.localizedDescription)"))
+                }
+                return
+            }
+            let payload = result as? [String: Any] ?? [:]
+            let verified = payload["verified"] as? Bool ?? false
+
+            if verified {
+                self.finishReject(QRZRejectResult(
+                    succeeded: true,
+                    message: "Successfully rejected confirmation request from \(target.callsign) on QRZ.com."
+                ))
+            } else if self.rejectVerifyCount <= 5 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                    self?.verifyRejection()
+                }
+            } else {
+                self.finishReject(QRZRejectResult(
+                    succeeded: false,
+                    message: "The request for \(target.callsign) is still showing in your QRZ Incoming list."
+                ))
+            }
         }
     }
 
@@ -155,7 +362,8 @@ final class QRZIncomingScraper: NSObject, WKNavigationDelegate {
                     callsign: call,
                     qsoDate: row["qsoDate"] as? String ?? "",
                     requestedAt: row["requestedAt"] as? String ?? "",
-                    rawSummary: row["summary"] as? String ?? ""
+                    rawSummary: row["summary"] as? String ?? "",
+                    qsoID: row["qsoID"] as? String ?? ""
                 )
             }
             let unique = Dictionary(grouping: requests, by: \.id).compactMap { $0.value.first }
@@ -177,6 +385,21 @@ final class QRZIncomingScraper: NSObject, WKNavigationDelegate {
         hasOpenedIncoming = false
         let active = continuation
         continuation = nil
+        active?.resume(returning: result)
+    }
+
+    private func finishReject(_ result: QRZRejectResult) {
+        timeoutTask?.cancel()
+        timeoutTask = nil
+        pollCount = 0
+        hasOpenedIncoming = false
+        isSubmittingReject = false
+        rejectVerifyCount = 0
+        pendingRejectTarget = nil
+        pendingRejectReason = ""
+        pendingRejectComments = ""
+        let active = rejectContinuation
+        rejectContinuation = nil
         active?.resume(returning: result)
     }
 
@@ -248,17 +471,168 @@ final class QRZIncomingScraper: NSObject, WKNavigationDelegate {
             var call = callFrom(callIndex >= 0 ? cells[callIndex] : summary);
             if (!call) return;
             var dates = summary.match(/\b\d{4}-\d{2}-\d{2}(?:\s+\d{2}:\d{2}:\d{2})?\b/g) || [];
+            var qsoId = "";
+            var rejButton = tr.querySelector("button[onclick*='lb_reject'], a[onclick*='lb_reject'], input[onclick*='lb_reject']");
+            if (rejButton) {
+                var m = (rejButton.getAttribute("onclick") || "").match(/lb_reject\s*\(\s*['\"]?(\d+)['\"]?\s*\)/);
+                if (m) qsoId = m[1];
+            }
+            if (!qsoId) {
+                var rcallInput = tr.querySelector("input[id^='rcall-']");
+                if (rcallInput) {
+                    var m2 = (rcallInput.id || "").match(/rcall-(\d+)/);
+                    if (m2) qsoId = m2[1];
+                }
+            }
             rows.push({
                 callsign: call,
                 requestedAt: requestedIndex >= 0 ? (cells[requestedIndex] || "") : (dates[0] || ""),
                 qsoDate: qsoIndex >= 0 ? firstDate(cells[qsoIndex] || "") : (dates.length > 1 ? firstDate(dates[1]) : firstDate(summary)),
-                summary: summary
+                summary: summary,
+                qsoID: qsoId
             });
           });
         });
         return { rows: rows };
     })();
     """#
+
+    private static func buildRejectScript(
+        qsoID: String,
+        callsign: String,
+        qsoDate: String,
+        reason: String,
+        comments: String
+    ) -> String {
+        let safeQsoID = qsoID.replacingOccurrences(of: "\"", with: "\\\"")
+        let safeCall = callsign.uppercased().replacingOccurrences(of: "\"", with: "\\\"")
+        let safeDate = qsoDate.replacingOccurrences(of: "\"", with: "\\\"")
+        let safeReason = reason.replacingOccurrences(of: "\"", with: "\\\"")
+        let safeComments = comments
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "\n", with: "\\n")
+
+        return #"""
+        (function() {
+            var targetQso = "\#(safeQsoID)";
+            var targetCall = "\#(safeCall)";
+            var targetDate = "\#(safeDate)";
+            var reasonVal = "\#(safeReason)";
+            var commentsVal = "\#(safeComments)";
+
+            // 1. Locate qsoId if not directly known
+            if (!targetQso) {
+                var rows = Array.from(document.querySelectorAll("table tr"));
+                for (var i = 0; i < rows.length; i++) {
+                    var tr = rows[i];
+                    var rcall = tr.querySelector("input[id^='rcall-']");
+                    var rdate = tr.querySelector("input[id^='rdate-']");
+                    var callVal = rcall ? rcall.value.toUpperCase().trim() : "";
+                    var dateVal = rdate ? rdate.value.trim() : "";
+                    var text = (tr.innerText || tr.textContent || "").toUpperCase();
+
+                    var matchCall = (callVal && callVal === targetCall) || text.indexOf(targetCall) >= 0;
+                    var matchDate = (!targetDate) || (dateVal && dateVal === targetDate) || text.indexOf(targetDate) >= 0;
+
+                    if (matchCall && matchDate) {
+                        if (rcall) {
+                            var m = (rcall.id || "").match(/rcall-(\d+)/);
+                            if (m) { targetQso = m[1]; break; }
+                        }
+                        var btn = tr.querySelector("button[onclick*='lb_reject'], a[onclick*='lb_reject'], input[onclick*='lb_reject']");
+                        if (btn) {
+                            var m2 = (btn.getAttribute("onclick") || "").match(/lb_reject\s*\(\s*['\"]?(\d+)['\"]?\s*\)/);
+                            if (m2) { targetQso = m2[1]; break; }
+                        }
+                    }
+                }
+            }
+
+            if (!targetQso) {
+                return { action: "not-found", message: "Could not locate confirmation request for " + targetCall + " on QRZ." };
+            }
+
+            // 2. Select reason radio
+            var radio = document.querySelector('input[name=reason][value="' + reasonVal + '"]');
+            if (radio) {
+                radio.checked = true;
+            } else {
+                var firstRadio = document.querySelector('input[name=reason]');
+                if (firstRadio) firstRadio.checked = true;
+            }
+
+            // 3. Set comments
+            var commentsInput = document.getElementById('comments');
+            if (commentsInput) {
+                commentsInput.value = commentsVal;
+            }
+
+            // 4. Set rejid
+            var rejidInput = document.getElementById('rejid');
+            if (rejidInput) {
+                rejidInput.value = targetQso;
+            }
+
+            // 5. Populate and submit #lbmenu form
+            var form = document.getElementById('lbmenu');
+            if (!form) {
+                return { action: "error", message: "Logbook form #lbmenu was not found on QRZ page." };
+            }
+
+            var opInput = form.querySelector('input[name="op"]');
+            if (opInput) opInput.value = 'reject';
+
+            var rInput = form.querySelector('input[name="reason"]');
+            if (rInput) rInput.value = reasonVal;
+
+            var cInput = form.querySelector('input[name="comments"]');
+            if (cInput) cInput.value = commentsVal;
+
+            var qsoInput = form.querySelector('input[name="qso"]');
+            if (qsoInput) {
+                qsoInput.value = targetQso;
+            } else {
+                var newQso = document.createElement('input');
+                newQso.type = 'hidden';
+                newQso.name = 'qso';
+                newQso.value = targetQso;
+                form.appendChild(newQso);
+            }
+
+            if (typeof lb_reject2 === "function") {
+                try {
+                    lb_reject2();
+                    return { action: "submitted", qsoID: targetQso };
+                } catch(e) {}
+            }
+
+            form.submit();
+            return { action: "submitted", qsoID: targetQso };
+        })();
+        """#
+    }
+
+    private static func buildVerifyScript(qsoID: String, callsign: String) -> String {
+        let safeQso = qsoID.replacingOccurrences(of: "\"", with: "\\\"")
+        let safeCall = callsign.uppercased().replacingOccurrences(of: "\"", with: "\\\"")
+
+        return #"""
+        (function() {
+            var qso = "\#(safeQso)";
+            var call = "\#(safeCall)";
+
+            if (qso) {
+                var el = document.getElementById('rcall-' + qso) || document.querySelector("button[onclick*='" + qso + "']");
+                if (el) {
+                    return { verified: false, message: "Request " + qso + " is still present on page." };
+                }
+            }
+
+            return { verified: true };
+        })();
+        """#
+    }
 }
 
 nonisolated struct ConfirmationReconciliationSnapshot: Codable, Equatable, Sendable {
@@ -315,6 +689,37 @@ extension AppState {
                 self.playActivitySound(.failure)
             } else {
                 self.playActivitySound(.success)
+            }
+        }
+    }
+
+    func rejectQRZIncomingRequest(_ incoming: QRZIncomingConfirmation, reason: String, comments: String = "") {
+        guard !isRejectingQRZIncoming else { return }
+        isRejectingQRZIncoming = true
+        rejectingQRZIncomingID = incoming.id
+        qrzIncomingStatus = "Rejecting request from \(incoming.callsign) on QRZ.com..."
+        appendLog("QRZ Incoming: rejecting confirmation request from \(incoming.callsign) (Reason: \(reason))...")
+
+        Task { @MainActor in
+            let result = await QRZIncomingScraper.shared.rejectIncoming(
+                request: incoming,
+                reason: reason,
+                comments: comments
+            )
+            self.isRejectingQRZIncoming = false
+            self.rejectingQRZIncomingID = nil
+
+            if result.succeeded {
+                self.qrzIncomingRequests.removeAll { $0.id == incoming.id }
+                self.saveQRZIncomingCache()
+                self.qrzIncomingStatus = "Rejected confirmation request from \(incoming.callsign) on QRZ.com."
+                self.appendLog("QRZ Incoming: successfully rejected confirmation request from \(incoming.callsign) on QRZ.com.")
+                self.playActivitySound(.success)
+                self.fetchQRZIncomingRequests()
+            } else {
+                self.qrzIncomingStatus = "Failed to reject on QRZ.com: \(result.message)"
+                self.appendLog("QRZ Incoming rejection error: \(result.message)")
+                self.playActivitySound(.failure)
             }
         }
     }
@@ -413,6 +818,8 @@ extension AppState {
 struct QRZIncomingRequestsView: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
+    @State private var requestToReject: QRZIncomingConfirmation?
+    @State private var showRejectSheet = false
 
     private var outstanding: [QRZIncomingConfirmation] {
         appState.qrzIncomingRequests.filter { !appState.hasLocalQSO(for: $0) }
@@ -424,7 +831,7 @@ struct QRZIncomingRequestsView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Label("QRZ Incoming Confirmation Requests", systemImage: "tray.and.arrow.down.fill")
                         .font(.title3.weight(.bold))
-                    Text("Requests that do not match a local QSO can be followed up by email for the missing contact details.")
+                    Text("Requests that do not match a local QSO can be followed up by email for the missing contact details or rejected directly on QRZ.com.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -435,7 +842,7 @@ struct QRZIncomingRequestsView: View {
                     Label("Refresh", systemImage: "arrow.clockwise")
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(appState.isFetchingQRZIncoming)
+                .disabled(appState.isFetchingQRZIncoming || appState.isRejectingQRZIncoming)
             }
 
             HStack(spacing: 10) {
@@ -447,6 +854,18 @@ struct QRZIncomingRequestsView: View {
                     color: .green,
                     icon: "checkmark.circle.fill"
                 )
+            }
+
+            if appState.isRejectingQRZIncoming {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text(appState.qrzIncomingStatus)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.red)
+                }
+                .padding(8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
             }
 
             if appState.isFetchingQRZIncoming {
@@ -485,6 +904,22 @@ struct QRZIncomingRequestsView: View {
                             .disabled(appState.incomingEmailLookupCallsign != nil)
                             .help("Prepare an editable email requesting the missing QSO details")
                         }
+
+                        Button(role: .destructive) {
+                            requestToReject = request
+                            showRejectSheet = true
+                        } label: {
+                            if appState.rejectingQRZIncomingID == request.id {
+                                ProgressView()
+                                    .controlSize(.small)
+                            } else {
+                                Label("Reject", systemImage: "xmark.circle")
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(.red)
+                        .disabled(appState.isRejectingQRZIncoming || appState.isFetchingQRZIncoming)
+                        .help("Reject confirmation request from \(request.callsign) on QRZ.com")
 
                         Button {
                             guard let url = URL(string: "https://www.qrz.com/db/\(request.callsign)") else { return }
@@ -525,6 +960,13 @@ struct QRZIncomingRequestsView: View {
             EmailComposerView()
                 .environmentObject(appState)
         }
+        .sheet(isPresented: $showRejectSheet) {
+            if let req = requestToReject {
+                QRZRejectRequestSheet(request: req) { reason, comments in
+                    appState.rejectQRZIncomingRequest(req, reason: reason, comments: comments)
+                }
+            }
+        }
     }
 
     private func incomingSummary(title: String, value: Int, color: Color, icon: String) -> some View {
@@ -543,6 +985,84 @@ struct QRZIncomingRequestsView: View {
         .padding(10)
         .background(color.opacity(0.08), in: RoundedRectangle(cornerRadius: 7))
         .overlay(RoundedRectangle(cornerRadius: 7).stroke(color.opacity(0.2)))
+    }
+}
+
+struct QRZRejectRequestSheet: View {
+    let request: QRZIncomingConfirmation
+    let onConfirm: (String, String) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var selectedReason = "Not in my logbook"
+    @State private var comments = ""
+
+    private let reasons: [(value: String, title: String, subtitle: String)] = [
+        ("Not in my logbook", "Not in my logbook", "The contact is not recorded in your station log."),
+        ("Incorrect data", "Incorrect data", "Date, time, frequency, or mode does not match."),
+        ("Other", "Other", "Other log discrepancy or duplicate request.")
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 12) {
+                Image(systemName: "exclamationmark.octagon.fill")
+                    .font(.system(size: 30))
+                    .foregroundStyle(.red)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Reject Confirmation Request")
+                        .font(.title3.weight(.bold))
+                    Text("Station: \(request.callsign) · QSO Date: \(request.qsoDate.isEmpty ? "Unknown" : request.qsoDate)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Text("This action will submit the rejection directly to QRZ.com using your active logbook session.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Rejection Reason on QRZ.com:")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                ForEach(reasons, id: \.value) { item in
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: selectedReason == item.value ? "largecircle.fill.circle" : "circle")
+                            .foregroundStyle(selectedReason == item.value ? Color.accentColor : Color.secondary)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(item.title).font(.body.weight(selectedReason == item.value ? .semibold : .regular))
+                            Text(item.subtitle).font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture { selectedReason = item.value }
+                    .padding(.vertical, 2)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Comments to requestor (optional):")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                TextField("Enter note to send to \(request.callsign)...", text: $comments)
+                    .textFieldStyle(.roundedBorder)
+            }
+
+            HStack {
+                Button("Cancel", role: .cancel) { dismiss() }
+                Spacer()
+                Button(role: .destructive) {
+                    dismiss()
+                    onConfirm(selectedReason, comments)
+                } label: {
+                    Label("Reject on QRZ.com", systemImage: "xmark.circle.fill")
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.red)
+            }
+        }
+        .padding(22)
+        .frame(width: 480)
     }
 }
 

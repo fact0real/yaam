@@ -26,6 +26,67 @@ nonisolated enum QSOIdentity {
         return "\(call)|\(date)|\(resolvedBand(fields))|\(effectiveMode(fields))"
     }
 
+    /// Key based on CALL|DATE|TIME|BAND (independent of MODE)
+    static func baseKey(fields: [String: String]) -> String {
+        let call = clean(fields["CALL"] ?? "")
+        let date = normalizedDate(fields["QSO_DATE"] ?? "")
+        let time = normalizedTime(fields["TIME_ON"] ?? fields["TIME_OFF"] ?? "")
+        let band = resolvedBand(fields)
+        guard !call.isEmpty, date.count == 8, time.count == 6 else { return "" }
+        return "\(call)|\(date)|\(time)|\(band)"
+    }
+
+    /// Key based on CALL|DATE|BAND for grouping duplicate clusters regardless of time/mode
+    static func callDateBandKey(fields: [String: String]) -> String {
+        let call = clean(fields["CALL"] ?? "")
+        let date = normalizedDate(fields["QSO_DATE"] ?? "")
+        let band = resolvedBand(fields)
+        guard !call.isEmpty, date.count == 8 else { return "" }
+        return "\(call)|\(date)|\(band)"
+    }
+
+    /// Returns true if two modes are equal, or if either mode is missing/empty, or if they represent compatible digital modes.
+    static func areModesCompatible(_ mode1: String, _ mode2: String) -> Bool {
+        let m1 = clean(mode1)
+        let m2 = clean(mode2)
+        if m1.isEmpty || m2.isEmpty { return true }
+        if m1 == m2 { return true }
+        let digitalModes: Set<String> = ["FT8", "FT4", "JT65", "JT9", "MSK144", "Q65", "JS8", "DATA", "DIGI"]
+        if digitalModes.contains(m1) && (m2 == "DATA" || m2 == "DIGI") { return true }
+        if digitalModes.contains(m2) && (m1 == "DATA" || m1 == "DIGI") { return true }
+        return false
+    }
+
+    /// Returns true if two records describe the same underlying QSO, accounting for missing mode or slight timestamp variations.
+    static func isSameQSO(lhs: [String: String], rhs: [String: String], timeToleranceSeconds: Int = 0) -> Bool {
+        let sdrId1 = lhs["APP_SDR_CONTROL_ID"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let sdrId2 = rhs["APP_SDR_CONTROL_ID"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !sdrId1.isEmpty && !sdrId2.isEmpty && sdrId1.caseInsensitiveCompare(sdrId2) == .orderedSame {
+            return true
+        }
+
+        let call1 = clean(lhs["CALL"] ?? "")
+        let call2 = clean(rhs["CALL"] ?? "")
+        guard !call1.isEmpty, call1 == call2 else { return false }
+
+        let date1 = normalizedDate(lhs["QSO_DATE"] ?? "")
+        let date2 = normalizedDate(rhs["QSO_DATE"] ?? "")
+        guard date1 == date2, date1.count == 8 else { return false }
+
+        let band1 = resolvedBand(lhs)
+        let band2 = resolvedBand(rhs)
+        guard !band1.isEmpty, band1 == band2 else { return false }
+
+        let mode1 = effectiveMode(lhs)
+        let mode2 = effectiveMode(rhs)
+        guard areModesCompatible(mode1, mode2) else { return false }
+
+        guard let sec1 = secondsFromMidnight(lhs), let sec2 = secondsFromMidnight(rhs) else {
+            return false
+        }
+        return abs(sec1 - sec2) <= timeToleranceSeconds
+    }
+
     static func normalizedTime(_ value: String) -> String {
         let digits = String(value.filter(\.isNumber))
         if digits.count == 4 { return digits + "00" }

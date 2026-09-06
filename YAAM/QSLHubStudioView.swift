@@ -53,6 +53,10 @@ public struct QSLHubStudioView: View {
     @State private var activeConflictItem: QSLInboundItem? = nil
     @State private var selectedQSOForPaperEdit: QSORecordModel? = nil
     @State private var toastMessage: String? = nil
+    @State private var gallerySearchText: String = ""
+    @State private var showingEQSLCredentialsPrompt: Bool = false
+    @State private var promptEQSLUsername: String = ""
+    @State private var promptEQSLPassword: String = ""
 
     public init() {}
 
@@ -98,6 +102,9 @@ public struct QSLHubStudioView: View {
             set: { viewingCardURL = $0?.url }
         )) { item in
             QSLCardViewerModal(cardURL: item.url)
+        }
+        .sheet(isPresented: $showingEQSLCredentialsPrompt) {
+            eqslCredentialsSheet
         }
         .overlay(alignment: .top) {
             if let msg = toastMessage {
@@ -151,6 +158,28 @@ public struct QSLHubStudioView: View {
             }
 
             Divider().frame(height: 28)
+
+            // DOWNLOAD ALL eQSL CARDS BUTTON
+            Button {
+                triggerEQSLDownload()
+            } label: {
+                HStack(spacing: 6) {
+                    if eqsl.isSyncing {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Image(systemName: "photo.badge.checkmark.fill")
+                    }
+                    Text(eqsl.isSyncing ? "Downloading Cards..." : "Download eQSL Cards")
+                        .fontWeight(.bold)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .background(Color.cyan, in: RoundedRectangle(cornerRadius: 6))
+                .foregroundColor(.black)
+            }
+            .buttonStyle(.plain)
+            .disabled(eqsl.isSyncing)
+            .help("Download all graphical QSL cards from your eQSL.cc inbox")
 
             // ONE-CLICK SYNC ALL BUTTON
             Button {
@@ -304,28 +333,40 @@ public struct QSLHubStudioView: View {
             Spacer()
 
             if selectedTab == .matrix {
-                // Filter chips for matrix
-                Picker("", selection: $matrixFilter) {
-                    Text("All QSOs").tag("ALL")
-                    Text("Unconfirmed").tag("UNCONFIRMED")
-                    Text("Has Card 🖼️").tag("HAS_CARD")
-                    Text("Paper Queued ✉️").tag("PAPER_QUEUED")
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 320)
+                // Filter chips for matrix & search box with clean spacing
+                HStack(spacing: 12) {
+                    Picker("", selection: $matrixFilter) {
+                        Text("All QSOs").tag("ALL")
+                        Text("Unconfirmed").tag("UNCONFIRMED")
+                        Text("Has Card 🖼").tag("HAS_CARD")
+                        Text("Queued ✉️").tag("PAPER_QUEUED")
+                    }
+                    .pickerStyle(.segmented)
+                    .fixedSize()
 
-                HStack(spacing: 4) {
-                    Image(systemName: "magnifyingglass")
-                        .foregroundColor(.secondary)
-                        .font(.caption2)
-                    TextField("Filter callsign...", text: $searchText)
-                        .textFieldStyle(.plain)
-                        .font(.caption)
+                    HStack(spacing: 5) {
+                        Image(systemName: "magnifyingglass")
+                            .foregroundColor(.secondary)
+                            .font(.caption2)
+                        TextField("Filter callsign...", text: $searchText)
+                            .textFieldStyle(.plain)
+                            .font(.caption)
+                        if !searchText.isEmpty {
+                            Button {
+                                searchText = ""
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundColor(.secondary)
+                                    .font(.caption2)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+                    .frame(width: 150)
                 }
-                .padding(.horizontal, 6)
-                .padding(.vertical, 3)
-                .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 5))
-                .frame(width: 140)
             }
         }
         .padding(.horizontal, 14)
@@ -392,11 +433,15 @@ public struct QSLHubStudioView: View {
 
         let isLotw = ["Y", "V", "C"].contains(qso["LOTW_QSL_RCVD"].uppercased())
         let isEqsl = ["Y", "V", "C"].contains(qso["EQSL_QSL_RCVD"].uppercased())
-        let isQrz = ["Y", "V", "C"].contains(qso["QRZCOM_QSO_DOWNLOAD_STATUS"].uppercased())
-        let isClubLog = ["Y", "V", "C"].contains(qso["CLUBLOG_LOTW_RCVD"].uppercased())
+        let isQrz = ["Y", "V", "C"].contains(qso["QRZLOG_QSL_RCVD"].uppercased()) ||
+                    ["Y", "V", "C"].contains(qso["QRZCOM_QSL_RCVD"].uppercased()) ||
+                    ["Y", "V", "C"].contains(qso["QRZCOM_QSO_DOWNLOAD_STATUS"].uppercased()) ||
+                    ["CONFIRMED", "C", "Y", "V"].contains(qso["APP_QRZLOG_STATUS"].uppercased())
+        let isClubLog = ["Y", "V", "C"].contains(qso["CLUBLOG_LOTW_RCVD"].uppercased()) ||
+                        ["C", "G"].contains(qso["APP_YAAM_CLUBLOG_LOTW_STATE"].uppercased())
 
-        let paperRcvd = ["Y", "V", "R"].contains(qso["QSL_RCVD"].uppercased())
-        let paperSent = ["Y", "S"].contains(qso["QSL_SENT"].uppercased())
+        let paperRcvd = isPaperQSLReceived(qso)
+        let paperSent = isPaperQSLSent(qso)
         let paperQueued = qso["QSL_SENT"].uppercased() == "Q"
 
         let cardPath = qso["QSL_MEDIA_PATH"]
@@ -871,23 +916,139 @@ public struct QSLHubStudioView: View {
 
     // MARK: - Tab 4: QSL Card Gallery & Viewer
 
+    private struct DisplayableCard: Identifiable {
+        let id: String
+        let fileURL: URL
+        let callsign: String
+        let date: String
+        let band: String
+        let mode: String
+        let isLocalMedia: Bool
+    }
+
     @ViewBuilder
     private var cardGalleryView: some View {
-        let qsosWithCards = appState.qsoRecords.filter { qso in
-            let path = qso["QSL_MEDIA_PATH"]
-            let call = qso["CALL"]
-            let date = qso["QSO_DATE"]
-            let band = qso["BAND"]
-            let mode = qso["MODE"]
-            return (!path.isEmpty && FileManager.default.fileExists(atPath: path)) || EQSLService.shared.hasCachedCard(callsign: call, date: date, band: band, mode: mode)
+        let allCards: [DisplayableCard] = {
+            var seenPaths = Set<String>()
+            var cards: [DisplayableCard] = []
+
+            // 1. Collect from QSO records
+            for qso in appState.qsoRecords {
+                let path = qso["QSL_MEDIA_PATH"]
+                let call = qso["CALL"]
+                let date = qso["QSO_DATE"]
+                let band = qso["BAND"]
+                let mode = qso["MODE"]
+
+                let resolvedURL: URL? = {
+                    if !path.isEmpty && FileManager.default.fileExists(atPath: path) {
+                        return URL(fileURLWithPath: path)
+                    }
+                    return EQSLService.shared.cachedCardURL(callsign: call, date: date, band: band, mode: mode)
+                }()
+
+                if let url = resolvedURL, seenPaths.insert(url.path).inserted {
+                    cards.append(DisplayableCard(
+                        id: url.path,
+                        fileURL: url,
+                        callsign: call,
+                        date: date,
+                        band: band,
+                        mode: mode,
+                        isLocalMedia: !path.isEmpty
+                    ))
+                }
+            }
+
+            // 2. Collect from cached directory files
+            for cached in EQSLService.shared.allCachedCards() {
+                if seenPaths.insert(cached.fileURL.path).inserted {
+                    cards.append(DisplayableCard(
+                        id: cached.fileURL.path,
+                        fileURL: cached.fileURL,
+                        callsign: cached.callsign,
+                        date: cached.date,
+                        band: cached.band,
+                        mode: cached.mode,
+                        isLocalMedia: false
+                    ))
+                }
+            }
+
+            return cards
+        }()
+
+        let filteredCards = allCards.filter { card in
+            guard !gallerySearchText.isEmpty else { return true }
+            return card.callsign.localizedCaseInsensitiveContains(gallerySearchText)
         }
 
         VStack(spacing: 0) {
-            HStack {
-                Text("QSL CARD GALLERY (\(qsosWithCards.count) CARDS)")
-                    .font(.caption.bold())
-                    .foregroundColor(.secondary)
+            // Gallery Toolbar
+            HStack(spacing: 12) {
+                HStack(spacing: 6) {
+                    Image(systemName: "photo.stack.fill")
+                        .foregroundColor(.cyan)
+                    Text("QSL CARD GALLERY")
+                        .font(.caption.bold())
+                        .foregroundColor(.secondary)
+                    Text("(\(filteredCards.count))")
+                        .font(.caption.bold())
+                        .foregroundColor(.primary)
+                }
+
                 Spacer()
+
+                // Filter search
+                HStack(spacing: 5) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundColor(.secondary)
+                        .font(.caption2)
+                    TextField("Filter callsign...", text: $gallerySearchText)
+                        .textFieldStyle(.plain)
+                        .font(.caption)
+                    if !gallerySearchText.isEmpty {
+                        Button { gallerySearchText = "" } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundColor(.secondary)
+                                .font(.caption2)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+                .frame(width: 150)
+
+                // Download All eQSL Cards Button
+                Button {
+                    triggerEQSLDownload()
+                } label: {
+                    HStack(spacing: 5) {
+                        if eqsl.isSyncing {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Image(systemName: "tray.and.arrow.down.fill")
+                        }
+                        Text(eqsl.isSyncing ? "Downloading..." : "Download All eQSL Cards")
+                            .font(.caption.bold())
+                    }
+                }
+                .controlSize(.small)
+                .buttonStyle(.borderedProminent)
+                .tint(.cyan)
+                .disabled(eqsl.isSyncing)
+
+                // Reveal in Finder
+                Button {
+                    NSWorkspace.shared.open(EQSLService.shared.cardsDirectoryURL)
+                } label: {
+                    Image(systemName: "folder")
+                        .font(.caption)
+                }
+                .controlSize(.small)
+                .help("Open eQSL Cards folder in Finder")
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
@@ -895,65 +1056,71 @@ public struct QSLHubStudioView: View {
 
             Divider()
 
-            if qsosWithCards.isEmpty {
-                VStack(spacing: 8) {
+            // Live download progress banner
+            if eqsl.isSyncing {
+                VStack(spacing: 6) {
+                    HStack {
+                        ProgressView().controlSize(.small)
+                        if let prog = eqsl.downloadProgress {
+                            Text("Downloading cards from eQSL.cc: \(prog.current) / \(prog.total) [\(prog.currentCallsign)]...")
+                                .font(.caption.bold())
+                        } else {
+                            Text(eqsl.statusMessage)
+                                .font(.caption.bold())
+                        }
+                        Spacer()
+                        Button("Cancel") {
+                            eqsl.cancelDownload()
+                        }
+                        .controlSize(.mini)
+                    }
+                    if let prog = eqsl.downloadProgress {
+                        ProgressView(value: prog.percentage)
+                            .progressViewStyle(.linear)
+                            .tint(.cyan)
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(Color.cyan.opacity(0.12))
+
+                Divider()
+            }
+
+            // Cards Grid or Empty State
+            if filteredCards.isEmpty {
+                VStack(spacing: 12) {
                     Spacer()
                     Image(systemName: "photo.on.rectangle.angled")
-                        .font(.system(size: 44))
-                        .foregroundColor(.secondary.opacity(0.5))
-                    Text("No QSL Card Images in Archive")
+                        .font(.system(size: 48))
+                        .foregroundColor(.secondary.opacity(0.4))
+                    Text("No QSL Cards Found")
                         .font(.headline)
                         .foregroundColor(.secondary)
-                    Text("Graphic cards from eQSL.cc and images extracted from email (.eml) drops will appear here.")
+                    Text("Click 'Download All eQSL Cards' above to automatically retrieve cards from eQSL.cc, or drop email/image files.")
                         .font(.caption)
                         .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 400)
+
+                    Button {
+                        triggerEQSLDownload()
+                    } label: {
+                        Label("Download All eQSL Cards", systemImage: "tray.and.arrow.down.fill")
+                            .font(.caption.bold())
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.cyan)
+                    .disabled(eqsl.isSyncing)
+                    .padding(.top, 4)
+
                     Spacer()
                 }
             } else {
                 ScrollView {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 180, maximum: 240), spacing: 14)], spacing: 14) {
-                        ForEach(qsosWithCards) { qso in
-                            let call = qso["CALL"]
-                            let date = qso["QSO_DATE"]
-                            let band = qso["BAND"]
-                            let mode = qso["MODE"]
-                            let cardURL: URL? = {
-                                let path = qso["QSL_MEDIA_PATH"]
-                                if !path.isEmpty {
-                                    return URL(fileURLWithPath: path)
-                                }
-                                return EQSLService.shared.cachedCardURL(callsign: call, date: date, band: band, mode: mode)
-                            }()
-
-                            if let url = cardURL, let img = NSImage(contentsOf: url) {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Image(nsImage: img)
-                                        .resizable()
-                                        .aspectRatio(contentMode: .fill)
-                                        .frame(height: 120)
-                                        .clipped()
-                                        .cornerRadius(6)
-
-                                    HStack {
-                                        Text(call)
-                                            .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                        Spacer()
-                                        Text("\(band) · \(mode)")
-                                            .font(.system(size: 9.5, weight: .semibold))
-                                            .foregroundColor(.secondary)
-                                    }
-
-                                    Text(date)
-                                        .font(.system(size: 8.5))
-                                        .foregroundColor(.secondary)
-                                }
-                                .padding(8)
-                                .background(Color(NSColor.controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
-                                .shadow(color: .black.opacity(0.08), radius: 2)
-                                .onTapGesture {
-                                    viewingCardURL = url
-                                }
-                            }
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 200, maximum: 260), spacing: 14)], spacing: 14) {
+                        ForEach(filteredCards) { card in
+                            cardCell(card: card)
                         }
                     }
                     .padding(14)
@@ -962,12 +1129,68 @@ public struct QSLHubStudioView: View {
         }
     }
 
+    private func cardCell(card: DisplayableCard) -> some View {
+        let flag = DXCCDatabase.resolve(callsign: card.callsign).flagEmoji
+        return VStack(alignment: .leading, spacing: 4) {
+            ZStack(alignment: .bottomTrailing) {
+                if let img = NSImage(contentsOf: card.fileURL) {
+                    Image(nsImage: img)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(height: 130)
+                        .clipped()
+                        .cornerRadius(6)
+                } else {
+                    Rectangle()
+                        .fill(Color.secondary.opacity(0.1))
+                        .frame(height: 130)
+                        .overlay(Image(systemName: "photo").foregroundColor(.secondary))
+                        .cornerRadius(6)
+                }
+
+                Text(card.isLocalMedia ? "Paper / Scan" : "eQSL.cc")
+                    .font(.system(size: 8, weight: .bold))
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 3))
+                    .foregroundColor(card.isLocalMedia ? .orange : .cyan)
+                    .padding(5)
+            }
+
+            HStack(spacing: 4) {
+                Text(flag).font(.caption2)
+                Text(card.callsign)
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                Spacer()
+                if !card.band.isEmpty || !card.mode.isEmpty {
+                    Text("\(card.band) · \(card.mode)")
+                        .font(.system(size: 9.5, weight: .semibold))
+                        .foregroundColor(.secondary)
+                }
+            }
+
+            if !card.date.isEmpty {
+                Text(card.date)
+                    .font(.system(size: 8.5))
+                    .foregroundColor(.secondary)
+            }
+        }
+        .padding(8)
+        .background(Color(NSColor.controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.12), lineWidth: 1))
+        .shadow(color: .black.opacity(0.06), radius: 3)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            viewingCardURL = card.fileURL
+        }
+    }
+
     // MARK: - Tab 5: Traditional Paper QSL & Bureau Manager
 
     @ViewBuilder
     private var paperQSLManagerView: some View {
         let paperQSOs = appState.qsoRecords.filter { qso in
-            qso["QSL_RCVD"].uppercased() == "Y" || qso["QSL_SENT"].uppercased() == "Y" || qso["QSL_SENT"].uppercased() == "Q" || qso.id == selectedQSOForPaperEdit?.id
+            isPaperQSLReceived(qso) || isPaperQSLSent(qso) || qso["QSL_SENT"].uppercased() == "Q" || qso.id == selectedQSOForPaperEdit?.id
         }
 
         HStack(spacing: 0) {
@@ -984,28 +1207,48 @@ public struct QSLHubStudioView: View {
 
                 Divider()
 
-                List(paperQSOs.prefix(100)) { qso in
-                    HStack {
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(qso["CALL"])
-                                .font(.system(size: 12, weight: .bold, design: .monospaced))
-                            Text("\(qso["QSO_DATE"]) · \(qso["BAND"]) \(qso["MODE"])")
-                                .font(.system(size: 9))
-                                .foregroundColor(.secondary)
-                        }
+                if paperQSOs.isEmpty {
+                    VStack(spacing: 8) {
                         Spacer()
-                        if qso["QSL_SENT"].uppercased() == "Q" {
-                            Text("Queued").font(.system(size: 8.5, weight: .bold)).foregroundColor(.orange)
-                        } else if qso["QSL_RCVD"].uppercased() == "Y" {
-                            Text("Recv").font(.system(size: 8.5, weight: .bold)).foregroundColor(.green)
+                        Image(systemName: "envelope.badge")
+                            .font(.title2)
+                            .foregroundColor(.secondary.opacity(0.5))
+                        Text("No Paper / Bureau QSOs")
+                            .font(.caption.bold())
+                            .foregroundColor(.secondary)
+                        Text("Select a QSO from Matrix to queue or track physical cards")
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 16)
+                        Spacer()
+                    }
+                } else {
+                    List(paperQSOs.prefix(100)) { qso in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(qso["CALL"])
+                                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                                Text("\(qso["QSO_DATE"]) · \(qso["BAND"]) \(qso["MODE"])")
+                                    .font(.system(size: 9))
+                                    .foregroundColor(.secondary)
+                            }
+                            Spacer()
+                            if qso["QSL_SENT"].uppercased() == "Q" {
+                                Text("Queued").font(.system(size: 8.5, weight: .bold)).foregroundColor(.orange)
+                            } else if isPaperQSLReceived(qso) {
+                                Text("Recv").font(.system(size: 8.5, weight: .bold)).foregroundColor(.green)
+                            } else if isPaperQSLSent(qso) {
+                                Text("Sent").font(.system(size: 8.5, weight: .bold)).foregroundColor(.blue)
+                            }
+                        }
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            selectedQSOForPaperEdit = qso
                         }
                     }
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        selectedQSOForPaperEdit = qso
-                    }
+                    .listStyle(.plain)
                 }
-                .listStyle(.plain)
             }
             .frame(width: 260)
 
@@ -1035,17 +1278,17 @@ public struct QSLHubStudioView: View {
 
                         HStack(spacing: 8) {
                             Button("Queue for Bureau (Q)") {
-                                updatePaperStatus(qsoID: target.id, sent: "Q", rcvd: nil)
+                                updatePaperStatus(qsoID: target.id, sent: "Q", sentVia: "B", rcvd: nil, rcvdVia: nil)
                             }
                             .controlSize(.small)
 
                             Button("Mark Sent Direct (Y)") {
-                                updatePaperStatus(qsoID: target.id, sent: "Y", rcvd: nil)
+                                updatePaperStatus(qsoID: target.id, sent: "Y", sentVia: "D", rcvd: nil, rcvdVia: nil)
                             }
                             .controlSize(.small)
 
                             Button("Clear Sent") {
-                                updatePaperStatus(qsoID: target.id, sent: "N", rcvd: nil)
+                                updatePaperStatus(qsoID: target.id, sent: "N", sentVia: "", rcvd: nil, rcvdVia: nil)
                             }
                             .controlSize(.small)
                         }
@@ -1059,17 +1302,17 @@ public struct QSLHubStudioView: View {
 
                         HStack(spacing: 8) {
                             Button("Mark Received Bureau (R)") {
-                                updatePaperStatus(qsoID: target.id, sent: nil, rcvd: "R")
+                                updatePaperStatus(qsoID: target.id, sent: nil, sentVia: nil, rcvd: "R", rcvdVia: "B")
                             }
                             .controlSize(.small)
 
                             Button("Mark Received Direct (Y)") {
-                                updatePaperStatus(qsoID: target.id, sent: nil, rcvd: "Y")
+                                updatePaperStatus(qsoID: target.id, sent: nil, sentVia: nil, rcvd: "Y", rcvdVia: "D")
                             }
                             .controlSize(.small)
 
                             Button("Clear Received") {
-                                updatePaperStatus(qsoID: target.id, sent: nil, rcvd: "N")
+                                updatePaperStatus(qsoID: target.id, sent: nil, sentVia: nil, rcvd: "N", rcvdVia: "")
                             }
                             .controlSize(.small)
                         }
@@ -1104,10 +1347,95 @@ public struct QSLHubStudioView: View {
         }
     }
 
-    private func updatePaperStatus(qsoID: UUID, sent: String?, rcvd: String?) {
+    private func isPaperQSLReceived(_ qso: QSORecordModel) -> Bool {
+        let rcvd = qso["QSL_RCVD"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard ["Y", "V", "R", "C", "CONFIRMED", "VERIFIED"].contains(rcvd) else { return false }
+
+        // 1. Explicitly received via Bureau, Direct, or Manager
+        let via = qso["QSL_RCVD_VIA"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if ["B", "D", "M", "BUREAU", "BURO", "DIRECT", "MANAGER"].contains(via) {
+            return true
+        }
+
+        // 2. Physical paper card scanned and attached
+        let cardPath = qso["QSL_MEDIA_PATH"]
+        if !cardPath.isEmpty && FileManager.default.fileExists(atPath: cardPath) {
+            return true
+        }
+
+        // 3. Explicit YAAM or Logger Paper Confirmation Source Tag
+        let yaamSource = (qso["APP_YAAM_QSL_SOURCE"] + " " + qso["APP_YAAM_CONFIRMATION_SOURCE"] + " " + qso["APP_QSL_SOURCE"]).uppercased()
+        if yaamSource.contains("PAPER") || yaamSource.contains("BUREAU") || yaamSource.contains("BURO") || yaamSource.contains("DIRECT") || yaamSource.contains("CARD") {
+            return true
+        }
+
+        // 4. If any electronic confirmation is present without explicit paper indicators,
+        // it is an electronic confirmation mirror (e.g. from LoTW, eQSL, QRZ) and NOT paper.
+        let isLotw = ["Y", "V", "C"].contains(qso["LOTW_QSL_RCVD"].uppercased())
+        let isEqsl = ["Y", "V", "C"].contains(qso["EQSL_QSL_RCVD"].uppercased())
+        let isQrz = ["Y", "V", "C"].contains(qso["QRZLOG_QSL_RCVD"].uppercased()) ||
+                    ["Y", "V", "C"].contains(qso["QRZCOM_QSL_RCVD"].uppercased()) ||
+                    ["Y", "V", "C"].contains(qso["QRZCOM_QSO_DOWNLOAD_STATUS"].uppercased()) ||
+                    ["CONFIRMED", "C", "Y", "V"].contains(qso["APP_QRZLOG_STATUS"].uppercased())
+
+        if isLotw || isEqsl || isQrz {
+            return false
+        }
+
+        // 5. If no electronic confirmation, but via is electronic (e.g. "E")
+        if via == "E" || via == "ELECTRONIC" {
+            return false
+        }
+
+        return false
+    }
+
+    private func isPaperQSLSent(_ qso: QSORecordModel) -> Bool {
+        let sent = qso["QSL_SENT"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard ["Y", "S"].contains(sent) else { return false }
+
+        let via = qso["QSL_SENT_VIA"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if ["B", "D", "M", "BUREAU", "BURO", "DIRECT", "MANAGER"].contains(via) {
+            return true
+        }
+
+        let yaamSource = (qso["APP_YAAM_QSL_SOURCE"] + " " + qso["APP_YAAM_CONFIRMATION_SOURCE"] + " " + qso["APP_QSL_SOURCE"]).uppercased()
+        if yaamSource.contains("PAPER") || yaamSource.contains("BUREAU") || yaamSource.contains("BURO") || yaamSource.contains("DIRECT") {
+            return true
+        }
+
+        let isLotwSent = ["Y", "S"].contains(qso["LOTW_QSL_SENT"].uppercased())
+        let isEqslSent = ["Y", "S"].contains(qso["EQSL_QSL_SENT"].uppercased())
+        if isLotwSent || isEqslSent {
+            return false
+        }
+
+        return false
+    }
+
+    private func updatePaperStatus(qsoID: UUID, sent: String?, sentVia: String? = nil, rcvd: String?, rcvdVia: String? = nil) {
         if let idx = appState.qsoRecords.firstIndex(where: { $0.id == qsoID }) {
             if let sent { appState.qsoRecords[idx].fields["QSL_SENT"] = sent }
-            if let rcvd { appState.qsoRecords[idx].fields["QSL_RCVD"] = rcvd }
+            if let sentVia {
+                if sentVia.isEmpty {
+                    appState.qsoRecords[idx].fields.removeValue(forKey: "QSL_SENT_VIA")
+                } else {
+                    appState.qsoRecords[idx].fields["QSL_SENT_VIA"] = sentVia
+                }
+            }
+            if let rcvd {
+                appState.qsoRecords[idx].fields["QSL_RCVD"] = rcvd
+                if rcvd == "N" {
+                    appState.qsoRecords[idx].fields.removeValue(forKey: "QSL_RCVD_VIA")
+                }
+            }
+            if let rcvdVia {
+                if rcvdVia.isEmpty {
+                    appState.qsoRecords[idx].fields.removeValue(forKey: "QSL_RCVD_VIA")
+                } else {
+                    appState.qsoRecords[idx].fields["QSL_RCVD_VIA"] = rcvdVia
+                }
+            }
             appState.autoSaveActiveWorkspace()
             showToast("Updated Paper QSL status for \(appState.qsoRecords[idx]["CALL"])")
         }
@@ -1256,6 +1584,97 @@ public struct QSLHubStudioView: View {
         }
     }
 
+    private func triggerEQSLDownload() {
+        let defaultCall = appState.activeStationProfile?.callsign ?? ""
+        let username = (UserDefaults.standard.string(forKey: "eqslUsername") ?? defaultCall).trimmingCharacters(in: .whitespacesAndNewlines)
+        let password = CredentialVault.value(for: .eqslPassword).trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if username.isEmpty || password.isEmpty {
+            promptEQSLUsername = username.isEmpty ? defaultCall : username
+            promptEQSLPassword = password
+            showingEQSLCredentialsPrompt = true
+            return
+        }
+
+        selectedTab = .gallery
+        Task {
+            do {
+                let count = try await eqsl.downloadAllCards(
+                    username: username,
+                    password: password,
+                    qthNickname: appState.activeStationProfile?.eqslQTHNickname,
+                    appState: appState
+                )
+                showToast("✅ Downloaded \(count) QSL card(s) from eQSL.cc")
+            } catch {
+                showToast("❌ eQSL: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func savePromptCredentialsAndDownload() {
+        let u = promptEQSLUsername.trimmingCharacters(in: .whitespacesAndNewlines)
+        let p = promptEQSLPassword.trimmingCharacters(in: .whitespacesAndNewlines)
+        UserDefaults.standard.set(u, forKey: "eqslUsername")
+        CredentialVault.set(p, for: .eqslPassword)
+        showingEQSLCredentialsPrompt = false
+        triggerEQSLDownload()
+    }
+
+    private var eqslCredentialsSheet: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 10) {
+                Image(systemName: "photo.badge.checkmark.fill")
+                    .font(.title)
+                    .foregroundColor(.cyan)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("eQSL.cc Credentials Required")
+                        .font(.headline.bold())
+                    Text("Enter your eQSL.cc credentials to download all your electronic QSL cards.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Callsign / Username:").font(.caption.bold())
+                    TextField("Callsign (e.g. \(appState.activeStationProfile?.callsign ?? "EP2AES"))", text: $promptEQSLUsername)
+                        .textFieldStyle(.roundedBorder)
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("eQSL Password:").font(.caption.bold())
+                    SecureField("Password", text: $promptEQSLPassword)
+                        .textFieldStyle(.roundedBorder)
+                }
+            }
+
+            Divider()
+
+            HStack {
+                Button("Cancel") {
+                    showingEQSLCredentialsPrompt = false
+                }
+                .keyboardShortcut(.cancelAction)
+
+                Spacer()
+
+                Button("Save & Download Cards") {
+                    savePromptCredentialsAndDownload()
+                }
+                .keyboardShortcut(.defaultAction)
+                .buttonStyle(.borderedProminent)
+                .tint(.cyan)
+                .disabled(promptEQSLUsername.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || promptEQSLPassword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(20)
+        .frame(width: 420)
+    }
+
     private func showToast(_ msg: String) {
         withAnimation(.easeInOut(duration: 0.2)) {
             toastMessage = msg
@@ -1284,9 +1703,10 @@ private struct QSLCardViewerModal: View {
     var body: some View {
         VStack(spacing: 0) {
             // Header
-            HStack {
+            HStack(spacing: 8) {
                 Text(cardURL.lastPathComponent)
                     .font(.headline)
+                    .lineLimit(1)
                 Spacer()
                 Button {
                     zoomScale = max(0.5, zoomScale - 0.25)
@@ -1298,7 +1718,26 @@ private struct QSLCardViewerModal: View {
                 Button {
                     rotationAngle += 90.0
                 } label: { Image(systemName: "rotate.right") }
+
                 Divider().frame(height: 18)
+
+                Button {
+                    saveImageToDisk()
+                } label: {
+                    Label("Save Image", systemImage: "square.and.arrow.down")
+                }
+                .controlSize(.small)
+
+                Button {
+                    NSWorkspace.shared.activateFileViewerSelecting([cardURL])
+                } label: {
+                    Image(systemName: "folder")
+                }
+                .controlSize(.small)
+                .help("Reveal card in Finder")
+
+                Divider().frame(height: 18)
+
                 Button("Done") { dismiss() }
                     .controlSize(.small)
             }
@@ -1322,6 +1761,22 @@ private struct QSLCardViewerModal: View {
                 }
             }
         }
-        .frame(minWidth: 640, minHeight: 460)
+        .frame(minWidth: 680, minHeight: 480)
+    }
+
+    private func saveImageToDisk() {
+        guard let img = NSImage(contentsOf: cardURL) else { return }
+        let savePanel = NSSavePanel()
+        savePanel.allowedContentTypes = [.jpeg, .png]
+        savePanel.canCreateDirectories = true
+        savePanel.nameFieldStringValue = cardURL.lastPathComponent
+
+        if savePanel.runModal() == .OK, let url = savePanel.url {
+            if let tiff = img.tiffRepresentation,
+               let bitmap = NSBitmapImageRep(data: tiff),
+               let data = bitmap.representation(using: .jpeg, properties: [:]) {
+                try? data.write(to: url)
+            }
+        }
     }
 }

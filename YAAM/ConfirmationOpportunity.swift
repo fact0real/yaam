@@ -71,11 +71,9 @@ nonisolated struct ConfirmationOpportunityIndex: Sendable {
         var confirmed = 0
     }
 
-    static let standardBands = [
-        "2190m", "630m", "160m", "80m", "60m", "40m", "30m", "20m", "17m",
-        "15m", "12m", "10m", "6m", "4m", "2m", "1.25m", "70cm", "33cm",
-        "23cm", "13cm", "9cm", "6cm", "3cm", "1.25cm"
-    ]
+    static var standardBands: [String] {
+        AmateurBandSettings.allBands.map(\.id)
+    }
 
     private let opportunitiesByRecordID: [UUID: QSOConfirmationOpportunity]
     let countryBandCoverage: [CountryBandCoverage]
@@ -202,8 +200,6 @@ nonisolated struct ConfirmationOpportunityIndex: Sendable {
     }
 
     private static func orderedBandUniverse(observedBands: Set<String>) -> [String] {
-        standardBands + observedBands
-            .filter { !standardBands.contains($0) }
-            .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+        AmateurBandSettings.savedOrderedActiveBands(observedBands: observedBands)
     }
 }

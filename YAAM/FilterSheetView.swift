@@ -14,7 +14,9 @@ struct FilterSheetView: View {
     @State private var tempCriteria = FilterCriteria()
     @State private var countrySearchText = ""
 
-    let availableBands = ["All", "160M", "80M", "60M", "40M", "30M", "20M", "17M", "15M", "12M", "10M", "6M", "4M", "2M", "1.25M", "70CM", "33CM", "23CM", "13CM", "9CM", "6CM", "3CM"]
+    var availableBands: [String] {
+        ["All"] + AmateurBandSettings.shared.orderedActiveBands().map { $0.uppercased() }
+    }
     let availableModes = ["All", "FT8", "FT4", "CW", "SSB", "FM", "AM", "RTTY", "PSK31", "JS8", "DIGI", "VARAFM", "MSK144"]
     let continents = ["AF", "AN", "AS", "EU", "NA", "OC", "SA"]
 
@@ -262,6 +264,9 @@ struct FilterSheetView: View {
                             Divider()
                             
                             HStack(spacing: 16) {
+                                Toggle("🌟 Today's Confirmed Only", isOn: $tempCriteria.useTodayConfirmed)
+                                    .font(.subheadline)
+                                
                                 Toggle("🌸 Newly Confirmed Only", isOn: $tempCriteria.useNewlyConfirmed)
                                     .font(.subheadline)
                                 

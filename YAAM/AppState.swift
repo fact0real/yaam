@@ -541,9 +541,10 @@ struct FilterCriteria {
     
     var useNewlyConfirmed: Bool = false
     var useSentEmail: Bool = false
+    var useTodayConfirmed: Bool = false
     
     var isActive: Bool {
-        useDate || useBand || useMode || useCallsign || useOperator || useZone || useCountry || useQSLSent || useQSLRcvd || useConfirmation || useContinent || useNewlyConfirmed || useSentEmail
+        useDate || useBand || useMode || useCallsign || useOperator || useZone || useCountry || useQSLSent || useQSLRcvd || useConfirmation || useContinent || useNewlyConfirmed || useSentEmail || useTodayConfirmed
     }
     
     mutating func reset() {
@@ -1601,6 +1602,18 @@ class AppState: NSObject, ObservableObject {
     @Published var isSendingBatchMail: Bool = false
     @Published var batchMailStatus: String = ""
 
+    func openEmailComposer(for record: QSORecordModel, email: String? = nil) {
+        let cleanEmail = (email ?? record["EMAIL"]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanEmail.isEmpty else { return }
+        selectedEmailCallsign = record["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        selectedEmailAddress = cleanEmail
+        selectedEmailQSO = record
+        selectedEmailTemplate = nil
+        selectedEmailUnconfirmedQSOs = []
+        selectedEmailIncomingRequest = nil
+        showEmailComposer = true
+    }
+
     func openQRZRankCongratulationsEmailComposer(for record: QSORecordModel) {
         let email = record["EMAIL"].trimmingCharacters(in: .whitespacesAndNewlines)
         guard !email.isEmpty else {
@@ -1642,6 +1655,8 @@ class AppState: NSObject, ObservableObject {
     @Published var qrzAwardsLastUpdated: Date? = nil
     @Published var qrzIncomingRequests: [QRZIncomingConfirmation] = []
     @Published var isFetchingQRZIncoming = false
+    @Published var isRejectingQRZIncoming = false
+    @Published var rejectingQRZIncomingID: String? = nil
     @Published var incomingEmailLookupCallsign: String? = nil
     @Published var qrzIncomingStatus = "No QRZ incoming requests loaded"
     @Published var showQRZIncomingSheet = false
@@ -1765,7 +1780,7 @@ class AppState: NSObject, ObservableObject {
         }
     }
     @Published var recentLogFiles: [URL] = []
-    @Published var selectedTab: Int = min(5, max(0, UserDefaults.standard.integer(forKey: "selectedTab")))
+    @Published var selectedTab: Int = min(6, max(0, UserDefaults.standard.integer(forKey: "selectedTab")))
     @Published var convertSource: Int = 0 // 0: External File, 1: YAAM Database
     @Published var convertDatabaseProfileID: UUID? = nil // nil: All Station Profiles / Full Database
     
@@ -2062,6 +2077,9 @@ class AppState: NSObject, ObservableObject {
                 }
                 if filterCriteria.useNewlyConfirmed {
                     if !self.isNewlyConfirmed(record: record) { return false }
+                }
+                if filterCriteria.useTodayConfirmed {
+                    if !self.isTodayConfirmed(record: record) { return false }
                 }
                 if filterCriteria.useSentEmail {
                     let call = record["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
@@ -5723,6 +5741,43 @@ class AppState: NSObject, ObservableObject {
         }
     }
 
+    func sendTodayConfirmedQSLCardsBatch(limit: Int = 40) {
+        let candidates = Array(todayConfirmedBatchCandidates.prefix(limit))
+        guard !candidates.isEmpty else {
+            showNativeAlert(
+                title: "No Candidates for Today's QSL Delivery",
+                message: "No confirmed QSOs from today with a valid EMAIL value were found. Please enrich emails first or select another QSO."
+            )
+            playActivitySound(.failure)
+            return
+        }
+
+        let alert = NSAlert()
+        alert.messageText = "Send Today's QSL Cards?"
+        alert.informativeText = """
+        YAAM will generate and send QSL card PDFs via email to \(candidates.count) contact(s) confirmed today.
+
+        Each email will include a generated QSL card PDF attachment.
+        """
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Send \(candidates.count) QSL Cards")
+        alert.addButton(withTitle: "Cancel")
+
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        isSendingBatchMail = true
+        batchMailStatus = "Sending today's QSL cards 0/\(candidates.count)"
+        appendLog("Today's confirmed QSL card delivery started: \(candidates.count) QSO(s).")
+        sendConfirmedQSLCardEmails(records: candidates) { sent, failed in
+            self.isSendingBatchMail = false
+            self.batchMailStatus = "Today's QSL cards: \(sent) sent, \(failed) failed"
+            self.appendLog("Today's confirmed QSL card delivery complete: \(sent) sent, \(failed) failed.")
+            self.alertTitle = "Today's QSL Cards Complete"
+            self.alertMessage = "\(sent) QSL card email(s) sent, \(failed) failed."
+            self.showAlert = true
+        }
+    }
+
     func sendRecentUnconfirmedReminderBatch(limit: Int = 40) {
         let recipients = recentUnconfirmedReminderRecipients(limit: limit)
         guard !recipients.isEmpty else {
@@ -6397,6 +6452,38 @@ class AppState: NSObject, ObservableObject {
 
     var newlyConfirmedCount: Int {
         qsoRecords.filter { isNewlyConfirmed(record: $0) }.count
+    }
+
+    // MARK: - Today's Confirmed QSOs
+    func isTodayConfirmed(record: QSORecordModel) -> Bool {
+        guard record.isConfirmed else { return false }
+        let todayUTC = Self.adifDateFormatter.string(from: Date())
+        let qsoDate = record["QSO_DATE"].trimmingCharacters(in: .whitespacesAndNewlines)
+        if qsoDate == todayUTC { return true }
+
+        let dateFields = [
+            "APP_QRZLOG_QSLDATE", "QRZLOG_QSLRDATE", "APP_QRZLOG_QSLRDATE",
+            "LOTW_QSLRDATE", "APP_LOTW_QSLRDATE", "EQSL_QSLRDATE",
+            "APP_EQSL_QSLRDATE", "QSLRDATE"
+        ]
+        for field in dateFields {
+            if let val = record.fields[field]?.trimmingCharacters(in: .whitespacesAndNewlines),
+               val.prefix(8) == todayUTC {
+                return true
+            }
+        }
+        return false
+    }
+
+    var todayConfirmedCount: Int {
+        qsoRecords.filter { isTodayConfirmed(record: $0) }.count
+    }
+
+    var todayConfirmedBatchCandidates: [QSORecordModel] {
+        qsoRecords.filter { record in
+            isTodayConfirmed(record: record) &&
+            !record["EMAIL"].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
     }
 
     var emailedQSOCount: Int {

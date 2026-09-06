@@ -447,6 +447,15 @@ struct QSLCardComposerView: View {
 
                     Spacer()
 
+                    if !record["EMAIL"].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Button(action: {
+                            dismiss()
+                            appState.openQSLCardEmailComposer(for: record)
+                        }) {
+                            Label("Email QSL Card", systemImage: "envelope.badge")
+                        }
+                    }
+
                     Button(action: { exportPDF(record: record) }) {
                         Label("Export PDF (2 Pages)", systemImage: "doc.richtext")
                     }

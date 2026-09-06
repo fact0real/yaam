@@ -24,13 +24,18 @@ nonisolated enum SDRControlMergeEngine {
         records.reserveCapacity(localRecords.count + incomingFields.count)
         var indexByUniqueKey: [String: Int] = [:]
         indexByUniqueKey.reserveCapacity(localRecords.count + incomingFields.count)
-        var indexesByRelaxedKey: [String: [Int]] = [:]
-        indexesByRelaxedKey.reserveCapacity(localRecords.count + incomingFields.count)
+        var indexBySDRID: [String: Int] = [:]
+        indexBySDRID.reserveCapacity(localRecords.count + incomingFields.count)
+        var indexesByBaseKey: [String: [Int]] = [:]
+        indexesByBaseKey.reserveCapacity(localRecords.count + incomingFields.count)
+        var indexesByCallDateBand: [String: [Int]] = [:]
+        indexesByCallDateBand.reserveCapacity(localRecords.count + incomingFields.count)
 
         var removedDuplicates = 0
         for record in localRecords {
             let key = QSOIdentity.exactKey(fields: record.fields)
-            guard !key.isEmpty else {
+            let baseKey = QSOIdentity.baseKey(fields: record.fields)
+            guard !key.isEmpty || !baseKey.isEmpty else {
                 records.append(record)
                 continue
             }
@@ -39,7 +44,9 @@ nonisolated enum SDRControlMergeEngine {
                 for: record.fields,
                 records: records,
                 indexByUniqueKey: indexByUniqueKey,
-                indexesByRelaxedKey: indexesByRelaxedKey,
+                indexBySDRID: indexBySDRID,
+                indexesByBaseKey: indexesByBaseKey,
+                indexesByCallDateBand: indexesByCallDateBand,
                 allowRoundedSDRMatches: allowRoundedSDRMatches
             ) {
                 records[existingIndex].fields = richestMergedFields(
@@ -51,7 +58,9 @@ nonisolated enum SDRControlMergeEngine {
                     records[existingIndex].fields,
                     at: existingIndex,
                     indexByUniqueKey: &indexByUniqueKey,
-                    indexesByRelaxedKey: &indexesByRelaxedKey
+                    indexBySDRID: &indexBySDRID,
+                    indexesByBaseKey: &indexesByBaseKey,
+                    indexesByCallDateBand: &indexesByCallDateBand
                 )
                 removedDuplicates += 1
             } else {
@@ -61,7 +70,9 @@ nonisolated enum SDRControlMergeEngine {
                     record.fields,
                     at: index,
                     indexByUniqueKey: &indexByUniqueKey,
-                    indexesByRelaxedKey: &indexesByRelaxedKey
+                    indexBySDRID: &indexBySDRID,
+                    indexesByBaseKey: &indexesByBaseKey,
+                    indexesByCallDateBand: &indexesByCallDateBand
                 )
             }
         }
@@ -73,7 +84,8 @@ nonisolated enum SDRControlMergeEngine {
         for fields in incomingFields {
             let incoming = QSORecordModel(index: records.count + 1, fields: fields)
             let incomingKey = QSOIdentity.exactKey(fields: incoming.fields)
-            guard !incomingKey.isEmpty else {
+            let incomingBaseKey = QSOIdentity.baseKey(fields: incoming.fields)
+            guard !incomingKey.isEmpty || !incomingBaseKey.isEmpty else {
                 skipped += 1
                 continue
             }
@@ -81,7 +93,9 @@ nonisolated enum SDRControlMergeEngine {
                 for: incoming.fields,
                 records: records,
                 indexByUniqueKey: indexByUniqueKey,
-                indexesByRelaxedKey: indexesByRelaxedKey,
+                indexBySDRID: indexBySDRID,
+                indexesByBaseKey: indexesByBaseKey,
+                indexesByCallDateBand: indexesByCallDateBand,
                 allowRoundedSDRMatches: allowRoundedSDRMatches
             ) {
                 let merged = richestMergedFields(
@@ -97,7 +111,9 @@ nonisolated enum SDRControlMergeEngine {
                         merged,
                         at: existingIndex,
                         indexByUniqueKey: &indexByUniqueKey,
-                        indexesByRelaxedKey: &indexesByRelaxedKey
+                        indexBySDRID: &indexBySDRID,
+                        indexesByBaseKey: &indexesByBaseKey,
+                        indexesByCallDateBand: &indexesByCallDateBand
                     )
                     updated += 1
                 }
@@ -110,7 +126,9 @@ nonisolated enum SDRControlMergeEngine {
                 incoming.fields,
                 at: index,
                 indexByUniqueKey: &indexByUniqueKey,
-                indexesByRelaxedKey: &indexesByRelaxedKey
+                indexBySDRID: &indexBySDRID,
+                indexesByBaseKey: &indexesByBaseKey,
+                indexesByCallDateBand: &indexesByCallDateBand
             )
             added += 1
         }
@@ -133,58 +151,112 @@ nonisolated enum SDRControlMergeEngine {
         _ rhs: [String: String],
         preferSDRCanonical: Bool
     ) -> [String: String] {
-        if preferSDRCanonical {
-            if prefersSDRIdentity(rhs, over: lhs) {
-                return ImportReviewAnalyzer.mergeUpdate(incoming: lhs, into: rhs)
-            }
-            return ImportReviewAnalyzer.mergeUpdate(incoming: rhs, into: lhs)
+        let winner: [String: String]
+        let loser: [String: String]
+
+        if preferSDRCanonical && prefersSDRIdentity(rhs, over: lhs) {
+            winner = rhs
+            loser = lhs
+        } else if preferSDRCanonical && prefersSDRIdentity(lhs, over: rhs) {
+            winner = lhs
+            loser = rhs
+        } else if richnessScore(rhs) > richnessScore(lhs) {
+            winner = rhs
+            loser = lhs
+        } else {
+            winner = lhs
+            loser = rhs
         }
 
-        if richnessScore(rhs) > richnessScore(lhs) {
-            return ImportReviewAnalyzer.mergeUpdate(incoming: lhs, into: rhs)
+        var merged = ImportReviewAnalyzer.mergeUpdate(incoming: loser, into: winner)
+        if (merged["MODE"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if let fallbackMode = loser["MODE"], !fallbackMode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                merged["MODE"] = fallbackMode
+            }
         }
-        return ImportReviewAnalyzer.mergeUpdate(incoming: rhs, into: lhs)
+        return merged
     }
 
     private static func duplicateIndex(
         for fields: [String: String],
         records: [QSORecordModel],
         indexByUniqueKey: [String: Int],
-        indexesByRelaxedKey: [String: [Int]],
+        indexBySDRID: [String: Int],
+        indexesByBaseKey: [String: [Int]],
+        indexesByCallDateBand: [String: [Int]],
         allowRoundedSDRMatches: Bool
     ) -> Int? {
+        // 1. Match by APP_SDR_CONTROL_ID
+        let sdrID = (fields["APP_SDR_CONTROL_ID"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !sdrID.isEmpty, let idx = indexBySDRID[sdrID] {
+            return idx
+        }
+
+        // 2. Exact match with same mode
         let exactKey = QSOIdentity.exactKey(fields: fields)
-        if let exactIndex = indexByUniqueKey[exactKey] {
+        if !exactKey.isEmpty, let exactIndex = indexByUniqueKey[exactKey] {
             return exactIndex
         }
-        guard allowRoundedSDRMatches else { return nil }
 
-        let relaxedKey = QSOIdentity.relaxedKey(fields: fields)
-        guard !relaxedKey.isEmpty,
-              let candidates = indexesByRelaxedKey[relaxedKey] else {
-            return nil
+        // 3. Match by Base Key (CALL|DATE|TIME|BAND) where modes are compatible
+        let baseKey = QSOIdentity.baseKey(fields: fields)
+        if !baseKey.isEmpty, let candidates = indexesByBaseKey[baseKey] {
+            let mode = QSOIdentity.effectiveMode(fields)
+            if let match = candidates.first(where: { index in
+                records.indices.contains(index) &&
+                QSOIdentity.areModesCompatible(mode, QSOIdentity.effectiveMode(records[index].fields))
+            }) {
+                return match
+            }
         }
-        return candidates.first { index in
-            records.indices.contains(index)
-                && isRoundedSDRDuplicate(records[index].fields, fields)
+
+        // 4. Relaxed / Rounded SDR matches (within 300s or rounded :00 minute)
+        if allowRoundedSDRMatches {
+            let callDateBand = QSOIdentity.callDateBandKey(fields: fields)
+            if !callDateBand.isEmpty, let candidates = indexesByCallDateBand[callDateBand] {
+                if let match = candidates.first(where: { index in
+                    records.indices.contains(index) &&
+                    (isRoundedSDRDuplicate(records[index].fields, fields) ||
+                     QSOIdentity.isSameQSO(lhs: records[index].fields, rhs: fields, timeToleranceSeconds: 300))
+                }) {
+                    return match
+                }
+            }
         }
+
+        return nil
     }
 
     private static func register(
         _ fields: [String: String],
         at index: Int,
         indexByUniqueKey: inout [String: Int],
-        indexesByRelaxedKey: inout [String: [Int]]
+        indexBySDRID: inout [String: Int],
+        indexesByBaseKey: inout [String: [Int]],
+        indexesByCallDateBand: inout [String: [Int]]
     ) {
+        let sdrID = (fields["APP_SDR_CONTROL_ID"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !sdrID.isEmpty {
+            indexBySDRID[sdrID] = index
+        }
+
         let exactKey = QSOIdentity.exactKey(fields: fields)
         if !exactKey.isEmpty {
             indexByUniqueKey[exactKey] = index
         }
 
-        let relaxedKey = QSOIdentity.relaxedKey(fields: fields)
-        guard !relaxedKey.isEmpty else { return }
-        if !(indexesByRelaxedKey[relaxedKey] ?? []).contains(index) {
-            indexesByRelaxedKey[relaxedKey, default: []].append(index)
+        let baseKey = QSOIdentity.baseKey(fields: fields)
+        if !baseKey.isEmpty {
+            if !(indexesByBaseKey[baseKey] ?? []).contains(index) {
+                indexesByBaseKey[baseKey, default: []].append(index)
+            }
+        }
+
+        let callDateBand = QSOIdentity.callDateBandKey(fields: fields)
+        if !callDateBand.isEmpty {
+            if !(indexesByCallDateBand[callDateBand] ?? []).contains(index) {
+                indexesByCallDateBand[callDateBand, default: []].append(index)
+            }
         }
     }
 
@@ -195,7 +267,8 @@ nonisolated enum SDRControlMergeEngine {
         _ lhs: [String: String],
         _ rhs: [String: String]
     ) -> Bool {
-        guard QSOIdentity.relaxedKey(fields: lhs) == QSOIdentity.relaxedKey(fields: rhs),
+        guard QSOIdentity.callDateBandKey(fields: lhs) == QSOIdentity.callDateBandKey(fields: rhs),
+              QSOIdentity.areModesCompatible(QSOIdentity.effectiveMode(lhs), QSOIdentity.effectiveMode(rhs)),
               let lhsTime = QSOIdentity.secondsFromMidnight(lhs),
               let rhsTime = QSOIdentity.secondsFromMidnight(rhs),
               lhsTime / 60 == rhsTime / 60 else {

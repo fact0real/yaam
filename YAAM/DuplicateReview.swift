@@ -51,8 +51,8 @@ nonisolated enum DuplicateQSOAnalyzer {
     private static let nearDuplicateWindowSeconds = 300
 
     static func analyze(records: [QSORecordModel], stationProfileID: UUID?) -> DuplicateReview {
-        let validRecords = records.filter { !identityKey($0.fields).isEmpty }
-        let grouped = Dictionary(grouping: validRecords, by: { relaxedIdentityKey($0.fields) })
+        let validRecords = records.filter { !identityKey($0.fields).isEmpty || !QSOIdentity.baseKey(fields: $0.fields).isEmpty }
+        let grouped = Dictionary(grouping: validRecords, by: { QSOIdentity.callDateBandKey(fields: $0.fields) })
         let groups = grouped.flatMap { _, copies in
             duplicateClusters(from: copies).compactMap(makeGroup)
         }.sorted {
@@ -123,20 +123,32 @@ nonisolated enum DuplicateQSOAnalyzer {
         }
 
         var clusters: [[QSORecordModel]] = []
-        var current: [QSORecordModel] = []
-        var anchorSeconds: Int?
+        var visited = Set<UUID>()
 
-        for record in sorted {
-            guard let recordSeconds = seconds(record.fields) else { continue }
-            if let anchor = anchorSeconds, abs(recordSeconds - anchor) <= nearDuplicateWindowSeconds {
-                current.append(record)
-            } else {
-                if current.count > 1 { clusters.append(current) }
-                current = [record]
-                anchorSeconds = recordSeconds
+        for i in 0..<sorted.count {
+            let r1 = sorted[i]
+            if visited.contains(r1.id) { continue }
+            guard let s1 = seconds(r1.fields) else { continue }
+            var cluster = [r1]
+
+            for j in (i + 1)..<sorted.count {
+                let r2 = sorted[j]
+                if visited.contains(r2.id) { continue }
+                guard let s2 = seconds(r2.fields) else { continue }
+                if abs(s2 - s1) > nearDuplicateWindowSeconds {
+                    break
+                }
+                if QSOIdentity.areModesCompatible(effectiveMode(r1.fields), effectiveMode(r2.fields)) {
+                    cluster.append(r2)
+                    visited.insert(r2.id)
+                }
+            }
+
+            if cluster.count > 1 {
+                visited.insert(r1.id)
+                clusters.append(cluster)
             }
         }
-        if current.count > 1 { clusters.append(current) }
         return clusters
     }
 
@@ -157,8 +169,10 @@ nonisolated enum DuplicateQSOAnalyzer {
             return oldValue.isEmpty && !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }.count
 
+        let groupMode = copies.map { effectiveMode($0.fields) }.first(where: { !$0.isEmpty }) ?? effectiveMode(keeper.fields)
+
         return DuplicateQSOGroup(
-            id: "\(relaxedIdentityKey(keeper.fields))|\(times.min() ?? 0)-\(times.max() ?? 0)",
+            id: "\(QSOIdentity.callDateBandKey(fields: keeper.fields))|\(times.min() ?? 0)-\(times.max() ?? 0)",
             recordIDs: copies.map(\.id),
             keeperID: keeper.id,
             keeperRow: keeper.index,
@@ -166,7 +180,7 @@ nonisolated enum DuplicateQSOAnalyzer {
             date: cleanDigits(keeper["QSO_DATE"]),
             time: normalizeTime(keeper["TIME_ON"].isEmpty ? keeper["TIME_OFF"] : keeper["TIME_ON"]),
             band: resolvedBand(keeper.fields),
-            mode: effectiveMode(keeper.fields),
+            mode: groupMode,
             matchDescription: spread == 0 ? "Exact UTC match" : "Within \(spread) seconds",
             mergedFieldCount: mergedFieldCount
         )
@@ -177,7 +191,7 @@ nonisolated enum DuplicateQSOAnalyzer {
     }
 
     private static func relaxedIdentityKey(_ fields: [String: String]) -> String {
-        QSOIdentity.relaxedKey(fields: fields)
+        QSOIdentity.callDateBandKey(fields: fields)
     }
 
     private static func keeperScore(_ record: QSORecordModel) -> Int {
@@ -289,5 +303,40 @@ extension AppState {
         showAlert = true
         appendLog("Duplicate cleanup removed \(result.removedCount) extra QSO row(s) after merging the retained records.")
         playActivitySound(.success)
+    }
+
+    @discardableResult
+    func consolidateDuplicatesNow(showFeedback: Bool = true) -> Int {
+        guard !qsoRecords.isEmpty else { return 0 }
+        let review = DuplicateQSOAnalyzer.analyze(records: qsoRecords, stationProfileID: activeStationProfileID)
+        guard !review.groups.isEmpty else {
+            if showFeedback {
+                alertTitle = "No Duplicates Found"
+                alertMessage = "The active station log has no duplicate or near-duplicate QSOs."
+                showAlert = true
+            }
+            return 0
+        }
+        var fullReview = review
+        fullReview.selectedGroupIDs = Set(review.groups.map(\.id))
+        guard createDestructiveCheckpointIfNeeded(reason: "Before consolidating duplicate QSOs") else { return 0 }
+        let result = DuplicateQSOAnalyzer.clean(records: qsoRecords, review: fullReview)
+        guard result.removedCount > 0 else { return 0 }
+        qsoRecords = result.records
+        selectedRecordIDs.subtract(Set(fullReview.selectedGroups.flatMap(\.recordIDs)))
+        autoSaveActiveWorkspace(replaceMissingRecords: true)
+        refreshAwardProgress()
+        updateMobileCompanionSnapshot()
+        duplicateReview = nil
+        showDuplicateReviewSheet = false
+        refreshDatabaseSafetyState()
+        if showFeedback {
+            alertTitle = "Consolidation Complete"
+            alertMessage = "Successfully consolidated \(result.mergedGroupCount) duplicate group(s) and removed \(result.removedCount) redundant row(s). Missing fields and confirmation statuses were merged into the retained records."
+            showAlert = true
+            playActivitySound(.success)
+        }
+        appendLog("Consolidated \(result.mergedGroupCount) duplicate group(s), removed \(result.removedCount) extra QSO row(s).")
+        return result.removedCount
     }
 }
