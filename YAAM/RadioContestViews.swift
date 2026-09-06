@@ -153,9 +153,9 @@ struct RadioBridgePanel: View {
     }
 
     private var wsjtxSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 14) {
             HStack {
-                sectionTitle("WSJT-X / JTDX", icon: "dot.radiowaves.left.and.right", active: wsjtx.state.isListening, subtitle: wsjtx.lastMessage)
+                sectionTitle("WSJT-X / JTDX Live Stream & 2-Way Control", icon: "dot.radiowaves.left.and.right", active: wsjtx.state.isListening, subtitle: wsjtx.lastMessage)
                 Spacer()
                 Toggle("Fill Quick Log", isOn: $wsjtxAutoFill)
                     .toggleStyle(.switch)
@@ -172,23 +172,12 @@ struct RadioBridgePanel: View {
                 .tint(wsjtx.state.isListening ? .secondary : .accentColor)
             }
 
-            if let status = wsjtx.lastStatus {
-                HStack(spacing: 20) {
-                    liveMetric("Application", value: status.sourceID, color: .primary, width: 120)
-                    liveMetric("Dial", value: "\(status.frequencyMHz) MHz", color: .blue, width: 170)
-                    liveMetric("Mode", value: status.mode, color: .primary, width: 90)
-                    liveMetric("DX", value: status.dxCallsign.isEmpty ? "--" : status.dxCallsign, color: .orange, width: 120)
-                    liveMetric("Grid", value: status.dxGrid.isEmpty ? "--" : status.dxGrid, color: .primary, width: 90)
-                    Label(status.transmitting ? "Transmitting" : (status.decoding ? "Decoding" : "Monitoring"),
-                          systemImage: status.transmitting ? "antenna.radiowaves.left.and.right" : "waveform")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(status.transmitting ? .red : .green)
-                    Spacer()
-                }
-            } else {
-                Text("Set the same UDP server port in WSJT-X/JTDX. Logged ADIF messages are held for review below.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
+            // Real-Time Live Decodes Stream & 1-Click Reply Console
+            WSJTXLiveStreamView(wsjtx: wsjtx)
+                .frame(minHeight: 420, idealHeight: 500)
+                .background(Color(nsColor: .controlBackgroundColor).opacity(0.35))
+                .cornerRadius(8)
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.2), lineWidth: 1))
         }
         .padding(20)
     }

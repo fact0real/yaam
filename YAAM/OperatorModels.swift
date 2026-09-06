@@ -95,6 +95,86 @@ nonisolated enum AmateurBandPlan {
         default: return "59"
         }
     }
+
+    /// Automatically normalizes Mode and Submode to prevent logical contradictions (e.g., Mode=SSB with Submode=FT8).
+    static func normalizeModeAndSubmode(mode: inout String, submode: inout String) {
+        let upperMode = mode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let upperSub = submode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+
+        let digitalSubmodes = ["FT8", "FT4", "JS8", "JT65", "JT9", "Q65", "MSK144", "FST4", "VARAC", "SSTV"]
+        let pskSubmodes = ["PSK31", "PSK63", "PSK125", "SIM31"]
+
+        if ["SSB", "CW", "FM", "AM"].contains(upperMode) {
+            if digitalSubmodes.contains(upperSub) || pskSubmodes.contains(upperSub) {
+                submode = ""
+            }
+        } else if digitalSubmodes.contains(upperSub) || pskSubmodes.contains(upperSub) {
+            if upperMode.isEmpty || upperMode != "DATA" {
+                mode = "DATA"
+            }
+        } else if upperSub == "RTTY" {
+            mode = "RTTY"
+            submode = ""
+        } else if upperSub == "USB" || upperSub == "LSB" {
+            mode = "SSB"
+        }
+    }
+
+    /// Returns recommended submodes for a given primary ADIF Mode.
+    static func submodes(forMode mode: String) -> [String] {
+        switch mode.uppercased() {
+        case "DATA", "DIGI", "MFSK":
+            return ["", "FT8", "FT4", "JS8", "PSK31", "PSK63", "JT65", "JT9", "Q65", "MSK144", "FST4", "VARAC", "SSTV"]
+        case "SSB":
+            return ["", "USB", "LSB"]
+        case "RTTY":
+            return ["", "ASCI"]
+        case "FM":
+            return ["", "C4FM", "DSTAR", "DMR"]
+        default:
+            return [""]
+        }
+    }
+
+    /// Smart-infer Band, Mode, Submode, and default RST from frequency in MHz.
+    static func smartInfer(frequencyMHz: Double) -> (band: String, mode: String, submode: String, rst: String) {
+        let detectedBand = band(forMHz: frequencyMHz) ?? "20m"
+
+        // Explicit FT8 spot frequencies
+        let ft8Freqs: [Double] = [
+            1.840, 3.573, 5.357, 7.074, 10.136, 14.074, 18.100,
+            21.074, 24.915, 28.074, 50.313, 70.154, 144.174, 432.174
+        ]
+        if ft8Freqs.contains(where: { abs($0 - frequencyMHz) < 0.0025 }) {
+            return (detectedBand, "DATA", "FT8", "-10")
+        }
+
+        // Explicit FT4 spot frequencies
+        let ft4Freqs: [Double] = [
+            3.575, 7.0475, 10.140, 14.080, 18.104, 21.140, 24.919, 28.180, 50.318
+        ]
+        if ft4Freqs.contains(where: { abs($0 - frequencyMHz) < 0.0025 }) {
+            return (detectedBand, "DATA", "FT4", "-10")
+        }
+
+        // Explicit JS8 spot frequencies
+        let js8Freqs: [Double] = [7.078, 14.078, 21.078, 28.078]
+        if js8Freqs.contains(where: { abs($0 - frequencyMHz) < 0.0025 }) {
+            return (detectedBand, "DATA", "JS8", "-10")
+        }
+
+        let fractionalKHz = (frequencyMHz * 1_000).truncatingRemainder(dividingBy: 1_000)
+        if frequencyMHz >= 144 && fractionalKHz >= 300 {
+            return (detectedBand, "FM", "", "59")
+        }
+        if frequencyMHz < 30 && fractionalKHz < 70 {
+            return (detectedBand, "CW", "", "599")
+        }
+        if frequencyMHz < 30 && fractionalKHz >= 70 && fractionalKHz <= 100 {
+            return (detectedBand, "DATA", "RTTY", "599")
+        }
+        return (detectedBand, "SSB", "", "59")
+    }
 }
 
 nonisolated struct QuickLogDraft: Equatable, Sendable {
@@ -104,6 +184,7 @@ nonisolated struct QuickLogDraft: Equatable, Sendable {
     var mode = "SSB"
     var submode = ""
     var startedAt = Date()
+    var endedAt = Date()
     var rstSent = "59"
     var rstReceived = "59"
     var name = ""
@@ -113,7 +194,11 @@ nonisolated struct QuickLogDraft: Equatable, Sendable {
     var dxcc = ""
     var cqZone = ""
     var ituZone = ""
+    var sentSerial = ""
+    var receivedSerial = ""
     var receivedExchange = ""
+    var state = ""
+    var arrlSection = ""
     var comment = ""
     var source = "Manual"
     var portableRole = PortableOperatingRole.none
@@ -132,15 +217,32 @@ nonisolated struct QuickLogDraft: Equatable, Sendable {
 
     mutating func applyFrequency(_ value: String) {
         frequencyMHz = value
-        if let detectedBand = AmateurBandPlan.band(for: value) {
-            band = detectedBand
+        if let freq = AmateurBandPlan.normalizedMHz(value) {
+            let smart = AmateurBandPlan.smartInfer(frequencyMHz: freq)
+            band = smart.band
+            if mode.isEmpty || (mode == "SSB" && !smart.submode.isEmpty) {
+                mode = smart.mode
+                submode = smart.submode
+                rstSent = smart.rst
+                rstReceived = smart.rst
+            }
         }
     }
 
     mutating func applyMode(_ value: String) {
         mode = value.uppercased()
+        AmateurBandPlan.normalizeModeAndSubmode(mode: &mode, submode: &submode)
         rstSent = AmateurBandPlan.defaultRST(for: mode)
         rstReceived = AmateurBandPlan.defaultRST(for: mode)
+    }
+
+    mutating func applySubmode(_ value: String) {
+        submode = value.uppercased()
+        let digitalSubmodes = ["FT8", "FT4", "JS8", "JT65", "JT9", "Q65", "MSK144", "FST4", "VARAC", "SSTV", "PSK31", "PSK63", "PSK125"]
+        if digitalSubmodes.contains(submode) {
+            mode = "DATA"
+        }
+        AmateurBandPlan.normalizeModeAndSubmode(mode: &mode, submode: &submode)
     }
 
     mutating func resetForNextQSO(keepingOperatingContext: Bool = true) {
@@ -154,6 +256,8 @@ nonisolated struct QuickLogDraft: Equatable, Sendable {
         let myIOTA = myIOTAReference
         let myVUCC = myVUCCGrids
         self = QuickLogDraft()
+        startedAt = Date()
+        endedAt = Date()
         if keepingOperatingContext {
             frequencyMHz = frequency
             band = currentBand

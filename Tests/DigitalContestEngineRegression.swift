@@ -16,6 +16,10 @@ struct DigitalContestEngineRegression {
         testRateMeter()
         testContestMessageSequences()
         testSlotClockTimings()
+        testBandMatrixAndMultipliersBreakdown()
+        testLiveDecodeContestAnalysis()
+        testSmartQueuePriorityScoring()
+        testSmartQueueFIFOAndPromotion()
         testCabrilloCQWWDigiExport()
         testCabrilloARRLDigiExport()
         testCabrilloPreFlightValidation()
@@ -394,5 +398,265 @@ struct DigitalContestEngineRegression {
         precondition(errors.isEmpty, "Valid configuration should have 0 errors, got: \(errors.map { $0.message })")
 
         print("  ✓ Cabrillo Pre-Flight Robot Validation verified.")
+    }
+
+    @MainActor
+    private static func testBandMatrixAndMultipliersBreakdown() {
+        print("🧪 Testing Band Matrix and Multiplier Engine Breakdown...")
+        let engine = DigitalContestEngine()
+        engine.configureContest(type: .cqWWDigi, myCall: "EP2LMA", myGrid: "KM32")
+        engine.isContestActive = true
+        engine.resetContestSession()
+
+        // 1. Log QSOs on 20m
+        _ = engine.logContestQSO(
+            callsign: "DL1ABC",
+            band: "20m",
+            mode: "FT8",
+            frequencyHz: 14074000,
+            sentReport: "-05",
+            rcvdReport: "-10",
+            sentExchange: "KM32",
+            rcvdExchange: "JO31",
+            grid: "JO31"
+        )
+        _ = engine.logContestQSO(
+            callsign: "F6XYZ",
+            band: "20m",
+            mode: "FT8",
+            frequencyHz: 14074000,
+            sentReport: "-08",
+            rcvdReport: "-14",
+            sentExchange: "KM32",
+            rcvdExchange: "JN18",
+            grid: "JN18"
+        )
+
+        // 2. Log QSO on 40m
+        _ = engine.logContestQSO(
+            callsign: "DL1ABC", // same call, but valid on new band!
+            band: "40m",
+            mode: "FT8",
+            frequencyHz: 7074000,
+            sentReport: "-04",
+            rcvdReport: "-08",
+            sentExchange: "KM32",
+            rcvdExchange: "JO31",
+            grid: "JO31"
+        )
+
+        // 3. Inspect breakdowns
+        let breakdowns = engine.bandBreakdowns
+        let b20 = breakdowns.first(where: { $0.band == "20m" })
+        precondition(b20 != nil, "Missing 20m breakdown")
+        precondition(b20!.qsoCount == 2, "Expected 2 QSOs on 20m, got \(b20!.qsoCount)")
+        precondition(b20!.dupeCount == 0, "Expected 0 dupes on 20m")
+        precondition(b20!.gridFields.contains("JO") && b20!.gridFields.contains("JN"), "Missing grid fields on 20m")
+        precondition(b20!.gridMultCount == 2, "Expected 2 grid mults on 20m")
+        precondition(b20!.dxccMultCount >= 1, "Expected DXCC mults on 20m")
+        precondition(b20!.bandScore > 0, "Expected positive bandScore on 20m")
+
+        let b40 = breakdowns.first(where: { $0.band == "40m" })
+        precondition(b40 != nil, "Missing 40m breakdown")
+        precondition(b40!.qsoCount == 1, "Expected 1 QSO on 40m, got \(b40!.qsoCount)")
+        precondition(b40!.gridFields.contains("JO"), "Missing JO on 40m")
+
+        // 4. Test Query APIs
+        precondition(engine.isCallWorked(callsign: "DL1ABC", onBand: "20m") == true, "DL1ABC should be worked on 20m")
+        precondition(engine.isCallWorked(callsign: "DL1ABC", onBand: "40m") == true, "DL1ABC should be worked on 40m")
+        precondition(engine.isCallWorked(callsign: "DL1ABC", onBand: "15m") == false, "DL1ABC should not be worked on 15m")
+        precondition(engine.isGridFieldWorked(field: "JO", onBand: "20m") == true, "Field JO should be worked on 20m")
+        precondition(engine.isGridFieldWorked(field: "FN", onBand: "20m") == false, "Field FN should not be worked on 20m")
+
+        precondition(engine.workedGridFields(for: "20m").count == 2, "Expected 2 worked fields on 20m")
+        precondition(engine.averagePointsPerQSO > 0.0, "Average points per QSO should be positive")
+        precondition(engine.projectedFinalScore >= engine.claimedScore, "Projected score should be >= claimed score")
+
+        print("  ✓ Band Matrix and Multiplier Engine Breakdown verified.")
+    }
+
+    @MainActor
+    private static func testLiveDecodeContestAnalysis() {
+        print("🧪 Testing Real-Time Live Decode Contest Analysis...")
+        let engine = DigitalContestEngine()
+        engine.configureContest(type: .cqWWDigi, myCall: "EP2LMA", myGrid: "KM32")
+        engine.isContestActive = true
+        engine.resetContestSession()
+
+        // 1. Initial station never heard: W1AW in FN31 on 20m
+        let status1 = engine.analyzeDecodedStation(callsign: "W1AW", grid: "FN31", band: "20m")
+        precondition(status1.isMultiplier == true, "Expected W1AW in FN31 to be a multiplier")
+        precondition(status1.isDupe == false, "Expected W1AW to not be a dupe")
+        precondition(status1.points > 0, "Expected positive points for W1AW")
+        precondition(status1.badgeLabel.contains("FN") || status1.badgeLabel.contains("United States"), "Badge label mismatch: \(status1.badgeLabel)")
+
+        // 2. Now log W1AW on 20m
+        _ = engine.logContestQSO(
+            callsign: "W1AW",
+            band: "20m",
+            mode: "FT8",
+            frequencyHz: 14074000,
+            sentReport: "-05",
+            rcvdReport: "-10",
+            sentExchange: "KM32",
+            rcvdExchange: "FN31",
+            grid: "FN31"
+        )
+
+        // 3. W1AW heard again on 20m -> should be DUPE
+        let status2 = engine.analyzeDecodedStation(callsign: "W1AW", grid: "FN31", band: "20m")
+        precondition(status2.isDupe == true, "Expected W1AW to be detected as DUPE on 20m")
+        precondition(status2.isMultiplier == false, "Dupe cannot be a multiplier")
+
+        // 4. W1AW heard on 15m -> Not a dupe!
+        let status3 = engine.analyzeDecodedStation(callsign: "W1AW", grid: "FN31", band: "15m")
+        precondition(status3.isDupe == false, "W1AW on 15m should NOT be a dupe")
+        precondition(status3.isMultiplier == true, "W1AW on 15m should be a new multiplier on 15m")
+
+        print("  ✓ Real-Time Live Decode Contest Analysis verified.")
+    }
+
+    @MainActor
+    private static func testSmartQueuePriorityScoring() {
+        print("🧪 Testing Smart Multi-Caller Queue Priority Scoring & Sorting...")
+        let engine = DigitalContestEngine()
+        engine.configureContest(type: .cqWWDigi, myCall: "EP2LMA", myGrid: "KM32")
+        engine.isContestActive = true
+        engine.resetContestSession()
+
+        // 0. Work a local QSO in KM32 so KM field and Iran DXCC are already worked on 20m
+        _ = engine.logContestQSO(
+            callsign: "EP2AAA",
+            band: "20m",
+            mode: "FT8",
+            frequencyHz: 14074000,
+            sentReport: "-05",
+            rcvdReport: "-08",
+            sentExchange: "KM32",
+            rcvdExchange: "KM32",
+            grid: "KM32"
+        )
+
+        // 1. Regular Caller (1 pt, same grid, non-mult): EP2XYZ
+        let enq1 = engine.enqueueCaller(
+            callsign: "EP2XYZ",
+            grid: "KM32",
+            countryName: "Iran",
+            countryFlag: "🇮🇷",
+            snr: -05,
+            audioFrequencyHz: 1200,
+            band: "20m",
+            activeDX: "W1AW",
+            source: .nativeFT8
+        )
+        precondition(enq1 == true, "Failed to enqueue EP2XYZ")
+
+        // 2. High-Value Multiplier: DL1ABC (JO31 -> Mult JO & Germany, ~2900 km, 2 pts)
+        let enq2 = engine.enqueueCaller(
+            callsign: "DL1ABC",
+            grid: "JO31",
+            countryName: "Germany",
+            countryFlag: "🇩🇪",
+            snr: -10,
+            audioFrequencyHz: 1450,
+            band: "20m",
+            activeDX: "W1AW",
+            source: .nativeFT8
+        )
+        precondition(enq2 == true, "Failed to enqueue DL1ABC")
+
+        // 3. Ultra-Value Multiplier: JA1ABC (PM95 -> Mult PM & Japan, ~7000 km, 4 pts)
+        let enq3 = engine.enqueueCaller(
+            callsign: "JA1ABC",
+            grid: "PM95",
+            countryName: "Japan",
+            countryFlag: "🇯🇵",
+            snr: -08,
+            audioFrequencyHz: 1800,
+            band: "20m",
+            activeDX: "W1AW",
+            source: .nativeFT8
+        )
+        precondition(enq3 == true, "Failed to enqueue JA1ABC")
+
+        precondition(engine.queuedCallers.count == 3, "Expected 3 callers in queue, got \(engine.queuedCallers.count)")
+
+        // Verify Multipliers are at top of queue!
+        // JA1ABC has 4 pts + 1000 mult bonus + distance bonus > DL1ABC with 2 pts + 1000 mult bonus
+        let top1 = engine.queuedCallers[0]
+        let top2 = engine.queuedCallers[1]
+        let top3 = engine.queuedCallers[2]
+
+        precondition(top1.contestStatus.isMultiplier, "Top caller should be a multiplier")
+        precondition(top2.contestStatus.isMultiplier, "Second caller should also be a multiplier")
+        precondition(!top3.contestStatus.isMultiplier, "Third caller should not be a multiplier")
+        precondition(top3.callsign == "EP2XYZ", "Expected EP2XYZ to be last due to lower points and no mult")
+
+        // Log JA1ABC on 20m so it becomes a DUPE
+        _ = engine.logContestQSO(
+            callsign: "JA1ABC",
+            band: "20m",
+            mode: "FT8",
+            frequencyHz: 14074000,
+            sentReport: "-05",
+            rcvdReport: "-08",
+            sentExchange: "KM32",
+            rcvdExchange: "PM95",
+            grid: "PM95"
+        )
+
+        // Try enqueuing JA1ABC again on 20m -> should be rejected because it's a dupe!
+        let enqDupe = engine.enqueueCaller(
+            callsign: "JA1ABC",
+            grid: "PM95",
+            countryName: "Japan",
+            countryFlag: "🇯🇵",
+            snr: -08,
+            audioFrequencyHz: 1800,
+            band: "20m",
+            activeDX: nil,
+            source: .nativeFT8
+        )
+        precondition(enqDupe == false, "Dupe station should be rejected from queue")
+
+        print("  ✓ Queue Priority Scoring and Dupe rejection verified.")
+    }
+
+    @MainActor
+    private static func testSmartQueueFIFOAndPromotion() {
+        print("🧪 Testing Smart Queue FIFO Pop, Manual Promotion, and Dismiss...")
+        let engine = DigitalContestEngine()
+        engine.configureContest(type: .cqWWDigi, myCall: "EP2LMA", myGrid: "KM32")
+        engine.isContestActive = true
+        engine.resetContestSession()
+
+        _ = engine.enqueueCaller(callsign: "DL1ABC", grid: "JO31", countryName: "Germany", countryFlag: "🇩🇪", snr: -05, audioFrequencyHz: 1000, band: "20m", source: .nativeFT8)
+        _ = engine.enqueueCaller(callsign: "G4ABC", grid: "IO91", countryName: "United Kingdom", countryFlag: "🇬🇧", snr: -08, audioFrequencyHz: 1200, band: "20m", source: .nativeFT8)
+        _ = engine.enqueueCaller(callsign: "EA3ABC", grid: "JN11", countryName: "Spain", countryFlag: "🇪🇸", snr: -06, audioFrequencyHz: 1400, band: "20m", source: .nativeFT8)
+
+        precondition(engine.queuedCallers.count == 3, "Expected 3 callers")
+
+        // Promote EA3ABC (currently 3rd or 2nd) to #1
+        if let ea3 = engine.queuedCallers.first(where: { $0.callsign == "EA3ABC" }) {
+            engine.promoteQueuedCallerToTop(id: ea3.id)
+            precondition(engine.queuedCallers.first?.callsign == "EA3ABC", "EA3ABC should now be #1 after promotion")
+        }
+
+        // Pop #1
+        let popped = engine.popNextCaller()
+        precondition(popped?.callsign == "EA3ABC", "Popped caller should be EA3ABC")
+        precondition(engine.queuedCallers.count == 2, "Queue should now have 2 callers")
+
+        // Dismiss caller
+        if let toDismiss = engine.queuedCallers.first {
+            engine.removeQueuedCaller(id: toDismiss.id)
+            precondition(engine.queuedCallers.count == 1, "Queue should now have 1 caller")
+        }
+
+        // Clear queue
+        engine.clearQueue()
+        precondition(engine.queuedCallers.isEmpty, "Queue should be empty after clearQueue")
+
+        print("  ✓ Smart Queue FIFO, Promotion, Dismiss, and Clear verified.")
     }
 }

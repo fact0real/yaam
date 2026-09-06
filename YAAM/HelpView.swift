@@ -6,7 +6,7 @@
 import SwiftUI
 
 private enum HelpTopic: String, CaseIterable, Identifiable {
-    case start, stations, logTable, quickLog, convertExport, globeGrids, cwWinKeyer, competitors, tciSdr, dxCluster, on4kst, radioBridge, contest, contestCalendar, dxpeditions, magicBand, syncCenter, qslHub, confirmations, statistics, qrzIncoming, logAssistant, awards, portable, connectivity, importReview, dataSafety, credentials, workflows, faq
+    case start, stations, logTable, quickLog, convertExport, globeGrids, cwWinKeyer, competitors, tciSdr, dxCluster, on4kst, radioBridge, contest, digitalContest, contestCalendar, dxpeditions, magicBand, syncCenter, qslHub, confirmations, statistics, qrzIncoming, logAssistant, awards, portable, connectivity, importReview, dataSafety, credentials, workflows, faq
     var id: String { rawValue }
 
     var title: String {
@@ -24,6 +24,7 @@ private enum HelpTopic: String, CaseIterable, Identifiable {
         case .on4kst: return "ON4KST Chat & Microwave"
         case .radioBridge: return "Radio, Icom & FT8"
         case .contest: return "Contest Workspace"
+        case .digitalContest: return "Digital Contest Suite (FT8/FT4)"
         case .contestCalendar: return "Contest Calendar"
         case .dxpeditions: return "DXpedition Watch"
         case .magicBand: return "6m & Propagation"
@@ -59,6 +60,7 @@ private enum HelpTopic: String, CaseIterable, Identifiable {
         case .on4kst: return "bubble.left.and.bubble.right.fill"
         case .radioBridge: return "wave.3.right.circle"
         case .contest: return "flag.checkered"
+        case .digitalContest: return "trophy.fill"
         case .contestCalendar: return "calendar.badge.clock"
         case .dxpeditions: return "binoculars.fill"
         case .magicBand: return "bolt.badge.clock.fill"
@@ -81,6 +83,8 @@ private enum HelpTopic: String, CaseIterable, Identifiable {
 
     var searchTerms: String {
         switch self {
+        case .digitalContest:
+            return "\(title) digital contest ft8 ft4 wsjt-x jtdx cabrillo 3.0 multiplier matrix rate meter cq ww digi arrl exchange dupe qso sdr-control waterfall swr alc power"
         case .convertExport:
             return "\(title) excel csv cabrillo adif json html text export format contest slice utc band mode"
         case .globeGrids:
@@ -158,6 +162,7 @@ struct HelpView: View {
         case .on4kst: on4kstView
         case .radioBridge: radioBridge
         case .contest: contest
+        case .digitalContest: digitalContestView
         case .contestCalendar: contestCalendar
         case .dxpeditions: dxpeditions
         case .magicBand: magicBand
@@ -357,7 +362,8 @@ struct HelpView: View {
                 HelpDefinition(icon: "cable.connector.horizontal", title: "Two audio paths", text: "Direct Icom LAN is available for IC-7300MKII and IC-705. The rigctld + Audio path works with a selected Core Audio input/output and uses Hamlib only for frequency, mode, and PTT.", color: .blue)
                 HelpDefinition(icon: "clock.badge.checkmark", title: "UTC synchronization", text: "FT8 uses exact 15-second periods. A Mac clock error can prevent decoding or make transmissions overlap; leave automatic date and time enabled.", color: .orange)
                 HelpDefinition(icon: "checkmark.shield", title: "Offline self-test", text: "Run Offline Self-Test before RF operation. It verifies CI-V frequency encoding, protected local UDP transport, 79 FT8 tones, 12 kHz waveform generation, loopback decode, and odd/even UTC slot timing. It does not contact or key the radio.", color: .green)
-                HelpDefinition(icon: "stop.circle.fill", title: "Hard PTT release", text: "TX requires an explicit arm switch and a 16-second watchdog releases PTT after cancellation, network failure, audio failure, or a stalled task.", color: .red)
+                HelpDefinition(icon: "stop.circle.fill", title: "Hard PTT Release & Dynamic Watchdog", text: "TX requires an explicit arm switch, and an exact protocol watchdog (15.0s for FT8, 7.5s for FT4) automatically releases transmitter PTT after cancellation, network failure, or a stalled slot.", color: .red)
+                HelpDefinition(icon: "gauge.with.needle", title: "Live Radio Meters & SDR Waterfall", text: "Direct Icom CI-V polling reads forward RF Power (0-100W), SWR with smart safety thresholds (emerald/amber/red), and ALC level. The SDR-Control 240-row waterfall keeps 30s of continuous history.", color: .orange)
             }
             helpCallout(icon: "antenna.radiowaves.left.and.right", title: "First transmission", text: "Begin with a dummy load or minimum RF power. Keep ALC inactive, verify the selected audio device and frequency, and remain able to stop the radio locally before enabling automatic sequencing.", color: .orange)
             helpCallout(icon: "lock.shield", title: "Local-network safety", text: "Keep rigctld and direct Icom LAN on localhost or a trusted private network. Do not expose either control port to the public Internet; use a trusted VPN when remote access is required.", color: .orange)
@@ -389,7 +395,373 @@ struct HelpView: View {
                 HelpInstruction(number: 2, title: "Watch the Dupe warning", text: "A callsign already worked on the same band and normalized contest mode is flagged before save. You can still explicitly log it when the contest rules require it.")
                 HelpInstruction(number: 3, title: "Review live totals", text: "Contest Workspace reports QSOs, unique callsigns, DXCC entities, bands, duplicates, and the next serial without rescanning outside the current session.")
             }
+            helpCallout(icon: "trophy.fill", title: "FT8 / FT4 Digital Contests", text: "Looking for real-time multiplier matrices, rate meters, WSJT-X 2-way live stream, and instant Cabrillo 3.0 export? Check out the dedicated Digital Contest Suite topic.", color: .yellow)
             helpCallout(icon: "doc.text.magnifyingglass", title: "Verify before submission", text: "Cabrillo layouts and scoring rules vary by sponsor. YAAM emits a standards-based Cabrillo 3.0 log with CLAIMED-SCORE set to zero; calculate the official score and validate categories and exchange columns with the contest sponsor's checker.", color: .blue)
+        }
+    }
+
+    private var digitalContestView: some View {
+        Group {
+            helpHeader(
+                title: "Digital Contest Suite (FT8 & FT4)",
+                subtitle: "The gold-standard macOS digital contest environment: real-time multiplier engine, rate meters, WSJT-X 2-way live stream, high-density band matrix, and official Cabrillo 3.0 export.",
+                icon: "trophy.fill",
+                color: .yellow
+            )
+
+            HelpFlow(steps: [
+                HelpFlowStep(icon: "flag.checkered", title: "Setup", detail: "Configure CQ WW Digi or ARRL Digi rules with your station call and Maidenhead grid."),
+                HelpFlowStep(icon: "antenna.radiowaves.left.and.right", title: "Stream", detail: "Connect WSJT-X / JTDX 2-way UDP stream or run YAAM's native FT8/FT4 engine."),
+                HelpFlowStep(icon: "tray.full.fill", title: "Auto-Runner", detail: "Smart multi-caller queue captures pile-ups and engages callers with zero idle cycles."),
+                HelpFlowStep(icon: "bolt.fill", title: "Spot & Hunt", detail: "Live amber highlights spotlight new grid fields & DXCC mults in every decode slot."),
+                HelpFlowStep(icon: "tablecells.badge.sparkles", title: "Matrix & Rate", detail: "Track QSOs, dupes, points, rate/hr, and projected score in the band matrix."),
+                HelpFlowStep(icon: "square.and.arrow.up.fill", title: "Cabrillo 3.0", detail: "Pre-flight validation ensures robot acceptance before 1-click export.")
+            ])
+
+            // Visual Showcase 1: Live Decode Highlights
+            helpSection("Live Decode Highlights & Spot Hunting") {
+                Text("Every decode in both the WSJT-X 2-way stream and YAAM native FT8 station is analyzed in real-time against your contest log:")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+
+                VStack(spacing: 6) {
+                    // Multiplier Decode Mockup
+                    HStack(spacing: 8) {
+                        Text("14:20:00")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                        Text("-06dB")
+                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                            .foregroundStyle(.green)
+                        Text("1240Hz")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.blue)
+                        Text("FT8")
+                            .font(.system(size: 9, weight: .heavy, design: .monospaced))
+                            .padding(.horizontal, 3).background(Color.secondary.opacity(0.12)).cornerRadius(3)
+                        Text("🇩🇪 Germany")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                        Text("DL1ABC")
+                            .font(.system(size: 11, weight: .heavy, design: .monospaced))
+                            .foregroundStyle(.orange)
+                        Text("JO31")
+                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                            .padding(.horizontal, 4).background(Color.orange.opacity(0.15)).foregroundStyle(.orange).cornerRadius(3)
+                        HStack(spacing: 2) {
+                            Image(systemName: "bolt.fill").font(.system(size: 7))
+                            Text("MULT: JO").font(.system(size: 8, weight: .heavy, design: .monospaced))
+                        }
+                        .padding(.horizontal, 4).padding(.vertical, 1).background(Color.orange).foregroundStyle(Color.black).cornerRadius(3)
+                        Text("CQ DL1ABC JO31")
+                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.green)
+                        Spacer()
+                        Text("Reply")
+                            .font(.system(size: 9, weight: .bold))
+                            .padding(.horizontal, 6).padding(.vertical, 2).background(Color.green).foregroundStyle(.white).cornerRadius(4)
+                    }
+                    .padding(8)
+                    .background(RoundedRectangle(cornerRadius: 6).fill(Color.orange.opacity(0.12)))
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.orange.opacity(0.5), lineWidth: 1))
+
+                    // Normal QSO Decode Mockup
+                    HStack(spacing: 8) {
+                        Text("14:20:00")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                        Text("-11dB")
+                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                            .foregroundStyle(.yellow)
+                        Text("1680Hz")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.blue)
+                        Text("FT8")
+                            .font(.system(size: 9, weight: .heavy, design: .monospaced))
+                            .padding(.horizontal, 3).background(Color.secondary.opacity(0.12)).cornerRadius(3)
+                        Text("🇫🇷 France")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                        Text("F6XYZ")
+                            .font(.system(size: 11, weight: .heavy, design: .monospaced))
+                            .foregroundStyle(.primary)
+                        Text("JN18")
+                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                            .padding(.horizontal, 4).background(Color.orange.opacity(0.15)).foregroundStyle(.orange).cornerRadius(3)
+                        Text("+2 PTS")
+                            .font(.system(size: 8, weight: .bold, design: .monospaced))
+                            .padding(.horizontal, 4).padding(.vertical, 1).background(Color.green.opacity(0.15)).foregroundStyle(.green).cornerRadius(3)
+                        Text("CQ F6XYZ JN18")
+                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.green)
+                        Spacer()
+                        Text("Reply")
+                            .font(.system(size: 9, weight: .bold))
+                            .padding(.horizontal, 6).padding(.vertical, 2).background(Color.accentColor).foregroundStyle(.white).cornerRadius(4)
+                    }
+                    .padding(8)
+                    .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.04)))
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.15), lineWidth: 1))
+
+                    // Dupe Decode Mockup
+                    HStack(spacing: 8) {
+                        Text("14:20:00")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                        Text("-04dB")
+                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                            .foregroundStyle(.green)
+                        Text("0850Hz")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.blue)
+                        Text("FT8")
+                            .font(.system(size: 9, weight: .heavy, design: .monospaced))
+                            .padding(.horizontal, 3).background(Color.secondary.opacity(0.12)).cornerRadius(3)
+                        Text("🇩🇪 Germany")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                        Text("DL1ABC")
+                            .font(.system(size: 11, weight: .heavy, design: .monospaced))
+                            .foregroundStyle(.secondary.opacity(0.6))
+                        Text("JO31")
+                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                            .padding(.horizontal, 4).background(Color.secondary.opacity(0.1)).foregroundStyle(.secondary).cornerRadius(3)
+                        Text("DUPE")
+                            .font(.system(size: 8, weight: .bold, design: .monospaced))
+                            .padding(.horizontal, 4).padding(.vertical, 1).background(Color.secondary.opacity(0.2)).foregroundStyle(.secondary).cornerRadius(3)
+                        Text("DL1ABC EP2LMA R-08")
+                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text("Worked")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(8)
+                    .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.02)))
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.1), lineWidth: 1))
+                }
+
+                HelpDefinition(icon: "bolt.fill", title: "New Multiplier (⚡️ MULT)", text: "Golden amber badge and highlighted callsign indicate that answering this station will award a new Maidenhead grid field (CQ WW Digi) or DXCC entity/State on the current band.", color: .orange)
+                HelpDefinition(icon: "plus.circle.fill", title: "New Valid QSO (+Pts)", text: "Emerald green badge indicates a fresh valid contact that adds distance or contest points without being a duplicate.", color: .green)
+                HelpDefinition(icon: "slash.circle", title: "Duplicate Call (DUPE)", text: "Dimmed slate badge warns you if this station was already worked on the current band in this contest, preventing lost cycle time.", color: .secondary)
+            }
+
+            // Visual Showcase 1.5: Smart Auto-Runner & Multi-Caller Pile-up Queue
+            helpSection("Smart Auto-Runner & Multi-Caller Queue (Zero-Idle)") {
+                Text("When running a frequency during high-density pile-ups, competing callers are intelligently prioritized and queued for instant continuous execution:")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+
+                VStack(spacing: 8) {
+                    // Queue Header Bar Mockup
+                    HStack(spacing: 12) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "tray.full.fill")
+                                .foregroundStyle(Color.yellow)
+                                .font(.system(size: 11))
+                            Text("Auto-Runner Queue")
+                                .font(.system(size: 11, weight: .bold))
+                            Text("(3)")
+                                .font(.system(size: 10, weight: .heavy, design: .monospaced))
+                                .foregroundStyle(Color.yellow)
+                        }
+
+                        Divider()
+                            .frame(height: 14)
+
+                        HStack(spacing: 4) {
+                            Image(systemName: "bolt.horizontal.fill")
+                                .font(.system(size: 9))
+                                .foregroundStyle(Color.green)
+                            Text("Zero-Idle Auto-Engage: ON")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(.green)
+                        }
+
+                        HStack(spacing: 4) {
+                            Image(systemName: "tray.and.arrow.down.fill")
+                                .font(.system(size: 9))
+                                .foregroundStyle(Color.cyan)
+                            Text("Auto-Queue: ON")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(.cyan)
+                        }
+
+                        Spacer()
+
+                        Text("Engage #1 (JA1ABC)")
+                            .font(.system(size: 10, weight: .bold))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.orange, in: RoundedRectangle(cornerRadius: 4))
+                            .foregroundStyle(.black)
+                    }
+                    .padding(8)
+                    .background(Color.yellow.opacity(0.08))
+                    .cornerRadius(6)
+
+                    // Queued Cards Mockup
+                    HStack(spacing: 8) {
+                        // Card 1
+                        HStack(spacing: 6) {
+                            Text("#1")
+                                .font(.system(size: 10, weight: .black, design: .monospaced))
+                                .foregroundStyle(Color.yellow)
+                            VStack(alignment: .leading, spacing: 1) {
+                                HStack(spacing: 4) {
+                                    Text("JA1ABC").font(.system(size: 11, weight: .bold, design: .monospaced))
+                                    Text("MULT: PM")
+                                        .font(.system(size: 8, weight: .black, design: .monospaced))
+                                        .foregroundStyle(.black)
+                                        .padding(.horizontal, 3).padding(.vertical, 1)
+                                        .background(Color.yellow, in: RoundedRectangle(cornerRadius: 2))
+                                }
+                                Text("🇯🇵 PM95 · -08 dB · 1800 Hz").font(.system(size: 9, design: .monospaced)).foregroundStyle(.secondary)
+                            }
+                            Image(systemName: "bolt.fill").font(.system(size: 9)).foregroundStyle(.yellow)
+                        }
+                        .padding(6)
+                        .background(Color.yellow.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+
+                        // Card 2
+                        HStack(spacing: 6) {
+                            Text("#2")
+                                .font(.system(size: 10, weight: .black, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                            VStack(alignment: .leading, spacing: 1) {
+                                HStack(spacing: 4) {
+                                    Text("DL1ABC").font(.system(size: 11, weight: .bold, design: .monospaced))
+                                    Text("MULT: JO")
+                                        .font(.system(size: 8, weight: .black, design: .monospaced))
+                                        .foregroundStyle(.black)
+                                        .padding(.horizontal, 3).padding(.vertical, 1)
+                                        .background(Color.yellow, in: RoundedRectangle(cornerRadius: 2))
+                                }
+                                Text("🇩🇪 JO31 · -10 dB · 1450 Hz").font(.system(size: 9, design: .monospaced)).foregroundStyle(.secondary)
+                            }
+                            Image(systemName: "chevron.up").font(.system(size: 8)).foregroundStyle(.secondary)
+                        }
+                        .padding(6)
+                        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+
+                        // Card 3
+                        HStack(spacing: 6) {
+                            Text("#3")
+                                .font(.system(size: 10, weight: .black, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                            VStack(alignment: .leading, spacing: 1) {
+                                HStack(spacing: 4) {
+                                    Text("EP2XYZ").font(.system(size: 11, weight: .bold, design: .monospaced))
+                                    Text("+1 PTS")
+                                        .font(.system(size: 8, weight: .heavy, design: .monospaced))
+                                        .foregroundStyle(.white)
+                                        .padding(.horizontal, 3).padding(.vertical, 1)
+                                        .background(Color.green, in: RoundedRectangle(cornerRadius: 2))
+                                }
+                                Text("🇮🇷 KM32 · -05 dB · 1200 Hz").font(.system(size: 9, design: .monospaced)).foregroundStyle(.secondary)
+                            }
+                            Image(systemName: "chevron.up").font(.system(size: 8)).foregroundStyle(.secondary)
+                        }
+                        .padding(6)
+                        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+                    }
+                }
+
+                HelpDefinition(icon: "bolt.horizontal.circle.fill", title: "Zero-Idle QSO Auto-Engagement", text: "When your active QSO completes (RR73 sent or received), the engine immediately pops the #1 ranked station and transmits their exchange on the very next slot without returning to CQ, saving 15s/7.5s every contact.", color: .green)
+                HelpDefinition(icon: "chart.line.uptrend.xyaxis.circle.fill", title: "Intelligent Multi-Factor Priority Scoring", text: "Stations are dynamically ranked: New Multiplier (+1000 pts) > Contact Points (x50) > Great Circle Distance > SNR. Dupes are automatically rejected or placed at the bottom.", color: .yellow)
+                HelpDefinition(icon: "tray.and.arrow.down.fill", title: "Live Pile-up Auto-Queueing", text: "When multiple stations answer your CQ at once or call while you work another DX, they are automatically captured into the queue in both the Native FT8 Engine and the WSJT-X / JTDX stream.", color: .cyan)
+                HelpDefinition(icon: "arrow.up.circle.fill", title: "Manual Override & VIP Promotion", text: "Click the up-chevron (▲) on any card to promote an important DX station straight to #1, or click the bolt icon to engage immediately.", color: .orange)
+            }
+
+            // Visual Showcase 2: Rate Meters HUD
+            helpSection("Real-Time Rate Meters & Velocity HUD") {
+                Text("Monitor your operating velocity and forecast final score with sub-second recalculation:")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("10-MIN RATE").font(.system(size: 8, weight: .bold)).foregroundStyle(.secondary)
+                        HStack(alignment: .firstTextBaseline, spacing: 2) {
+                            Text("64").font(.system(size: 15, weight: .heavy, design: .monospaced)).foregroundStyle(.green)
+                            Text("/hr").font(.system(size: 9)).foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(8).frame(maxWidth: .infinity, alignment: .leading).background(Color.green.opacity(0.08)).cornerRadius(6)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("60-MIN RATE").font(.system(size: 8, weight: .bold)).foregroundStyle(.secondary)
+                        HStack(alignment: .firstTextBaseline, spacing: 2) {
+                            Text("52").font(.system(size: 15, weight: .heavy, design: .monospaced)).foregroundStyle(.cyan)
+                            Text("/hr").font(.system(size: 9)).foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(8).frame(maxWidth: .infinity, alignment: .leading).background(Color.cyan.opacity(0.08)).cornerRadius(6)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("PEAK RATE").font(.system(size: 8, weight: .bold)).foregroundStyle(.secondary)
+                        HStack(alignment: .firstTextBaseline, spacing: 2) {
+                            Text("84").font(.system(size: 15, weight: .heavy, design: .monospaced)).foregroundStyle(.purple)
+                            Text("/hr").font(.system(size: 9)).foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(8).frame(maxWidth: .infinity, alignment: .leading).background(Color.purple.opacity(0.08)).cornerRadius(6)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("AVG PTS/QSO").font(.system(size: 8, weight: .bold)).foregroundStyle(.secondary)
+                        Text("2.35").font(.system(size: 15, weight: .heavy, design: .monospaced)).foregroundStyle(.primary)
+                    }
+                    .padding(8).frame(maxWidth: .infinity, alignment: .leading).background(Color.secondary.opacity(0.08)).cornerRadius(6)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("PROJECTED FINAL").font(.system(size: 8, weight: .bold)).foregroundStyle(.secondary)
+                        Text("48,200").font(.system(size: 15, weight: .heavy, design: .monospaced)).foregroundStyle(.yellow)
+                    }
+                    .padding(8).frame(maxWidth: .infinity, alignment: .leading).background(Color.yellow.opacity(0.12)).cornerRadius(6)
+                }
+
+                HelpDefinition(icon: "speedometer", title: "10-Minute Rolling Rate", text: "Instantaneous QSOs/hour velocity computed from recent contacts to evaluate run frequency viability.", color: .green)
+                HelpDefinition(icon: "sparkles", title: "Projected Final Score", text: "Mathematically combines rolling 60-minute rate, average points per contact, and accumulated multipliers to forecast final contest output.", color: .yellow)
+            }
+
+            // Section: Band Matrix & Multiplier Explorer
+            helpSection("Band-by-Band Matrix & Multiplier Explorer") {
+                HelpInstruction(number: 1, title: "Band Matrix Table", text: "Access via the 'Contest Matrix' button in FT8 Station or WSJT-X console. Shows 160m to 6m breakdowns with valid QSOs, dupes, points, grid mults, DXCC mults, and band score.")
+                HelpInstruction(number: 2, title: "Activity Share Progress", text: "Visual progress capsule highlights which band has the highest contact yield and where band changes are needed.")
+                HelpInstruction(number: 3, title: "Multiplier Explorer", text: "Browse worked 2-letter Maidenhead fields (JO, JN, LL, FN...) and DXCC countries with flags per band or across all bands.")
+                HelpInstruction(number: 4, title: "Live Contest QSOs", text: "Review raw contest log entries with sent/received exchanges, exact UTC timestamp, and multiplier flags.")
+            }
+
+            // Section: WSJT-X / JTDX Two-Way Integration
+            helpSection("Two-Way WSJT-X & JTDX Integration") {
+                HelpDefinition(icon: "antenna.radiowaves.left.and.right", title: "1-Click Reply (Type 4 Packet)", text: "Clicking Reply or double-clicking any decode row in YAAM instantly directs WSJT-X to set DX Call, Grid, and key the transmitter.", color: .green)
+                HelpDefinition(icon: "stop.circle.fill", title: "1-Click Halt TX (Type 7 Packet)", text: "Instantly aborts transmission in WSJT-X directly from YAAM's toolbar for emergency safety or QRM avoidance.", color: .red)
+                HelpDefinition(icon: "mappin.and.ellipse", title: "Sync Grid (Type 9 Packet)", text: "Pushes your station Maidenhead grid to WSJT-X with one click to ensure consistent exchange logging.", color: .blue)
+                HelpDefinition(icon: "line.3.horizontal.decrease.circle", title: "⚡️ Mults Filter Chip", text: "Toggle the '⚡️ Mults' filter chip to show only high-value multipliers in the live stream for rapid rate boosting.", color: .orange)
+            }
+
+            // Section: Native FT8 Engine & Hardware Telemetry
+            helpSection("Native FT8 Engine & Hardware Telemetry") {
+                HelpDefinition(icon: "clock.badge.checkmark", title: "Exact UTC Slot Clock", text: "Built-in DigitalSlotClock strictly enforces 15.0s (FT8) and 7.5s (FT4) boundaries with odd/even parity management.", color: .blue)
+                HelpDefinition(icon: "gauge.with.needle", title: "Live Radio SWR, Power & ALC", text: "Direct CI-V polling reads forward RF Power (0-100W), antenna SWR (emerald <= 1.5, amber <= 2.0, red > 2.0), ALC level, and S-meter in real time.", color: .orange)
+                HelpDefinition(icon: "waveform", title: "High-Contrast SDR-Control Waterfall", text: "240-row depth (30 seconds history) with exponential moving average noise-floor tracking to clearly resolve individual FT8 tone packets.", color: .purple)
+                HelpDefinition(icon: "shield.lefthalf.filled", title: "Dynamic Watchdog", text: "Rigorous 15.0s (FT8) and 7.5s (FT4) hardware watchdog automatically releases transmitter PTT if any audio or socket stall occurs.", color: .red)
+            }
+
+            // Section: Official Cabrillo 3.0 Export
+            helpSection("Official Cabrillo 3.0 Export & Pre-Flight Validation") {
+                HelpInstruction(number: 1, title: "Automated Pre-Flight Robot Validation", text: "Before generating files, YAAM verifies mandatory fields (Callsign, Grid Locator, Categories) to prevent contest robot rejection emails.")
+                HelpInstruction(number: 2, title: "CQ WW Digi & ARRL Digi Format", text: "Generates strict column-aligned Cabrillo 3.0 headers and QSO lines with CRLF line terminators and CLAIMED-SCORE computation.")
+                HelpInstruction(number: 3, title: "1-Click Export & Share", text: "Save the verified .log file to disk or copy directly to the contest web upload portal.")
+            }
+
+            helpCallout(
+                icon: "trophy.fill",
+                title: "Maximum Competitive Efficiency",
+                text: "Combine the WSJT-X 2-way stream with the '⚡️ Mults' filter to quickly capture rare grid fields on open bands, then switch to Contest Matrix to monitor your 60-minute rate and points per contact.",
+                color: .yellow
+            )
         }
     }
 

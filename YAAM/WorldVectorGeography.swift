@@ -11,6 +11,24 @@ import CoreGraphics
 import Foundation
 import SwiftUI
 
+// MARK: - Azimuth Map Themes
+
+public enum AzimuthMapTheme: String, CaseIterable, Identifiable, Sendable {
+    case shackNight = "Shack Night"
+    case classicLight = "Classic NS6T"
+    case nightVision = "Night Vision Red"
+
+    public var id: String { rawValue }
+
+    public var icon: String {
+        switch self {
+        case .shackNight: return "moon.stars.fill"
+        case .classicLight: return "sun.max.fill"
+        case .nightVision: return "eye.fill"
+        }
+    }
+}
+
 // MARK: - Country Entity Model
 
 public struct WorldCountryEntity: Identifiable, Sendable {
@@ -21,6 +39,7 @@ public struct WorldCountryEntity: Identifiable, Sendable {
     public let center: GeoCoordinate
     public let cqZone: Int
     public let ituZone: Int
+    public let priority: Int // 1: High/Major, 2: Standard, 3: Small/Dense
     public let labelOffset: CGPoint
 
     public init(
@@ -31,6 +50,7 @@ public struct WorldCountryEntity: Identifiable, Sendable {
         center: GeoCoordinate,
         cqZone: Int,
         ituZone: Int,
+        priority: Int = 1,
         labelOffset: CGPoint = .zero
     ) {
         self.id = id
@@ -40,6 +60,7 @@ public struct WorldCountryEntity: Identifiable, Sendable {
         self.center = center
         self.cqZone = cqZone
         self.ituZone = ituZone
+        self.priority = priority
         self.labelOffset = labelOffset
     }
 }
@@ -84,7 +105,80 @@ public struct VectorLineString: Sendable {
 
 public enum WorldVectorGeography {
 
-    // NS6T Authentic Cartographic Palette
+    // Dynamic Theme Color Resolvers
+    public static func colorOcean(for theme: AzimuthMapTheme) -> Color {
+        switch theme {
+        case .shackNight: return Color(red: 0.05, green: 0.08, blue: 0.13) // Midnight Abyss
+        case .classicLight: return Color(red: 0.37, green: 0.72, blue: 0.89) // NS6T Sky Blue
+        case .nightVision: return Color(red: 0.08, green: 0.00, blue: 0.00) // Deep Night Maroon
+        }
+    }
+
+    public static func colorCanvasBackground(for theme: AzimuthMapTheme) -> Color {
+        switch theme {
+        case .shackNight: return Color(red: 0.04, green: 0.06, blue: 0.09) // Deep Obsidian
+        case .classicLight: return Color(red: 0.96, green: 0.97, blue: 0.98) // Light Gray
+        case .nightVision: return Color(red: 0.05, green: 0.00, blue: 0.00) // Pitch Red
+        }
+    }
+
+    public static func colorLand(for theme: AzimuthMapTheme) -> Color {
+        switch theme {
+        case .shackNight: return Color(red: 0.12, green: 0.16, blue: 0.22) // Graphite Slate
+        case .classicLight: return Color(red: 0.98, green: 0.99, blue: 1.00) // Crisp White
+        case .nightVision: return Color(red: 0.22, green: 0.02, blue: 0.02) // Dark Crimson
+        }
+    }
+
+    public static func colorLandStroke(for theme: AzimuthMapTheme) -> Color {
+        switch theme {
+        case .shackNight: return Color(red: 0.22, green: 0.74, blue: 0.97) // Luminous Cyan
+        case .classicLight: return Color(red: 0.12, green: 0.20, blue: 0.30) // Dark Navy
+        case .nightVision: return Color(red: 0.90, green: 0.15, blue: 0.15) // Neon Red
+        }
+    }
+
+    public static func colorBorder(for theme: AzimuthMapTheme) -> Color {
+        switch theme {
+        case .shackNight: return Color(red: 0.30, green: 0.40, blue: 0.50).opacity(0.6)
+        case .classicLight: return Color(red: 0.45, green: 0.55, blue: 0.65)
+        case .nightVision: return Color(red: 0.60, green: 0.10, blue: 0.10).opacity(0.6)
+        }
+    }
+
+    public static func colorGraticule(for theme: AzimuthMapTheme) -> Color {
+        switch theme {
+        case .shackNight: return Color(red: 0.15, green: 0.35, blue: 0.55).opacity(0.35)
+        case .classicLight: return Color(red: 0.20, green: 0.45, blue: 0.65).opacity(0.40)
+        case .nightVision: return Color(red: 0.50, green: 0.05, blue: 0.05).opacity(0.35)
+        }
+    }
+
+    public static func colorDialRing(for theme: AzimuthMapTheme) -> Color {
+        switch theme {
+        case .shackNight: return Color(red: 0.25, green: 0.35, blue: 0.48)
+        case .classicLight: return Color(red: 0.20, green: 0.30, blue: 0.40)
+        case .nightVision: return Color(red: 0.60, green: 0.10, blue: 0.10)
+        }
+    }
+
+    public static func colorDialText(for theme: AzimuthMapTheme) -> Color {
+        switch theme {
+        case .shackNight: return Color(red: 0.75, green: 0.85, blue: 0.95)
+        case .classicLight: return Color(red: 0.10, green: 0.15, blue: 0.25)
+        case .nightVision: return Color(red: 1.00, green: 0.30, blue: 0.30)
+        }
+    }
+
+    public static func colorLabelText(for theme: AzimuthMapTheme) -> Color {
+        switch theme {
+        case .shackNight: return Color(red: 0.90, green: 0.94, blue: 0.98)
+        case .classicLight: return Color(red: 0.12, green: 0.16, blue: 0.22)
+        case .nightVision: return Color(red: 1.00, green: 0.40, blue: 0.40)
+        }
+    }
+
+    // Classic Static Fallbacks (Maintains Full Backwards Compatibility)
     public static let colorOcean = Color(red: 0.37, green: 0.72, blue: 0.89)      // NS6T Sky Blue Ocean (#5EB8E3)
     public static let colorOceanDark = Color(red: 0.28, green: 0.58, blue: 0.75)  // Ocean Depth Tint
     public static let colorLand = Color(red: 0.98, green: 0.99, blue: 1.00)       // Pure Crisp White Land (#FAFCFF)
@@ -92,6 +186,28 @@ public enum WorldVectorGeography {
     public static let colorBorder = Color(red: 0.45, green: 0.55, blue: 0.65)     // Slate Internal Border
     public static let colorGraticule = Color(red: 0.20, green: 0.45, blue: 0.65).opacity(0.40) // Cyan-Slate Mesh
     public static let colorGraticuleMajor = Color(red: 0.15, green: 0.35, blue: 0.55).opacity(0.65) // Equator / Prime Meridian
+
+    // MARK: - Ham Radio Standard Band Color Mapping
+    public static func bandColor(for band: String) -> Color {
+        let clean = band.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            .replacingOccurrences(of: "meters", with: "m")
+            .replacingOccurrences(of: "meter", with: "m")
+
+        if clean.contains("160") { return Color(red: 0.48, green: 0.12, blue: 0.64) } // 160m Plum
+        if clean.contains("80") { return Color(red: 0.61, green: 0.15, blue: 0.69) }  // 80m Violet
+        if clean.contains("60") { return Color(red: 0.40, green: 0.23, blue: 0.72) }  // 60m Purple
+        if clean.contains("40") { return Color(red: 0.18, green: 0.49, blue: 0.20) }  // 40m Emerald Green
+        if clean.contains("30") { return Color(red: 0.00, green: 0.54, blue: 0.48) }  // 30m Teal
+        if clean.contains("20") { return Color(red: 0.96, green: 0.62, blue: 0.04) }  // 20m Golden Yellow
+        if clean.contains("17") { return Color(red: 0.92, green: 0.35, blue: 0.05) }  // 17m Warm Amber
+        if clean.contains("15") { return Color(red: 0.12, green: 0.53, blue: 0.90) }  // 15m Royal Blue
+        if clean.contains("12") { return Color(red: 0.22, green: 0.29, blue: 0.67) }  // 12m Indigo
+        if clean.contains("10") { return Color(red: 0.86, green: 0.15, blue: 0.15) }  // 10m Crimson Red
+        if clean.contains("6") { return Color(red: 0.00, green: 0.90, blue: 1.00) }   // 6m Magic Band Cyan
+        if clean.contains("2m") || clean.contains("144") { return Color(red: 0.46, green: 0.80, blue: 0.09) } // 2m Lime
+        if clean.contains("70cm") || clean.contains("432") { return Color(red: 0.95, green: 0.15, blue: 0.55) } // 70cm Hot Pink
+        return Color.orange
+    }
 
     // MARK: - Dynamic Lat / Lon Graticule Mesh Generator
 
@@ -122,27 +238,33 @@ public enum WorldVectorGeography {
     // MARK: - Detailed Country & DXCC Entity Anchors
 
     public static let countries: [WorldCountryEntity] = [
-        WorldCountryEntity(id: "RU", name: "Russia", flag: "🇷🇺", primaryPrefix: "UA", center: GeoCoordinate(latitude: 61.5, longitude: 95.0), cqZone: 16, ituZone: 29),
-        WorldCountryEntity(id: "CN", name: "China", flag: "🇨🇳", primaryPrefix: "BY", center: GeoCoordinate(latitude: 35.8, longitude: 104.2), cqZone: 24, ituZone: 44),
-        WorldCountryEntity(id: "US", name: "United States", flag: "🇺🇸", primaryPrefix: "K", center: GeoCoordinate(latitude: 39.5, longitude: -98.3), cqZone: 5, ituZone: 8),
-        WorldCountryEntity(id: "CA", name: "Canada", flag: "🇨🇦", primaryPrefix: "VE", center: GeoCoordinate(latitude: 56.1, longitude: -106.3), cqZone: 4, ituZone: 9),
-        WorldCountryEntity(id: "BR", name: "Brazil", flag: "🇧🇷", primaryPrefix: "PY", center: GeoCoordinate(latitude: -14.2, longitude: -51.9), cqZone: 11, ituZone: 15),
-        WorldCountryEntity(id: "AQ", name: "Antarctica", flag: "🇦🇶", primaryPrefix: "CE9", center: GeoCoordinate(latitude: -80.0, longitude: 0.0), cqZone: 39, ituZone: 71),
-        WorldCountryEntity(id: "AU", name: "Australia", flag: "🇦🇺", primaryPrefix: "VK", center: GeoCoordinate(latitude: -25.2, longitude: 133.7), cqZone: 30, ituZone: 59),
-        WorldCountryEntity(id: "IR", name: "Iran", flag: "🇮🇷", primaryPrefix: "EP", center: GeoCoordinate(latitude: 32.4, longitude: 53.7), cqZone: 21, ituZone: 40),
-        WorldCountryEntity(id: "SA", name: "Saudi Arabia", flag: "🇸🇦", primaryPrefix: "HZ", center: GeoCoordinate(latitude: 23.8, longitude: 45.0), cqZone: 21, ituZone: 39),
-        WorldCountryEntity(id: "IN", name: "India", flag: "🇮🇳", primaryPrefix: "VU", center: GeoCoordinate(latitude: 20.5, longitude: 78.9), cqZone: 22, ituZone: 41),
-        WorldCountryEntity(id: "JP", name: "Japan", flag: "🇯🇵", primaryPrefix: "JA", center: GeoCoordinate(latitude: 36.2, longitude: 138.2), cqZone: 25, ituZone: 45),
-        WorldCountryEntity(id: "GB", name: "United Kingdom", flag: "🇬🇧", primaryPrefix: "G", center: GeoCoordinate(latitude: 54.5, longitude: -2.5), cqZone: 14, ituZone: 27),
-        WorldCountryEntity(id: "DE", name: "Germany", flag: "🇩🇪", primaryPrefix: "DL", center: GeoCoordinate(latitude: 51.1, longitude: 10.4), cqZone: 14, ituZone: 28),
-        WorldCountryEntity(id: "FR", name: "France", flag: "🇫🇷", primaryPrefix: "F", center: GeoCoordinate(latitude: 46.2, longitude: 2.2), cqZone: 14, ituZone: 27),
-        WorldCountryEntity(id: "IT", name: "Italy", flag: "🇮🇹", primaryPrefix: "I", center: GeoCoordinate(latitude: 41.8, longitude: 12.5), cqZone: 15, ituZone: 28),
-        WorldCountryEntity(id: "ES", name: "Spain", flag: "🇪🇸", primaryPrefix: "EA", center: GeoCoordinate(latitude: 40.4, longitude: -3.7), cqZone: 14, ituZone: 37),
-        WorldCountryEntity(id: "ZA", name: "South Africa", flag: "🇿🇦", primaryPrefix: "ZS", center: GeoCoordinate(latitude: -30.5, longitude: 25.0), cqZone: 38, ituZone: 57),
-        WorldCountryEntity(id: "EG", name: "Egypt", flag: "🇪🇬", primaryPrefix: "SU", center: GeoCoordinate(latitude: 26.8, longitude: 30.8), cqZone: 34, ituZone: 38),
-        WorldCountryEntity(id: "AR", name: "Argentina", flag: "🇦🇷", primaryPrefix: "LU", center: GeoCoordinate(latitude: -38.4, longitude: -63.6), cqZone: 13, ituZone: 14),
-        WorldCountryEntity(id: "NZ", name: "New Zealand", flag: "🇳🇿", primaryPrefix: "ZL", center: GeoCoordinate(latitude: -40.9, longitude: 174.8), cqZone: 32, ituZone: 60),
-        WorldCountryEntity(id: "GL", name: "Greenland", flag: "🇬🇱", primaryPrefix: "OX", center: GeoCoordinate(latitude: 72.0, longitude: -40.0), cqZone: 40, ituZone: 5)
+        WorldCountryEntity(id: "RU", name: "Russia", flag: "🇷🇺", primaryPrefix: "UA", center: GeoCoordinate(latitude: 61.5, longitude: 95.0), cqZone: 16, ituZone: 29, priority: 1),
+        WorldCountryEntity(id: "CN", name: "China", flag: "🇨🇳", primaryPrefix: "BY", center: GeoCoordinate(latitude: 35.8, longitude: 104.2), cqZone: 24, ituZone: 44, priority: 1),
+        WorldCountryEntity(id: "US", name: "United States", flag: "🇺🇸", primaryPrefix: "K", center: GeoCoordinate(latitude: 39.5, longitude: -98.3), cqZone: 5, ituZone: 8, priority: 1),
+        WorldCountryEntity(id: "CA", name: "Canada", flag: "🇨🇦", primaryPrefix: "VE", center: GeoCoordinate(latitude: 56.1, longitude: -106.3), cqZone: 4, ituZone: 9, priority: 1),
+        WorldCountryEntity(id: "BR", name: "Brazil", flag: "🇧🇷", primaryPrefix: "PY", center: GeoCoordinate(latitude: -14.2, longitude: -51.9), cqZone: 11, ituZone: 15, priority: 1),
+        WorldCountryEntity(id: "AQ", name: "Antarctica", flag: "🇦🇶", primaryPrefix: "CE9", center: GeoCoordinate(latitude: -80.0, longitude: 0.0), cqZone: 39, ituZone: 71, priority: 2),
+        WorldCountryEntity(id: "AU", name: "Australia", flag: "🇦🇺", primaryPrefix: "VK", center: GeoCoordinate(latitude: -25.2, longitude: 133.7), cqZone: 30, ituZone: 59, priority: 1),
+        WorldCountryEntity(id: "IR", name: "Iran", flag: "🇮🇷", primaryPrefix: "EP", center: GeoCoordinate(latitude: 32.4, longitude: 53.7), cqZone: 21, ituZone: 40, priority: 1),
+        WorldCountryEntity(id: "SA", name: "Saudi Arabia", flag: "🇸🇦", primaryPrefix: "HZ", center: GeoCoordinate(latitude: 23.8, longitude: 45.0), cqZone: 21, ituZone: 39, priority: 2),
+        WorldCountryEntity(id: "IN", name: "India", flag: "🇮🇳", primaryPrefix: "VU", center: GeoCoordinate(latitude: 20.5, longitude: 78.9), cqZone: 22, ituZone: 41, priority: 1),
+        WorldCountryEntity(id: "JP", name: "Japan", flag: "🇯🇵", primaryPrefix: "JA", center: GeoCoordinate(latitude: 36.2, longitude: 138.2), cqZone: 25, ituZone: 45, priority: 1),
+        WorldCountryEntity(id: "GB", name: "United Kingdom", flag: "🇬🇧", primaryPrefix: "G", center: GeoCoordinate(latitude: 54.5, longitude: -2.5), cqZone: 14, ituZone: 27, priority: 1),
+        WorldCountryEntity(id: "DE", name: "Germany", flag: "🇩🇪", primaryPrefix: "DL", center: GeoCoordinate(latitude: 51.1, longitude: 10.4), cqZone: 14, ituZone: 28, priority: 2),
+        WorldCountryEntity(id: "FR", name: "France", flag: "🇫🇷", primaryPrefix: "F", center: GeoCoordinate(latitude: 46.2, longitude: 2.2), cqZone: 14, ituZone: 27, priority: 2),
+        WorldCountryEntity(id: "IT", name: "Italy", flag: "🇮🇹", primaryPrefix: "I", center: GeoCoordinate(latitude: 41.8, longitude: 12.5), cqZone: 15, ituZone: 28, priority: 2),
+        WorldCountryEntity(id: "ES", name: "Spain", flag: "🇪🇸", primaryPrefix: "EA", center: GeoCoordinate(latitude: 40.4, longitude: -3.7), cqZone: 14, ituZone: 37, priority: 2),
+        WorldCountryEntity(id: "ZA", name: "South Africa", flag: "🇿🇦", primaryPrefix: "ZS", center: GeoCoordinate(latitude: -30.5, longitude: 25.0), cqZone: 38, ituZone: 57, priority: 1),
+        WorldCountryEntity(id: "EG", name: "Egypt", flag: "🇪🇬", primaryPrefix: "SU", center: GeoCoordinate(latitude: 26.8, longitude: 30.8), cqZone: 34, ituZone: 38, priority: 2),
+        WorldCountryEntity(id: "AR", name: "Argentina", flag: "🇦🇷", primaryPrefix: "LU", center: GeoCoordinate(latitude: -38.4, longitude: -63.6), cqZone: 13, ituZone: 14, priority: 2),
+        WorldCountryEntity(id: "NZ", name: "New Zealand", flag: "🇳🇿", primaryPrefix: "ZL", center: GeoCoordinate(latitude: -40.9, longitude: 174.8), cqZone: 32, ituZone: 60, priority: 2),
+        WorldCountryEntity(id: "GL", name: "Greenland", flag: "🇬🇱", primaryPrefix: "OX", center: GeoCoordinate(latitude: 72.0, longitude: -40.0), cqZone: 40, ituZone: 5, priority: 2),
+        // Key DX Islands & Entities
+        WorldCountryEntity(id: "IS", name: "Iceland", flag: "🇮🇸", primaryPrefix: "TF", center: GeoCoordinate(latitude: 64.9, longitude: -19.0), cqZone: 40, ituZone: 17, priority: 2),
+        WorldCountryEntity(id: "MG", name: "Madagascar", flag: "🇲🇬", primaryPrefix: "5R", center: GeoCoordinate(latitude: -18.8, longitude: 46.8), cqZone: 39, ituZone: 53, priority: 2),
+        WorldCountryEntity(id: "HI", name: "Hawaii", flag: "🇺🇸", primaryPrefix: "KH6", center: GeoCoordinate(latitude: 21.3, longitude: -157.8), cqZone: 31, ituZone: 61, priority: 2),
+        WorldCountryEntity(id: "CU", name: "Cuba", flag: "🇨🇺", primaryPrefix: "CO", center: GeoCoordinate(latitude: 21.5, longitude: -80.0), cqZone: 8, ituZone: 11, priority: 3),
+        WorldCountryEntity(id: "ID", name: "Indonesia", flag: "🇮🇩", primaryPrefix: "YB", center: GeoCoordinate(latitude: -0.8, longitude: 113.9), cqZone: 28, ituZone: 54, priority: 2)
     ]
 
     public static var countryBoundaries: [VectorCountryPolygon] { landmassPolygons }
@@ -555,6 +677,87 @@ public enum WorldVectorGeography {
                 GeoCoordinate(latitude: -69.0, longitude: 40.0),
                 GeoCoordinate(latitude: -70.0, longitude: 0.0),
                 GeoCoordinate(latitude: -75.0, longitude: -30.0)
+            ]
+        ),
+
+        // 13. Iceland (TF)
+        VectorCountryPolygon(
+            countryId: "IS",
+            countryName: "Iceland",
+            primaryPrefix: "TF",
+            coordinates: [
+                GeoCoordinate(latitude: 63.4, longitude: -19.0),
+                GeoCoordinate(latitude: 64.0, longitude: -14.0),
+                GeoCoordinate(latitude: 65.5, longitude: -13.5),
+                GeoCoordinate(latitude: 66.5, longitude: -16.0),
+                GeoCoordinate(latitude: 66.0, longitude: -22.5),
+                GeoCoordinate(latitude: 65.0, longitude: -24.5),
+                GeoCoordinate(latitude: 64.0, longitude: -22.5)
+            ]
+        ),
+
+        // 14. Madagascar (5R)
+        VectorCountryPolygon(
+            countryId: "MG",
+            countryName: "Madagascar",
+            primaryPrefix: "5R",
+            coordinates: [
+                GeoCoordinate(latitude: -12.0, longitude: 49.3),
+                GeoCoordinate(latitude: -15.5, longitude: 50.5),
+                GeoCoordinate(latitude: -25.6, longitude: 47.0),
+                GeoCoordinate(latitude: -25.0, longitude: 44.5),
+                GeoCoordinate(latitude: -20.0, longitude: 43.5),
+                GeoCoordinate(latitude: -16.0, longitude: 44.5)
+            ]
+        ),
+
+        // 15. Hawaii (KH6)
+        VectorCountryPolygon(
+            countryId: "HI",
+            countryName: "Hawaii",
+            primaryPrefix: "KH6",
+            coordinates: [
+                GeoCoordinate(latitude: 19.0, longitude: -155.6),
+                GeoCoordinate(latitude: 19.5, longitude: -154.8),
+                GeoCoordinate(latitude: 20.2, longitude: -155.8),
+                GeoCoordinate(latitude: 21.3, longitude: -157.8),
+                GeoCoordinate(latitude: 22.2, longitude: -159.5),
+                GeoCoordinate(latitude: 21.9, longitude: -160.2),
+                GeoCoordinate(latitude: 20.8, longitude: -156.5)
+            ]
+        ),
+
+        // 16. Caribbean / Cuba (CO)
+        VectorCountryPolygon(
+            countryId: "CU",
+            countryName: "Cuba & Caribbean",
+            primaryPrefix: "CO",
+            coordinates: [
+                GeoCoordinate(latitude: 22.0, longitude: -84.9),
+                GeoCoordinate(latitude: 23.2, longitude: -81.0),
+                GeoCoordinate(latitude: 21.5, longitude: -76.0),
+                GeoCoordinate(latitude: 20.2, longitude: -74.1),
+                GeoCoordinate(latitude: 19.8, longitude: -77.5),
+                GeoCoordinate(latitude: 21.5, longitude: -82.5)
+            ]
+        ),
+
+        // 17. Indonesia / Greater Sunda Islands (YB)
+        VectorCountryPolygon(
+            countryId: "ID",
+            countryName: "Indonesia",
+            primaryPrefix: "YB",
+            coordinates: [
+                GeoCoordinate(latitude: 5.5, longitude: 95.3),   // Sumatra North
+                GeoCoordinate(latitude: 3.0, longitude: 99.0),
+                GeoCoordinate(latitude: -3.0, longitude: 104.0),
+                GeoCoordinate(latitude: -5.9, longitude: 106.0), // Java West
+                GeoCoordinate(latitude: -6.5, longitude: 110.0),
+                GeoCoordinate(latitude: -8.5, longitude: 114.5), // Bali Strait
+                GeoCoordinate(latitude: -8.0, longitude: 112.0),
+                GeoCoordinate(latitude: -7.0, longitude: 106.5),
+                GeoCoordinate(latitude: -4.5, longitude: 103.0),
+                GeoCoordinate(latitude: -0.5, longitude: 100.0)
             ]
         )
     ]

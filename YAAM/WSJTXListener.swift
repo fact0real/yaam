@@ -2,74 +2,102 @@
 //  WSJTXListener.swift
 //  YAAM
 //
+//  Bi-directional Live WSJT-X / JTDX UDP Protocol Service.
+//  Supports full 2-way communication: 1-click Reply (Type 4), Halt TX (Type 7),
+//  Clear Activity (Type 3), Set Location (Type 9), and high-performance live decodes stream.
+//
 
 import Combine
 import Foundation
 import Network
+import SwiftUI
 
-nonisolated enum WSJTXListenerState: Equatable, Sendable {
+// MARK: - Listener State
+
+nonisolated public enum WSJTXListenerState: Equatable, Sendable {
     case stopped
     case starting
     case listening(UInt16)
     case failed(String)
 
-    var title: String {
+    public var title: String {
         switch self {
         case .stopped: return "Stopped"
         case .starting: return "Starting"
         case .listening(let port): return "Listening on UDP \(port)"
-        case .failed: return "Listener failed"
+        case .failed(let err): return "Listener failed: \(err)"
         }
     }
 
-    var isListening: Bool {
+    public var isListening: Bool {
         if case .listening = self { return true }
         return false
     }
 }
 
-nonisolated struct WSJTXStatusSnapshot: Equatable, Sendable {
-    var sourceID: String
-    var dialFrequencyHz: UInt64
-    var mode: String
-    var dxCallsign: String
-    var report: String
-    var transmitting: Bool
-    var decoding: Bool
-    var ownCallsign: String
-    var ownGrid: String
-    var dxGrid: String
-    var receivedAt: Date
+// MARK: - Status Snapshot
 
-    var frequencyMHz: String {
+nonisolated public struct WSJTXStatusSnapshot: Equatable, Sendable {
+    public var sourceID: String
+    public var dialFrequencyHz: UInt64
+    public var mode: String
+    public var dxCallsign: String
+    public var report: String
+    public var transmitting: Bool
+    public var decoding: Bool
+    public var ownCallsign: String
+    public var ownGrid: String
+    public var dxGrid: String
+    public var receivedAt: Date
+
+    public var frequencyMHz: String {
         AmateurBandPlan.formattedMHz(Double(dialFrequencyHz) / 1_000_000)
     }
 
-    var band: String {
+    public var band: String {
         AmateurBandPlan.band(forMHz: Double(dialFrequencyHz) / 1_000_000) ?? ""
     }
 }
 
-nonisolated struct WSJTXLoggedEvent: Identifiable, Equatable, Sendable {
-    var id = UUID()
-    var sourceID: String
-    var adif: String
-    var receivedAt = Date()
+// MARK: - Logged Event & Pending QSO
+
+nonisolated public struct WSJTXLoggedEvent: Identifiable, Equatable, Sendable {
+    public var id = UUID()
+    public var sourceID: String
+    public var adif: String
+    public var receivedAt = Date()
+
+    public init(id: UUID = UUID(), sourceID: String, adif: String, receivedAt: Date = Date()) {
+        self.id = id
+        self.sourceID = sourceID
+        self.adif = adif
+        self.receivedAt = receivedAt
+    }
 }
 
-nonisolated struct WSJTXPendingQSO: Identifiable, Equatable, Sendable {
-    var id: UUID
-    var sourceID: String
-    var fields: [String: String]
-    var receivedAt: Date
-    var isDuplicate: Bool
+nonisolated public struct WSJTXPendingQSO: Identifiable, Equatable, Sendable {
+    public var id: UUID
+    public var sourceID: String
+    public var fields: [String: String]
+    public var receivedAt: Date
+    public var isDuplicate: Bool
 
-    var callsign: String { fields["CALL"] ?? "" }
-    var band: String { fields["BAND"] ?? "" }
-    var mode: String { fields["SUBMODE"] ?? fields["MODE"] ?? "" }
+    public var callsign: String { fields["CALL"] ?? "" }
+    public var band: String { fields["BAND"] ?? "" }
+    public var mode: String { fields["SUBMODE"] ?? fields["MODE"] ?? "" }
+
+    public init(id: UUID, sourceID: String, fields: [String: String], receivedAt: Date, isDuplicate: Bool) {
+        self.id = id
+        self.sourceID = sourceID
+        self.fields = fields
+        self.receivedAt = receivedAt
+        self.isDuplicate = isDuplicate
+    }
 }
 
-nonisolated struct WSJTXLiveDecode: Identifiable, Equatable, Sendable {
+// MARK: - Live Decode Model
+
+nonisolated public struct WSJTXLiveDecode: Identifiable, Equatable, Sendable {
     public var id = UUID()
     public var sourceID: String
     public var isNew: Bool
@@ -88,40 +116,322 @@ nonisolated struct WSJTXLiveDecode: Identifiable, Equatable, Sendable {
     public var targetCallsign: String
     public var grid: String
     public var report: String
+
+    public init(
+        id: UUID = UUID(),
+        sourceID: String,
+        isNew: Bool,
+        timeMillis: UInt32,
+        snr: Int32,
+        deltaTimeSec: Double,
+        deltaFrequencyHz: UInt32,
+        mode: String,
+        message: String,
+        lowConfidence: Bool,
+        offAir: Bool,
+        receivedAt: Date = Date(),
+        callerCallsign: String,
+        targetCallsign: String,
+        grid: String,
+        report: String
+    ) {
+        self.id = id
+        self.sourceID = sourceID
+        self.isNew = isNew
+        self.timeMillis = timeMillis
+        self.snr = snr
+        self.deltaTimeSec = deltaTimeSec
+        self.deltaFrequencyHz = deltaFrequencyHz
+        self.mode = mode
+        self.message = message
+        self.lowConfidence = lowConfidence
+        self.offAir = offAir
+        self.receivedAt = receivedAt
+        self.callerCallsign = callerCallsign
+        self.targetCallsign = targetCallsign
+        self.grid = grid
+        self.report = report
+    }
+
+    // Computed Properties
+    public var isCQ: Bool {
+        let u = message.uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        return u.hasPrefix("CQ ") || u.contains(" CQ ") || u == "CQ"
+    }
+
+    public func isDirectedToMe(myCall: String) -> Bool {
+        guard !myCall.isEmpty else { return false }
+        let cleanMy = myCall.uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanTarget = targetCallsign.uppercased()
+        if cleanTarget == cleanMy { return true }
+        let tokens = message.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
+        if tokens.count >= 2 && tokens[0].uppercased() == cleanMy { return true }
+        return false
+    }
+
+    public var timeUTCString: String {
+        let totalSeconds = timeMillis / 1000
+        let hours = (totalSeconds / 3600) % 24
+        let minutes = (totalSeconds / 60) % 60
+        let seconds = totalSeconds % 60
+        return String(format: "%02d:%02d:%02d", hours, minutes, seconds)
+    }
+
+    public var snrFormatted: String {
+        snr >= 0 ? "+\(snr) dB" : "\(snr) dB"
+    }
+
+    public var deltaFrequencyFormatted: String {
+        "\(deltaFrequencyHz) Hz"
+    }
+
+    public var deltaTimeFormatted: String {
+        String(format: "%+.1fs", deltaTimeSec)
+    }
+
+    public var countryInfo: (flag: String, country: String) {
+        let call = callerCallsign.isEmpty ? targetCallsign : callerCallsign
+        guard !call.isEmpty else { return ("🌐", "Unknown") }
+        let res = DXCCDatabase.resolve(callsign: call)
+        return (res.flagEmoji, res.entityName)
+    }
+
+    public var snrColor: Color {
+        switch snr {
+        case 0...: return Color.green
+        case -10 ..< 0: return Color.yellow
+        case -18 ..< -10: return Color.orange
+        default: return Color.red
+        }
+    }
+
+    @MainActor
+    public func contestStatus(engine: DigitalContestEngine, onBand band: String) -> DecodedContestStatus {
+        let call = callerCallsign.isEmpty ? targetCallsign : callerCallsign
+        return engine.analyzeDecodedStation(callsign: call, grid: grid, band: band)
+    }
 }
 
-nonisolated enum WSJTXPacket: Sendable {
+// MARK: - Inbound Packet Types
+
+nonisolated public enum WSJTXPacket: Sendable {
     case heartbeat(sourceID: String)
     case status(WSJTXStatusSnapshot)
     case decode(WSJTXLiveDecode)
+    case clear(sourceID: String, window: UInt8)
     case loggedADIF(WSJTXLoggedEvent)
 }
 
-final class WSJTXListener: ObservableObject {
-    @Published private(set) var state: WSJTXListenerState = .stopped
-    @Published private(set) var lastStatus: WSJTXStatusSnapshot?
-    @Published private(set) var loggedEvents: [WSJTXLoggedEvent] = []
-    @Published private(set) var liveDecodes: [WSJTXLiveDecode] = []
-    @Published private(set) var packetCount = 0
-    @Published private(set) var lastMessage = "Ready to listen for WSJT-X or JTDX"
+// MARK: - Outbound Qt Packet Writer
+
+public struct WSJTXPacketWriter {
+    public private(set) var data = Data()
+
+    public init() {}
+
+    public mutating func writeUInt8(_ value: UInt8) {
+        data.append(value)
+    }
+
+    public mutating func writeUInt16(_ value: UInt16) {
+        var be = value.bigEndian
+        withUnsafeBytes(of: &be) { data.append(contentsOf: $0) }
+    }
+
+    public mutating func writeUInt32(_ value: UInt32) {
+        var be = value.bigEndian
+        withUnsafeBytes(of: &be) { data.append(contentsOf: $0) }
+    }
+
+    public mutating func writeInt32(_ value: Int32) {
+        var be = value.bigEndian
+        withUnsafeBytes(of: &be) { data.append(contentsOf: $0) }
+    }
+
+    public mutating func writeUInt64(_ value: UInt64) {
+        var be = value.bigEndian
+        withUnsafeBytes(of: &be) { data.append(contentsOf: $0) }
+    }
+
+    public mutating func writeDouble(_ value: Double) {
+        var bitPattern = value.bitPattern.bigEndian
+        withUnsafeBytes(of: &bitPattern) { data.append(contentsOf: $0) }
+    }
+
+    public mutating func writeBool(_ value: Bool) {
+        data.append(value ? 1 : 0)
+    }
+
+    public mutating func writeString(_ string: String) {
+        let utf8 = Data(string.utf8)
+        writeUInt32(UInt32(utf8.count))
+        data.append(utf8)
+    }
+
+    public mutating func writeQColor(red: UInt8, green: UInt8, blue: UInt8, alpha: UInt8 = 255) {
+        // Qt QColor serialization
+        writeUInt8(1) // RGB spec
+        writeUInt16((UInt16(alpha) << 8) | UInt16(alpha))
+        writeUInt16((UInt16(red) << 8) | UInt16(red))
+        writeUInt16((UInt16(green) << 8) | UInt16(green))
+        writeUInt16((UInt16(blue) << 8) | UInt16(blue))
+        writeUInt16(0) // Pad
+    }
+
+    public func build() -> Data {
+        data
+    }
+}
+
+// MARK: - Outbound WSJT-X Packet Encoder
+
+public enum WSJTXPacketEncoder {
+    public static let magic: UInt32 = 0xADBCCBDA
+    public static let schemaVersion: UInt32 = 2
+
+    // Type 4: Reply
+    public static func encodeReply(
+        clientID: String,
+        timeMillis: UInt32,
+        snr: Int32,
+        deltaTimeSec: Double,
+        deltaFrequencyHz: UInt32,
+        mode: String,
+        message: String,
+        lowConfidence: Bool = false,
+        modifiers: UInt8 = 0
+    ) -> Data {
+        var writer = WSJTXPacketWriter()
+        writer.writeUInt32(magic)
+        writer.writeUInt32(schemaVersion)
+        writer.writeUInt32(4) // Type 4: Reply
+        writer.writeString(clientID)
+        writer.writeUInt32(timeMillis)
+        writer.writeInt32(snr)
+        writer.writeDouble(deltaTimeSec)
+        writer.writeUInt32(deltaFrequencyHz)
+        writer.writeString(mode)
+        writer.writeString(message)
+        writer.writeBool(lowConfidence)
+        writer.writeUInt8(modifiers)
+        return writer.build()
+    }
+
+    // Type 7: Halt TX
+    public static func encodeHaltTx(
+        clientID: String,
+        autoTxOnly: Bool = false
+    ) -> Data {
+        var writer = WSJTXPacketWriter()
+        writer.writeUInt32(magic)
+        writer.writeUInt32(schemaVersion)
+        writer.writeUInt32(7) // Type 7: Halt TX
+        writer.writeString(clientID)
+        writer.writeBool(autoTxOnly)
+        return writer.build()
+    }
+
+    // Type 8: Free Text
+    public static func encodeFreeText(
+        clientID: String,
+        text: String,
+        sendImmediately: Bool = true
+    ) -> Data {
+        var writer = WSJTXPacketWriter()
+        writer.writeUInt32(magic)
+        writer.writeUInt32(schemaVersion)
+        writer.writeUInt32(8) // Type 8: Free Text
+        writer.writeString(clientID)
+        writer.writeString(text)
+        writer.writeBool(sendImmediately)
+        return writer.build()
+    }
+
+    // Type 9: Location
+    public static func encodeSetLocation(
+        clientID: String,
+        location: String
+    ) -> Data {
+        var writer = WSJTXPacketWriter()
+        writer.writeUInt32(magic)
+        writer.writeUInt32(schemaVersion)
+        writer.writeUInt32(9) // Type 9: Location
+        writer.writeString(clientID)
+        writer.writeString(location)
+        return writer.build()
+    }
+
+    // Type 3: Clear
+    public static func encodeClear(
+        clientID: String,
+        window: UInt8 = 2
+    ) -> Data {
+        var writer = WSJTXPacketWriter()
+        writer.writeUInt32(magic)
+        writer.writeUInt32(schemaVersion)
+        writer.writeUInt32(3) // Type 3: Clear
+        writer.writeString(clientID)
+        writer.writeUInt8(window)
+        return writer.build()
+    }
+
+    // Type 13: Highlight Callsign
+    public static func encodeHighlightCallsign(
+        clientID: String,
+        callsign: String,
+        bgRGB: (UInt8, UInt8, UInt8) = (255, 255, 0),
+        fgRGB: (UInt8, UInt8, UInt8) = (0, 0, 0),
+        highlightLast: Bool = false
+    ) -> Data {
+        var writer = WSJTXPacketWriter()
+        writer.writeUInt32(magic)
+        writer.writeUInt32(schemaVersion)
+        writer.writeUInt32(13) // Type 13: Highlight Callsign
+        writer.writeString(clientID)
+        writer.writeString(callsign)
+        writer.writeQColor(red: bgRGB.0, green: bgRGB.1, blue: bgRGB.2)
+        writer.writeQColor(red: fgRGB.0, green: fgRGB.1, blue: fgRGB.2)
+        writer.writeBool(highlightLast)
+        return writer.build()
+    }
+}
+
+// MARK: - WSJTX Listener & 2-Way Controller
+
+final public class WSJTXListener: ObservableObject {
+    @Published public private(set) var state: WSJTXListenerState = .stopped
+    @Published public private(set) var lastStatus: WSJTXStatusSnapshot?
+    @Published public private(set) var loggedEvents: [WSJTXLoggedEvent] = []
+    @Published public private(set) var liveDecodes: [WSJTXLiveDecode] = []
+    @Published public private(set) var packetCount = 0
+    @Published public private(set) var lastMessage = "Ready to listen for WSJT-X or JTDX"
+    @Published public private(set) var lastSentCommand = ""
+    @Published public private(set) var activeReplyDecode: WSJTXLiveDecode? = nil
+    @Published public private(set) var activeReplyToast: String? = nil
 
     private let queue = DispatchQueue(label: "app.yaam.wsjtx-udp", qos: .userInitiated)
     private var listener: NWListener?
     private var peers: [NWConnection] = []
     private var listenerID = UUID()
+    public var currentPort: Int = 2237
+
+    public init() {}
 
     deinit {
         listener?.cancel()
         peers.forEach { $0.cancel() }
     }
 
-    func start(port rawPort: Int) {
+    // MARK: - Lifecycle
+
+    public func start(port rawPort: Int) {
         guard (1...65_535).contains(rawPort), let port = NWEndpoint.Port(rawValue: UInt16(rawPort)) else {
             state = .failed("Enter a valid UDP port.")
             lastMessage = "WSJT-X UDP port is invalid"
             return
         }
 
+        currentPort = rawPort
         stop()
         let id = UUID()
         listenerID = id
@@ -162,7 +472,7 @@ final class WSJTXListener: ObservableObject {
         }
     }
 
-    func stop() {
+    public func stop() {
         listenerID = UUID()
         listener?.cancel()
         listener = nil
@@ -172,13 +482,148 @@ final class WSJTXListener: ObservableObject {
         lastMessage = "WSJT-X listener stopped"
     }
 
-    func removeLoggedEvent(id: UUID) {
+    public func clearLiveDecodes() {
+        liveDecodes.removeAll(keepingCapacity: true)
+    }
+
+    public func removeLoggedEvent(id: UUID) {
         loggedEvents.removeAll { $0.id == id }
     }
 
-    func clearLoggedEvents() {
+    public func clearLoggedEvents() {
         loggedEvents.removeAll(keepingCapacity: true)
     }
+
+    // MARK: - 2-Way Command Dispatching to WSJT-X
+
+    /// Sends a 1-click Reply (Type 4) packet to WSJT-X/JTDX
+    public func sendReply(
+        to decode: WSJTXLiveDecode,
+        host: String = "127.0.0.1",
+        port: Int = 2237
+    ) {
+        let clientID = decode.sourceID.isEmpty ? (lastStatus?.sourceID ?? "WSJT-X") : decode.sourceID
+        let packetData = WSJTXPacketEncoder.encodeReply(
+            clientID: clientID,
+            timeMillis: decode.timeMillis,
+            snr: decode.snr,
+            deltaTimeSec: decode.deltaTimeSec,
+            deltaFrequencyHz: decode.deltaFrequencyHz,
+            mode: decode.mode,
+            message: decode.message,
+            lowConfidence: decode.lowConfidence,
+            modifiers: 0
+        )
+
+        dispatchPacket(packetData, targetHost: host, targetPort: port)
+
+        let targetCall = decode.callerCallsign.isEmpty ? decode.targetCallsign : decode.callerCallsign
+        activeReplyDecode = decode
+        let toast = "Replying to \(targetCall) on \(decode.deltaFrequencyHz) Hz in \(clientID)"
+        activeReplyToast = toast
+        lastSentCommand = "Reply: \(decode.message)"
+        lastMessage = toast
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) { [weak self] in
+            if self?.activeReplyToast == toast {
+                self?.activeReplyToast = nil
+            }
+        }
+    }
+
+    /// Sends a Halt TX (Type 7) packet to stop transmission immediately
+    public func sendHaltTx(
+        clientID: String? = nil,
+        autoTxOnly: Bool = false,
+        host: String = "127.0.0.1",
+        port: Int = 2237
+    ) {
+        let targetID = clientID ?? lastStatus?.sourceID ?? "WSJT-X"
+        let data = WSJTXPacketEncoder.encodeHaltTx(clientID: targetID, autoTxOnly: autoTxOnly)
+        dispatchPacket(data, targetHost: host, targetPort: port)
+        lastSentCommand = "Halt TX (\(targetID))"
+        lastMessage = "Sent Halt TX to \(targetID)"
+    }
+
+    /// Sends a Clear (Type 3) packet to clear band activity window in WSJT-X
+    public func sendClear(
+        clientID: String? = nil,
+        window: UInt8 = 2,
+        host: String = "127.0.0.1",
+        port: Int = 2237
+    ) {
+        let targetID = clientID ?? lastStatus?.sourceID ?? "WSJT-X"
+        let data = WSJTXPacketEncoder.encodeClear(clientID: targetID, window: window)
+        dispatchPacket(data, targetHost: host, targetPort: port)
+        lastSentCommand = "Clear Window (\(targetID))"
+        lastMessage = "Sent Clear Window to \(targetID)"
+    }
+
+    /// Sends a Location / Grid (Type 9) packet to synchronize operator grid in WSJT-X
+    public func sendSetLocation(
+        grid: String,
+        clientID: String? = nil,
+        host: String = "127.0.0.1",
+        port: Int = 2237
+    ) {
+        let cleanGrid = grid.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard !cleanGrid.isEmpty else { return }
+        let targetID = clientID ?? lastStatus?.sourceID ?? "WSJT-X"
+        let data = WSJTXPacketEncoder.encodeSetLocation(clientID: targetID, location: cleanGrid)
+        dispatchPacket(data, targetHost: host, targetPort: port)
+        lastSentCommand = "Set Location: \(cleanGrid) (\(targetID))"
+        lastMessage = "Synchronized Grid \(cleanGrid) with \(targetID)"
+    }
+
+    /// Sends Free Text (Type 8) to WSJT-X
+    public func sendFreeText(
+        text: String,
+        sendImmediately: Bool = true,
+        clientID: String? = nil,
+        host: String = "127.0.0.1",
+        port: Int = 2237
+    ) {
+        let cleanText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanText.isEmpty else { return }
+        let targetID = clientID ?? lastStatus?.sourceID ?? "WSJT-X"
+        let data = WSJTXPacketEncoder.encodeFreeText(clientID: targetID, text: cleanText, sendImmediately: sendImmediately)
+        dispatchPacket(data, targetHost: host, targetPort: port)
+        lastSentCommand = "Free Text: \(cleanText)"
+        lastMessage = "Sent Free Text to \(targetID)"
+    }
+
+    // MARK: - Internal Packet Dispatcher
+
+    private func dispatchPacket(_ data: Data, targetHost: String, targetPort: Int) {
+        // 1. Send via all active peer connections
+        for peer in peers {
+            peer.send(content: data, completion: .contentProcessed { error in
+                if let error {
+                    print("WSJT-X peer send warning: \(error)")
+                }
+            })
+        }
+
+        // 2. Also send via outbound UDP connection to ensure reachability
+        guard let port = NWEndpoint.Port(rawValue: UInt16(targetPort)) else { return }
+        let endpoint = NWEndpoint.hostPort(host: NWEndpoint.Host(targetHost), port: port)
+        let outbound = NWConnection(to: endpoint, using: .udp)
+        outbound.stateUpdateHandler = { state in
+            switch state {
+            case .ready:
+                outbound.send(content: data, completion: .contentProcessed { _ in
+                    outbound.cancel()
+                })
+            case .failed, .cancelled:
+                outbound.cancel()
+            default:
+                break
+            }
+        }
+        outbound.start(queue: queue)
+    }
+
+    // MARK: - Inbound Message Handling
 
     private func handle(_ connection: NWConnection, listenerID: UUID) {
         peers.append(connection)
@@ -220,24 +665,45 @@ final class WSJTXListener: ObservableObject {
             lastMessage = "\(activity) · \(target) · \(status.frequencyMHz) MHz"
         case .decode(let decode):
             liveDecodes.insert(decode, at: 0)
-            let cutoff = Date().addingTimeInterval(-300) // Keep last 5 minutes of decodes
-            liveDecodes = Array(liveDecodes.filter { $0.receivedAt > cutoff }.prefix(200))
+            let cutoff = Date().addingTimeInterval(-600) // Keep last 10 minutes of decodes
+            liveDecodes = Array(liveDecodes.filter { $0.receivedAt > cutoff }.prefix(500))
+
+            // Ingest real-time decode into BandmapEngine
+            let dialHz = lastStatus?.dialFrequencyHz ?? 0
+            let targetCall = !decode.callerCallsign.isEmpty ? decode.callerCallsign : (!decode.targetCallsign.isEmpty ? decode.targetCallsign : "")
+            if dialHz > 0 && !targetCall.isEmpty {
+                let exactKHz = Double(dialHz + UInt64(decode.deltaFrequencyHz)) / 1000.0
+                let resolvedBand = lastStatus?.band ?? AmateurBandPlan.band(forMHz: exactKHz / 1000.0) ?? "20M"
+                BandmapEngine.shared.addSpot(
+                    callsign: targetCall,
+                    frequencyKHz: exactKHz,
+                    band: resolvedBand,
+                    mode: decode.mode.isEmpty ? "FT8" : decode.mode,
+                    comment: decode.grid.isEmpty ? "" : "Grid: \(decode.grid)",
+                    source: "WSJT-X (\(decode.sourceID))",
+                    snr: Int(decode.snr)
+                )
+            }
+        case .clear(let sourceID, _):
+            lastMessage = "Clear command received from \(sourceID)"
         case .loggedADIF(let event):
             guard !loggedEvents.contains(where: { $0.adif == event.adif }) else { return }
             loggedEvents.insert(event, at: 0)
-            loggedEvents = Array(loggedEvents.prefix(50))
+            loggedEvents = Array(loggedEvents.prefix(100))
             lastMessage = "New logged QSO received from \(event.sourceID)"
         }
     }
 }
 
-nonisolated enum WSJTXPacketParser {
-    private static let magic: UInt32 = 0xADBCCBDA
+// MARK: - Inbound Packet Parser
 
-    static func parse(_ data: Data) -> WSJTXPacket? {
+nonisolated public enum WSJTXPacketParser {
+    public static let magic: UInt32 = 0xADBCCBDA
+
+    public static func parse(_ data: Data) -> WSJTXPacket? {
         var cursor = DataCursor(data: data)
         guard cursor.readUInt32() == magic,
-              cursor.readUInt32() != nil,
+              cursor.readUInt32() != nil, // Schema
               let type = cursor.readUInt32(),
               let sourceID = cursor.readString() else { return nil }
 
@@ -249,12 +715,12 @@ nonisolated enum WSJTXPacketParser {
                   let mode = cursor.readString(),
                   let dxCall = cursor.readString(),
                   let report = cursor.readString(),
-                  cursor.readString() != nil,
-                  cursor.readBool() != nil,
+                  cursor.readString() != nil, // txMode
+                  cursor.readBool() != nil,   // txEnabled
                   let transmitting = cursor.readBool(),
                   let decoding = cursor.readBool(),
-                  cursor.readUInt32() != nil,
-                  cursor.readUInt32() != nil,
+                  cursor.readUInt32() != nil, // rxDF
+                  cursor.readUInt32() != nil, // txDF
                   let ownCall = cursor.readString(),
                   let ownGrid = cursor.readString(),
                   let dxGrid = cursor.readString() else { return nil }
@@ -303,6 +769,9 @@ nonisolated enum WSJTXPacketParser {
                 grid: parsed.grid,
                 report: parsed.report
             ))
+        case 3:
+            let window = cursor.readUInt8() ?? 2
+            return .clear(sourceID: sourceID, window: window)
         case 12:
             guard let adif = cursor.readString(), !adif.isEmpty else { return nil }
             return .loggedADIF(WSJTXLoggedEvent(sourceID: sourceID, adif: adif))
@@ -311,21 +780,31 @@ nonisolated enum WSJTXPacketParser {
         }
     }
 
-    private static func parseMessageTokens(_ msg: String) -> (caller: String, target: String, grid: String, report: String) {
+    public static func parseMessageTokens(_ msg: String) -> (caller: String, target: String, grid: String, report: String) {
         let tokens = msg.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
         guard !tokens.isEmpty else { return ("", "", "", "") }
 
-        // CQ [DX/POTA/NA] CALL GRID
+        // 1. CQ patterns
         if tokens[0].uppercased() == "CQ" {
-            if tokens.count >= 3 {
-                let call = tokens[1].uppercased().count > 2 ? tokens[1].uppercased() : (tokens.count >= 3 ? tokens[2].uppercased() : "")
-                let grid = tokens.last!.uppercased()
-                let validGrid = isGrid4(grid) ? grid : ""
-                return (call, "", validGrid, "")
+            if tokens.count == 2 {
+                // e.g. CQ EP2LMA
+                return (tokens[1].uppercased(), "", "", "")
+            } else if tokens.count == 3 {
+                // e.g. CQ EP2LMA KM32
+                let call = tokens[1].uppercased()
+                let last = tokens[2].uppercased()
+                let grid = isMaidenheadGrid(last) ? last : ""
+                return (call, "", grid, "")
+            } else if tokens.count >= 4 {
+                // e.g. CQ DX EP2LMA KM32 or CQ TEST EP2LMA KM32
+                let call = tokens[2].uppercased()
+                let last = tokens.last!.uppercased()
+                let grid = isMaidenheadGrid(last) ? last : ""
+                return (call, "", grid, "")
             }
         }
 
-        // CALL1 CALL2 [GRID / REPORT / RRR / 73]
+        // 2. Direct QSO patterns: TARGET CALLSIGN [GRID / REPORT / 73]
         if tokens.count >= 2 {
             let target = tokens[0].uppercased()
             let caller = tokens[1].uppercased()
@@ -333,7 +812,7 @@ nonisolated enum WSJTXPacketParser {
             var report = ""
             if tokens.count >= 3 {
                 let third = tokens[2].uppercased()
-                if isGrid4(third) {
+                if isMaidenheadGrid(third) {
                     grid = third
                 } else {
                     report = third
@@ -345,21 +824,41 @@ nonisolated enum WSJTXPacketParser {
         return ("", "", "", "")
     }
 
-    private static func isGrid4(_ text: String) -> Bool {
-        guard text.count == 4 else { return false }
-        let chars = Array(text.uppercased())
-        return chars[0] >= "A" && chars[0] <= "R" &&
-               chars[1] >= "A" && chars[1] <= "R" &&
-               chars[2] >= "0" && chars[2] <= "9" &&
-               chars[3] >= "0" && chars[3] <= "9"
+    public static func isMaidenheadGrid(_ text: String) -> Bool {
+        let clean = text.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard clean.count == 4 || clean.count == 6 else { return false }
+        let chars = Array(clean)
+        guard chars[0] >= "A" && chars[0] <= "R",
+              chars[1] >= "A" && chars[1] <= "R",
+              chars[2] >= "0" && chars[2] <= "9",
+              chars[3] >= "0" && chars[3] <= "9" else { return false }
+        if clean.count == 6 {
+            guard chars[4] >= "A" && chars[4] <= "X",
+                  chars[5] >= "A" && chars[5] <= "X" else { return false }
+        }
+        return true
     }
 }
 
-nonisolated private struct DataCursor {
-    let data: Data
-    var offset = 0
+// MARK: - Inbound Data Cursor
 
-    mutating func readUInt32() -> UInt32? {
+nonisolated public struct DataCursor {
+    public let data: Data
+    public var offset = 0
+
+    public init(data: Data, offset: Int = 0) {
+        self.data = data
+        self.offset = offset
+    }
+
+    public mutating func readUInt8() -> UInt8? {
+        guard offset < data.count else { return nil }
+        let r = data[offset]
+        offset += 1
+        return r
+    }
+
+    public mutating func readUInt32() -> UInt32? {
         guard offset + 4 <= data.count else { return nil }
         let result = (UInt32(data[offset]) << 24)
             | (UInt32(data[offset + 1]) << 16)
@@ -369,7 +868,7 @@ nonisolated private struct DataCursor {
         return result
     }
 
-    mutating func readUInt64() -> UInt64? {
+    public mutating func readUInt64() -> UInt64? {
         guard offset + 8 <= data.count else { return nil }
         var result: UInt64 = 0
         for index in 0..<8 { result = (result << 8) | UInt64(data[offset + index]) }
@@ -377,24 +876,24 @@ nonisolated private struct DataCursor {
         return result
     }
 
-    mutating func readInt32() -> Int32? {
+    public mutating func readInt32() -> Int32? {
         guard let u = readUInt32() else { return nil }
         return Int32(bitPattern: u)
     }
 
-    mutating func readDouble() -> Double? {
+    public mutating func readDouble() -> Double? {
         guard let u = readUInt64() else { return nil }
         return Double(bitPattern: u)
     }
 
-    mutating func readBool() -> Bool? {
+    public mutating func readBool() -> Bool? {
         guard offset < data.count else { return nil }
         let result = data[offset] != 0
         offset += 1
         return result
     }
 
-    mutating func readString() -> String? {
+    public mutating func readString() -> String? {
         guard let length = readUInt32() else { return nil }
         if length == UInt32.max { return "" }
         guard length <= Int.max, offset + Int(length) <= data.count else { return nil }

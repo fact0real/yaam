@@ -167,7 +167,7 @@ struct UnconfirmedCallsignStatModel: Identifiable {
     let email: String
 }
 
-struct EmailHistoryEntry: Identifiable, Codable {
+struct EmailHistoryEntry: Identifiable, Codable, Equatable, Hashable {
     let id: UUID
     let date: Date
     let callsign: String
@@ -539,8 +539,11 @@ struct FilterCriteria {
     var useContinent: Bool = false
     var selectedContinents: Set<String> = []
     
+    var useNewlyConfirmed: Bool = false
+    var useSentEmail: Bool = false
+    
     var isActive: Bool {
-        useDate || useBand || useMode || useCallsign || useOperator || useZone || useCountry || useQSLSent || useQSLRcvd || useConfirmation || useContinent
+        useDate || useBand || useMode || useCallsign || useOperator || useZone || useCountry || useQSLSent || useQSLRcvd || useConfirmation || useContinent || useNewlyConfirmed || useSentEmail
     }
     
     mutating func reset() {
@@ -582,6 +585,68 @@ nonisolated struct QSORecordModel: Identifiable, Sendable {
             "APP_QRZLOG_STATUS", "EQSL_QSL_RCVD", "QSL_RCVD"
         ].map { fields[$0]?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? "" }
         return confirmationValues.contains { ["Y", "V", "C", "CONFIRMED", "VERIFIED"].contains($0) }
+    }
+
+    static func parseADIFDate(_ raw: String) -> Date? {
+        let clean = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let digits = clean.filter(\.isNumber)
+        guard digits.count >= 8 else { return nil }
+        var components = DateComponents()
+        components.calendar = Calendar(identifier: .gregorian)
+        components.timeZone = TimeZone(secondsFromGMT: 0)
+        components.year = Int(digits.prefix(4))
+        components.month = Int(digits.dropFirst(4).prefix(2))
+        components.day = Int(digits.dropFirst(6).prefix(2))
+        return components.date
+    }
+
+    var latestConfirmationDate: Date? {
+        let dateFields = [
+            "APP_QRZLOG_QSLDATE",
+            "QRZLOG_QSLRDATE",
+            "APP_QRZLOG_QSLRDATE",
+            "LOTW_QSLRDATE",
+            "APP_LOTW_QSLRDATE",
+            "EQSL_QSLRDATE",
+            "APP_EQSL_QSLRDATE",
+            "QSLRDATE"
+        ]
+        var latest: Date?
+        for field in dateFields {
+            if let raw = fields[field], !raw.isEmpty, let date = Self.parseADIFDate(raw) {
+                if let current = latest {
+                    if date > current { latest = date }
+                } else {
+                    latest = date
+                }
+            }
+        }
+        return latest
+    }
+
+    var confirmationSourcesSummary: String {
+        var sources: [String] = []
+        let lotwRcvd = (fields["LOTW_QSL_RCVD"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if ["Y", "V", "C"].contains(lotwRcvd) {
+            sources.append("LoTW")
+        }
+        let qrzRcvd = (fields["QRZLOG_QSL_RCVD"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let qrzComRcvd = (fields["QRZCOM_QSL_RCVD"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let qrzStatus = (fields["APP_QRZLOG_STATUS"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if ["Y", "V", "C"].contains(qrzRcvd) || ["Y", "V", "C"].contains(qrzComRcvd) || qrzStatus == "C" {
+            sources.append("QRZ")
+        }
+        let eqslRcvd = (fields["EQSL_QSL_RCVD"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if ["Y", "V", "C"].contains(eqslRcvd) {
+            sources.append("eQSL")
+        }
+        let qslRcvd = (fields["QSL_RCVD"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if ["Y", "V", "C"].contains(qslRcvd) {
+            if !sources.contains("Card") {
+                sources.append("Card")
+            }
+        }
+        return sources.isEmpty ? "Confirmed" : sources.joined(separator: ", ")
     }
     
     // SMART DEDUPLICATION KEY: Call + Date + Time + Band + Mode
@@ -1529,6 +1594,8 @@ class AppState: NSObject, ObservableObject {
     @Published var selectedEmailIncomingRequest: QRZIncomingConfirmation? = nil
     @Published var incomingEmailDraftNotice: String = ""
     @Published var emailHistory: [EmailHistoryEntry] = []
+    @Published var emailHistoryByCallsign: [String: EmailHistoryEntry] = [:]
+    @Published var newlyConfirmedRecordIDs: Set<UUID> = []
     @Published var showQSLCardComposer: Bool = false
     @Published var selectedQSLCardQSO: QSORecordModel? = nil
     @Published var isSendingBatchMail: Bool = false
@@ -1993,6 +2060,13 @@ class AppState: NSObject, ObservableObject {
                 if filterCriteria.useContinent, !filterCriteria.selectedContinents.isEmpty {
                     if !filterCriteria.selectedContinents.contains(record["CONT"].uppercased()) { return false }
                 }
+                if filterCriteria.useNewlyConfirmed {
+                    if !self.isNewlyConfirmed(record: record) { return false }
+                }
+                if filterCriteria.useSentEmail {
+                    let call = record["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+                    if self.emailHistoryByCallsign[call] == nil { return false }
+                }
                 return true
             }
         }
@@ -2079,6 +2153,61 @@ class AppState: NSObject, ObservableObject {
         if !selectedCallsigns.isEmpty {
             enrichLogData(targetCallsigns: selectedCallsigns)
         }
+    }
+
+    func deleteSelectedRecords() {
+        guard !selectedRecordIDs.isEmpty else { return }
+        let idsToDelete = selectedRecordIDs
+        qsoRecords.removeAll { idsToDelete.contains($0.id) }
+        selectedRecordIDs.removeAll()
+        filteredRecordsCache = nil
+        objectWillChange.send()
+        autoSaveActiveWorkspace()
+    }
+
+    func exportSelectedRecordsAs() {
+        guard !selectedRecordIDs.isEmpty else { return }
+        let selectedRecords = qsoRecords.filter { selectedRecordIDs.contains($0.id) }
+        let panel = NSSavePanel()
+        var types: [UTType] = [.plainText]
+        if let adiType = UTType(filenameExtension: "adi") { types.append(adiType) }
+        types.append(.commaSeparatedText)
+        panel.allowedContentTypes = types
+        let baseName = loadedFileName.isEmpty ? "selected_log" : URL(fileURLWithPath: loadedFileName).deletingPathExtension().lastPathComponent
+        panel.nameFieldStringValue = "\(baseName)_Selected_\(selectedRecords.count)_QSOs.adi"
+        if panel.runModal() == .OK, let url = panel.url {
+            let dicts = selectedRecords.map { $0.fields }
+            writeRecordsToFileAsync(records: dicts, to: url)
+        }
+    }
+
+    func openBatchEmailComposerForSelected() {
+        let selectedRecords = qsoRecords.filter { selectedRecordIDs.contains($0.id) }
+        guard !selectedRecords.isEmpty else { return }
+
+        let validWithEmail = selectedRecords.filter { !$0["EMAIL"].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        if validWithEmail.isEmpty {
+            alertTitle = "No Email Addresses Found"
+            alertMessage = "None of the selected QSOs have an email address recorded. Enrich selected contacts with QRZ first."
+            showAlert = true
+            return
+        }
+
+        if validWithEmail.count == 1, let first = validWithEmail.first {
+            selectedEmailCallsign = first["CALL"]
+            selectedEmailAddress = first["EMAIL"]
+            selectedEmailQSO = first
+            selectedEmailTemplate = nil
+            selectedEmailUnconfirmedQSOs = []
+            showEmailComposer = true
+            return
+        }
+
+        selectedEmailCallsign = validWithEmail.first?["CALL"] ?? ""
+        selectedEmailAddress = validWithEmail.first?["EMAIL"] ?? ""
+        selectedEmailQSO = validWithEmail.first
+        selectedEmailUnconfirmedQSOs = validWithEmail
+        showEmailComposer = true
     }
 
     func toggleSort(for header: String) {
@@ -6116,6 +6245,14 @@ class AppState: NSObject, ObservableObject {
         }
 
         emailHistory = decoded.sorted { $0.date > $1.date }
+        var map: [String: EmailHistoryEntry] = [:]
+        for entry in emailHistory {
+            let norm = entry.callsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            if !norm.isEmpty && map[norm] == nil {
+                map[norm] = entry
+            }
+        }
+        emailHistoryByCallsign = map
         refreshEmailHistoryColumns()
     }
 
@@ -6131,6 +6268,10 @@ class AppState: NSObject, ObservableObject {
 
         emailHistory.insert(entry, at: 0)
         emailHistory = Array(emailHistory.prefix(500))
+        let norm = callsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if !norm.isEmpty {
+            emailHistoryByCallsign[norm] = entry
+        }
         saveEmailHistory()
         updateEmailHistoryColumn(with: entry)
     }
@@ -6139,6 +6280,9 @@ class AppState: NSObject, ObservableObject {
         let normalizedCallsign = callsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         guard !normalizedCallsign.isEmpty else { return nil }
 
+        if let cached = emailHistoryByCallsign[normalizedCallsign] {
+            return cached
+        }
         return emailHistory
             .filter { $0.callsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == normalizedCallsign }
             .sorted { $0.date > $1.date }
@@ -6159,15 +6303,18 @@ class AppState: NSObject, ObservableObject {
             tableHeaders.append(header)
         }
 
-        let latestByCallsign = Dictionary(grouping: emailHistory, by: {
-            $0.callsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        }).compactMapValues { entries in
-            entries.sorted { $0.date > $1.date }.first
+        var map: [String: EmailHistoryEntry] = [:]
+        for entry in emailHistory {
+            let norm = entry.callsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            if !norm.isEmpty && map[norm] == nil {
+                map[norm] = entry
+            }
         }
+        emailHistoryByCallsign = map
 
         for index in qsoRecords.indices {
             let callsign = qsoRecords[index]["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-            guard let entry = latestByCallsign[callsign] else { continue }
+            guard let entry = map[callsign] else { continue }
             qsoRecords[index].fields["APP_YAAM_LAST_EMAIL"] = emailHistorySummary(for: entry)
         }
     }
@@ -6206,6 +6353,58 @@ class AppState: NSObject, ObservableObject {
         guard let url = emailHistoryURL,
               let data = try? JSONEncoder().encode(emailHistory) else { return }
         try? data.write(to: url, options: .atomic)
+    }
+
+    // MARK: - Newly Confirmed Management
+    func isNewlyConfirmed(record: QSORecordModel) -> Bool {
+        if newlyConfirmedRecordIDs.contains(record.id) { return true }
+        if record["APP_YAAM_NEW_CONFIRMED"] == "Y" { return true }
+        if let confDate = record.latestConfirmationDate {
+            let cutoff = Calendar.current.date(byAdding: .day, value: -14, to: Date()) ?? Date().addingTimeInterval(-14 * 86400)
+            if confDate >= cutoff && confDate <= Date().addingTimeInterval(86400) {
+                return true
+            }
+        }
+        return false
+    }
+
+    func markRecordAsNewlyConfirmed(id: UUID) {
+        newlyConfirmedRecordIDs.insert(id)
+        if let idx = qsoRecords.firstIndex(where: { $0.id == id }) {
+            qsoRecords[idx].fields["APP_YAAM_NEW_CONFIRMED"] = "Y"
+        }
+        filteredRecordsCache = nil
+        objectWillChange.send()
+    }
+
+    func unmarkRecordAsNewlyConfirmed(id: UUID) {
+        newlyConfirmedRecordIDs.remove(id)
+        if let idx = qsoRecords.firstIndex(where: { $0.id == id }) {
+            qsoRecords[idx].fields.removeValue(forKey: "APP_YAAM_NEW_CONFIRMED")
+        }
+        filteredRecordsCache = nil
+        objectWillChange.send()
+    }
+
+    func clearAllNewlyConfirmed() {
+        newlyConfirmedRecordIDs.removeAll()
+        for idx in qsoRecords.indices {
+            qsoRecords[idx].fields.removeValue(forKey: "APP_YAAM_NEW_CONFIRMED")
+        }
+        filteredRecordsCache = nil
+        objectWillChange.send()
+    }
+
+    var newlyConfirmedCount: Int {
+        qsoRecords.filter { isNewlyConfirmed(record: $0) }.count
+    }
+
+    var emailedQSOCount: Int {
+        let set = Set(emailHistoryByCallsign.keys)
+        return qsoRecords.filter { record in
+            let call = record["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            return set.contains(call)
+        }.count
     }
 
     private enum QRZConfirmedFetchResult {

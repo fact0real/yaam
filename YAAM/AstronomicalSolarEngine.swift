@@ -272,3 +272,70 @@ public enum GeodesicMath {
         return directions[safeIndex]
     }
 }
+
+// MARK: - Astronomical Lunar Ephemeris for EME & DXing
+
+public struct SubLunarPosition: Equatable, Sendable {
+    public let latitude: Double   // Moon Declination (-28.5° to +28.5°)
+    public let longitude: Double  // Sub-lunar Longitude (-180° to +180°)
+    public let phasePercent: Double // 0% (New) to 100% (Full)
+}
+
+public struct LunarEphemeris {
+    /// Computes the Sub-Lunar Point and Phase for a given date (Meeus/Schlyter algorithm)
+    public static func calculate(at date: Date = Date()) -> SubLunarPosition {
+        // Days since J2000.0 (2000-01-01 12:00:00 UTC)
+        let j2000 = Date(timeIntervalSince1970: 946728000)
+        let d = date.timeIntervalSince(j2000) / 86400.0
+
+        // Moon mean orbital elements in degrees
+        let L = (218.316 + 13.176396 * d).truncatingRemainder(dividingBy: 360.0) * .pi / 180.0
+        let M = (134.963 + 13.064993 * d).truncatingRemainder(dividingBy: 360.0) * .pi / 180.0
+        let F = (93.272 + 13.229350 * d).truncatingRemainder(dividingBy: 360.0) * .pi / 180.0
+
+        // Ecliptic coordinates of the Moon
+        let lambda = L + (6.289 * .pi / 180.0) * sin(M)
+        let beta = (5.128 * .pi / 180.0) * sin(F)
+
+        // Earth obliquity
+        let eps = 23.439 * .pi / 180.0
+
+        // Equatorial coordinates (Right Ascension alpha & Declination delta)
+        let sinDelta = sin(beta) * cos(eps) + cos(beta) * sin(eps) * sin(lambda)
+        let deltaRad = asin(max(-1.0, min(1.0, sinDelta)))
+        let declinationDeg = deltaRad * 180.0 / .pi
+
+        let y = sin(lambda) * cos(eps) - tan(beta) * sin(eps)
+        let x = cos(lambda)
+        var raRad = atan2(y, x)
+        if raRad < 0 { raRad += 2.0 * .pi }
+        let raDeg = raRad * 180.0 / .pi
+
+        // Greenwich Mean Sidereal Time (GMST) in degrees
+        let calendar = Calendar(identifier: .gregorian)
+        var calUTC = calendar
+        calUTC.timeZone = TimeZone(secondsFromGMT: 0)!
+        let hour = Double(calUTC.component(.hour, from: date))
+        let minute = Double(calUTC.component(.minute, from: date))
+        let second = Double(calUTC.component(.second, from: date))
+        let utHours = hour + minute / 60.0 + second / 3600.0
+
+        let gmstDeg = (280.46061837 + 360.98564736629 * d + utHours * 15.0).truncatingRemainder(dividingBy: 360.0)
+
+        // Sub-lunar longitude = GMST - RA (normalized to -180...180)
+        var subLon = (gmstDeg - raDeg).truncatingRemainder(dividingBy: 360.0)
+        if subLon > 180.0 { subLon -= 360.0 }
+        if subLon < -180.0 { subLon += 360.0 }
+
+        // Moon phase estimation
+        let sunL = (280.466 + 0.9856474 * d).truncatingRemainder(dividingBy: 360.0) * .pi / 180.0
+        let elongation = abs(L - sunL)
+        let phase = (1.0 - cos(elongation)) / 2.0 * 100.0
+
+        return SubLunarPosition(
+            latitude: max(-28.5, min(28.5, declinationDeg)),
+            longitude: subLon,
+            phasePercent: phase
+        )
+    }
+}

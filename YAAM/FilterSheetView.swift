@@ -258,6 +258,16 @@ struct FilterSheetView: View {
                                 .pickerStyle(.segmented)
                                 .disabled(!tempCriteria.useConfirmation)
                             }
+                            
+                            Divider()
+                            
+                            HStack(spacing: 16) {
+                                Toggle("🌸 Newly Confirmed Only", isOn: $tempCriteria.useNewlyConfirmed)
+                                    .font(.subheadline)
+                                
+                                Toggle("✉️ Has Sent Email", isOn: $tempCriteria.useSentEmail)
+                                    .font(.subheadline)
+                            }
                         }
                     }
                     .padding(12)

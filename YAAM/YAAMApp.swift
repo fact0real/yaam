@@ -229,7 +229,7 @@ struct YAAMApp: App {
         .windowResizability(.contentMinSize)
 
         // MARK: - Help Secondary Window Scene
-        Window("ADIF Processor Help & FAQ", id: YAAMWindowID.help) {
+        Window("YAAM Help & FAQ", id: YAAMWindowID.help) {
             HelpView()
                 .frame(
                     minWidth: 820,

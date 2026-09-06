@@ -224,6 +224,7 @@ public struct ContestQSOEntry: Identifiable, Sendable, Codable {
 public struct ContestBandBreakdown: Identifiable, Sendable {
     public let band: String
     public let qsoCount: Int
+    public let dupeCount: Int
     public let qsoPoints: Int
     public let gridFields: Set<String>
     public let dxccEntities: Set<String>
@@ -233,6 +234,62 @@ public struct ContestBandBreakdown: Identifiable, Sendable {
     public var gridMultCount: Int { gridFields.count }
     public var dxccMultCount: Int { dxccEntities.count }
     public var totalMults: Int { gridMultCount + dxccMultCount + otherMults.count }
+    public var bandScore: Int { qsoPoints * max(1, totalMults) }
+}
+
+// MARK: - Contest Queued Caller Models
+
+public enum QueuedCallerSource: String, Sendable, Codable {
+    case nativeFT8 = "FT8 Engine"
+    case wsjtx = "WSJT-X Stream"
+}
+
+public struct ContestQueuedCaller: Identifiable, Equatable, Sendable {
+    public let id: UUID
+    public let callsign: String
+    public let grid: String?
+    public let countryName: String
+    public let countryFlag: String
+    public let snr: Int
+    public let audioFrequencyHz: Int
+    public let receivedAt: Date
+    public let contestStatus: DecodedContestStatus
+    public let priorityScore: Int
+    public let source: QueuedCallerSource
+
+    public init(
+        id: UUID = UUID(),
+        callsign: String,
+        grid: String?,
+        countryName: String = "Unknown",
+        countryFlag: String = "🌐",
+        snr: Int = 0,
+        audioFrequencyHz: Int = 1000,
+        receivedAt: Date = Date(),
+        contestStatus: DecodedContestStatus = .none,
+        priorityScore: Int = 0,
+        source: QueuedCallerSource = .nativeFT8
+    ) {
+        self.id = id
+        self.callsign = callsign.uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        self.grid = grid?.uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        self.countryName = countryName
+        self.countryFlag = countryFlag
+        self.snr = snr
+        self.audioFrequencyHz = audioFrequencyHz
+        self.receivedAt = receivedAt
+        self.contestStatus = contestStatus
+        self.priorityScore = priorityScore
+        self.source = source
+    }
+
+    public var deltaFrequencyFormatted: String {
+        "\(audioFrequencyHz) Hz"
+    }
+
+    public static func == (lhs: ContestQueuedCaller, rhs: ContestQueuedCaller) -> Bool {
+        lhs.id == rhs.id
+    }
 }
 
 // MARK: - Digital Contest Engine (Observable)
@@ -248,6 +305,7 @@ public final class DigitalContestEngine: ObservableObject {
     @Published public var myStationCall: String = ""
     @Published public var myStationGrid: String = ""
     @Published public var currentSerial: Int = 1
+    public var bandsSupported: [String] { contestType.bandsSupported }
 
     // Real-Time Contest Score & Multipliers State
     @Published public private(set) var qsoLog: [ContestQSOEntry] = []
@@ -262,6 +320,12 @@ public final class DigitalContestEngine: ObservableObject {
     @Published public private(set) var rate10Min: Int = 0
     @Published public private(set) var rate60Min: Int = 0
     @Published public private(set) var peakRate: Int = 0
+
+    // Smart Multi-Caller Queue State
+    @Published public private(set) var queuedCallers: [ContestQueuedCaller] = []
+    @Published public var autoEngageNext: Bool = true
+    @Published public var autoQueueIncomingCallers: Bool = true
+    @Published public var maxQueueDepth: Int = 10
 
     // Trackers: band -> Set of worked keys
     private var workedCallsByBand: [String: Set<String>] = [:]
@@ -304,6 +368,7 @@ public final class DigitalContestEngine: ObservableObject {
         workedGridFieldsByBand.removeAll()
         workedDXCCByBand.removeAll()
         workedOtherMultsByBand.removeAll()
+        clearQueue()
         totalQSOs = 0
         totalPoints = 0
         totalGridMultipliers = 0
@@ -618,20 +683,23 @@ public final class DigitalContestEngine: ObservableObject {
         }
     }
 
-    // MARK: - Band Breakdowns for Checksheets
+    // MARK: - Band Breakdowns for Checksheets & Matrix
 
     public var bandBreakdowns: [ContestBandBreakdown] {
         contestType.bandsSupported.map { band in
             let bandKey = normalizeBand(band)
-            let qsos = qsoLog.filter { normalizeBand($0.band) == bandKey && $0.points > 0 }
-            let points = qsos.reduce(0) { $0 + $1.points }
+            let bandQSOs = qsoLog.filter { normalizeBand($0.band) == bandKey }
+            let validQSOs = bandQSOs.filter { $0.points > 0 }
+            let dupes = bandQSOs.filter { $0.points == 0 }
+            let points = validQSOs.reduce(0) { $0 + $1.points }
             let gridFields = workedGridFieldsByBand[bandKey] ?? []
             let dxccEntities = workedDXCCByBand[bandKey] ?? []
             let others = workedOtherMultsByBand[bandKey] ?? []
 
             return ContestBandBreakdown(
                 band: band,
-                qsoCount: qsos.count,
+                qsoCount: validQSOs.count,
+                dupeCount: dupes.count,
                 qsoPoints: points,
                 gridFields: gridFields,
                 dxccEntities: dxccEntities,
@@ -640,9 +708,183 @@ public final class DigitalContestEngine: ObservableObject {
         }
     }
 
+    // MARK: - Multiplier Query APIs for UI & Stream
+
+    public func isCallWorked(callsign: String, onBand band: String) -> Bool {
+        let clean = callsign.uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else { return false }
+        let bandKey = normalizeBand(band)
+        return workedCallsByBand[bandKey]?.contains(clean) ?? false
+    }
+
+    public func isDXCCWorked(entityName: String, onBand band: String) -> Bool {
+        let clean = entityName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty, clean != "Unknown" else { return false }
+        let bandKey = normalizeBand(band)
+        return workedDXCCByBand[bandKey]?.contains(clean) ?? false
+    }
+
+    public func isGridFieldWorked(field: String, onBand band: String) -> Bool {
+        let clean = field.uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard clean.count >= 2 else { return false }
+        let key = String(clean.prefix(2))
+        let bandKey = normalizeBand(band)
+        return workedGridFieldsByBand[bandKey]?.contains(key) ?? false
+    }
+
+    public func workedGridFields(for band: String) -> Set<String> {
+        workedGridFieldsByBand[normalizeBand(band)] ?? []
+    }
+
+    public func workedDXCCEntities(for band: String) -> Set<String> {
+        workedDXCCByBand[normalizeBand(band)] ?? []
+    }
+
+    public var averagePointsPerQSO: Double {
+        guard totalQSOs > 0 else { return 0.0 }
+        return Double(totalPoints) / Double(totalQSOs)
+    }
+
+    public var projectedFinalScore: Int {
+        // Based on 60m rate and current average points & mult accumulation
+        guard rate60Min > 0 else { return claimedScore }
+        let projectedQSOs = max(totalQSOs, totalQSOs + rate60Min)
+        let projectedPoints = Int(Double(projectedQSOs) * max(1.0, averagePointsPerQSO))
+        return projectedPoints * max(1, totalMultipliers)
+    }
+
+    // MARK: - Smart Multi-Caller Queue Management
+
+    public func calculateQueuePriority(
+        callsign: String,
+        grid: String?,
+        snr: Int,
+        band: String
+    ) -> (status: DecodedContestStatus, score: Int) {
+        let cleanCall = callsign.uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        let status = analyzeDecodedStation(callsign: cleanCall, grid: grid, band: band)
+
+        var score = 0
+        if status.isMultiplier {
+            score += 1000 // Multipliers take topmost priority in digital contesting!
+        }
+        if status.isDupe {
+            score -= 2000 // Dupes heavily penalized
+        } else {
+            score += status.points * 50
+        }
+
+        // Distance bonus if grid is available
+        if let g1 = myStationGrid.nilIfEmpty, let g2 = grid, g1.count >= 4, g2.count >= 4,
+           let km = calculateMaidenheadDistanceKm(grid1: g1, grid2: g2) {
+            score += min(50, Int(km / 200))
+        }
+
+        // SNR bonus: higher SNR = cleaner, faster contact
+        score += max(0, min(50, snr + 30))
+
+        return (status, score)
+    }
+
+    @discardableResult
+    public func enqueueCaller(
+        callsign: String,
+        grid: String?,
+        countryName: String = "Unknown",
+        countryFlag: String = "🌐",
+        snr: Int = 0,
+        audioFrequencyHz: Int = 1000,
+        band: String,
+        activeDX: String? = nil,
+        source: QueuedCallerSource = .nativeFT8
+    ) -> Bool {
+        let cleanCall = callsign.uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanCall.isEmpty, cleanCall != myStationCall else { return false }
+
+        // Don't enqueue if currently engaging this station
+        if let active = activeDX?.uppercased().trimmingCharacters(in: .whitespacesAndNewlines), !active.isEmpty, cleanCall == active {
+            return false
+        }
+
+        // Don't enqueue dupes if already worked on this band
+        if isCallWorked(callsign: cleanCall, onBand: band) {
+            return false
+        }
+
+        // If already in queue, update SNR and frequency if higher/newer
+        if let idx = queuedCallers.firstIndex(where: { $0.callsign == cleanCall }) {
+            let existing = queuedCallers[idx]
+            let (status, score) = calculateQueuePriority(callsign: cleanCall, grid: grid ?? existing.grid, snr: snr, band: band)
+            let updated = ContestQueuedCaller(
+                id: existing.id,
+                callsign: cleanCall,
+                grid: grid ?? existing.grid,
+                countryName: countryName != "Unknown" ? countryName : existing.countryName,
+                countryFlag: countryFlag != "🌐" ? countryFlag : existing.countryFlag,
+                snr: snr,
+                audioFrequencyHz: audioFrequencyHz > 0 ? audioFrequencyHz : existing.audioFrequencyHz,
+                receivedAt: Date(),
+                contestStatus: status,
+                priorityScore: max(existing.priorityScore, score),
+                source: source
+            )
+            queuedCallers[idx] = updated
+            sortQueue()
+            return true
+        }
+
+        guard queuedCallers.count < maxQueueDepth else { return false }
+
+        let (status, score) = calculateQueuePriority(callsign: cleanCall, grid: grid, snr: snr, band: band)
+        let newCaller = ContestQueuedCaller(
+            id: UUID(),
+            callsign: cleanCall,
+            grid: grid,
+            countryName: countryName,
+            countryFlag: countryFlag,
+            snr: snr,
+            audioFrequencyHz: audioFrequencyHz,
+            receivedAt: Date(),
+            contestStatus: status,
+            priorityScore: score,
+            source: source
+        )
+        queuedCallers.append(newCaller)
+        sortQueue()
+        return true
+    }
+
+    public func popNextCaller() -> ContestQueuedCaller? {
+        guard !queuedCallers.isEmpty else { return nil }
+        return queuedCallers.removeFirst()
+    }
+
+    public func removeQueuedCaller(id: UUID) {
+        queuedCallers.removeAll(where: { $0.id == id })
+    }
+
+    public func promoteQueuedCallerToTop(id: UUID) {
+        guard let idx = queuedCallers.firstIndex(where: { $0.id == id }), idx > 0 else { return }
+        let caller = queuedCallers.remove(at: idx)
+        queuedCallers.insert(caller, at: 0)
+    }
+
+    public func clearQueue() {
+        queuedCallers.removeAll()
+    }
+
+    private func sortQueue() {
+        queuedCallers.sort {
+            if $0.priorityScore != $1.priorityScore {
+                return $0.priorityScore > $1.priorityScore
+            }
+            return $0.receivedAt < $1.receivedAt
+        }
+    }
+
     // MARK: - Helper
 
-    private func normalizeBand(_ band: String) -> String {
+    public func normalizeBand(_ band: String) -> String {
         let b = band.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
         if b.hasSuffix("m") { return b }
         return "\(b)m"

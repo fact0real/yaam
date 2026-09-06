@@ -98,15 +98,25 @@ extension AppState {
         guard !draft.band.isEmpty else { throw QuickLogValidationError.missingBand }
         guard !draft.mode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw QuickLogValidationError.missingMode }
 
+        // Normalize mode and submode before saving
+        AmateurBandPlan.normalizeModeAndSubmode(mode: &draft.mode, submode: &draft.submode)
+
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
         let components = calendar.dateComponents([.year, .month, .day, .hour, .minute, .second], from: draft.startedAt)
         let date = String(format: "%04d%02d%02d", components.year ?? 0, components.month ?? 0, components.day ?? 0)
         let time = String(format: "%02d%02d%02d", components.hour ?? 0, components.minute ?? 0, components.second ?? 0)
 
+        let endTimestamp = (draft.endedAt >= draft.startedAt) ? draft.endedAt : Date()
+        let endComponents = calendar.dateComponents([.year, .month, .day, .hour, .minute, .second], from: endTimestamp)
+        let dateOff = String(format: "%04d%02d%02d", endComponents.year ?? 0, endComponents.month ?? 0, endComponents.day ?? 0)
+        let timeOff = String(format: "%02d%02d%02d", endComponents.hour ?? 0, endComponents.minute ?? 0, endComponents.second ?? 0)
+
         var fields: [String: String] = [
             "QSO_DATE": date,
             "TIME_ON": time,
+            "QSO_DATE_OFF": dateOff,
+            "TIME_OFF": timeOff,
             "CALL": draft.callsign,
             "FREQ": AmateurBandPlan.formattedMHz(frequency),
             "BAND": draft.band,
@@ -159,13 +169,25 @@ extension AppState {
         if let session = contestSession {
             let serial = ContestWorkspaceLogic.nextSerial(in: session, records: qsoRecords)
             fields["CONTEST_ID"] = session.contestID
-            fields["STX"] = String(serial)
+            fields["STX"] = !draft.sentSerial.isEmpty ? draft.sentSerial : String(serial)
             if !session.sentExchange.isEmpty { fields["STX_STRING"] = session.sentExchange }
             let receivedExchange = draft.receivedExchange.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
             if !receivedExchange.isEmpty {
                 fields["SRX_STRING"] = receivedExchange
                 if receivedExchange.allSatisfy(\.isNumber) { fields["SRX"] = receivedExchange }
             }
+        }
+        if !draft.sentSerial.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            fields["STX"] = draft.sentSerial.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        if !draft.receivedSerial.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            fields["SRX"] = draft.receivedSerial.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        if !draft.state.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            fields["STATE"] = draft.state.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        }
+        if !draft.arrlSection.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            fields["ARRL_SECT"] = draft.arrlSection.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         }
         if let lookup = quickLogLookup {
             if !lookup.latitude.isEmpty { fields["LAT"] = lookup.latitude }
@@ -180,11 +202,11 @@ extension AppState {
         }
 
         let preferredHeaders = [
-            "QSO_DATE", "TIME_ON", "CALL", "FREQ", "BAND", "MODE", "SUBMODE", "RST_SENT", "RST_RCVD",
+            "QSO_DATE", "TIME_ON", "QSO_DATE_OFF", "TIME_OFF", "CALL", "FREQ", "BAND", "MODE", "SUBMODE", "RST_SENT", "RST_RCVD",
             "NAME", "QTH", "GRIDSQUARE", "COUNTRY", "DXCC", "CQZ", "ITUZ", "COMMENT", "QSL_SENT",
-            "QSL_RCVD", "STATION_CALLSIGN", "OPERATOR", "APP_YAAM_STATION_PROFILE_ID", "APP_YAAM_SOURCE"
-            , "CONTEST_ID", "STX", "STX_STRING", "SRX", "SRX_STRING"
-            , "MY_POTA_REF", "POTA_REF", "MY_SOTA_REF", "SOTA_REF", "MY_IOTA", "IOTA",
+            "QSL_RCVD", "STATION_CALLSIGN", "OPERATOR", "APP_YAAM_STATION_PROFILE_ID", "APP_YAAM_SOURCE",
+            "CONTEST_ID", "STX", "STX_STRING", "SRX", "SRX_STRING", "STATE", "ARRL_SECT",
+            "MY_POTA_REF", "POTA_REF", "MY_SOTA_REF", "SOTA_REF", "MY_IOTA", "IOTA",
             "MY_VUCC_GRIDS", "VUCC_GRIDS", "MY_SIG", "MY_SIG_INFO", "SIG", "SIG_INFO"
         ]
         for header in preferredHeaders where fields[header] != nil && !tableHeaders.contains(header) {
@@ -203,6 +225,7 @@ extension AppState {
 
         quickLogDraft.resetForNextQSO()
         quickLogDraft.startedAt = Date()
+        quickLogDraft.endedAt = Date()
         quickLogLookup = nil
         quickLogAssessment = QuickLogAssessment()
         quickLogStatus = "Saved \(record["CALL"])"
@@ -228,12 +251,15 @@ extension AppState {
         var draft = quickLogDraft
         draft.callsign = spot.callsign
         draft.frequencyMHz = AmateurBandPlan.formattedMHz(spot.frequencyMHz)
-        draft.band = spot.band.isEmpty ? (AmateurBandPlan.band(forMHz: spot.frequencyMHz) ?? draft.band) : spot.band
-        draft.mode = spot.mode
-        draft.submode = spot.submode
+        let smart = AmateurBandPlan.smartInfer(frequencyMHz: spot.frequencyMHz)
+        draft.band = spot.band.isEmpty ? smart.band : spot.band
+        draft.mode = spot.mode.isEmpty ? smart.mode : spot.mode
+        draft.submode = spot.submode.isEmpty ? smart.submode : spot.submode
+        AmateurBandPlan.normalizeModeAndSubmode(mode: &draft.mode, submode: &draft.submode)
         draft.startedAt = Date()
-        draft.rstSent = AmateurBandPlan.defaultRST(for: spot.mode)
-        draft.rstReceived = AmateurBandPlan.defaultRST(for: spot.mode)
+        draft.endedAt = Date()
+        draft.rstSent = AmateurBandPlan.defaultRST(for: draft.mode)
+        draft.rstReceived = AmateurBandPlan.defaultRST(for: draft.mode)
         draft.grid = spot.grid
         draft.comment = spot.comment
         draft.source = "DX Cluster"

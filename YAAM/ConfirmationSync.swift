@@ -914,6 +914,7 @@ extension AppState {
                 self.qsoRecords = mergeResult.records
                 let changedRecords = mergeResult.records.filter { mergeResult.changedRecordIDs.contains($0.id) }
                 self.rememberConfirmedRecords(changedRecords)
+                self.newlyConfirmedRecordIDs.formUnion(mergeResult.changedRecordIDs)
                 importedConfirmedRecords = self.importRemoteConfirmationRecords(
                     lotw: lotw.errorMessage == nil ? mergeResult.lotwUnmatchedRecords : [],
                     qrz: qrz.errorMessage == nil ? mergeResult.qrzUnmatchedRecords : []
@@ -1138,6 +1139,7 @@ extension AppState {
                 tableHeaders.append(contentsOf: missingHeaders)
             }
             rememberConfirmedRecords(addedRecords)
+            newlyConfirmedRecordIDs.formUnion(addedRecords.map(\.id))
         }
         return added
     }

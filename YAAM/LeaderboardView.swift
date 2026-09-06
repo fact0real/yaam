@@ -456,17 +456,17 @@ struct RankPerformanceMonitor: View {
                 HStack(alignment: .top, spacing: 14) {
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(spacing: 8) {
-                            Text("Daily QRZ rank movement")
+                            Text("QRZ Rank Trajectory & Progress")
                                 .font(.subheadline.weight(.semibold))
                             Text("• Click any bullet to inspect rank & daily delta")
                                 .font(.caption2.weight(.medium))
                                 .foregroundColor(.cyan)
                         }
-                        Text("Every line starts at zero. Above the center line means that operator climbed; below it means they slipped.")
+                        Text("Cumulative climb / slip relative to period baseline. Every line starts at zero on first tracked date.")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                         RankMovementTrendChart(series: series)
-                            .frame(minHeight: 220)
+                            .frame(minHeight: 240)
                     }
 
                     VStack(alignment: .leading, spacing: 8) {
@@ -746,6 +746,7 @@ struct RankMovementTrendChart: View {
 
     private let maximumVisibleDays = 90
 
+    @State private var zoomScale: CGFloat = 1.0
     @State private var selectedPointDetail: SelectedPointDetail? = nil
 
     private struct SelectedPointDetail: Identifiable {
@@ -754,6 +755,8 @@ struct RankMovementTrendChart: View {
         let countryIso: String?
         let isOwner: Bool
         let point: RankTrendPoint
+        let startingRank: Int
+        let startingDate: Date?
         let movement: Int
         let deltaFromPrev: Int?
         let color: Color
@@ -785,148 +788,253 @@ struct RankMovementTrendChart: View {
     }
 
     var body: some View {
-        GeometryReader { geometry in
-            if series.flatMap(\.points).isEmpty {
-                VStack(spacing: 8) {
-                    Image(systemName: "chart.xyaxis.line")
-                        .font(.largeTitle)
-                        .foregroundColor(.secondary)
-                    Text("Refresh once today; tomorrow's snapshot will start the visible trend.")
-                        .font(.subheadline)
+        VStack(spacing: 6) {
+            // Zoom controls and status toolbar
+            HStack(spacing: 8) {
+                if zoomScale > 1.0 {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.left.and.right")
+                            .font(.system(size: 9))
+                        Text("Zoomed \(String(format: "%.1f", zoomScale))x · Scroll horizontally to pan dates")
+                            .font(.caption2.weight(.medium))
+                    }
+                    .foregroundColor(.cyan)
+                } else {
+                    Text("Pinch or click buttons to zoom closely on dense points")
+                        .font(.caption2)
                         .foregroundColor(.secondary)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                let plotWidth = max(1, geometry.size.width - 68)
-                let plotHeight = max(1, geometry.size.height - 44)
-                let origin = CGPoint(x: 54, y: 12 + plotHeight / 2)
-                let step = visibleDates.count > 1
-                    ? plotWidth / CGFloat(visibleDates.count - 1)
-                    : 0
-                let yScale = max(1, plotHeight / 2 - 12) / CGFloat(maxAbsMovement)
 
-                ZStack(alignment: .topLeading) {
-                    chartGrid(width: geometry.size.width, height: plotHeight, origin: origin)
+                Spacer()
 
-                    ForEach(Array(series.enumerated()), id: \.element.id) { index, item in
-                        let color = rankTrendPalette[index % rankTrendPalette.count]
-                        let plotted = plottedPoints(
-                            for: item.points,
-                            origin: origin,
-                            plotWidth: plotWidth,
-                            step: step,
-                            yScale: yScale
-                        )
+                HStack(spacing: 4) {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            zoomScale = max(1.0, zoomScale - 0.5)
+                        }
+                    } label: {
+                        Image(systemName: "minus.magnifyingglass")
+                            .font(.system(size: 10))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.mini)
+                    .disabled(zoomScale <= 1.0)
+                    .help("Zoom out chart")
 
-                        linePath(plotted.map(\.position))
-                            .stroke(
-                                color,
-                                style: StrokeStyle(
-                                    lineWidth: item.isOwner ? 3.6 : 2.5,
-                                    lineCap: .round,
-                                    lineJoin: .round
-                                )
-                            )
+                    Text("\(String(format: "%.1f", zoomScale))x")
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .foregroundColor(zoomScale > 1.0 ? .cyan : .secondary)
+                        .frame(width: 32)
 
-                        ForEach(plotted) { plottedPoint in
-                            let isSelected = selectedPointDetail?.id == "\(item.callsign)-\(plottedPoint.point.id)"
-                            ZStack {
-                                Color.clear
-                                    .frame(width: 28, height: 28)
-                                    .contentShape(Rectangle())
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            zoomScale = min(4.0, zoomScale + 0.5)
+                        }
+                    } label: {
+                        Image(systemName: "plus.magnifyingglass")
+                            .font(.system(size: 10))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.mini)
+                    .disabled(zoomScale >= 4.0)
+                    .help("Zoom in chart (up to 4x) to click close bullets easily")
 
-                                if isSelected {
-                                    Circle()
-                                        .stroke(Color.white, lineWidth: 2)
-                                        .frame(width: 15, height: 15)
-                                    Circle()
-                                        .fill(color.opacity(0.35))
-                                        .frame(width: 20, height: 20)
-                                }
-                                Circle()
-                                    .fill(color)
-                                    .overlay {
-                                        if item.isOwner {
-                                            Circle().stroke(Color.white.opacity(0.85), lineWidth: 1)
-                                        }
-                                    }
-                                    .frame(width: isSelected ? 10 : (item.isOwner ? 8 : 7), height: isSelected ? 10 : (item.isOwner ? 8 : 7))
+                    if zoomScale > 1.0 {
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                zoomScale = 1.0
                             }
-                            .frame(width: 28, height: 28)
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                withAnimation(.spring(response: 0.25)) {
-                                    if isSelected {
-                                        selectedPointDetail = nil
-                                    } else {
-                                        let sorted = visiblePoints(item.points)
-                                        let idx = sorted.firstIndex(where: { $0.id == plottedPoint.point.id }) ?? 0
-                                        let prev = idx > 0 ? sorted[idx - 1] : nil
-                                        let delta = prev.map { $0.rank - plottedPoint.point.rank }
-                                        selectedPointDetail = SelectedPointDetail(
-                                            callsign: item.callsign,
-                                            countryIso: item.countryIso,
-                                            isOwner: item.isOwner,
-                                            point: plottedPoint.point,
-                                            movement: plottedPoint.movement,
-                                            deltaFromPrev: delta,
-                                            color: color,
-                                            position: plottedPoint.position
+                        } label: {
+                            Text("Reset")
+                                .font(.system(size: 9, weight: .semibold))
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.mini)
+                        .help("Reset zoom to 1.0x")
+                    }
+                }
+            }
+            .padding(.horizontal, 4)
+
+            // GeometryReader for the chart
+            GeometryReader { geometry in
+                if series.flatMap(\.points).isEmpty {
+                    VStack(spacing: 8) {
+                        Image(systemName: "chart.xyaxis.line")
+                            .font(.largeTitle)
+                            .foregroundColor(.secondary)
+                        Text("Refresh once today; tomorrow's snapshot will start the visible trend.")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    let yAxisWidth: CGFloat = 52
+                    let basePlotWidth = max(100, geometry.size.width - yAxisWidth - 14)
+                    let plotContentWidth = basePlotWidth * zoomScale
+                    let plotHeight = max(1, geometry.size.height - 30)
+                    let origin = CGPoint(x: 18, y: 10 + plotHeight / 2)
+                    let step = visibleDates.count > 1
+                        ? (plotContentWidth - 36) / CGFloat(visibleDates.count - 1)
+                        : 0
+                    let yScale = max(1, plotHeight / 2 - 10) / CGFloat(maxAbsMovement)
+
+                    HStack(alignment: .top, spacing: 0) {
+                        // Pinned Y-Axis column
+                        ZStack(alignment: .trailing) {
+                            axisLabel("▲ +\(formattedNumber(maxAbsMovement))", color: .green)
+                                .position(x: yAxisWidth - 4, y: 14)
+                            axisLabel("0", color: .secondary)
+                                .position(x: yAxisWidth - 4, y: origin.y)
+                            axisLabel("▼ -\(formattedNumber(maxAbsMovement))", color: .orange)
+                                .position(x: yAxisWidth - 4, y: 10 + plotHeight)
+                        }
+                        .frame(width: yAxisWidth, height: geometry.size.height)
+
+                        // Horizontally scrollable plot area
+                        ScrollView(.horizontal, showsIndicators: zoomScale > 1.0) {
+                            ZStack(alignment: .topLeading) {
+                                chartGrid(width: plotContentWidth, height: plotHeight, origin: origin)
+
+                                ForEach(Array(series.enumerated()), id: \.element.id) { index, item in
+                                    let color = rankTrendPalette[index % rankTrendPalette.count]
+                                    let plotted = plottedPoints(
+                                        for: item.points,
+                                        origin: origin,
+                                        plotWidth: plotContentWidth - 36,
+                                        step: step,
+                                        yScale: yScale
+                                    )
+
+                                    linePath(plotted.map(\.position))
+                                        .stroke(
+                                            color,
+                                            style: StrokeStyle(
+                                                lineWidth: item.isOwner ? 3.6 : 2.5,
+                                                lineCap: .round,
+                                                lineJoin: .round
+                                            )
                                         )
+
+                                    ForEach(plotted) { plottedPoint in
+                                        let isSelected = selectedPointDetail?.id == "\(item.callsign)-\(plottedPoint.point.id)"
+                                        ZStack {
+                                            Color.clear
+                                                .frame(width: 30, height: 30)
+                                                .contentShape(Rectangle())
+
+                                            if isSelected {
+                                                Circle()
+                                                    .stroke(Color.white, lineWidth: 2)
+                                                    .frame(width: 15, height: 15)
+                                                Circle()
+                                                    .fill(color.opacity(0.35))
+                                                    .frame(width: 22, height: 22)
+                                            }
+                                            Circle()
+                                                .fill(color)
+                                                .overlay {
+                                                    if item.isOwner {
+                                                        Circle().stroke(Color.white.opacity(0.85), lineWidth: 1)
+                                                    }
+                                                }
+                                                .frame(width: isSelected ? 11 : (item.isOwner ? 8.5 : 7.5), height: isSelected ? 11 : (item.isOwner ? 8.5 : 7.5))
+                                        }
+                                        .frame(width: 30, height: 30)
+                                        .contentShape(Rectangle())
+                                        .onTapGesture {
+                                            withAnimation(.spring(response: 0.25)) {
+                                                if isSelected {
+                                                    selectedPointDetail = nil
+                                                } else {
+                                                    let sorted = visiblePoints(item.points)
+                                                    let idx = sorted.firstIndex(where: { $0.id == plottedPoint.point.id }) ?? 0
+                                                    let prev = idx > 0 ? sorted[idx - 1] : nil
+                                                    let delta = prev.map { $0.rank - plottedPoint.point.rank }
+                                                    let startRank = sorted.first?.rank ?? plottedPoint.point.rank
+                                                    let startDate = sorted.first?.date
+                                                    selectedPointDetail = SelectedPointDetail(
+                                                        callsign: item.callsign,
+                                                        countryIso: item.countryIso,
+                                                        isOwner: item.isOwner,
+                                                        point: plottedPoint.point,
+                                                        startingRank: startRank,
+                                                        startingDate: startDate,
+                                                        movement: plottedPoint.movement,
+                                                        deltaFromPrev: delta,
+                                                        color: color,
+                                                        position: plottedPoint.position
+                                                    )
+                                                }
+                                            }
+                                        }
+                                        .onHover { isHovered in
+                                            if isHovered {
+                                                NSCursor.pointingHand.push()
+                                            } else {
+                                                NSCursor.pop()
+                                            }
+                                        }
+                                        .help(pointHelp(item: item, plottedPoint: plottedPoint))
+                                        .position(plottedPoint.position)
                                     }
                                 }
-                            }
-                            .onHover { isHovered in
-                                if isHovered {
-                                    NSCursor.pointingHand.push()
-                                } else {
-                                    NSCursor.pop()
+
+                                // Date Labels along the bottom
+                                dateLabelsRow(step: step, origin: origin, plotHeight: plotHeight, width: plotContentWidth)
+
+                                // Selected Point Guide Line & Popover
+                                if let detail = selectedPointDetail {
+                                    Path { path in
+                                        path.move(to: CGPoint(x: detail.position.x, y: 10))
+                                        path.addLine(to: CGPoint(x: detail.position.x, y: 10 + plotHeight))
+                                    }
+                                    .stroke(detail.color.opacity(0.6), style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
+
+                                    pointDetailPopover(detail, in: plotContentWidth)
                                 }
                             }
-                            .help(pointHelp(item: item, plottedPoint: plottedPoint))
-                            .position(plottedPoint.position)
+                            .frame(width: plotContentWidth, height: geometry.size.height)
                         }
-                    }
-
-                    axisLabel("▲ +\(formattedNumber(maxAbsMovement))", color: .green)
-                        .position(x: 26, y: 14)
-                    axisLabel("0", color: .secondary)
-                        .position(x: 38, y: origin.y)
-                    axisLabel("▼ -\(formattedNumber(maxAbsMovement))", color: .orange)
-                        .position(x: 26, y: 12 + plotHeight)
-
-                    if let first = visibleDates.first {
-                        dateLabel(first)
-                            .position(x: 70, y: geometry.size.height - 10)
-                    }
-                    if visibleDates.count > 1, let last = visibleDates.last {
-                        dateLabel(last)
-                            .position(x: geometry.size.width - 38, y: geometry.size.height - 10)
-                    }
-
-                    // Interactive day bullet vertical guide and details card popover
-                    if let detail = selectedPointDetail {
-                        Path { path in
-                            path.move(to: CGPoint(x: detail.position.x, y: 12))
-                            path.addLine(to: CGPoint(x: detail.position.x, y: 12 + plotHeight))
-                        }
-                        .stroke(detail.color.opacity(0.6), style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
-
-                        pointDetailPopover(detail, in: geometry.size)
                     }
                 }
             }
         }
     }
 
-    private func pointDetailPopover(_ detail: SelectedPointDetail, in size: CGSize) -> some View {
-        let cardWidth: CGFloat = 220
-        let cardHeight: CGFloat = 82
-        let posX = min(max(detail.position.x, cardWidth / 2 + 10), size.width - cardWidth / 2 - 10)
-        let posY = detail.position.y > 90 ? detail.position.y - 52 : detail.position.y + 52
+    @ViewBuilder
+    private func dateLabelsRow(step: CGFloat, origin: CGPoint, plotHeight: CGFloat, width: CGFloat) -> some View {
+        if zoomScale <= 1.2 {
+            if let first = visibleDates.first {
+                dateLabel(first)
+                    .position(x: origin.x + 20, y: 10 + plotHeight + 12)
+            }
+            if visibleDates.count > 1, let last = visibleDates.last {
+                dateLabel(last)
+                    .position(x: width - 30, y: 10 + plotHeight + 12)
+            }
+        } else {
+            let strideCount = max(1, Int(ceil(5.0 / Double(zoomScale))))
+            ForEach(Array(stride(from: 0, to: visibleDates.count, by: strideCount)), id: \.self) { idx in
+                let date = visibleDates[idx]
+                let x = origin.x + CGFloat(idx) * step
+                dateLabel(date)
+                    .position(x: x, y: 10 + plotHeight + 12)
+            }
+        }
+    }
 
-        let formatter = DateFormatter()
-        formatter.dateFormat = "MMM d, yyyy"
+    private func pointDetailPopover(_ detail: SelectedPointDetail, in totalWidth: CGFloat) -> some View {
+        let cardWidth: CGFloat = 265
+        let cardHeight: CGFloat = 90
+        let posX = min(max(detail.position.x, cardWidth / 2 + 8), max(cardWidth, totalWidth - cardWidth / 2 - 8))
+        let posY = detail.position.y > 105 ? detail.position.y - 58 : detail.position.y + 58
+
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "MMM d, yyyy"
+
+        let shortDateFormatter = DateFormatter()
+        shortDateFormatter.dateFormat = "MMM d"
 
         return VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 5) {
@@ -934,11 +1042,11 @@ struct RankMovementTrendChart: View {
                 Text(countryToFlag(detail.countryIso ?? ""))
                     .font(.caption)
                 Text(detail.callsign)
-                    .font(.system(size: 11.5, weight: .heavy, design: .monospaced))
+                    .font(.system(size: 12, weight: .heavy, design: .monospaced))
                     .foregroundColor(.primary)
                 if detail.isOwner {
                     Text("YOU")
-                        .font(.system(size: 7.5, weight: .black))
+                        .font(.system(size: 8, weight: .black))
                         .padding(.horizontal, 4)
                         .padding(.vertical, 1)
                         .background(Color.blue.opacity(0.2), in: Capsule())
@@ -957,25 +1065,40 @@ struct RankMovementTrendChart: View {
 
             Divider()
 
-            HStack {
+            HStack(alignment: .top, spacing: 8) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(formatter.string(from: detail.point.date))
-                        .font(.system(size: 9.5))
+                    Text(dateFormatter.string(from: detail.point.date))
+                        .font(.system(size: 9.5, weight: .medium))
                         .foregroundStyle(.secondary)
-                    Text("Rank: #\(detail.point.rank.formatted())")
-                        .font(.system(size: 12, weight: .bold, design: .monospaced))
+                    Text("Rank #\(detail.point.rank.formatted())")
+                        .font(.system(size: 13, weight: .bold, design: .monospaced))
                         .foregroundStyle(.primary)
+                    if let sDate = detail.startingDate {
+                        Text("Baseline: #\(detail.startingRank.formatted()) (\(shortDateFormatter.string(from: sDate)))")
+                            .font(.system(size: 8.5))
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 Spacer()
-                VStack(alignment: .trailing, spacing: 2) {
-                    let net = detail.movement
-                    Text(net >= 0 ? "▲ +\(net)" : "▼ \(net)")
-                        .font(.system(size: 11, weight: .bold, design: .monospaced))
-                        .foregroundStyle(net > 0 ? .green : (net < 0 ? .orange : .secondary))
+                VStack(alignment: .trailing, spacing: 3) {
+                    VStack(alignment: .trailing, spacing: 1) {
+                        Text("PERIOD NET")
+                            .font(.system(size: 7.5, weight: .bold))
+                            .foregroundStyle(.secondary)
+                        let net = detail.movement
+                        Text(net >= 0 ? "▲ +\(formattedNumber(net))" : "▼ -\(formattedNumber(abs(net)))")
+                            .font(.system(size: 12, weight: .heavy, design: .monospaced))
+                            .foregroundStyle(net > 0 ? .green : (net < 0 ? .orange : .secondary))
+                    }
                     if let d = detail.deltaFromPrev {
-                        Text(d >= 0 ? "(+\(d) daily)" : "(\(d) daily)")
-                            .font(.system(size: 8.5, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(d >= 0 ? .green : .red)
+                        HStack(spacing: 3) {
+                            Text("24h Delta:")
+                                .font(.system(size: 8))
+                                .foregroundStyle(.secondary)
+                            Text(d >= 0 ? "+\(formattedNumber(d))" : "-\(formattedNumber(abs(d)))")
+                                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                                .foregroundStyle(d >= 0 ? .green : .red)
+                        }
                     }
                 }
             }
@@ -1030,18 +1153,18 @@ struct RankMovementTrendChart: View {
     private func chartGrid(width: CGFloat, height: CGFloat, origin: CGPoint) -> some View {
         Path { path in
             for row in 0...4 {
-                let y = 12 + CGFloat(row) * height / 4
-                path.move(to: CGPoint(x: origin.x, y: y))
-                path.addLine(to: CGPoint(x: width - 8, y: y))
+                let y = 10 + CGFloat(row) * height / 4
+                path.move(to: CGPoint(x: 0, y: y))
+                path.addLine(to: CGPoint(x: width, y: y))
             }
-            path.move(to: CGPoint(x: origin.x, y: 12))
-            path.addLine(to: CGPoint(x: origin.x, y: 12 + height))
+            path.move(to: CGPoint(x: 0, y: 10))
+            path.addLine(to: CGPoint(x: 0, y: 10 + height))
         }
         .stroke(Color.gray.opacity(0.18), lineWidth: 1)
         .overlay(alignment: .topLeading) {
             Path { path in
-                path.move(to: CGPoint(x: origin.x, y: origin.y))
-                path.addLine(to: CGPoint(x: width - 8, y: origin.y))
+                path.move(to: CGPoint(x: 0, y: origin.y))
+                path.addLine(to: CGPoint(x: width, y: origin.y))
             }
             .stroke(Color.secondary.opacity(0.45), style: StrokeStyle(lineWidth: 1.2, dash: [5, 4]))
         }
@@ -1058,15 +1181,22 @@ struct RankMovementTrendChart: View {
     }
 
     private func pointHelp(item: RankTrendSeries, plottedPoint: PlottedPoint) -> String {
+        let sorted = visiblePoints(item.points)
+        let startRank = sorted.first?.rank ?? plottedPoint.point.rank
+        let startDate = sorted.first?.date
+        let shortFmt = DateFormatter()
+        shortFmt.dateFormat = "MMM d"
+        let startLabel = startDate.map { shortFmt.string(from: $0) } ?? "start"
+
         let movement: String
         if plottedPoint.movement > 0 {
-            movement = "climbed \(formattedNumber(plottedPoint.movement)) places"
+            movement = "climbed +\(formattedNumber(plottedPoint.movement)) places since \(startLabel) (was #\(formattedNumber(startRank)))"
         } else if plottedPoint.movement < 0 {
-            movement = "slipped \(formattedNumber(abs(plottedPoint.movement))) places"
+            movement = "slipped -\(formattedNumber(abs(plottedPoint.movement))) places since \(startLabel) (was #\(formattedNumber(startRank)))"
         } else {
-            movement = "starting point"
+            movement = "starting baseline (#\(formattedNumber(startRank)))"
         }
-        return "\(item.callsign) · \(plottedPoint.point.label) · rank #\(formattedNumber(plottedPoint.point.rank)) · \(movement)"
+        return "\(item.callsign) · \(plottedPoint.point.label) · Rank #\(formattedNumber(plottedPoint.point.rank)) · Net: \(movement)"
     }
 
     private func axisLabel(_ value: String, color: Color) -> some View {

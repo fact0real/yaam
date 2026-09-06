@@ -831,6 +831,39 @@ final class FT8EngineService: ObservableObject {
         }
     }
 
+    public func engageQueuedCaller(_ queued: ContestQueuedCaller) {
+        dxCall = queued.callsign
+        dxGrid = queued.grid ?? ""
+        dxReport = String(format: "%+03d", queued.snr)
+        if queued.audioFrequencyHz > 0 {
+            txAudioFrequencyHz = Float(queued.audioFrequencyHz)
+        }
+
+        let sentExch = isContestMode ? (contestEngine.contestType == .cqWWDigi ? myGrid : String(format: "%03d", contestEngine.currentSerial)) : myGrid
+        let multTag = queued.contestStatus.isMultiplier ? " 🌟 [\(queued.contestStatus.badgeLabel)]" : ""
+
+        qsoStreamItems.append(.status(
+            id: UUID(),
+            time: Date(),
+            text: "⚡️ Queue Auto-Engage: Immediately answering queued \(queued.callsign)\(multTag) at \(queued.audioFrequencyHz) Hz!",
+            isMilestone: true
+        ))
+
+        if isContestMode {
+            txText = "\(queued.callsign) \(myCall) \(sentExch)"
+            sequencePhase = "Contest Exchange"
+        } else {
+            txText = "\(queued.callsign) \(myCall) \(myGrid)"
+            sequencePhase = "Grid Sent"
+        }
+
+        txParity = txParity.toggled
+        autoSequenceEnabled = true
+        if transmitArmed && transmitTask == nil {
+            scheduleTransmission()
+        }
+    }
+
     func selectForReply(_ row: FT8DecodedRow) {
         guard validateIdentity(), let caller = row.callerCall, !caller.isEmpty else {
             fail("The selected decode is not a valid message with a callsign.")
@@ -1302,6 +1335,30 @@ final class FT8EngineService: ObservableObject {
                 let bestCaller = callers.max(by: { greedyScore($0) < greedyScore($1) }) ?? callers[0]
                 let multBadge = bestCaller.contestStatus.isMultiplier ? " 🌟 [\(bestCaller.contestStatus.badgeLabel)]" : ""
                 qsoStreamItems.append(.status(id: UUID(), time: Date(), text: "~ Answered by \(bestCaller.callerCall ?? "")\(multBadge) (Score \(greedyScore(bestCaller)))! Engaging...", isMilestone: true))
+
+                // Auto-queue all competing callers in pileup!
+                if isContestMode && contestEngine.autoQueueIncomingCallers {
+                    let otherCallers = callers.filter { $0.callerCall != bestCaller.callerCall }
+                    for other in otherCallers {
+                        if let call = other.callerCall {
+                            _ = contestEngine.enqueueCaller(
+                                callsign: call,
+                                grid: other.callerGrid,
+                                countryName: other.countryName,
+                                countryFlag: other.countryFlag,
+                                snr: Int(other.estimatedSNR),
+                                audioFrequencyHz: Int(other.audioFrequencyHz),
+                                band: currentBandName,
+                                activeDX: bestCaller.callerCall,
+                                source: .nativeFT8
+                            )
+                        }
+                    }
+                    if !otherCallers.isEmpty {
+                        qsoStreamItems.append(.status(id: UUID(), time: Date(), text: "📥 Queued \(otherCallers.count) competing callers into Smart Runner Queue", isMilestone: false))
+                    }
+                }
+
                 answerCallsign(bestCaller)
                 return
             } else if autoSequenceEnabled && transmitArmed && transmitTask == nil {
@@ -1313,6 +1370,26 @@ final class FT8EngineService: ObservableObject {
         }
 
         if isContestMode {
+            // Check for additional callers during active QSO and queue them
+            if contestEngine.autoQueueIncomingCallers {
+                let callersCallingMe = rows.filter { $0.isDirectedToMe && $0.callerCall != dxCall }
+                for caller in callersCallingMe {
+                    if let call = caller.callerCall {
+                        _ = contestEngine.enqueueCaller(
+                            callsign: call,
+                            grid: caller.callerGrid,
+                            countryName: caller.countryName,
+                            countryFlag: caller.countryFlag,
+                            snr: Int(caller.estimatedSNR),
+                            audioFrequencyHz: Int(caller.audioFrequencyHz),
+                            band: currentBandName,
+                            activeDX: dxCall,
+                            source: .nativeFT8
+                        )
+                    }
+                }
+            }
+
             // Contest Sequence Handler
             if !dxCall.isEmpty {
                 if let targetRow = rows.first(where: { $0.callerCall == dxCall && ($0.isDirectedToMe || $0.text.contains(myCall)) }) {
@@ -1349,6 +1426,13 @@ final class FT8EngineService: ObservableObject {
                         appendAllTextLog(line: "\(Self.utcTime(Date())) \(dialMHz) Contest QSO Logged: \(completedDX) \(dxGrid) \(operatingProtocol == .ft4 ? "FT4" : "FT8") \(currentBand)")
 
                         dxCall = ""
+
+                        // Zero-Idle Auto-Engage next caller from Smart Queue!
+                        if contestEngine.autoEngageNext, let nextCaller = contestEngine.popNextCaller() {
+                            engageQueuedCaller(nextCaller)
+                            return
+                        }
+
                         if resumeCQAfterQSO {
                             Task { @MainActor in
                                 try? await Task.sleep(for: .seconds(1))
@@ -1398,6 +1482,12 @@ final class FT8EngineService: ObservableObject {
                         dialMHz
                     )
                     appendAllTextLog(line: "\(Self.utcTime(Date())) \(dialMHz) QSO Logged: \(completedDX) \(dxGrid) \(operatingProtocol == .ft4 ? "FT4" : "FT8") \(currentBand)")
+
+                    // Zero-Idle Auto-Engage next caller if queued
+                    if contestEngine.autoEngageNext, let nextCaller = contestEngine.popNextCaller() {
+                        engageQueuedCaller(nextCaller)
+                        return
+                    }
 
                     // Resume CQ if desired
                     if resumeCQAfterQSO {

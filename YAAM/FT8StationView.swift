@@ -46,6 +46,7 @@ struct FT8StationView: View {
     @State private var selectedTxMessageIndex = 1
     @State private var showChecksheetPopover = false
     @State private var showCabrilloExportSheet = false
+    @State private var showWSJTXBridgeSheet = false
 
     private var icomModel: Binding<IcomNetworkModel> {
         Binding(
@@ -80,6 +81,8 @@ struct FT8StationView: View {
             // 2.5 Gold Standard Contest Command Ribbon & Live Multipliers HUD
             if engine.isContestMode {
                 contestCommandHUD
+                Divider()
+                contestQueueHUD
                 Divider()
             }
 
@@ -150,6 +153,22 @@ struct FT8StationView: View {
                 defaultCall: appState.currentStationCallsign,
                 defaultGrid: appState.activeStationProfile?.normalizedGrid ?? engine.myGrid
             )
+        }
+        .sheet(isPresented: $showWSJTXBridgeSheet) {
+            VStack(spacing: 0) {
+                HStack {
+                    Label("WSJT-X / JTDX 2-Way Live Stream & Command Console", systemImage: "dot.radiowaves.left.and.right")
+                        .font(.headline)
+                        .foregroundStyle(Color.accentColor)
+                    Spacer()
+                    Button("Done") { showWSJTXBridgeSheet = false }
+                        .keyboardShortcut(.defaultAction)
+                }
+                .padding(16)
+                Divider()
+                WSJTXLiveStreamView(wsjtx: appState.wsjtxListener)
+            }
+            .frame(minWidth: 880, idealWidth: 980, minHeight: 560, idealHeight: 660)
         }
     }
 
@@ -386,6 +405,27 @@ struct FT8StationView: View {
             }
             .buttonStyle(.bordered)
             .help("Clear both Band Activity and Rx Stream")
+
+            // WSJT-X 2-Way Bridge Button
+            Button {
+                showWSJTXBridgeSheet.toggle()
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "dot.radiowaves.left.and.right")
+                    Text("WSJT-X")
+                        .font(.system(size: 11, weight: .bold))
+                    if appState.wsjtxListener.state.isListening {
+                        Circle()
+                            .fill(Color.green)
+                            .frame(width: 6, height: 6)
+                    }
+                }
+                .padding(.horizontal, 6)
+                .padding(.vertical, 4)
+            }
+            .buttonStyle(.bordered)
+            .tint(appState.wsjtxListener.state.isListening ? Color.green : Color.secondary)
+            .help("Open 2-Way WSJT-X / JTDX Live Stream & 1-Click Reply Console")
 
             Spacer()
 
@@ -911,18 +951,18 @@ struct FT8StationView: View {
                 showChecksheetPopover.toggle()
             } label: {
                 HStack(spacing: 4) {
-                    Image(systemName: "tablecells")
-                    Text("Checksheet")
+                    Image(systemName: "tablecells.badge.sparkles")
+                    Text("Contest Matrix")
                 }
                 .font(.system(size: 11, weight: .semibold))
             }
             .buttonStyle(.bordered)
             .popover(isPresented: $showChecksheetPopover) {
-                ContestChecksheetPopoverView(engine: engine.contestEngine) {
+                DigitalContestBandMatrixView(engine: engine.contestEngine) {
                     showChecksheetPopover = false
                     showCabrilloExportSheet = true
                 }
-                .frame(width: 490, height: 350)
+                .frame(width: 760, height: 500)
             }
         }
         .padding(.horizontal, 14)
@@ -936,6 +976,223 @@ struct FT8StationView: View {
                 startPoint: .leading,
                 endPoint: .trailing
             )
+        )
+    }
+
+    // MARK: - 2.6 Smart Auto-Runner & Multi-Caller Queue HUD
+
+    private var contestQueueHUD: some View {
+        VStack(spacing: 6) {
+            HStack(spacing: 12) {
+                HStack(spacing: 6) {
+                    Image(systemName: "tray.full.fill")
+                        .foregroundStyle(Color(red: 1.0, green: 0.72, blue: 0.15))
+                        .font(.system(size: 11))
+                    Text("Auto-Runner Queue")
+                        .font(.system(size: 11, weight: .bold))
+                    Text("(\(engine.contestEngine.queuedCallers.count))")
+                        .font(.system(size: 10, weight: .heavy, design: .monospaced))
+                        .foregroundStyle(engine.contestEngine.queuedCallers.isEmpty ? .secondary : Color.yellow)
+                }
+
+                Divider()
+                    .frame(height: 16)
+
+                Toggle(isOn: Binding(
+                    get: { engine.contestEngine.autoEngageNext },
+                    set: { engine.contestEngine.autoEngageNext = $0 }
+                )) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "bolt.horizontal.fill")
+                            .font(.system(size: 9))
+                            .foregroundStyle(engine.contestEngine.autoEngageNext ? Color.green : Color.secondary)
+                        Text("Zero-Idle Auto-Engage")
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                }
+                .toggleStyle(.checkbox)
+                .controlSize(.small)
+
+                Toggle(isOn: Binding(
+                    get: { engine.contestEngine.autoQueueIncomingCallers },
+                    set: { engine.contestEngine.autoQueueIncomingCallers = $0 }
+                )) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "tray.and.arrow.down.fill")
+                            .font(.system(size: 9))
+                            .foregroundStyle(engine.contestEngine.autoQueueIncomingCallers ? Color.cyan : Color.secondary)
+                        Text("Auto-Queue Pile-up")
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                }
+                .toggleStyle(.checkbox)
+                .controlSize(.small)
+
+                Spacer()
+
+                if !engine.contestEngine.queuedCallers.isEmpty {
+                    if let top = engine.contestEngine.queuedCallers.first {
+                        Button {
+                            if let caller = engine.contestEngine.popNextCaller() {
+                                engine.engageQueuedCaller(caller)
+                            }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "play.fill")
+                                    .font(.system(size: 8))
+                                Text("Engage #1 (\(top.callsign))")
+                                    .font(.system(size: 10, weight: .bold))
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(Color.orange)
+                        .controlSize(.mini)
+                    }
+
+                    Button {
+                        engine.contestEngine.clearQueue()
+                    } label: {
+                        HStack(spacing: 3) {
+                            Image(systemName: "trash")
+                                .font(.system(size: 8))
+                            Text("Clear")
+                                .font(.system(size: 9))
+                        }
+                    }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(.secondary)
+                }
+            }
+
+            if engine.contestEngine.queuedCallers.isEmpty {
+                HStack(spacing: 6) {
+                    Image(systemName: "info.circle")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                    Text("Pile-up queue is empty. Callers answering CQ during an active QSO will be ranked and queued automatically.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .padding(.vertical, 2)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(Array(engine.contestEngine.queuedCallers.enumerated()), id: \.element.id) { index, caller in
+                            queueCard(caller: caller, rank: index + 1)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 6)
+        .background(Color(red: 0.12, green: 0.10, blue: 0.05).opacity(0.6))
+    }
+
+    private func queueCard(caller: ContestQueuedCaller, rank: Int) -> some View {
+        HStack(spacing: 8) {
+            // Rank Badge
+            Text("#\(rank)")
+                .font(.system(size: 10, weight: .black, design: .monospaced))
+                .foregroundStyle(rank == 1 ? Color.yellow : Color.secondary)
+                .frame(width: 20)
+
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 4) {
+                    Text(caller.callsign)
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .foregroundStyle(.primary)
+
+                    if caller.contestStatus.isMultiplier {
+                        Text(caller.contestStatus.badgeLabel)
+                            .font(.system(size: 8, weight: .black, design: .monospaced))
+                            .foregroundStyle(.black)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(Color(red: 1.0, green: 0.72, blue: 0.15), in: RoundedRectangle(cornerRadius: 3))
+                    } else if caller.contestStatus.isDupe {
+                        Text("DUPE")
+                            .font(.system(size: 7, weight: .black))
+                            .foregroundStyle(.white.opacity(0.7))
+                            .padding(.horizontal, 3)
+                            .padding(.vertical, 1)
+                            .background(Color.secondary.opacity(0.5), in: RoundedRectangle(cornerRadius: 2))
+                    } else if caller.contestStatus.points > 0 {
+                        Text("+\(caller.contestStatus.points) PTS")
+                            .font(.system(size: 8, weight: .heavy, design: .monospaced))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 3)
+                            .padding(.vertical, 1)
+                            .background(Color(red: 0.15, green: 0.75, blue: 0.38), in: RoundedRectangle(cornerRadius: 2))
+                    }
+                }
+
+                HStack(spacing: 6) {
+                    if !caller.countryFlag.isEmpty {
+                        Text(caller.countryFlag)
+                            .font(.system(size: 9))
+                    }
+                    if let grid = caller.grid {
+                        Text(grid)
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+                    Text(String(format: "%+02d dB", caller.snr))
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(caller.snr >= -10 ? Color.green : Color.secondary)
+                    Text("\(caller.audioFrequencyHz) Hz")
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            HStack(spacing: 3) {
+                Button {
+                    engine.engageQueuedCaller(caller)
+                    engine.contestEngine.removeQueuedCaller(id: caller.id)
+                } label: {
+                    Image(systemName: "bolt.fill")
+                        .font(.system(size: 9))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+                .help("Engage this caller now")
+
+                if rank > 1 {
+                    Button {
+                        engine.contestEngine.promoteQueuedCallerToTop(id: caller.id)
+                    } label: {
+                        Image(systemName: "chevron.up")
+                            .font(.system(size: 8))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.mini)
+                    .help("Promote to top of queue")
+                }
+
+                Button {
+                    engine.contestEngine.removeQueuedCaller(id: caller.id)
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 8))
+                }
+                .buttonStyle(.borderless)
+                .controlSize(.mini)
+                .foregroundStyle(.secondary)
+                .help("Remove from queue")
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(rank == 1 ? Color.yellow.opacity(0.12) : Color(nsColor: .controlBackgroundColor).opacity(0.7))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(rank == 1 ? Color.yellow.opacity(0.4) : Color.white.opacity(0.08), lineWidth: 1)
+                )
         )
     }
 
@@ -1915,114 +2172,9 @@ private struct FT8SpectrumWaterfallView: View {
 struct ContestChecksheetPopoverView: View {
     @ObservedObject var engine: DigitalContestEngine
     var onOpenCabrilloExport: (() -> Void)? = nil
-    @Environment(\.dismiss) private var dismiss
-    @State private var confirmReset = false
 
     var body: some View {
-        VStack(spacing: 12) {
-            HStack {
-                Label("Contest Multipliers & Band Checksheet", systemImage: "trophy.fill")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(Color.yellow)
-                Spacer()
-                Button("Done") { dismiss() }
-                    .keyboardShortcut(.defaultAction)
-            }
-            .padding(.horizontal, 14)
-            .padding(.top, 12)
-
-            Divider()
-
-            // Band Breakdown Table
-            ScrollView {
-                VStack(spacing: 8) {
-                    Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
-                        GridRow {
-                            Text("Band").font(.system(size: 10, weight: .bold)).foregroundStyle(.secondary)
-                            Text("QSOs").font(.system(size: 10, weight: .bold)).foregroundStyle(.secondary)
-                            Text("Points").font(.system(size: 10, weight: .bold)).foregroundStyle(.secondary)
-                            Text("Grid Fields").font(.system(size: 10, weight: .bold)).foregroundStyle(.secondary)
-                            Text("DXCC").font(.system(size: 10, weight: .bold)).foregroundStyle(.secondary)
-                        }
-                        Divider()
-                        ForEach(engine.bandBreakdowns) { b in
-                            GridRow {
-                                Text(b.band).font(.system(size: 11, weight: .heavy, design: .monospaced))
-                                Text("\(b.qsoCount)").font(.system(size: 11, weight: .medium, design: .monospaced))
-                                Text("\(b.qsoPoints)").font(.system(size: 11, weight: .medium, design: .monospaced))
-                                HStack(spacing: 3) {
-                                    Text("\(b.gridMultCount)")
-                                        .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                        .foregroundStyle(Color.orange)
-                                    if !b.gridFields.isEmpty {
-                                        Text("(\(b.gridFields.sorted().joined(separator: " ")))")
-                                            .font(.system(size: 9, design: .monospaced))
-                                            .foregroundStyle(.secondary)
-                                            .lineLimit(1)
-                                    }
-                                }
-                                HStack(spacing: 3) {
-                                    Text("\(b.dxccMultCount)")
-                                        .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                        .foregroundStyle(Color.blue)
-                                }
-                            }
-                        }
-                    }
-                    .padding(.horizontal, 14)
-
-                    Divider()
-                        .padding(.vertical, 4)
-
-                    // Export & Reset actions
-                    HStack(spacing: 10) {
-                        if let onOpenCabrilloExport {
-                            Button {
-                                onOpenCabrilloExport()
-                            } label: {
-                                HStack(spacing: 4) {
-                                    Image(systemName: "square.and.arrow.up")
-                                    Text("Export Cabrillo 3.0...")
-                                }
-                                .font(.system(size: 11, weight: .semibold))
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .tint(.green)
-                            .controlSize(.small)
-                        }
-
-                        Spacer()
-
-                        if confirmReset {
-                            Text("Reset all contest QSOs and multipliers?")
-                                .font(.system(size: 10, weight: .semibold))
-                                .foregroundStyle(.red)
-                            Button("Yes, Reset", role: .destructive) {
-                                engine.resetContestSession()
-                                confirmReset = false
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .tint(.red)
-                            .controlSize(.small)
-
-                            Button("Cancel") { confirmReset = false }
-                                .controlSize(.small)
-                        } else {
-                            Button {
-                                confirmReset = true
-                            } label: {
-                                Label("Reset Session...", systemImage: "arrow.counterclockwise")
-                                    .font(.system(size: 11))
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                        }
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.bottom, 10)
-                }
-            }
-        }
+        DigitalContestBandMatrixView(engine: engine, onOpenCabrilloExport: onOpenCabrilloExport)
     }
 }
 

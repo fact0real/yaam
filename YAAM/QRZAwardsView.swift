@@ -111,7 +111,7 @@ struct QRZAwardsView: View {
         let continentSet = Set(confirmedRecords.map { $0["CONT"].uppercased() }.filter { !$0.isEmpty })
         let gridSet = Set(confirmedRecords.map { ($0["GRIDSQUARE"].isEmpty ? $0["GRID"] : $0["GRIDSQUARE"]).prefix(4).uppercased() }.filter { $0.count == 4 })
         let sixMeterGrids = Set(confirmedRecords.filter { $0["BAND"].lowercased() == "6m" }.map { ($0["GRIDSQUARE"].isEmpty ? $0["GRID"] : $0["GRIDSQUARE"]).prefix(4).uppercased() }.filter { $0.count == 4 })
-        let wpxPrefixes = Set(confirmedRecords.map { derivePrefix($0["CALL"] ?? "") }.filter { !$0.isEmpty })
+        let wpxPrefixes = Set(confirmedRecords.map { derivePrefix($0["CALL"]) }.filter { !$0.isEmpty })
 
         var list: [QRZAwardSummary] = []
 

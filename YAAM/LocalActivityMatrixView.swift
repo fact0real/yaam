@@ -37,9 +37,9 @@ enum ActivityMatrixMode: String, CaseIterable, Identifiable {
 
     var localizedTitle: String {
         switch self {
-        case .dayVsHour: return "Day vs Hour (روز / ساعت محلی)"
-        case .bandVsHour: return "Band vs Hour (باند / ساعت محلی)"
-        case .dayVsBand: return "Day vs Band (روز / باند)"
+        case .dayVsHour: return "Day vs Hour"
+        case .bandVsHour: return "Band vs Hour"
+        case .dayVsBand: return "Day vs Band"
         }
     }
 
@@ -87,28 +87,26 @@ enum LocalSolarPhase: String, CaseIterable {
     }
 }
 
-// MARK: - Weekday Definition (Customized for Saturday-Friday sequence)
+// MARK: - Weekday Definition (Saturday-Friday sequence)
 struct WeekdayDefinition: Identifiable, Hashable {
     let weekdayIndex: Int // 1=Sun, 2=Mon, 3=Tue, 4=Wed, 5=Thu, 6=Fri, 7=Sat
     let nameEn: String
-    let nameFa: String
     let shortEn: String
 
     var id: Int { weekdayIndex }
 
     var displayLabel: String {
-        "\(shortEn) · \(nameFa)"
+        "\(shortEn) · \(nameEn)"
     }
 
-    // Standard sequence starting Saturday (customary in Iran and Middle East DXers)
     static let orderedWeekdays: [WeekdayDefinition] = [
-        WeekdayDefinition(weekdayIndex: 7, nameEn: "Saturday", nameFa: "شنبه", shortEn: "Sat"),
-        WeekdayDefinition(weekdayIndex: 1, nameEn: "Sunday", nameFa: "یکشنبه", shortEn: "Sun"),
-        WeekdayDefinition(weekdayIndex: 2, nameEn: "Monday", nameFa: "دوشنبه", shortEn: "Mon"),
-        WeekdayDefinition(weekdayIndex: 3, nameEn: "Tuesday", nameFa: "سه‌شنبه", shortEn: "Tue"),
-        WeekdayDefinition(weekdayIndex: 4, nameEn: "Wednesday", nameFa: "چهارشنبه", shortEn: "Wed"),
-        WeekdayDefinition(weekdayIndex: 5, nameEn: "Thursday", nameFa: "پنج‌شنبه", shortEn: "Thu"),
-        WeekdayDefinition(weekdayIndex: 6, nameEn: "Friday", nameFa: "جمعه", shortEn: "Fri")
+        WeekdayDefinition(weekdayIndex: 7, nameEn: "Saturday", shortEn: "Sat"),
+        WeekdayDefinition(weekdayIndex: 1, nameEn: "Sunday", shortEn: "Sun"),
+        WeekdayDefinition(weekdayIndex: 2, nameEn: "Monday", shortEn: "Mon"),
+        WeekdayDefinition(weekdayIndex: 3, nameEn: "Tuesday", shortEn: "Tue"),
+        WeekdayDefinition(weekdayIndex: 4, nameEn: "Wednesday", shortEn: "Wed"),
+        WeekdayDefinition(weekdayIndex: 5, nameEn: "Thursday", shortEn: "Thu"),
+        WeekdayDefinition(weekdayIndex: 6, nameEn: "Friday", shortEn: "Fri")
     ]
 }
 
@@ -229,7 +227,7 @@ struct LocalActivityMatrixView: View {
         .onAppear {
             parseAllRecords()
         }
-        .onChange(of: records.count) { _ in
+        .onChange(of: records.count) { _, _ in
             parseAllRecords()
         }
     }
@@ -276,8 +274,8 @@ struct LocalActivityMatrixView: View {
 
             InsightCard(
                 title: "Most Active Day",
-                value: peakDayDef != nil ? peakDayDef!.nameFa : "N/A",
-                subtitle: peakDayIdx != nil && dayCounts[peakDayIdx!] != nil ? "\(peakDayDef!.nameEn) · \(dayCounts[peakDayIdx!]!) QSOs" : "No activity",
+                value: peakDayDef != nil ? peakDayDef!.nameEn : "N/A",
+                subtitle: peakDayIdx != nil && dayCounts[peakDayIdx!] != nil ? "\(peakDayDef!.shortEn) · \(dayCounts[peakDayIdx!]!) QSOs" : "No activity",
                 icon: "calendar.badge.clock",
                 color: .blue
             )
@@ -489,11 +487,8 @@ struct LocalActivityMatrixView: View {
                 HStack(spacing: 3) {
                     // Row Header
                     HStack(spacing: 4) {
-                        Text(day.nameFa)
-                            .font(.system(size: 10, weight: .bold))
-                        Text(day.shortEn)
-                            .font(.system(size: 9))
-                            .foregroundColor(.secondary)
+                        Text(day.nameEn)
+                            .font(.system(size: 11, weight: .semibold))
                         Spacer()
                     }
                     .frame(width: 96, alignment: .leading)
@@ -530,7 +525,7 @@ struct LocalActivityMatrixView: View {
                                 selectedSlotBand = nil
                             }
                         }
-                        .help("\(day.nameEn) (\(day.nameFa)) @ \(String(format: "%02d:00", hour)) Local: \(cellQSOs.count) QSOs")
+                        .help("\(day.nameEn) @ \(String(format: "%02d:00", hour)) Local: \(cellQSOs.count) QSOs")
                     }
 
                     // Row Total Badge
@@ -763,11 +758,8 @@ struct LocalActivityMatrixView: View {
 
                 HStack(spacing: 4) {
                     HStack(spacing: 4) {
-                        Text(day.nameFa)
-                            .font(.system(size: 10, weight: .bold))
-                        Text(day.shortEn)
-                            .font(.system(size: 9))
-                            .foregroundColor(.secondary)
+                        Text(day.nameEn)
+                            .font(.system(size: 11, weight: .semibold))
                         Spacer()
                     }
                     .frame(width: 96, alignment: .leading)
@@ -950,18 +942,18 @@ struct LocalActivityMatrixView: View {
     private var slotTitle: String {
         if let h = selectedSlotHour, let w = selectedSlotWeekday {
             let dayDef = WeekdayDefinition.orderedWeekdays.first(where: { $0.weekdayIndex == w })
-            let dayName = dayDef?.nameFa ?? "Day \(w)"
+            let dayName = dayDef?.nameEn ?? "Day \(w)"
             return "\(dayName) @ \(String(format: "%02d:00 - %02d:00", h, (h + 1) % 24))"
         } else if let h = selectedSlotHour, let b = selectedSlotBand {
             return "\(b.uppercased()) @ \(String(format: "%02d:00 - %02d:00", h, (h + 1) % 24))"
         } else if let w = selectedSlotWeekday, let b = selectedSlotBand {
             let dayDef = WeekdayDefinition.orderedWeekdays.first(where: { $0.weekdayIndex == w })
-            return "\(dayDef?.nameFa ?? "") on \(b.uppercased())"
+            return "\(dayDef?.nameEn ?? "") on \(b.uppercased())"
         } else if let h = selectedSlotHour {
             return "\(String(format: "%02d:00 - %02d:00", h, (h + 1) % 24)) Local Time"
         } else if let w = selectedSlotWeekday {
             let dayDef = WeekdayDefinition.orderedWeekdays.first(where: { $0.weekdayIndex == w })
-            return "\(dayDef?.nameFa ?? "") (\(dayDef?.nameEn ?? ""))"
+            return dayDef?.nameEn ?? "Day \(w)"
         } else if let b = selectedSlotBand {
             return "Band \(b.uppercased()) (All Hours)"
         } else {

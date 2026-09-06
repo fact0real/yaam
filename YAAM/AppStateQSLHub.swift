@@ -223,6 +223,7 @@ extension AppState {
                 guard let index = qslConfirmationMatchIndex(fields) else { continue }
                 qsoRecords[index].fields = ImportReviewAnalyzer.mergeUpdate(incoming: fields, into: qsoRecords[index].fields)
                 qsoRecords[index].fields["EQSL_QSL_RCVD"] = "Y"
+                newlyConfirmedRecordIDs.insert(qsoRecords[index].id)
                 updated += 1
             }
             if updated > 0 { autoSaveActiveWorkspace() }
@@ -382,7 +383,7 @@ extension AppState {
         for header in [provider.sentField, dateField] where !tableHeaders.contains(header) { tableHeaders.append(header) }
     }
 
-    private func qslConfirmationMatchIndex(_ incoming: [String: String]) -> Int? {
+    func qslConfirmationMatchIndex(_ incoming: [String: String]) -> Int? {
         let candidate = QSORecordModel(index: 0, fields: incoming)
         if let exact = qsoRecords.firstIndex(where: { $0.uniqueKey == candidate.uniqueKey }) { return exact }
         let call = incoming["CALL"]?.uppercased() ?? ""

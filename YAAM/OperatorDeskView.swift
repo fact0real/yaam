@@ -340,30 +340,85 @@ private struct QuickLogPanel: View {
     @State private var duplicateWasAcknowledged = false
     @State private var showPortableFields = false
 
-    private enum Field { case callsign, frequency, rstSent, rstReceived, exchange, comment }
-    private let modes = ["SSB", "CW", "DIGI", "FM", "AM", "RTTY", "MFSK", "SSTV", "SAT"]
+    private enum Field: Hashable {
+        case callsign, frequency, rstSent, rstReceived, exchange, sentSerial, receivedSerial, state, arrlSection, comment
+    }
+    private let modes = ["SSB", "CW", "DATA", "RTTY", "FM", "AM", "MFSK", "SSTV", "SAT"]
+
+    private var isDupe: Bool {
+        appState.quickLogAssessment.sameBandMode > 0 || appState.quickLogAssessment.contestDuplicate
+    }
+
+    private var dxccInfo: DXCCEntityInfo {
+        DXCCDatabase.resolve(callsign: appState.quickLogDraft.normalizedCallsign)
+    }
+
+    private var homeCoordinate: GeoCoordinate? {
+        if let profile = appState.activeStationProfile {
+            if let lat = Double(profile.latitude), let lon = Double(profile.longitude), (lat != 0 || lon != 0) {
+                return GeoCoordinate(latitude: lat, longitude: lon)
+            }
+            if !profile.grid.isEmpty, let box = MaidenheadGridEngine.boundingBox(for: profile.grid) {
+                return box.center
+            }
+        }
+        return nil
+    }
+
+    private var targetCoordinate: GeoCoordinate? {
+        let grid = appState.quickLogDraft.grid.isEmpty ? (appState.quickLogLookup?.grid ?? "") : appState.quickLogDraft.grid
+        if !grid.isEmpty, let box = MaidenheadGridEngine.boundingBox(for: grid) {
+            return box.center
+        }
+        if let lookup = appState.quickLogLookup, let lat = Double(lookup.latitude), let lon = Double(lookup.longitude), (lat != 0 || lon != 0) {
+            return GeoCoordinate(latitude: lat, longitude: lon)
+        }
+        return nil
+    }
+
+    private var beamInfo: (sp: Double, lp: Double, distKm: Double, distMi: Double)? {
+        guard let home = homeCoordinate, let target = targetCoordinate else { return nil }
+        let sp = GeodesicMath.initialBearing(from: home, to: target)
+        let lp = GeodesicMath.longPathBearing(from: home, to: target)
+        let km = GeodesicMath.distanceKm(from: home, to: target)
+        let mi = km * GeodesicMath.kmToMiles
+        return (sp, lp, km, mi)
+    }
+
+    private var dxSolarState: SolarEphemeris.IlluminationState? {
+        guard let target = targetCoordinate else { return nil }
+        return SolarEphemeris.illuminationState(for: target)
+    }
+
+    private var qsoDurationString: String {
+        let end = appState.quickLogDraft.endedAt >= appState.quickLogDraft.startedAt ? appState.quickLogDraft.endedAt : Date()
+        let diff = max(0, Int(end.timeIntervalSince(appState.quickLogDraft.startedAt)))
+        let mins = diff / 60
+        let secs = diff % 60
+        return String(format: "%02d:%02d", mins, secs)
+    }
 
     var body: some View {
         GeometryReader { geometry in
-            if geometry.size.width >= 920 {
+            if geometry.size.width >= 960 {
                 HSplitView {
                     ScrollView {
                         entryFields
-                            .padding(22)
+                            .padding(16)
                     }
-                    .frame(minWidth: 620)
+                    .frame(minWidth: 580)
 
                     historyPanel
-                        .frame(minWidth: 280, idealWidth: 330, maxWidth: 390)
+                        .frame(minWidth: 320, idealWidth: 360, maxWidth: 440)
                 }
             } else {
                 ScrollView {
                     VStack(spacing: 0) {
                         entryFields
-                            .padding(22)
+                            .padding(16)
                         Divider()
                         historyPanel
-                            .frame(minHeight: 280)
+                            .frame(minHeight: 320)
                     }
                 }
             }
@@ -376,6 +431,24 @@ private struct QuickLogPanel: View {
         .onChange(of: appState.quickLogDraft.callsign) { _, newValue in
             duplicateWasAcknowledged = false
             lookupTask?.cancel()
+
+            // Spacebar in callsign triggers instant lookup and advances to RST or Exchange (N1MM standard)
+            if newValue.hasSuffix(" ") {
+                let clean = newValue.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+                appState.quickLogDraft.callsign = clean
+                if appState.isValidOperatorCallsign(clean) {
+                    Task { @MainActor in
+                        await appState.lookupQuickLogCallsign(clean)
+                    }
+                    if appState.currentContestSession?.isActive == true {
+                        focusedField = .exchange
+                    } else {
+                        focusedField = .rstSent
+                    }
+                    return
+                }
+            }
+
             appState.quickLogLookup = nil
             appState.refreshQuickLogAssessment()
             let normalized = newValue.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
@@ -415,30 +488,384 @@ private struct QuickLogPanel: View {
     }
 
     private var entryFields: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 14) {
             quickEntryHeader
+            Divider()
             operatingFields
-            reportFields
             contestFields
-            portableFields
             contactFields
-            notesAndSave
+            portableFields
+            notesAndStatus
+            Divider()
+            recentQSOsTable
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    private var dupeAlertBanner: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.octagon.fill")
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(.white)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("⚠️ DUPE ALERT: Already worked on \(appState.quickLogDraft.band) \(appState.quickLogDraft.mode)")
+                    .font(.system(size: 11.5, weight: .bold))
+                    .foregroundStyle(.white)
+                if let last = appState.quickLogAssessment.lastWorkedAt {
+                    Text("Previous contact: \(last.formatted(date: .abbreviated, time: .shortened)) UTC")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.white.opacity(0.9))
+                }
+            }
+            Spacer()
+            Text("Esc to Wipe")
+                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(Color.black.opacity(0.35), in: RoundedRectangle(cornerRadius: 4))
+                .foregroundStyle(.white)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Color.red.opacity(0.92), in: RoundedRectangle(cornerRadius: 6))
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.red, lineWidth: 1.5))
+    }
+
+    private var quickEntryHeader: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if isDupe {
+                dupeAlertBanner
+            }
+
+            HStack(alignment: .bottom, spacing: 12) {
+                // CALLSIGN
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 4) {
+                        Text("CALLSIGN")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.secondary)
+                        if !appState.quickLogDraft.normalizedCallsign.isEmpty {
+                            Text(dxccInfo.flagEmoji)
+                                .font(.system(size: 12))
+                            Text(dxccInfo.entityName)
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    }
+
+                    HStack(spacing: 6) {
+                        TextField("DX Callsign (Space to advance)", text: $appState.quickLogDraft.callsign)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(size: 22, weight: .bold, design: .monospaced))
+                            .focused($focusedField, equals: .callsign)
+                            .onSubmit { moveAfterCallsign() }
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .stroke(isDupe ? Color.red : Color.clear, lineWidth: 2)
+                            )
+                            .frame(minWidth: 230)
+
+                        if appState.isLookingUpQuickLogCallsign {
+                            ProgressView().controlSize(.small)
+                        }
+                    }
+
+                    let matches = ClubMembershipEngine.shared.lookupMemberships(for: appState.quickLogDraft.callsign)
+                    if !matches.isEmpty {
+                        HStack(spacing: 6) {
+                            ForEach(matches) { match in
+                                Button {
+                                    appState.quickLogDraft.receivedExchange = match.memberNumber
+                                    appState.quickLogDraft.comment = "\(match.club.rawValue) #\(match.memberNumber)"
+                                } label: {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: match.club.icon).font(.system(size: 9))
+                                        Text("\(match.club.rawValue) #\(match.memberNumber)")
+                                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                    }
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(match.club.badgeColor.opacity(0.18), in: Capsule())
+                                    .foregroundColor(match.club.badgeColor)
+                                }
+                                .buttonStyle(.plain)
+                                .help("Click to insert \(match.club.rawValue) #\(match.memberNumber) into exchange")
+                            }
+                        }
+                    }
+                }
+
+                // START UTC
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 2) {
+                        Text("START UTC")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.secondary)
+                        Button {
+                            appState.quickLogDraft.startedAt = Date()
+                        } label: {
+                            Image(systemName: "clock.arrow.circlepath").font(.system(size: 9))
+                        }
+                        .buttonStyle(.plain)
+                        .help("Set start time to now")
+                    }
+                    DatePicker("", selection: $appState.quickLogDraft.startedAt, displayedComponents: [.date, .hourAndMinute])
+                        .labelsHidden()
+                        .datePickerStyle(.compact)
+                }
+
+                // END UTC
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 2) {
+                        Text("END UTC")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.secondary)
+                        Button {
+                            appState.quickLogDraft.endedAt = Date()
+                        } label: {
+                            Image(systemName: "clock.arrow.circlepath").font(.system(size: 9))
+                        }
+                        .buttonStyle(.plain)
+                        .help("Set end time to now")
+                    }
+                    DatePicker("", selection: $appState.quickLogDraft.endedAt, displayedComponents: [.date, .hourAndMinute])
+                        .labelsHidden()
+                        .datePickerStyle(.compact)
+                }
+
+                // LIVE DURATION BADGE
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("DURATION")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.secondary)
+                    HStack(spacing: 3) {
+                        Image(systemName: "stopwatch")
+                            .font(.system(size: 10))
+                        Text(qsoDurationString)
+                            .font(.system(size: 11.5, weight: .bold, design: .monospaced))
+                    }
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 5)
+                    .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+                    .foregroundStyle(Color.accentColor)
+                }
+
+                Spacer()
+
+                // LOG & CLEAR ACTION BUTTONS
+                HStack(spacing: 6) {
+                    Button {
+                        attemptSave()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "checkmark.circle.fill")
+                            Text("Log (↵)")
+                        }
+                        .font(.system(size: 12, weight: .bold))
+                        .padding(.horizontal, 6)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.return, modifiers: [])
+
+                    Button {
+                        wipeForm()
+                    } label: {
+                        HStack(spacing: 3) {
+                            Image(systemName: "eraser.line.dashed")
+                            Text("Wipe")
+                        }
+                        .font(.system(size: 12))
+                    }
+                    .keyboardShortcut(.escape, modifiers: [])
+                }
+            }
+        }
+    }
+
+    private var operatingFields: some View {
+        HStack(alignment: .top, spacing: 10) {
+            compactField("Frequency (MHz)", width: 125) {
+                TextField("14.074", text: $appState.quickLogDraft.frequencyMHz)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.body, design: .monospaced))
+                    .focused($focusedField, equals: .frequency)
+                    .onChange(of: appState.quickLogDraft.frequencyMHz) { _, value in
+                        appState.quickLogDraft.applyFrequency(value)
+                    }
+            }
+
+            compactField("Band", width: 85) {
+                Picker("", selection: $appState.quickLogDraft.band) {
+                    ForEach(AmateurBandPlan.commonBands, id: \.self) { Text($0).tag($0) }
+                }
+                .labelsHidden()
+            }
+
+            compactField("Mode", width: 95) {
+                Picker("", selection: $appState.quickLogDraft.mode) {
+                    ForEach(modes, id: \.self) { Text($0).tag($0) }
+                }
+                .labelsHidden()
+                .onChange(of: appState.quickLogDraft.mode) { _, newValue in
+                    appState.quickLogDraft.applyMode(newValue)
+                }
+            }
+
+            let availableSubmodes = AmateurBandPlan.submodes(forMode: appState.quickLogDraft.mode)
+            compactField("Submode", width: 100) {
+                Menu {
+                    Button("(None)") {
+                        appState.quickLogDraft.applySubmode("")
+                    }
+                    ForEach(availableSubmodes.filter { !$0.isEmpty }, id: \.self) { sub in
+                        Button(sub) {
+                            appState.quickLogDraft.applySubmode(sub)
+                        }
+                    }
+                } label: {
+                    HStack {
+                        Text(appState.quickLogDraft.submode.isEmpty ? "(None)" : appState.quickLogDraft.submode)
+                            .font(.system(.body, design: .monospaced))
+                        Spacer()
+                        Image(systemName: "chevron.up.chevron.down").font(.system(size: 9))
+                    }
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 5))
+                    .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.gray.opacity(0.3)))
+                }
+                .buttonStyle(.plain)
+            }
+
+            compactField("RST Sent", width: 85) {
+                TextField("59", text: $appState.quickLogDraft.rstSent)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.body, design: .monospaced))
+                    .focused($focusedField, equals: .rstSent)
+            }
+
+            compactField("RST Recv", width: 85) {
+                TextField("59", text: $appState.quickLogDraft.rstReceived)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.body, design: .monospaced))
+                    .focused($focusedField, equals: .rstReceived)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var contestFields: some View {
+        let session = appState.currentContestSession
+        let isContestActive = session?.isActive == true
+
+        DisclosureGroup(isExpanded: .constant(true)) {
+            HStack(spacing: 10) {
+                if let activeSession = session, activeSession.isActive {
+                    compactValue("Serial", value: String(ContestWorkspaceLogic.nextSerial(in: activeSession, records: appState.qsoRecords)))
+                    compactValue("Sent Exch", value: activeSession.sentExchange.isEmpty ? "--" : activeSession.sentExchange)
+                } else {
+                    compactField("STX (Sent #)", width: 85) {
+                        TextField("001", text: $appState.quickLogDraft.sentSerial)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(.body, design: .monospaced))
+                            .focused($focusedField, equals: .sentSerial)
+                    }
+                    compactField("SRX (Recv #)", width: 85) {
+                        TextField("001", text: $appState.quickLogDraft.receivedSerial)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(.body, design: .monospaced))
+                            .focused($focusedField, equals: .receivedSerial)
+                    }
+                }
+
+                compactField("Recv Exch", width: 120) {
+                    TextField("599 001", text: $appState.quickLogDraft.receivedExchange)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.body, design: .monospaced))
+                        .focused($focusedField, equals: .exchange)
+                }
+
+                compactField("State / Prov", width: 85) {
+                    TextField("CA", text: $appState.quickLogDraft.state)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.body, design: .monospaced))
+                        .focused($focusedField, equals: .state)
+                }
+
+                compactField("ARRL Sect", width: 85) {
+                    TextField("SV", text: $appState.quickLogDraft.arrlSection)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.body, design: .monospaced))
+                        .focused($focusedField, equals: .arrlSection)
+                }
+
+                if isContestActive && appState.quickLogAssessment.contestDuplicate {
+                    Label("DUPE", systemImage: "flag.checkered")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.red)
+                }
+            }
+            .padding(.top, 4)
+        } label: {
+            HStack(spacing: 6) {
+                Label("Contest & Exchange", systemImage: "flag.checkered")
+                    .font(.subheadline.weight(.semibold))
+                if let activeSession = session, activeSession.isActive {
+                    Text("• \(activeSession.displayName)")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.orange)
+                }
+            }
+        }
+        .padding(8)
+        .background(Color.orange.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.orange.opacity(0.2)))
+    }
+
+    private var contactFields: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Label("Callbook & Location", systemImage: "person.text.rectangle")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                if let lookup = appState.quickLogLookup, !lookup.sources.isEmpty {
+                    Text("Source: " + lookup.sources.joined(separator: " + "))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Grid(horizontalSpacing: 10, verticalSpacing: 6) {
+                GridRow {
+                    labeledField("Name", text: $appState.quickLogDraft.name)
+                    labeledField("QTH", text: $appState.quickLogDraft.qth)
+                    labeledField("Grid", text: $appState.quickLogDraft.grid)
+                }
+                GridRow {
+                    labeledField("Country", text: $appState.quickLogDraft.country)
+                    labeledField("DXCC", text: $appState.quickLogDraft.dxcc)
+                    HStack(spacing: 6) {
+                        labeledField("CQ", text: $appState.quickLogDraft.cqZone)
+                        labeledField("ITU", text: $appState.quickLogDraft.ituZone)
+                    }
+                }
+            }
+        }
+    }
+
     private var portableFields: some View {
         DisclosureGroup(isExpanded: $showPortableFields) {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 10) {
                 Picker("Operating role", selection: $appState.quickLogDraft.portableRole) {
                     ForEach(PortableOperatingRole.allCases) { role in
                         Text(role.title).tag(role)
                     }
                 }
                 .pickerStyle(.segmented)
-                .frame(maxWidth: 520)
+                .frame(maxWidth: 500)
 
-                Grid(horizontalSpacing: 12, verticalSpacing: 10) {
+                Grid(horizontalSpacing: 10, verticalSpacing: 8) {
                     GridRow {
                         labeledField("My POTA reference", text: $appState.quickLogDraft.myPOTAReference)
                         labeledField("Contacted POTA reference", text: $appState.quickLogDraft.contactedPOTAReference)
@@ -458,372 +885,472 @@ private struct QuickLogPanel: View {
                 }
 
                 Text("Activator references stay in the next entry; contacted references are cleared after each QSO.")
-                    .font(.caption)
+                    .font(.caption2)
                     .foregroundStyle(.secondary)
             }
-            .padding(.top, 10)
+            .padding(.top, 8)
         } label: {
-            Label("Portable Activity", systemImage: "figure.hiking")
-                .font(.headline)
+            Label("Portable Activity (POTA / SOTA / IOTA)", systemImage: "figure.hiking")
+                .font(.subheadline.weight(.semibold))
         }
-        .padding(12)
+        .padding(8)
         .background(Color.green.opacity(0.05), in: RoundedRectangle(cornerRadius: 6))
         .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.green.opacity(0.18)))
     }
 
-    private var quickEntryHeader: some View {
-        HStack(alignment: .bottom, spacing: 14) {
-            VStack(alignment: .leading, spacing: 5) {
-                Text("CALLSIGN")
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(.secondary)
-                TextField("DX callsign", text: $appState.quickLogDraft.callsign)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(size: 26, weight: .bold, design: .monospaced))
-                    .focused($focusedField, equals: .callsign)
-                    .onSubmit { moveAfterCallsign() }
-                    .frame(minWidth: 260)
+    private var notesAndStatus: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                labeledField("QSO Notes & Comments", text: $appState.quickLogDraft.comment)
+                    .focused($focusedField, equals: .comment)
 
-                let matches = ClubMembershipEngine.shared.lookupMemberships(for: appState.quickLogDraft.callsign)
-                if !matches.isEmpty {
-                    HStack(spacing: 6) {
-                        ForEach(matches) { match in
-                            Button {
-                                appState.quickLogDraft.receivedExchange = match.memberNumber
-                                appState.quickLogDraft.comment = "\(match.club.rawValue) #\(match.memberNumber)"
-                            } label: {
-                                HStack(spacing: 4) {
-                                    Image(systemName: match.club.icon)
-                                        .font(.system(size: 9))
-                                    Text("\(match.club.rawValue) #\(match.memberNumber)")
-                                        .font(.system(size: 10, weight: .bold, design: .monospaced))
-                                }
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(match.club.badgeColor.opacity(0.18), in: Capsule())
-                                .foregroundColor(match.club.badgeColor)
-                            }
-                            .buttonStyle(.plain)
-                            .help("Click to insert \(match.club.rawValue) #\(match.memberNumber) into exchange")
-                        }
-                    }
-                    .padding(.top, 2)
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 5) {
-                Text("START UTC")
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(.secondary)
-                DatePicker("", selection: $appState.quickLogDraft.startedAt, displayedComponents: [.date, .hourAndMinute])
-                    .labelsHidden()
-                    .datePickerStyle(.compact)
-            }
-
-            Button {
-                appState.quickLogDraft.startedAt = Date()
-            } label: {
-                Image(systemName: "clock.arrow.circlepath")
-            }
-            .buttonStyle(.borderless)
-            .help("Set start time to now")
-
-            if appState.isLookingUpQuickLogCallsign {
-                ProgressView().controlSize(.small)
-            }
-        }
-    }
-
-    private var operatingFields: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label("Operating", systemImage: "waveform.path.ecg")
-                .font(.headline)
-
-            HStack(spacing: 12) {
-                compactField("Frequency (MHz)", width: 150) {
-                    TextField("14.074", text: $appState.quickLogDraft.frequencyMHz)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.system(.body, design: .monospaced))
-                        .focused($focusedField, equals: .frequency)
-                        .onChange(of: appState.quickLogDraft.frequencyMHz) { _, value in
-                            if let band = AmateurBandPlan.band(for: value) {
-                                appState.quickLogDraft.band = band
-                            }
-                        }
-                }
-
-                compactField("Band", width: 120) {
-                    Picker("", selection: $appState.quickLogDraft.band) {
-                        ForEach(AmateurBandPlan.commonBands, id: \.self) { Text($0).tag($0) }
-                    }
-                    .labelsHidden()
-                }
-
-                compactField("Mode", width: 120) {
-                    Picker("", selection: $appState.quickLogDraft.mode) {
-                        ForEach(modes, id: \.self) { Text($0).tag($0) }
-                    }
-                    .labelsHidden()
-                    .onChange(of: appState.quickLogDraft.mode) { oldValue, newValue in
-                        guard oldValue != newValue else { return }
-                        appState.quickLogDraft.rstSent = AmateurBandPlan.defaultRST(for: newValue)
-                        appState.quickLogDraft.rstReceived = AmateurBandPlan.defaultRST(for: newValue)
-                    }
-                }
-
-                compactField("Submode", width: 130) {
-                    TextField("FT8", text: $appState.quickLogDraft.submode)
-                        .textFieldStyle(.roundedBorder)
-                }
-            }
-        }
-    }
-
-    private var reportFields: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label("Signal Report", systemImage: "gauge.with.dots.needle.50percent")
-                .font(.headline)
-            HStack(spacing: 12) {
-                compactField("RST Sent", width: 130) {
-                    TextField("59", text: $appState.quickLogDraft.rstSent)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.system(.body, design: .monospaced))
-                        .focused($focusedField, equals: .rstSent)
-                }
-                compactField("RST Received", width: 130) {
-                    TextField("59", text: $appState.quickLogDraft.rstReceived)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.system(.body, design: .monospaced))
-                        .focused($focusedField, equals: .rstReceived)
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var contestFields: some View {
-        if let session = appState.currentContestSession, session.isActive {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Label("Contest Exchange", systemImage: "flag.checkered")
-                        .font(.headline)
-                    Spacer()
-                    Text(session.displayName)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.orange)
-                }
-                HStack(spacing: 12) {
-                    compactValue("Serial", value: String(ContestWorkspaceLogic.nextSerial(in: session, records: appState.qsoRecords)))
-                    compactValue("Sent", value: session.sentExchange.isEmpty ? "--" : session.sentExchange)
-                    compactField("Received", width: 180) {
-                        TextField("Exchange", text: $appState.quickLogDraft.receivedExchange)
-                            .textFieldStyle(.roundedBorder)
-                            .font(.system(.body, design: .monospaced))
-                            .focused($focusedField, equals: .exchange)
-                    }
-                    if appState.quickLogAssessment.contestDuplicate {
-                        Label("Dupe", systemImage: "exclamationmark.triangle.fill")
-                            .font(.caption.weight(.bold))
-                            .foregroundStyle(.orange)
-                    }
-                }
-            }
-            .padding(12)
-            .background(Color.orange.opacity(0.07), in: RoundedRectangle(cornerRadius: 6))
-            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.orange.opacity(0.22)))
-        }
-    }
-
-    private var contactFields: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Label("Callbook Details", systemImage: "person.text.rectangle")
-                    .font(.headline)
-                Spacer()
-                if let lookup = appState.quickLogLookup, !lookup.sources.isEmpty {
-                    Text(lookup.sources.joined(separator: " + "))
-                        .font(.caption)
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("Status")
+                        .font(.caption2)
                         .foregroundStyle(.secondary)
+                    Text(appState.quickLogStatus)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
-            }
-            Grid(horizontalSpacing: 12, verticalSpacing: 10) {
-                GridRow {
-                    labeledField("Name", text: $appState.quickLogDraft.name)
-                    labeledField("QTH", text: $appState.quickLogDraft.qth)
-                    labeledField("Grid", text: $appState.quickLogDraft.grid)
-                }
-                GridRow {
-                    labeledField("Country", text: $appState.quickLogDraft.country)
-                    labeledField("DXCC", text: $appState.quickLogDraft.dxcc)
-                    HStack(spacing: 8) {
-                        labeledField("CQ", text: $appState.quickLogDraft.cqZone)
-                        labeledField("ITU", text: $appState.quickLogDraft.ituZone)
-                    }
-                }
+                .frame(minWidth: 140, alignment: .trailing)
             }
         }
     }
 
-    private var notesAndSave: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Notes")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-            TextField("QSO notes", text: $appState.quickLogDraft.comment)
-                .textFieldStyle(.roundedBorder)
-                .focused($focusedField, equals: .comment)
-
-            HStack(spacing: 10) {
-                Button {
-                    attemptSave()
-                } label: {
-                    Label("Log QSO", systemImage: "checkmark.circle.fill")
-                        .frame(minWidth: 105)
-                }
-                .buttonStyle(.borderedProminent)
-                .keyboardShortcut(.return, modifiers: [.command])
-
-                Button {
-                    appState.quickLogDraft.resetForNextQSO(keepingOperatingContext: true)
-                    appState.quickLogLookup = nil
-                    appState.refreshQuickLogAssessment()
-                    focusedField = .callsign
-                } label: {
-                    Label("Clear", systemImage: "arrow.counterclockwise")
-                }
-
+    private var recentQSOsTable: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Label("Recent Logged QSOs (\(min(8, appState.qsoRecords.count)))", systemImage: "list.bullet.rectangle.portrait")
+                    .font(.subheadline.weight(.bold))
                 Spacer()
+                Text("Total in Log: \(appState.qsoRecords.count)")
+                    .font(.caption.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
 
-                Text(appState.quickLogStatus)
+            if appState.qsoRecords.isEmpty {
+                Text("No QSOs logged yet. Enter details above and press ↵ to log.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                    .padding(.vertical, 8)
+            } else {
+                let recents = Array(appState.qsoRecords.suffix(8).reversed())
+                VStack(spacing: 2) {
+                    // Table header
+                    HStack(spacing: 8) {
+                        Text("UTC").frame(width: 55, alignment: .leading)
+                        Text("CALLSIGN").frame(width: 100, alignment: .leading)
+                        Text("FREQ / BAND").frame(width: 85, alignment: .leading)
+                        Text("MODE").frame(width: 55, alignment: .leading)
+                        Text("RST (S/R)").frame(width: 75, alignment: .leading)
+                        Text("EXCHANGE / INFO").frame(minWidth: 80, alignment: .leading)
+                        Text("QSL").frame(width: 70, alignment: .trailing)
+                    }
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 4))
+
+                    ForEach(recents) { record in
+                        recentQSOItem(record)
+                    }
+                }
             }
         }
+    }
+
+    private func recentQSOItem(_ record: QSORecordModel) -> some View {
+        let call = record["CALL"]
+        let flag = DXCCDatabase.resolve(callsign: call).flagEmoji
+        let time = record["TIME_ON"].prefix(4)
+        let formattedTime = time.count == 4 ? "\(time.prefix(2)):\(time.suffix(2))" : record["TIME_ON"]
+        let freq = record["FREQ"].isEmpty ? record["BAND"] : "\(record["FREQ"]) MHz"
+        let mode = record["SUBMODE"].isEmpty ? record["MODE"] : record["SUBMODE"]
+        let rst = "\(record["RST_SENT"])/\(record["RST_RCVD"])"
+        let exch = record["SRX_STRING"].isEmpty ? record["COMMENT"] : record["SRX_STRING"]
+
+        let lotw = record["LOTW_QSL_RCVD"].uppercased() == "Y"
+        let qrz = record["QRZLOG_QSL_RCVD"].uppercased() == "Y" || record["QRZCOM_QSL_RCVD"].uppercased() == "Y" || record["APP_QRZLOG_STATUS"].uppercased() == "CONFIRMED"
+        let paper = record["QSL_RCVD"].uppercased() == "Y"
+
+        return HStack(spacing: 8) {
+            Text(formattedTime)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .frame(width: 55, alignment: .leading)
+
+            HStack(spacing: 4) {
+                Text(flag)
+                    .font(.system(size: 11))
+                Text(call)
+                    .font(.system(size: 11.5, weight: .bold, design: .monospaced))
+            }
+            .frame(width: 100, alignment: .leading)
+
+            Text(freq)
+                .font(.system(size: 11, design: .monospaced))
+                .frame(width: 85, alignment: .leading)
+
+            Text(mode)
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .foregroundStyle(modeColor(mode))
+                .frame(width: 55, alignment: .leading)
+
+            Text(rst)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .frame(width: 75, alignment: .leading)
+
+            Text(exch)
+                .font(.system(size: 10.5))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .frame(minWidth: 80, alignment: .leading)
+
+            HStack(spacing: 3) {
+                if lotw {
+                    Text("L")
+                        .font(.system(size: 9, weight: .bold))
+                        .padding(.horizontal, 3)
+                        .background(Color.green.opacity(0.2), in: RoundedRectangle(cornerRadius: 3))
+                        .foregroundStyle(.green)
+                        .help("LoTW Confirmed")
+                }
+                if qrz {
+                    Text("Q")
+                        .font(.system(size: 9, weight: .bold))
+                        .padding(.horizontal, 3)
+                        .background(Color.blue.opacity(0.2), in: RoundedRectangle(cornerRadius: 3))
+                        .foregroundStyle(.blue)
+                        .help("QRZ Confirmed")
+                }
+                if paper {
+                    Text("P")
+                        .font(.system(size: 9, weight: .bold))
+                        .padding(.horizontal, 3)
+                        .background(Color.orange.opacity(0.2), in: RoundedRectangle(cornerRadius: 3))
+                        .foregroundStyle(.orange)
+                        .help("Paper Card Confirmed")
+                }
+                if !lotw && !qrz && !paper {
+                    Text("·")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .frame(width: 70, alignment: .trailing)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3.5)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.4), in: RoundedRectangle(cornerRadius: 4))
     }
 
     private var historyPanel: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Label("Worked Before", systemImage: "clock.arrow.trianglehead.counterclockwise.rotate.90")
+        VStack(alignment: .leading, spacing: 14) {
+            Label("DX & Station Intelligence", systemImage: "antenna.radiowaves.left.and.right")
                 .font(.headline)
 
             let assessment = appState.quickLogAssessment
-            if appState.quickLogDraft.normalizedCallsign.isEmpty {
+            let call = appState.quickLogDraft.normalizedCallsign
+
+            if call.isEmpty {
                 ContentUnavailableView(
-                    "Enter a Callsign",
+                    "Enter Callsign",
                     systemImage: "antenna.radiowaves.left.and.right",
-                    description: Text("History and duplicate checks appear here.")
+                    description: Text("DXCC entity, antenna headings, worked before history, and duplicate checks will appear here.")
                 )
-            } else if assessment.isNewCallsign {
-                statusBanner("New callsign", detail: "No previous QSO in this station log", icon: "sparkles", color: .blue)
             } else {
-                metricRow("All QSOs", value: assessment.totalWorked, color: .primary)
-                metricRow("Confirmed", value: assessment.confirmed, color: .green)
-                metricRow("This band", value: assessment.sameBand, color: .blue)
-                metricRow("Band + mode", value: assessment.sameBandMode, color: .purple)
-                if let lastWorked = assessment.lastWorkedAt {
+                dxccSummaryCard
+
+                if assessment.isNewCallsign {
+                    statusBanner("All-Time New One (ATNO)", detail: "No previous QSO with this callsign in station log", icon: "sparkles", color: .blue)
+                } else {
+                    bandMatrixSection
+                    previousQSOsSection
+
                     Divider()
-                    Text("Last worked")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text(lastWorked.formatted(date: .abbreviated, time: .shortened))
-                        .font(.system(.body, design: .monospaced).weight(.semibold))
-                }
-                if assessment.hasRecentDuplicate {
-                    statusBanner(
-                        "Recent duplicate",
-                        detail: "Same band and mode within 30 minutes",
-                        icon: "exclamationmark.triangle.fill",
-                        color: .orange
-                    )
-                }
-                if assessment.contestDuplicate {
-                    statusBanner(
-                        "Contest duplicate",
-                        detail: "Already worked on this band and mode in the active session",
-                        icon: "flag.checkered",
-                        color: .orange
-                    )
+
+                    metricRow("Total QSOs", value: assessment.totalWorked, color: .primary)
+                    metricRow("Confirmed", value: assessment.confirmed, color: .green)
+                    metricRow("This band (\(appState.quickLogDraft.band))", value: assessment.sameBand, color: .blue)
+                    metricRow("Band + mode (\(appState.quickLogDraft.band) \(appState.quickLogDraft.mode))", value: assessment.sameBandMode, color: .purple)
+
+                    if let lastWorked = assessment.lastWorkedAt {
+                        HStack {
+                            Text("Last Worked")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Text(lastWorked.formatted(date: .abbreviated, time: .shortened) + " UTC")
+                                .font(.system(.caption, design: .monospaced).weight(.semibold))
+                        }
+                    }
                 }
             }
 
             Spacer()
 
             if let saved = appState.quickLogLastSaved {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("LAST SAVED")
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("LAST LOGGED QSO")
                         .font(.caption2.weight(.bold))
                         .foregroundStyle(.secondary)
-                    Text(saved["CALL"])
-                        .font(.system(.title3, design: .monospaced).weight(.bold))
-                    Text("\(saved["BAND"]) · \(saved["MODE"]) · \(saved["TIME_ON"]) UTC")
-                        .font(.caption)
+                    HStack(spacing: 6) {
+                        Text(DXCCDatabase.resolve(callsign: saved["CALL"]).flagEmoji)
+                        Text(saved["CALL"])
+                            .font(.system(.subheadline, design: .monospaced).weight(.bold))
+                        Spacer()
+                        Text("\(saved["BAND"]) · \(saved["MODE"])")
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(8)
+                .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
+            }
+        }
+        .padding(16)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.55))
+    }
+
+    private var dxccSummaryCard: some View {
+        let entity = dxccInfo
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text(entity.flagEmoji)
+                    .font(.system(size: 26))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(entity.entityName)
+                        .font(.system(size: 13, weight: .bold))
+                        .lineLimit(1)
+                    Text("\(entity.continent) · CQ \(entity.cqZone) · ITU \(entity.ituZone)")
+                        .font(.system(size: 10.5))
                         .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if let solar = dxSolarState {
+                    HStack(spacing: 3) {
+                        Image(systemName: solar == .daylight ? "sun.max.fill" : (solar == .night ? "moon.stars.fill" : "sunset.fill"))
+                            .font(.system(size: 10))
+                        Text(solar.rawValue)
+                            .font(.system(size: 9.5, weight: .semibold))
+                    }
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2.5)
+                    .background(
+                        (solar == .daylight ? Color.yellow : (solar == .night ? Color.indigo : Color.orange)).opacity(0.18),
+                        in: Capsule()
+                    )
+                    .foregroundStyle(solar == .daylight ? Color.orange : (solar == .night ? Color.indigo : Color.orange))
+                }
+            }
+
+            if let beam = beamInfo {
+                Divider()
+                HStack {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("BEAM HEADING")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(.secondary)
+                        Text(String(format: "%03.0f° SP / %03.0f° LP", beam.sp, beam.lp))
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            .foregroundStyle(.primary)
+                    }
+                    Spacer()
+                    VStack(alignment: .trailing, spacing: 1) {
+                        Text("DISTANCE")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(.secondary)
+                        Text(String(format: "%.0f km (%.0f mi)", beam.distKm, beam.distMi))
+                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(.primary)
+                    }
                 }
             }
         }
-        .padding(20)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.55))
+        .padding(10)
+        .background(Color.accentColor.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.accentColor.opacity(0.2), lineWidth: 1))
+    }
+
+    private var bandMatrixSection: some View {
+        let callsign = appState.quickLogDraft.normalizedCallsign
+        let commonBands = ["160m", "80m", "40m", "30m", "20m", "17m", "15m", "12m", "10m", "6m", "2m", "70cm"]
+        let matchingRecords = appState.qsoRecords.filter {
+            $0["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == callsign
+        }
+
+        return VStack(alignment: .leading, spacing: 6) {
+            Text("BAND MATRIX")
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.secondary)
+
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 4), spacing: 4) {
+                ForEach(commonBands, id: \.self) { band in
+                    let bandRecords = matchingRecords.filter { $0["BAND"].lowercased() == band.lowercased() }
+                    let isConfirmed = bandRecords.contains(where: \.isConfirmed)
+                    let isWorked = !bandRecords.isEmpty
+                    bandBadge(band: band, isConfirmed: isConfirmed, isWorked: isWorked)
+                }
+            }
+        }
+    }
+
+    private func bandBadge(band: String, isConfirmed: Bool, isWorked: Bool) -> some View {
+        let tint: Color = isConfirmed ? .green : (isWorked ? .orange : .secondary)
+        let bgOpacity = isConfirmed ? 0.18 : (isWorked ? 0.18 : 0.06)
+        let borderOpacity = isConfirmed ? 0.4 : (isWorked ? 0.4 : 0.15)
+
+        return HStack(spacing: 2) {
+            Text(band)
+                .font(.system(size: 10, weight: .bold, design: .monospaced))
+            if isConfirmed {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(.green)
+            } else if isWorked {
+                Circle()
+                    .fill(Color.orange)
+                    .frame(width: 5, height: 5)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 4)
+        .background(tint.opacity(bgOpacity), in: RoundedRectangle(cornerRadius: 4))
+        .overlay(RoundedRectangle(cornerRadius: 4).stroke(tint.opacity(borderOpacity), lineWidth: 1))
+        .foregroundStyle(tint)
+    }
+
+    private var previousQSOsSection: some View {
+        let callsign = appState.quickLogDraft.normalizedCallsign
+        let matches = appState.qsoRecords.filter {
+            $0["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == callsign
+        }
+
+        return Group {
+            if !matches.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("PREVIOUS QSOs (\(matches.count))")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.secondary)
+
+                    VStack(spacing: 3) {
+                        ForEach(Array(matches.suffix(5).reversed())) { rec in
+                            HStack(spacing: 4) {
+                                Text(rec["QSO_DATE"].prefix(8))
+                                    .font(.system(size: 9.5, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                                Text(rec["BAND"])
+                                    .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
+                                Text(rec["MODE"])
+                                    .font(.system(size: 9.5, weight: .bold, design: .monospaced))
+                                    .foregroundStyle(modeColor(rec["MODE"]))
+                                Spacer()
+                                Text("\(rec["RST_SENT"])/\(rec["RST_RCVD"])")
+                                    .font(.system(size: 9.5, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                                if rec.isConfirmed {
+                                    Image(systemName: "checkmark.seal.fill")
+                                        .font(.system(size: 9))
+                                        .foregroundStyle(.green)
+                                        .help("Confirmed")
+                                }
+                            }
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 4))
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func modeColor(_ mode: String) -> Color {
+        switch mode.uppercased() {
+        case "CW": return .green
+        case "SSB", "USB", "LSB": return .blue
+        case "DATA", "DIGI", "FT8", "FT4", "JS8", "MFSK", "RTTY": return .purple
+        case "FM", "AM": return .orange
+        default: return .secondary
+        }
     }
 
     @ViewBuilder
     private func compactField<Content: View>(_ title: String, width: CGFloat, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text(title).font(.caption).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
             content()
         }
         .frame(width: width, alignment: .leading)
     }
 
     private func labeledField(_ title: String, text: Binding<String>) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(.caption).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title).font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
             TextField(title, text: text).textFieldStyle(.roundedBorder)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func compactValue(_ title: String, value: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(.caption).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title).font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
             Text(value)
                 .font(.system(.body, design: .monospaced).weight(.bold))
-                .frame(minWidth: 80, minHeight: 22, alignment: .leading)
+                .frame(minWidth: 70, minHeight: 22, alignment: .leading)
         }
     }
 
     private func metricRow(_ title: String, value: Int, color: Color) -> some View {
         HStack {
-            Text(title).foregroundStyle(.secondary)
+            Text(title).foregroundStyle(.secondary).font(.caption)
             Spacer()
             Text(value.formatted())
-                .font(.system(.body, design: .monospaced).weight(.bold))
+                .font(.system(.caption, design: .monospaced).weight(.bold))
                 .foregroundStyle(color)
         }
     }
 
     private func statusBanner(_ title: String, detail: String, icon: String, color: Color) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: icon).foregroundStyle(color).font(.title3)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title).fontWeight(.semibold)
-                Text(detail).font(.caption).foregroundStyle(.secondary)
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: icon).foregroundStyle(color).font(.headline)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.subheadline.weight(.semibold))
+                Text(detail).font(.caption2).foregroundStyle(.secondary)
             }
         }
-        .padding(12)
+        .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(color.opacity(0.09), in: RoundedRectangle(cornerRadius: 6))
         .overlay(RoundedRectangle(cornerRadius: 6).stroke(color.opacity(0.25)))
     }
 
     private func moveAfterCallsign() {
-        if appState.isValidOperatorCallsign(appState.quickLogDraft.normalizedCallsign) {
-            focusedField = .frequency
+        let clean = appState.quickLogDraft.normalizedCallsign
+        if appState.isValidOperatorCallsign(clean) {
+            if appState.currentContestSession?.isActive == true {
+                focusedField = .exchange
+            } else {
+                focusedField = .rstSent
+            }
         }
     }
 
+    private func wipeForm() {
+        appState.quickLogDraft.resetForNextQSO(keepingOperatingContext: true)
+        appState.quickLogDraft.startedAt = Date()
+        appState.quickLogDraft.endedAt = Date()
+        appState.quickLogLookup = nil
+        appState.refreshQuickLogAssessment()
+        focusedField = .callsign
+        appState.quickLogStatus = "Cleared"
+    }
+
     private func attemptSave() {
-        if (appState.quickLogAssessment.hasRecentDuplicate || appState.quickLogAssessment.contestDuplicate), !duplicateWasAcknowledged {
+        if isDupe, !duplicateWasAcknowledged {
             showDuplicateConfirmation = true
             return
         }
