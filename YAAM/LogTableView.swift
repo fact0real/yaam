@@ -451,6 +451,50 @@ struct LogTableView: View {
                 .buttonStyle(.plain)
                 .help(appState.filterCriteria.useTodayConfirmed ? "Showing only today's confirmed QSOs. Click to reset." : "Filter log table to show confirmed QSOs from today (\(todayConfirmedCount))")
 
+                if todayConfirmedCount > 0 {
+                    let readyUnsent = appState.todayConfirmedReadyUnsentCount
+                    let totalUnsent = appState.todayConfirmedUnsentCount
+
+                    if readyUnsent > 0 || totalUnsent > 0 {
+                        let badgeCount = readyUnsent > 0 ? readyUnsent : totalUnsent
+                        Button {
+                            appState.showTodayConfirmedQSLSheet = true
+                        } label: {
+                            HStack(spacing: 3.5) {
+                                Image(systemName: "paperplane.fill")
+                                    .font(.system(size: 8.5))
+                                Text("Send QSLs (\(badgeCount))")
+                                    .font(.system(size: 10.5, weight: .bold))
+                            }
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(Capsule().fill(Color.green))
+                            .foregroundColor(.white)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Open Today's Confirmed QSL Dispatcher to review, preview, and email QSL card PDFs for \(badgeCount) un-emailed contact(s)")
+                    } else {
+                        Button {
+                            appState.showTodayConfirmedQSLSheet = true
+                        } label: {
+                            HStack(spacing: 3.5) {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .font(.system(size: 8.5))
+                                    .foregroundColor(.green)
+                                Text("QSLs Sent (\(todayConfirmedCount))")
+                                    .font(.system(size: 10.5, weight: .medium))
+                                    .foregroundColor(.secondary)
+                            }
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(Capsule().fill(Color(NSColor.controlBackgroundColor)))
+                            .overlay(Capsule().stroke(Color.secondary.opacity(0.25), lineWidth: 1))
+                        }
+                        .buttonStyle(.plain)
+                        .help("All confirmed contacts with email from today have been sent QSL card emails. Click to view dispatch records.")
+                    }
+                }
+
                 let newConfirmedCount = appState.newlyConfirmedCount
                 if newConfirmedCount > 0 {
                     Button {
@@ -591,7 +635,7 @@ struct LogTableView: View {
                         value: Double(appState.dailyRankBackfillCompleted),
                         total: Double(max(1, appState.dailyRankBackfillTotal))
                     )
-                    .frame(width: 90)
+                    .frame(width: 80)
 
                     Text(appState.dailyRankBackfillStatus)
                         .font(.caption2)
@@ -600,6 +644,20 @@ struct LogTableView: View {
                         .truncationMode(.tail)
                         .frame(maxWidth: 150)
                         .help(appState.dailyRankBackfillStatus)
+
+                    Button {
+                        appState.stopEnrichment()
+                    } label: {
+                        HStack(spacing: 3) {
+                            Image(systemName: "stop.circle.fill")
+                                .foregroundColor(.red)
+                            Text("Stop")
+                                .font(.caption2.bold())
+                                .foregroundColor(.red)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .help("Stop QRZ rank lookup and save current progress")
                 } else if !appState.dailyRankBackfillStatus.isEmpty {
                     Text(appState.dailyRankBackfillStatus)
                         .font(.caption2)
@@ -823,31 +881,54 @@ struct LogTableView: View {
             Text("•")
                 .foregroundColor(.secondary.opacity(0.5))
 
-            let candidates = appState.todayConfirmedBatchCandidates
-            Text(candidates.isEmpty ? "No contact emails found in today's confirmed QSOs" : "\(candidates.count) contact(s) ready with email")
+            let totalConfirmed = appState.todayConfirmedCount
+            let readyCandidates = appState.todayConfirmedBatchCandidates
+            Text("\(readyCandidates.count) of \(totalConfirmed) ready with email")
                 .font(.system(size: 11))
                 .foregroundColor(.secondary)
 
             Spacer()
 
-            if !candidates.isEmpty {
+            let readyUnsent = appState.todayConfirmedReadyUnsentCount
+            let totalUnsent = appState.todayConfirmedUnsentCount
+
+            if readyUnsent > 0 || totalUnsent > 0 {
+                let badgeCount = readyUnsent > 0 ? readyUnsent : totalUnsent
                 Button {
-                    appState.sendTodayConfirmedQSLCardsBatch()
+                    appState.showTodayConfirmedQSLSheet = true
                 } label: {
-                    HStack(spacing: 4) {
+                    HStack(spacing: 5) {
                         Image(systemName: "paperplane.fill")
                             .font(.system(size: 9))
-                        Text("Send QSL Cards (\(candidates.count))")
-                            .font(.system(size: 11, weight: .semibold))
+                        Text("Dispatch QSL Cards (\(badgeCount))")
+                            .font(.system(size: 11, weight: .bold))
                     }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3.5)
-                    .background(RoundedRectangle(cornerRadius: 5).fill(Color.green.opacity(0.18)))
-                    .foregroundColor(.green)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 4)
+                    .background(RoundedRectangle(cornerRadius: 5).fill(Color.green))
+                    .foregroundColor(.white)
                 }
                 .buttonStyle(.plain)
-                .disabled(appState.isSendingBatchMail)
-                .help("Generate and send QSL card PDFs via email to all today's confirmed contacts with an email address")
+                .help("Open Today's Confirmed QSL Dispatcher to review, preview, enrich emails, and send cards to \(badgeCount) un-emailed contact(s)")
+            } else {
+                Button {
+                    appState.showTodayConfirmedQSLSheet = true
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 9))
+                            .foregroundColor(.green)
+                        Text("QSLs Sent (\(totalConfirmed))")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 4)
+                    .background(RoundedRectangle(cornerRadius: 5).fill(Color(NSColor.controlBackgroundColor)))
+                    .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.secondary.opacity(0.25), lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .help("All confirmed contacts with email have been dispatched. Click to view history.")
             }
 
             Button {

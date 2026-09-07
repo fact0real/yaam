@@ -111,6 +111,14 @@ public enum DXCCDatabase {
         entry("BH", "China", "CN", "🇨🇳", "AS", 24, 44),
         entry("BI", "China", "CN", "🇨🇳", "AS", 24, 44),
         entry("BV", "Taiwan", "TW", "🇹🇼", "AS", 24, 44),
+        entry("BM", "Taiwan", "TW", "🇹🇼", "AS", 24, 44),
+        entry("BN", "Taiwan", "TW", "🇹🇼", "AS", 24, 44),
+        entry("BO", "Taiwan", "TW", "🇹🇼", "AS", 24, 44),
+        entry("BP", "Taiwan", "TW", "🇹🇼", "AS", 24, 44),
+        entry("BQ", "Taiwan", "TW", "🇹🇼", "AS", 24, 44),
+        entry("BU", "Taiwan", "TW", "🇹🇼", "AS", 24, 44),
+        entry("BW", "Taiwan", "TW", "🇹🇼", "AS", 24, 44),
+        entry("BX", "Taiwan", "TW", "🇹🇼", "AS", 24, 44),
         entry("VR2", "Hong Kong", "HK", "🇭🇰", "AS", 24, 44),
         entry("XX9", "Macao", "MO", "🇲🇴", "AS", 24, 44),
         entry("JT", "Mongolia", "MN", "🇲🇳", "AS", 23, 32),
@@ -410,9 +418,18 @@ public enum DXCCDatabase {
     }
 
     /// Resolves an international amateur callsign into its DXCC entity, continent, and flag.
-    public nonisolated static func resolve(callsign: String) -> DXCCEntityInfo {
+    public nonisolated static func resolve(callsign: String, country: String? = nil) -> DXCCEntityInfo {
         let clean = callsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let cleanCountry = (country ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+
+        if cleanCountry == "TAIWAN" || cleanCountry == "REPUBLIC OF CHINA" || cleanCountry == "ROC" || cleanCountry.contains("TAIWAN") || cleanCountry == "CHINESE TAIPEI" || cleanCountry == "FORMOSA" {
+            return DXCCEntityInfo(entityName: "Taiwan", countryCode: "TW", flagEmoji: "🇹🇼", continent: "AS", cqZone: 24, ituZone: 44)
+        }
+
         guard !clean.isEmpty else {
+            if !cleanCountry.isEmpty {
+                return DXCCEntityInfo(entityName: cleanCountry, countryCode: "--", flagEmoji: countryToFlag(cleanCountry), continent: "??", cqZone: 0, ituZone: 0)
+            }
             return DXCCEntityInfo(entityName: "Unknown", countryCode: "--", flagEmoji: "🌐", continent: "??", cqZone: 0, ituZone: 0)
         }
 

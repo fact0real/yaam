@@ -1539,7 +1539,7 @@ class QRZWebKitScraper: NSObject, WKNavigationDelegate {
 
 // MARK: - Global Application State Manager (Workspace Architecture)
 class AppState: NSObject, ObservableObject {
-    private static let adifDateFormatter: DateFormatter = {
+    static let adifDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyyMMdd"
         return formatter
@@ -1601,6 +1601,7 @@ class AppState: NSObject, ObservableObject {
     @Published var selectedQSLCardQSO: QSORecordModel? = nil
     @Published var isSendingBatchMail: Bool = false
     @Published var batchMailStatus: String = ""
+    @Published var showTodayConfirmedQSLSheet: Bool = false
 
     func openEmailComposer(for record: QSORecordModel, email: String? = nil) {
         let cleanEmail = (email ?? record["EMAIL"]).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1643,8 +1644,8 @@ class AppState: NSObject, ObservableObject {
     @Published var isRefreshingRankHistory: Bool = false
     @Published var rankHistoryStatus: String = ""
     @Published var rankServiceStatus: String = ""
-    @Published private(set) var rankDailyQuota = QRZRankDailyQuota()
-    @Published private(set) var rankServerQuota: QRZRankAPIQuota?
+    private(set) var rankDailyQuota = QRZRankDailyQuota()
+    private(set) var rankServerQuota: QRZRankAPIQuota?
     @Published var isDailyRankBackfillRunning: Bool = false
     @Published var dailyRankBackfillStatus: String = ""
     @Published var dailyRankBackfillCompleted: Int = 0
@@ -1768,6 +1769,9 @@ class AppState: NSObject, ObservableObject {
     private var rankCandidateCacheDay = ""
     private var rankCandidateCacheRevision = -1
     private var rankCandidateCacheAvailable = 0
+    private var cachedTodayConfirmedRecords: [QSORecordModel]?
+    private var cachedTodayConfirmedRevision = -1
+    private var cachedTodayConfirmedDay = ""
 
     @Published var tableHeaders: [String] = []
     @Published var qsoRecords: [QSORecordModel] = [] {
@@ -1777,6 +1781,7 @@ class AppState: NSObject, ObservableObject {
             filteredChronologicalOrdinals.removeAll(keepingCapacity: true)
             availableCountriesCache = nil
             confirmationOpportunityIndexCache = nil
+            cachedTodayConfirmedRecords = nil
         }
     }
     @Published var recentLogFiles: [URL] = []
@@ -2788,18 +2793,18 @@ class AppState: NSObject, ObservableObject {
         saveDailyRankQuota()
     }
 
-    private func recordDailyRankRequestAttempt() {
+    private func recordDailyRankRequestAttempt(persist: Bool = false) {
         var quota = rankDailyQuota
         quota.recordAttempt()
         rankDailyQuota = quota
-        saveDailyRankQuota()
+        if persist { saveDailyRankQuota() }
     }
 
-    private func recordDailyRankSuccess() {
+    private func recordDailyRankSuccess(persist: Bool = false) {
         var quota = rankDailyQuota
         quota.recordSuccess()
         rankDailyQuota = quota
-        saveDailyRankQuota()
+        if persist { saveDailyRankQuota() }
     }
 
     private func fetchRankWithDailyQuota(
@@ -4388,10 +4393,13 @@ class AppState: NSObject, ObservableObject {
 
         let propagatedRows = propagateExistingRankValues()
         let checkedDay = Self.adifDateFormatter.string(from: Date())
+        let maxBatchSize = 50
+        let remainingRequests = dailyRankRequestsRemaining
+        let effectiveBatchLimit = remainingRequests == Int.max ? maxBatchSize : min(maxBatchSize, max(1, remainingRequests))
         let callsigns = QRZRankBackfillPlanner.candidateCallsigns(
             from: qsoRecords,
             checkedDay: checkedDay,
-            limit: Int.max,
+            limit: effectiveBatchLimit,
             value: { record, field in record[field] }
         )
         guard !callsigns.isEmpty else {
@@ -4424,9 +4432,9 @@ class AppState: NSObject, ObservableObject {
         isDailyRankBackfillRunning = true
         dailyRankBackfillCompleted = 0
         dailyRankBackfillTotal = callsigns.count
-        dailyRankBackfillStatus = "Checking the server allowance for \(callsigns.count) missing QRZ rankings..."
+        dailyRankBackfillStatus = "Checking allowance for batch of \(callsigns.count) callsign(s)..."
         rankServiceStatus = dailyRankBackfillStatus
-        appendLog("QRZ Rank daily backfill is checking the server allowance for \(callsigns.count) unique callsign(s).")
+        appendLog("QRZ Rank daily backfill: processing batch of \(callsigns.count) callsign(s)...")
 
         enrichmentTask = Task { @MainActor in
             do {
@@ -4462,7 +4470,7 @@ class AppState: NSObject, ObservableObject {
                 return
             }
 
-            self.dailyRankBackfillStatus = "Starting \(callsigns.count) callsign(s), \(self.rankQuotaAvailabilityDescription)."
+            self.dailyRankBackfillStatus = "Batch of \(callsigns.count) started (\(self.rankQuotaAvailabilityDescription))."
             self.rankServiceStatus = self.dailyRankBackfillStatus
             var successfulCallsigns = 0
             var unavailableCallsigns = 0
@@ -4532,19 +4540,13 @@ class AppState: NSObject, ObservableObject {
                 let completed = offset + 1
                 if completed.isMultiple(of: 5) || completed == callsigns.count || stoppingFailure != nil {
                     self.dailyRankBackfillCompleted = completed
-                    self.dailyRankBackfillStatus = "\(completed) of \(callsigns.count) checked, \(successfulCallsigns) saved, \(self.rankQuotaAvailabilityDescription)."
+                    self.dailyRankBackfillStatus = "\(completed)/\(callsigns.count) checked (\(successfulCallsigns) saved)"
                     self.rankServiceStatus = self.dailyRankBackfillStatus
                 }
 
-                if completed.isMultiple(of: 100) || completed == callsigns.count || stoppingFailure != nil {
-                    self.applySafeFieldDeltas(from: publishedRecords, to: workingRecords)
-                    publishedRecords = workingRecords
-                    self.autoSaveActiveWorkspace()
-                    hasUnsavedChanges = false
-                }
                 if stoppingFailure != nil { break }
 
-                try? await Task.sleep(nanoseconds: 150_000_000)
+                try? await Task.sleep(nanoseconds: 120_000_000)
             }
 
             let wasCancelled = Task.isCancelled
@@ -4552,6 +4554,7 @@ class AppState: NSObject, ObservableObject {
                 self.applySafeFieldDeltas(from: publishedRecords, to: workingRecords)
                 self.autoSaveActiveWorkspace()
             }
+            self.saveDailyRankQuota()
             self.isEnriching = false
             self.isDailyRankBackfillRunning = false
             self.enrichmentTask = nil
@@ -4561,7 +4564,12 @@ class AppState: NSObject, ObservableObject {
             } else if let stoppingFailure {
                 self.dailyRankBackfillStatus = "Paused after \(self.dailyRankBackfillCompleted) callsigns: \(stoppingFailure.localizedDescription)"
             } else {
-                self.dailyRankBackfillStatus = "Daily rank backfill finished: \(successfulCallsigns) saved, \(unavailableCallsigns) unavailable, \(self.rankQuotaAvailabilityDescription)."
+                let remainingPending = self.dailyRankBackfillCandidateCount
+                if remainingPending > 0 {
+                    self.dailyRankBackfillStatus = "Batch done: \(successfulCallsigns) saved (\(remainingPending) more pending)."
+                } else {
+                    self.dailyRankBackfillStatus = "Rank backfill complete: all callsigns checked!"
+                }
                 self.playActivitySound(.success)
             }
             self.rankServiceStatus = self.dailyRankBackfillStatus
@@ -5696,12 +5704,33 @@ class AppState: NSObject, ObservableObject {
         }
     }
 
+    private var cachedRecentConfirmedQSLCount: Int?
+    private var cachedRecentReminderRecipientCount: Int?
+    private var cachedRecentBatchRevision: Int = -1
+    private var cachedRecentBatchDate: Date = .distantPast
+
     func recentConfirmedQSLBatchCandidateCount(limit: Int = 40) -> Int {
-        recentConfirmedQSLBatchCandidates(limit: limit).count
+        if cachedRecentBatchRevision == qsoRecordsRevision && Date().timeIntervalSince(cachedRecentBatchDate) < 60,
+           let cached = cachedRecentConfirmedQSLCount {
+            return min(cached, limit)
+        }
+        let count = recentConfirmedQSLBatchCandidates(limit: limit).count
+        cachedRecentConfirmedQSLCount = count
+        cachedRecentBatchRevision = qsoRecordsRevision
+        cachedRecentBatchDate = Date()
+        return count
     }
 
     func recentUnconfirmedReminderBatchRecipientCount(limit: Int = 40) -> Int {
-        recentUnconfirmedReminderRecipients(limit: limit).count
+        if cachedRecentBatchRevision == qsoRecordsRevision && Date().timeIntervalSince(cachedRecentBatchDate) < 60,
+           let cached = cachedRecentReminderRecipientCount {
+            return min(cached, limit)
+        }
+        let count = recentUnconfirmedReminderRecipients(limit: limit).count
+        cachedRecentReminderRecipientCount = count
+        cachedRecentBatchRevision = qsoRecordsRevision
+        cachedRecentBatchDate = Date()
+        return count
     }
 
     func sendRecentConfirmedQSLCardsBatch(limit: Int = 40) {
@@ -5877,6 +5906,7 @@ class AppState: NSObject, ObservableObject {
                     ) { success, _ in
                         if success {
                             sentCount += 1
+                            self.markRecordAsQSLSent(id: record.id, via: "E")
                         } else {
                             failedCount += 1
                         }
@@ -5991,9 +6021,11 @@ class AppState: NSObject, ObservableObject {
     private func recentRecords(days: Int) -> [QSORecordModel] {
         let calendar = Calendar(identifier: .gregorian)
         guard let cutoff = calendar.date(byAdding: .day, value: -days, to: Date()) else { return [] }
+        let cutoffStr = Self.adifDateFormatter.string(from: cutoff)
         return qsoRecords.filter { record in
-            guard let qsoDate = adifDateTime(for: record) else { return false }
-            return qsoDate >= cutoff
+            let date = record["QSO_DATE"].trimmingCharacters(in: .whitespacesAndNewlines)
+            guard date.count >= 8 else { return false }
+            return date >= cutoffStr
         }
     }
 
@@ -6025,7 +6057,7 @@ class AppState: NSObject, ObservableObject {
         return components.date
     }
 
-    private func qslCardStationInfoFromDefaults() -> QSLCardStationInfo {
+    func qslCardStationInfoFromDefaults() -> QSLCardStationInfo {
         let profile = activeStationProfile
         let stationCallsign = currentStationCallsign == "DEFAULT" ? "NOCALL" : currentStationCallsign
         let grid = profile?.normalizedGrid ?? ""
@@ -6311,7 +6343,7 @@ class AppState: NSObject, ObservableObject {
         refreshEmailHistoryColumns()
     }
 
-    private func recordEmailHistory(callsign: String, email: String, subject: String, status: String) {
+    func recordEmailHistory(callsign: String, email: String, subject: String, status: String) {
         let entry = EmailHistoryEntry(
             id: UUID(),
             date: Date(),
@@ -6455,11 +6487,19 @@ class AppState: NSObject, ObservableObject {
     }
 
     // MARK: - Today's Confirmed QSOs
-    func isTodayConfirmed(record: QSORecordModel) -> Bool {
+    private static let todayUTCFormatter: DateFormatter = {
+        let df = DateFormatter()
+        df.dateFormat = "yyyyMMdd"
+        df.timeZone = TimeZone(secondsFromGMT: 0)
+        return df
+    }()
+
+    func isTodayConfirmed(record: QSORecordModel, todayLocal: String, todayUTC: String) -> Bool {
         guard record.isConfirmed else { return false }
-        let todayUTC = Self.adifDateFormatter.string(from: Date())
+        let validDates = Set([todayLocal, todayUTC])
+
         let qsoDate = record["QSO_DATE"].trimmingCharacters(in: .whitespacesAndNewlines)
-        if qsoDate == todayUTC { return true }
+        if validDates.contains(qsoDate) { return true }
 
         let dateFields = [
             "APP_QRZLOG_QSLDATE", "QRZLOG_QSLRDATE", "APP_QRZLOG_QSLRDATE",
@@ -6467,23 +6507,156 @@ class AppState: NSObject, ObservableObject {
             "APP_EQSL_QSLRDATE", "QSLRDATE"
         ]
         for field in dateFields {
-            if let val = record.fields[field]?.trimmingCharacters(in: .whitespacesAndNewlines),
-               val.prefix(8) == todayUTC {
-                return true
+            if let val = record.fields[field]?.trimmingCharacters(in: .whitespacesAndNewlines) {
+                let prefix8 = String(val.prefix(8))
+                if validDates.contains(prefix8) {
+                    return true
+                }
             }
         }
         return false
     }
 
+    func isTodayConfirmed(record: QSORecordModel) -> Bool {
+        let now = Date()
+        let todayLocal = Self.adifDateFormatter.string(from: now)
+        let todayUTC = Self.todayUTCFormatter.string(from: now)
+        return isTodayConfirmed(record: record, todayLocal: todayLocal, todayUTC: todayUTC)
+    }
+
     var todayConfirmedCount: Int {
-        qsoRecords.filter { isTodayConfirmed(record: $0) }.count
+        todayConfirmedRecords.count
+    }
+
+    var todayConfirmedRecords: [QSORecordModel] {
+        let now = Date()
+        let todayLocal = Self.adifDateFormatter.string(from: now)
+        let todayUTC = Self.todayUTCFormatter.string(from: now)
+        let cacheKey = "\(todayLocal)_\(todayUTC)"
+
+        if cachedTodayConfirmedRevision == qsoRecordsRevision,
+           cachedTodayConfirmedDay == cacheKey,
+           let cached = cachedTodayConfirmedRecords {
+            return cached
+        }
+
+        let filtered = qsoRecords.filter { isTodayConfirmed(record: $0, todayLocal: todayLocal, todayUTC: todayUTC) }
+            .sorted { ($0["TIME_ON"], $0["QSO_DATE"]) > ($1["TIME_ON"], $1["QSO_DATE"]) }
+
+        cachedTodayConfirmedRecords = filtered
+        cachedTodayConfirmedRevision = qsoRecordsRevision
+        cachedTodayConfirmedDay = cacheKey
+        return filtered
+    }
+
+    func isQSLSent(record: QSORecordModel) -> Bool {
+        let call = record["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if record["QSL_SENT"].uppercased() == "Y" { return true }
+        if let emailSent = record.fields["APP_YAAM_EMAIL_SENT_DATE"], !emailSent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return true }
+        if let history = emailHistoryByCallsign[call], history.status == "Sent" { return true }
+        return false
+    }
+
+    func sentEmailSummary(for record: QSORecordModel) -> String {
+        let call = record["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if let entry = latestEmailHistory(for: call), entry.status == "Sent" {
+            return "Sent on \(formattedEmailHistoryDate(entry.date))"
+        }
+        if let date = record.fields["APP_YAAM_EMAIL_SENT_DATE"], !date.isEmpty {
+            return "Sent \(date)"
+        }
+        if let qslsDate = record.fields["QSLSDATE"], !qslsDate.isEmpty {
+            return "Sent \(qslsDate)"
+        }
+        if record["QSL_SENT"].uppercased() == "Y" {
+            return "Sent"
+        }
+        return ""
+    }
+
+    var todayConfirmedUnsentCount: Int {
+        todayConfirmedRecords.filter { !isQSLSent(record: $0) }.count
+    }
+
+    var todayConfirmedReadyUnsentCount: Int {
+        todayConfirmedRecords.filter { !isQSLSent(record: $0) && !$0["EMAIL"].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.count
     }
 
     var todayConfirmedBatchCandidates: [QSORecordModel] {
-        qsoRecords.filter { record in
-            isTodayConfirmed(record: record) &&
+        todayConfirmedRecords.filter { record in
             !record["EMAIL"].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
+    }
+
+    func markRecordAsQSLSent(id: UUID, via: String = "E", autoSave: Bool = true) {
+        guard let idx = qsoRecords.firstIndex(where: { $0.id == id }) else { return }
+        let todayStr = Self.adifDateFormatter.string(from: Date())
+        qsoRecords[idx].fields["QSL_SENT"] = "Y"
+        qsoRecords[idx].fields["QSLSDATE"] = todayStr
+        qsoRecords[idx].fields["QSL_SENT_VIA"] = via
+        if via == "E" {
+            qsoRecords[idx].fields["APP_YAAM_EMAIL_SENT_DATE"] = todayStr
+        }
+        filteredRecordsCache = nil
+        cachedTodayConfirmedRecords = nil
+        if autoSave {
+            objectWillChange.send()
+            autoSaveActiveWorkspace()
+        }
+    }
+
+    func queueRecordsForBureau(ids: Set<UUID>) {
+        var modified = 0
+        for i in qsoRecords.indices {
+            if ids.contains(qsoRecords[i].id) {
+                qsoRecords[i].fields["QSL_SENT"] = "Q"
+                qsoRecords[i].fields["QSL_SENT_VIA"] = "B"
+                modified += 1
+            }
+        }
+        if modified > 0 {
+            filteredRecordsCache = nil
+            objectWillChange.send()
+            autoSaveActiveWorkspace()
+            appendLog("Queued \(modified) QSO(s) for Bureau QSL.")
+            playActivitySound(.success)
+        }
+    }
+
+    @MainActor
+    func enrichMissingEmailsForTodayConfirmed(records: [QSORecordModel], progress: @escaping (Int, Int) -> Void) async -> Int {
+        let missing = records.filter { $0["EMAIL"].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        guard !missing.isEmpty else { return 0 }
+
+        var enrichedCount = 0
+        for (idx, rec) in missing.enumerated() {
+            let call = rec["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            guard !call.isEmpty else { continue }
+            progress(idx + 1, missing.count)
+            if let email = await fetchAndStoreQRZEmail(for: call), !email.isEmpty {
+                enrichedCount += 1
+            }
+            try? await Task.sleep(nanoseconds: 250_000_000)
+        }
+        return enrichedCount
+    }
+
+    func exportTodayConfirmedQSLPDFs(records: [QSORecordModel], to folderURL: URL) throws -> [URL] {
+        let station = qslCardStationInfoFromDefaults()
+        var exportedURLs: [URL] = []
+
+        for record in records {
+            let cleanCall = QSLCardRenderer.cleanFileComponent(record["CALL"].isEmpty ? "CONTACT" : record["CALL"])
+            let cleanDate = QSLCardRenderer.cleanFileComponent(record["QSO_DATE"].isEmpty ? "DATE" : record["QSO_DATE"])
+            let cleanStation = QSLCardRenderer.cleanFileComponent(station.callsign.isEmpty ? "EP2AES" : station.callsign)
+            let fileName = "\(cleanStation)_QSL_\(cleanCall)_\(cleanDate).pdf"
+            let fileURL = folderURL.appendingPathComponent(fileName)
+
+            try QSLCardRenderer.exportPDF(record: record, station: station, to: fileURL)
+            exportedURLs.append(fileURL)
+        }
+
+        return exportedURLs
     }
 
     var emailedQSOCount: Int {

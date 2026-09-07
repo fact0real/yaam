@@ -576,6 +576,9 @@ Warm 73,
             DispatchQueue.main.async {
                 self.isSending = false
                 if success {
+                    if shouldAttach, let qso = targetQSO {
+                        self.appState.markRecordAsQSLSent(id: qso.id, via: "E")
+                    }
                     self.appState.alertTitle = "Email Sent Successfully 🚀"
                     self.appState.alertMessage = "Your email has been dispatched via SMTP."
                     self.appState.showAlert = true

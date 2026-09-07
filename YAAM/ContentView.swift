@@ -539,6 +539,10 @@ struct ContentView: View {
             ConfirmationReconciliationView()
                 .environmentObject(appState)
         }
+        .sheet(isPresented: $appState.showTodayConfirmedQSLSheet) {
+            TodayConfirmedQSLDispatchView()
+                .environmentObject(appState)
+        }
         .sheet(isPresented: $appState.showLogAssistantSheet) {
             LogAssistantView()
                 .environmentObject(appState)

@@ -48,6 +48,7 @@ nonisolated enum CountryNameNormalizer {
         ("Moldova", ["Republic of Moldova"]),
         ("Ireland", ["Republic of Ireland", "Eire"]),
         ("Iran", ["Islamic Republic of Iran", "Iran, Islamic Republic of"]),
+        ("Taiwan", ["Republic of China", "ROC", "Chinese Taipei", "Formosa", "Taiwan, Province of China"]),
         ("Turkey", ["Turkiye", "Türkiye", "Republic of Turkiye", "Republic of Türkiye"]),
         ("Syria", ["Syrian Arab Republic"]),
         ("Laos", ["Lao PDR", "Lao People's Democratic Republic"]),
