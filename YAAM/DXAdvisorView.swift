@@ -5,6 +5,7 @@
 
 import SwiftUI
 import AppKit
+import Combine
 
 private struct DXCoordinate {
     let latitude: Double
@@ -86,13 +87,54 @@ struct DXAdvisorView: View {
     @State private var voacapSearchQuery = ""
     @State private var voacapFilterMode = "All"
 
+    @State private var currentDate = Date()
+    private let clockTimer = Timer.publish(every: 5.0, on: .main, in: .common).autoconnect()
+
+    private var utcCalendar: Calendar {
+        var cal = Calendar(identifier: .gregorian)
+        cal.locale = Locale(identifier: "en_US_POSIX")
+        cal.timeZone = TimeZone(secondsFromGMT: 0)!
+        return cal
+    }
+
+    private var localCalendar: Calendar {
+        Calendar.current
+    }
+
     private var utcHour: Int {
-        Calendar(identifier: .gregorian).component(.hour, from: Date())
+        utcCalendar.component(.hour, from: currentDate)
+    }
+
+    private var localHour: Int {
+        localCalendar.component(.hour, from: currentDate)
+    }
+
+    private static let localTimeFormatter: DateFormatter = {
+        let df = DateFormatter()
+        df.dateFormat = "HH:mm"
+        df.timeZone = .current
+        return df
+    }()
+
+    private static let utcTimeFormatter: DateFormatter = {
+        let df = DateFormatter()
+        df.dateFormat = "HH:mm"
+        df.timeZone = TimeZone(secondsFromGMT: 0)
+        return df
+    }()
+
+    private var localTimeString: String {
+        Self.localTimeFormatter.string(from: currentDate)
+    }
+
+    private var utcTimeString: String {
+        Self.utcTimeFormatter.string(from: currentDate)
     }
 
     private var recommendedBands: [String] {
         let baseBands: [String]
-        switch utcHour {
+        let stationHour = stationCoordinate.map { localSolarHour(for: $0.longitude) } ?? localHour
+        switch stationHour {
         case 5..<9:
             baseBands = ["40M", "30M", "20M", "17M"]
         case 9..<15:
@@ -264,6 +306,7 @@ struct DXAdvisorView: View {
             refreshPathPredictions()
         }
         .onChange(of: bulkEmailRecipients.count) { _, _ in syncBulkEmailSelection() }
+        .onReceive(clockTimer) { currentDate = $0 }
     }
 
     private var tabSelector: some View {
@@ -368,9 +411,27 @@ struct DXAdvisorView: View {
             .disabled(appState.isFetchingPropagation)
             .help("Refresh HamQSL propagation data")
 
-            Text("UTC \(String(format: "%02d", utcHour)):00")
-                .font(.system(.caption, design: .monospaced))
-                .foregroundColor(.secondary)
+            HStack(spacing: 8) {
+                HStack(spacing: 4) {
+                    Image(systemName: "clock.fill")
+                        .font(.caption2)
+                        .foregroundColor(.accentColor)
+                    Text("Local \(localTimeString)")
+                        .font(.system(.caption, design: .monospaced))
+                        .fontWeight(.semibold)
+                }
+                Text("•")
+                    .font(.caption2)
+                    .foregroundColor(.secondary.opacity(0.6))
+                Text("UTC \(utcTimeString)")
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundColor(.secondary)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color(NSColor.controlBackgroundColor))
+            .cornerRadius(6)
+            .help("Station Local Time: \(localTimeString) | Universal Time (UTC): \(utcTimeString)")
         }
         .padding(12)
         .background(Color(NSColor.windowBackgroundColor))
@@ -1398,7 +1459,11 @@ struct DXAdvisorView: View {
     }
 
     private var isDaytimeBandWindow: Bool {
-        (6..<18).contains(utcHour)
+        if let station = stationCoordinate {
+            let stationSolarHour = localSolarHour(for: station.longitude)
+            return (6..<18).contains(stationSolarHour)
+        }
+        return (6..<18).contains(localHour)
     }
 
     private func propagationScore(for band: String) -> Int {

@@ -242,8 +242,23 @@ public struct Globe3DSceneView: NSViewRepresentable {
             // 2. Plot DX Markers & Arcs
             for marker in markers.prefix(35) {
                 let dxPos = cartesianCoordinate(lat: marker.coordinate.latitude, lon: marker.coordinate.longitude, radius: Double(earthRadius + 0.08))
-                let pinColor = bandColor(marker.band)
-                let pinNode = createPinNode(color: pinColor, isHome: false, label: "\(marker.flag) \(marker.callsign)", flag: marker.flag)
+                let pinColor: NSColor
+                if let snr = marker.snr {
+                    if snr >= 0 {
+                        pinColor = NSColor(red: 0.05, green: 0.95, blue: 0.45, alpha: 0.95)
+                    } else if snr >= -10 {
+                        pinColor = NSColor(red: 1.0, green: 0.85, blue: 0.15, alpha: 0.90)
+                    } else if snr >= -18 {
+                        pinColor = NSColor(red: 1.0, green: 0.55, blue: 0.10, alpha: 0.85)
+                    } else {
+                        pinColor = NSColor(red: 0.95, green: 0.25, blue: 0.35, alpha: 0.80)
+                    }
+                } else {
+                    pinColor = bandColor(marker.band)
+                }
+
+                let snrLabel = marker.snr.map { " (\($0 > 0 ? "+" : "")\($0)dB)" } ?? ""
+                let pinNode = createPinNode(color: pinColor, isHome: false, label: "\(marker.flag) \(marker.callsign)\(snrLabel)", flag: marker.flag)
                 pinNode.position = dxPos
                 pinNode.name = marker.id.uuidString
                 markerLookup[marker.id.uuidString] = marker

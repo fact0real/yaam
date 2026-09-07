@@ -230,6 +230,11 @@ extension AppState {
         quickLogAssessment = QuickLogAssessment()
         quickLogStatus = "Saved \(record["CALL"])"
         enqueueAutomaticQSL(for: record)
+        ZeroClickCloudUploadDaemon.shared.dispatch(
+            record: record,
+            stationID: activeStationProfileID?.uuidString,
+            qrzKeyOverride: activeQRZAPIKey
+        )
         WavelogSyncEngine.shared.autoPushSingleQSO(record: record)
         if HRDLogClient.shared.autoUploadEnabled {
             Task {

@@ -437,6 +437,13 @@ extension AppState {
                 isDuplicate: qsoRecords.contains { $0.uniqueKey == candidate.uniqueKey }
             )
         }
+
+        if ZeroClickCloudUploadDaemon.shared.autoCommitWSJTX {
+            let readyToCommit = wsjtxPendingQSOs.filter { !$0.isDuplicate }
+            for pending in readyToCommit {
+                _ = try? importWSJTXPendingQSO(id: pending.id)
+            }
+        }
     }
 
     private func removeWSJTXPendingQSO(id: UUID) {

@@ -51,7 +51,7 @@ struct ImportReviewView: View {
 
     private var header: some View {
         HStack(spacing: 14) {
-            Image(systemName: review?.sourceFormat.systemImage ?? "doc.badge.magnifyingglass")
+            Image(systemName: review?.sourceFormat.systemImage ?? "doc.text.magnifyingglass")
                 .font(.system(size: 24, weight: .semibold))
                 .foregroundStyle(.blue)
                 .frame(width: 42, height: 42)

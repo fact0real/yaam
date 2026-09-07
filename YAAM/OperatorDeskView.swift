@@ -63,6 +63,8 @@ struct OperatorDeskView: View {
                 WinKeyerView()
             case 19:
                 QSLLabelDesignerView()
+            case 20:
+                DigitalCallRosterView()
             default:
                 QuickLogPanel()
             }
@@ -78,6 +80,7 @@ struct OperatorDeskView: View {
     private var deskTabs: [DeskTabItem] {
         [
             DeskTabItem(tag: 0, title: "Quick Log", icon: "plus.circle.fill"),
+            DeskTabItem(tag: 20, title: "Call Roster", icon: "waveform.and.person.filled"),
             DeskTabItem(tag: 12, title: "Globe & Grids", icon: "globe.americas.fill"),
             DeskTabItem(tag: 13, title: "Bandmap", icon: "waveform.path.ecg.rectangle"),
             DeskTabItem(tag: 14, title: "CW Keyer", icon: "tuningfork"),

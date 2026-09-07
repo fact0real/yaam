@@ -6,7 +6,7 @@
 import SwiftUI
 
 private enum HelpTopic: String, CaseIterable, Identifiable {
-    case start, stations, logTable, quickLog, convertExport, globeGrids, cwWinKeyer, competitors, tciSdr, dxCluster, on4kst, radioBridge, contest, digitalContest, contestCalendar, dxpeditions, magicBand, syncCenter, qslHub, confirmations, statistics, qrzIncoming, logAssistant, awards, portable, connectivity, importReview, dataSafety, credentials, workflows, faq
+    case start, stations, logTable, quickLog, convertExport, globeGrids, cwWinKeyer, competitors, tciSdr, dxCluster, on4kst, radioBridge, contest, digitalContest, digitalRoster, contestCalendar, dxpeditions, magicBand, syncCenter, qslHub, confirmations, statistics, qrzIncoming, logAssistant, awards, portable, connectivity, importReview, dataSafety, credentials, workflows, faq
     var id: String { rawValue }
 
     var title: String {
@@ -25,6 +25,7 @@ private enum HelpTopic: String, CaseIterable, Identifiable {
         case .radioBridge: return "Radio, Icom & FT8"
         case .contest: return "Contest Workspace"
         case .digitalContest: return "Digital Contest Suite (FT8/FT4)"
+        case .digitalRoster: return "Digital Call Roster & Voice Alerts"
         case .contestCalendar: return "Contest Calendar"
         case .dxpeditions: return "DXpedition Watch"
         case .magicBand: return "6m & Propagation"
@@ -61,6 +62,7 @@ private enum HelpTopic: String, CaseIterable, Identifiable {
         case .radioBridge: return "wave.3.right.circle"
         case .contest: return "flag.checkered"
         case .digitalContest: return "trophy.fill"
+        case .digitalRoster: return "waveform.and.person.filled"
         case .contestCalendar: return "calendar.badge.clock"
         case .dxpeditions: return "binoculars.fill"
         case .magicBand: return "bolt.badge.clock.fill"
@@ -73,7 +75,7 @@ private enum HelpTopic: String, CaseIterable, Identifiable {
         case .awards: return "medal"
         case .portable: return "figure.hiking"
         case .connectivity: return "network"
-        case .importReview: return "doc.badge.magnifyingglass"
+        case .importReview: return "doc.text.magnifyingglass"
         case .dataSafety: return "externaldrive.fill.badge.checkmark"
         case .credentials: return "lock.shield.fill"
         case .workflows: return "arrow.triangle.2.circlepath"
@@ -83,6 +85,8 @@ private enum HelpTopic: String, CaseIterable, Identifiable {
 
     var searchTerms: String {
         switch self {
+        case .digitalRoster:
+            return "\(title) digital call roster ft8 ft4 js8 wsjt-x jtdx udp voice alerts speech triage new dxcc atno new band new grid reply calling me snr beam heading hands-free"
         case .digitalContest:
             return "\(title) digital contest ft8 ft4 wsjt-x jtdx cabrillo 3.0 multiplier matrix rate meter cq ww digi arrl exchange dupe qso sdr-control waterfall swr alc power"
         case .convertExport:
@@ -142,6 +146,7 @@ struct HelpView: View {
                 .frame(maxWidth: 820, alignment: .leading)
                 .padding(28)
             }
+            .navigationTitle(selection?.title ?? "YAAM Help")
         }
         .frame(minWidth: 820, minHeight: 600)
     }
@@ -163,6 +168,7 @@ struct HelpView: View {
         case .radioBridge: radioBridge
         case .contest: contest
         case .digitalContest: digitalContestView
+        case .digitalRoster: digitalRosterView
         case .contestCalendar: contestCalendar
         case .dxpeditions: dxpeditions
         case .magicBand: magicBand
@@ -199,7 +205,7 @@ struct HelpView: View {
             HelpFlow(steps: [
                 HelpFlowStep(icon: "antenna.radiowaves.left.and.right", title: "Choose a station", detail: "Select the callsign profile in the Log Table toolbar."),
                 HelpFlowStep(icon: "square.and.arrow.down", title: "Import or sync", detail: "Open ADIF or SmartSDR directly, or use a configured live source."),
-                HelpFlowStep(icon: "doc.badge.magnifyingglass", title: "Review", detail: "Accept new QSOs and confirmation updates; inspect conflicts."),
+                HelpFlowStep(icon: "doc.text.magnifyingglass", title: "Review", detail: "Accept new QSOs and confirmation updates; inspect conflicts."),
                 HelpFlowStep(icon: "externaldrive.fill.badge.checkmark", title: "Protected save", detail: "The Master Log is committed to SQLite with a restore point.")
             ])
             helpSection("First Setup") {
@@ -366,7 +372,7 @@ struct HelpView: View {
             helpSection("WSJT-X / JTDX UDP") {
                 HelpDefinition(icon: "network", title: "Matching port", text: "The default is UDP 2237. Configure WSJT-X/JTDX to send status and logged ADIF messages to this Mac on the same port.")
                 HelpDefinition(icon: "waveform", title: "Live context", text: "YAAM shows dial frequency, mode, selected DX callsign/Grid, and whether the decoder is monitoring, decoding, or transmitting.")
-                HelpDefinition(icon: "doc.badge.magnifyingglass", title: "Review-first queue", text: "Logged ADIF packets do not silently enter the Master Log. Exact duplicates are marked and blocked; new entries can be reviewed or imported.", color: .green)
+                HelpDefinition(icon: "doc.text.magnifyingglass", title: "Review-first queue", text: "Logged ADIF packets do not silently enter the Master Log. Exact duplicates are marked and blocked; new entries can be reviewed or imported.", color: .green)
                 HelpDefinition(icon: "rectangle.stack.badge.minus", title: "Bounded memory", text: "The listener retains at most 50 pending QSOs and coalesces identical packets so a long digital session stays responsive.")
             }
             helpSection("Native FT8 with IC-7300MKII or IC-705") {
@@ -796,6 +802,111 @@ struct HelpView: View {
         }
     }
 
+    private var digitalRosterView: some View {
+        Group {
+            helpHeader(
+                title: "Digital Call Roster & Voice Alerts",
+                subtitle: "Real-time decode triage against your Master Log, instant 1-click calling via UDP, geodesic beam headings, and hands-free Apple speech alerts.",
+                icon: "waveform.and.person.filled",
+                color: .purple
+            )
+
+            HelpScreenshotCard(
+                imageName: "help_call_roster",
+                title: "Live Digital Call Roster & Real-Time Triage",
+                caption: "Instant classification against Master Log, 1-click calling, geodesic bearing & distance, and hands-free AVSpeechSynthesizer voice alerts."
+            )
+
+            HelpFlow(steps: [
+                HelpFlowStep(icon: "network", title: "UDP Ingestion", detail: "Listens on UDP 2237 for live WSJT-X and JTDX decodes every 15-second FT8/FT4 cycle."),
+                HelpFlowStep(icon: "bolt.badge.clock.fill", title: "Master Log Triage", detail: "Indexes your SQLite log in memory to determine in O(1) time if a caller is an All-Time New One or New Band."),
+                HelpFlowStep(icon: "location.north.circle.fill", title: "Geodesic Heading", detail: "Computes exact great-circle short-path beam heading degrees and distance in km from your Maidenhead grid."),
+                HelpFlowStep(icon: "bolt.fill", title: "1-Click Calling", detail: "Click 'Call ⚡️' or double-click any row to instruct WSJT-X to transmit immediately without leaving YAAM."),
+                HelpFlowStep(icon: "speaker.wave.3.fill", title: "Voice Alerts", detail: "Apple AVSpeechSynthesizer announces rare DXCCs and direct callers hands-free with cycle debouncing.")
+            ])
+
+            helpSection("Real-Time Priority Triage Hierarchy") {
+                Text("Each decode is matched against your master logbook and tagged with high-visibility badges:")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+
+                HelpDefinition(
+                    icon: "star.fill",
+                    title: "⭐️ NEW DXCC (All-Time New One)",
+                    text: "Indicates a country entity that you have NEVER worked on any band or mode. Highest operational priority for your DXCC score.",
+                    color: .yellow
+                )
+                HelpDefinition(
+                    icon: "target",
+                    title: "🎯 NEW BAND (Band DXCC)",
+                    text: "Indicates a country you have worked on other bands, but is unworked on the current operating band. Essential for DXCC Challenge and multi-band awards.",
+                    color: .orange
+                )
+                HelpDefinition(
+                    icon: "square.grid.3x3.fill",
+                    title: "💠 NEW GRID (VUCC Gridsquare)",
+                    text: "Indicates a Maidenhead locator (e.g. LL29, JO31) that you have not yet logged, critical for VHF/UHF and HF VUCC awards.",
+                    color: .cyan
+                )
+                HelpDefinition(
+                    icon: "bell.badge.fill",
+                    title: "🔔 CALLING ME (Direct Contact)",
+                    text: "Highlights any incoming message directed specifically to your station callsign (e.g., answering your CQ or replying to your report).",
+                    color: .green
+                )
+                HelpDefinition(
+                    icon: "checkmark.seal.fill",
+                    title: "✓ WORKED / CONFIRMED",
+                    text: "Station or country already in your log; confirmations verified via LoTW or QRZ are highlighted.",
+                    color: .secondary
+                )
+            }
+
+            helpSection("Zero-Window-Switching (1-Click & Double-Click Calling)") {
+                HelpInstruction(
+                    number: 1,
+                    title: "1-Click Instant Reply",
+                    text: "Click the 'Call ⚡️' button in any row to transmit a WSJT-X UDP Type 4 (Reply) message. WSJT-X immediately sets the DX call, frequency offset, and enables TX."
+                )
+                HelpInstruction(
+                    number: 2,
+                    title: "Double-Click Shortcut",
+                    text: "Double-click anywhere on a call roster row to initiate transmission on that station with zero mouse precision required."
+                )
+                HelpInstruction(
+                    number: 3,
+                    title: "Antenna Rotator Direction",
+                    text: "Read the computed short-path beam heading (e.g. 048° NE) and distance to align your directional beam before transmitting."
+                )
+            }
+
+            helpSection("Smart Audio Speech Alerts (Apple AVSpeechSynthesizer)") {
+                HelpInstruction(
+                    number: 1,
+                    title: "Hands-Free Operation",
+                    text: "Click 'Voice Alerts 🔈' in the Call Roster toolbar to customize voice callouts. YAAM speaks incoming events like 'New DXCC! Japan on 14 megahertz, signal minus 8'."
+                )
+                HelpInstruction(
+                    number: 2,
+                    title: "Cycle Debouncing",
+                    text: "Repeat CQs from the same station within 60 seconds are automatically debounced to prevent voice fatigue during busy FT8 cycles."
+                )
+                HelpInstruction(
+                    number: 3,
+                    title: "Audio Chimes & Speed",
+                    text: "Enable subtle audio chimes (NSSound) before speech, adjust the speech rate slider, and choose any installed macOS voice (e.g. Samantha, Daniel, Siri)."
+                )
+            }
+
+            helpCallout(
+                icon: "keyboard",
+                title: "Instant Global Access: ⌘⇧R",
+                text: "Open the Digital Call Roster at any time from anywhere in YAAM by pressing Command + Shift + R or opening Operator Desk tab 20.",
+                color: .purple
+            )
+        }
+    }
+
     private var contestCalendar: some View {
         Group {
             helpHeader(title: "Contest Calendar", subtitle: "Use the Operator Desk calendar to pick upcoming operating windows and move quickly into a contest session.", icon: "calendar.badge.clock", color: .blue)
@@ -1163,7 +1274,7 @@ struct HelpView: View {
 
     private var importReview: some View {
         Group {
-            helpHeader(title: "Import Review", subtitle: "See exactly what an ADIF or SmartSDR file will change before it reaches the Master Log.", icon: "doc.badge.magnifyingglass", color: .orange)
+            helpHeader(title: "Import Review", subtitle: "See exactly what an ADIF or SmartSDR file will change before it reaches the Master Log.", icon: "doc.text.magnifyingglass", color: .orange)
             helpSection("Record Categories") {
                 HelpDefinition(icon: "plus.circle.fill", title: "New", text: "No matching QSO exists. These records are selected by default.", color: .blue)
                 HelpDefinition(icon: "arrow.triangle.2.circlepath.circle.fill", title: "Confirmation update", text: "The contact exists, but the incoming record adds a confirmation or fills a missing field.", color: .green)

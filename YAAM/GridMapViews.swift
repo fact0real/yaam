@@ -14,7 +14,7 @@ import SwiftUI
 
 public enum MapActivityLayer: String, CaseIterable, Identifiable, Sendable {
     case all = "🌟 All Activity"
-    case onTheAir = "📡 On-The-Air (PSK)"
+    case onTheAir = "📡 PSK Reporter (Heatmap)"
     case recentQSOs = "📻 Recent Logged QSOs"
     case liveTraffic = "⚡️ WSJT-X & Cluster"
 
@@ -23,7 +23,7 @@ public enum MapActivityLayer: String, CaseIterable, Identifiable, Sendable {
     public var shortTitle: String {
         switch self {
         case .all: return "All Activity"
-        case .onTheAir: return "On-Air"
+        case .onTheAir: return "PSK Heatmap"
         case .recentQSOs: return "Log QSOs"
         case .liveTraffic: return "WSJT-X"
         }
@@ -102,7 +102,11 @@ public struct GlobeAndGridTrackerWorkspaceView: View {
             // MARK: - Bottom Grid Hunter & VUCC Analytics HUD
             gridHunterFooter
         }
-        .background(Color(NSColor.windowBackgroundColor))
+        .onAppear {
+            if onAirService.spots.isEmpty {
+                onAirService.loadSamplePropagationTelemetry()
+            }
+        }
         .onReceive(appState.wsjtxListener.$liveDecodes) { decodes in
             checkForWantedGridAlerts(decodes)
         }
@@ -776,13 +780,47 @@ public struct GlobeAndGridTrackerWorkspaceView: View {
                     .fill(onAirCount > 0 ? Color.green : Color.gray)
                     .frame(width: 8, height: 8)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("ON-THE-AIR (LIVE)")
+                    Text("PSK HEATMAP")
                         .font(.system(size: 8, weight: .bold))
                         .foregroundStyle(.secondary)
-                    Text("\(onAirCount) Receivers")
+                    Text("\(onAirCount) Stations")
                         .font(.headline.weight(.bold).monospacedDigit())
                         .foregroundStyle(onAirCount > 0 ? Color.green : Color.secondary)
                 }
+            }
+
+            if onAirCount > 0 {
+                Divider().frame(height: 24)
+                HStack(spacing: 6) {
+                    Text("SNR:")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(.secondary)
+                    HStack(spacing: 4) {
+                        Circle().fill(Color.green).frame(width: 6, height: 6)
+                        Text("≥0dB").font(.system(size: 8, weight: .bold, design: .monospaced)).foregroundStyle(.green)
+                        Circle().fill(Color.yellow).frame(width: 6, height: 6)
+                        Text("-10").font(.system(size: 8, weight: .bold, design: .monospaced)).foregroundStyle(.yellow)
+                        Circle().fill(Color.orange).frame(width: 6, height: 6)
+                        Text("-18").font(.system(size: 8, weight: .bold, design: .monospaced)).foregroundStyle(.orange)
+                        Circle().fill(Color.red).frame(width: 6, height: 6)
+                        Text("<-18").font(.system(size: 8, weight: .bold, design: .monospaced)).foregroundStyle(.red)
+                    }
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.secondary.opacity(0.12), in: Capsule())
+                }
+            } else {
+                Button {
+                    onAirService.loadSamplePropagationTelemetry()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "antenna.radiowaves.left.and.right")
+                        Text("Demo Heatmap")
+                    }
+                    .font(.system(size: 9, weight: .semibold))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
             }
 
             Divider()

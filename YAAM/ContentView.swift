@@ -557,6 +557,10 @@ struct ContentView: View {
             appState.showStatsSheet = false
             appState.selectedTab = 6
         }
+        .overlay(alignment: .top) {
+            ZeroClickCloudToastView()
+                .padding(.top, 46)
+        }
         .alert(appState.alertTitle, isPresented: $appState.showAlert) {
             Button("OK", role: .cancel) { }
         } message: {

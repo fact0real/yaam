@@ -128,6 +128,12 @@ struct YAAMApp: App {
                 }
                 .keyboardShortcut("l", modifiers: .command)
 
+                Button("Digital Call Roster (Live FT8)") {
+                    appState.selectedTab = 5
+                    appState.operatorDeskSection = 20
+                }
+                .keyboardShortcut("r", modifiers: [.command, .shift])
+
                 Button("3D Globe & Grid Tracker") {
                     appState.selectedTab = 5
                     appState.operatorDeskSection = 12

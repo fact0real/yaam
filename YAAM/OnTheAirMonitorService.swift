@@ -166,6 +166,77 @@ public final class OnTheAirMonitorService: ObservableObject {
         }
     }
 
+    // MARK: - Sample Telemetry Generator for Testing & Demo
+    public func loadSamplePropagationTelemetry() {
+        let sampleStations: [(call: String, grid: String, freq: Int, mode: String, snr: Int)] = [
+            ("JA1XRH", "QM05", 14074000, "FT8", 4),
+            ("DL0IGI", "JN57", 14074000, "FT8", -3),
+            ("W1AW", "FN31", 14074000, "FT8", -14),
+            ("VK2DX", "QF56", 21074000, "FT8", -19),
+            ("ZS6DN", "KG44", 21074000, "FT8", -8),
+            ("PY2XB", "GG66", 14074000, "FT8", -16),
+            ("G4FOC", "IO91", 7074000, "FT8", 1),
+            ("OH2BAD", "KP20", 14074000, "FT8", -6),
+            ("UA0IT", "QP19", 14074000, "FT8", -12),
+            ("K6LL", "DM34", 14074000, "FT8", -21),
+            ("VU2TS", "MK82", 28074000, "FT8", 6),
+            ("EA8URL", "IL18", 14074000, "FT8", -9)
+        ]
+
+        let myGrid = homeGrid.isEmpty ? "LM35" : homeGrid
+        let myCoord: GeoCoordinate
+        if let c = gridToCoordinate(myGrid) {
+            myCoord = GeoCoordinate(latitude: c.latitude, longitude: c.longitude)
+        } else {
+            myCoord = GeoCoordinate(latitude: homeLatitude, longitude: homeLongitude)
+        }
+
+        var newSpots: [OnAirSpot] = []
+        for (index, s) in sampleStations.enumerated() {
+            let targetCoord: GeoCoordinate
+            if let c = gridToCoordinate(s.grid) {
+                targetCoord = GeoCoordinate(latitude: c.latitude, longitude: c.longitude)
+            } else {
+                targetCoord = GeoCoordinate(latitude: 0, longitude: 0)
+            }
+            let dist = GeodesicMath.distanceKm(from: myCoord, to: targetCoord)
+            let bearing = GeodesicMath.initialBearing(from: myCoord, to: targetCoord)
+            let compass = GeodesicMath.compassCardinal(for: bearing)
+
+            let spot = OnAirSpot(
+                id: "sample-\(index)-\(s.call)",
+                senderCall: currentCallsign.isEmpty ? "EP2AES" : currentCallsign,
+                senderGrid: s.grid,
+                listenerCall: s.call,
+                listenerGrid: s.grid,
+                frequencyHz: s.freq,
+                mode: s.mode,
+                snr: s.snr,
+                distanceKm: dist,
+                bearingDeg: bearing,
+                bearingCompass: compass,
+                timestamp: Date().addingTimeInterval(-Double(index * 45))
+            )
+            newSpots.append(spot)
+        }
+
+        self.spots = newSpots
+        let maxDXSpot = newSpots.max { ($0.distanceKm ?? 0) < ($1.distanceKm ?? 0) }
+        let bestSNR = newSpots.compactMap(\.snr).max()
+        let activeBands = Array(Set(newSpots.map(\.band))).sorted()
+        if let maxDist = maxDXSpot?.distanceKm {
+            sessionMaxDistanceKm = maxDist
+            sessionMaxDXCall = maxDXSpot?.listenerCall ?? ""
+        }
+        self.state = .active(
+            spotCount: newSpots.count,
+            furthestDXKm: maxDXSpot?.distanceKm,
+            furthestCall: maxDXSpot?.listenerCall,
+            bestSNR: bestSNR,
+            activeBands: activeBands
+        )
+    }
+
     // MARK: - Fetch PSK Reporter 15-Min Telemetry
     public func fetchOnAirTelemetry() async {
         guard !currentCallsign.isEmpty, currentCallsign != "DEFAULT", currentCallsign != "NOCALL" else {

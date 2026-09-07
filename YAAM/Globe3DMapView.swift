@@ -195,7 +195,7 @@ public struct Globe3DMapView: NSViewRepresentable {
                 mapView.addOverlay(SolarTerminatorOverlay(), level: .aboveRoads)
             }
 
-            // 2. Glowing Geodesic Great-Circle Arcs
+            // 2. Glowing Geodesic Great-Circle Arcs & PSK Propagation Trails
             if parent.showGreatCircleArcs {
                 let home = parent.homeCoordinate
                 for (index, m) in parent.markers.prefix(35).enumerated() {
@@ -203,6 +203,24 @@ public struct Globe3DMapView: NSViewRepresentable {
                     var coords = waypoints.map { CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude) }
                     let polyline = GlobeArcPolyline(coordinates: &coords, count: coords.count)
                     polyline.isActiveTarget = (index == 0)
+
+                    // PSK Reporter SNR Propagation Color Coding
+                    if let snr = m.snr {
+                        if snr >= 0 {
+                            polyline.customColor = NSColor(red: 0.05, green: 0.95, blue: 0.45, alpha: 0.95)
+                            polyline.customLineWidth = 3.2
+                        } else if snr >= -10 {
+                            polyline.customColor = NSColor(red: 1.0, green: 0.85, blue: 0.15, alpha: 0.90)
+                            polyline.customLineWidth = 2.5
+                        } else if snr >= -18 {
+                            polyline.customColor = NSColor(red: 1.0, green: 0.55, blue: 0.10, alpha: 0.85)
+                            polyline.customLineWidth = 2.0
+                        } else {
+                            polyline.customColor = NSColor(red: 0.95, green: 0.25, blue: 0.35, alpha: 0.80)
+                            polyline.customLineWidth = 1.6
+                        }
+                    }
+
                     mapView.addOverlay(polyline, level: .aboveLabels)
                 }
             }
@@ -282,7 +300,10 @@ public struct Globe3DMapView: NSViewRepresentable {
         public func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
             if let arcPolyline = overlay as? GlobeArcPolyline {
                 let renderer = MKPolylineRenderer(polyline: arcPolyline)
-                if arcPolyline.isActiveTarget {
+                if let custom = arcPolyline.customColor {
+                    renderer.strokeColor = custom
+                    renderer.lineWidth = arcPolyline.customLineWidth ?? 2.4
+                } else if arcPolyline.isActiveTarget {
                     renderer.strokeColor = NSColor(red: 0.25, green: 0.95, blue: 0.45, alpha: 0.95)
                     renderer.lineWidth = 3.2
                 } else {
@@ -303,10 +324,12 @@ public struct Globe3DMapView: NSViewRepresentable {
     }
 }
 
-// MARK: - Custom Polyline with Active Flag
+// MARK: - Custom Polyline with Active Flag & SNR Styling
 
 public final class GlobeArcPolyline: MKPolyline {
     public var isActiveTarget: Bool = false
+    public var customColor: NSColor?
+    public var customLineWidth: CGFloat?
 }
 
 // MARK: - Sleek Translucent City & Station Pill Annotation View
