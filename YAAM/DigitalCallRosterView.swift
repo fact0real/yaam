@@ -15,8 +15,10 @@ public struct DigitalCallRosterView: View {
     @EnvironmentObject private var appState: AppState
     @ObservedObject private var roster = DigitalCallRosterEngine.shared
     @ObservedObject private var audioAlerts = DigitalAudioAlertEngine.shared
+    @ObservedObject private var targetQueue = DigitalTargetQueueEngine.shared
 
     @State private var filterMode: RosterFilterMode = .neededOnly
+    @State private var selectedSlice: String = "All"
     @State private var minSNRFilter: Int = -30
     @State private var searchText: String = ""
     @State private var selectedEntryID: UUID? = nil
@@ -71,6 +73,10 @@ public struct DigitalCallRosterView: View {
                 }
             }
 
+            // Slice Filter
+            if selectedSlice == "VFO A" && entry.sliceLabel != "VFO A" { return false }
+            if selectedSlice == "VFO B" && entry.sliceLabel != "VFO B" { return false }
+
             return true
         }
     }
@@ -78,6 +84,8 @@ public struct DigitalCallRosterView: View {
     public var body: some View {
         VStack(spacing: 0) {
             topControlBar
+            Divider()
+            targetQueueStrip
             Divider()
             filterAndStatsBar
             Divider()
@@ -106,12 +114,116 @@ public struct DigitalCallRosterView: View {
                 loadSampleDecodes()
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .init("DigitalTargetQueueDidTriggerCall"))) { notif in
+            if let call = notif.userInfo?["callsign"] as? String,
+               let match = roster.entries.first(where: { $0.callsign == call }) {
+                callStation(match)
+            }
+        }
         .onChange(of: appState.qsoRecordsRevision) { _, _ in
             roster.rebuildLogCache(records: appState.qsoRecords)
         }
         .onChange(of: appState.wsjtxListener.liveDecodes) { _, newDecodes in
             roster.processDecodes(newDecodes, activeBand: activeBand)
         }
+    }
+
+    // MARK: - Smart Target Auto-Pilot Queue Strip
+
+    private var targetQueueStrip: some View {
+        HStack(spacing: 10) {
+            Button {
+                targetQueue.toggleAutoPilot()
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: targetQueue.isAutoPilotActive ? "bolt.circle.fill" : "bolt.slash.circle")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(targetQueue.isAutoPilotActive ? Color.yellow : Color.secondary)
+                    Text(targetQueue.isAutoPilotActive ? "AUTO-PILOT ACTIVE" : "Auto-Pilot Standby")
+                        .font(.system(size: 10, weight: .black))
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(targetQueue.isAutoPilotActive ? Color.yellow.opacity(0.18) : Color.gray.opacity(0.12))
+                .clipShape(Capsule())
+            }
+            .buttonStyle(.plain)
+
+            // Cycle Countdown
+            HStack(spacing: 4) {
+                Image(systemName: "clock.badge.checkmark")
+                    .font(.system(size: 10))
+                Text(String(format: "Cycle: %.1fs", targetQueue.secondsRemainingInCycle))
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+            }
+            .foregroundStyle(.secondary)
+
+            // Active Target Pill
+            if let active = targetQueue.activeTarget {
+                HStack(spacing: 6) {
+                    Text("CALLING:")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.secondary)
+                    Text(active.callsign)
+                        .font(.system(size: 11, weight: .heavy, design: .monospaced))
+                        .foregroundStyle(Color.accentColor)
+                    Text(active.grid)
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                    Text("Try \(active.attempts)/\(active.maxAttempts)")
+                        .font(.system(size: 9, weight: .bold))
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(Color.orange.opacity(0.2))
+                        .foregroundStyle(.orange)
+                        .clipShape(Capsule())
+
+                    Button {
+                        targetQueue.advanceToNextTarget()
+                    } label: {
+                        Image(systemName: "forward.fill")
+                            .font(.system(size: 8))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.mini)
+                    .help("Skip to next in queue")
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 2)
+                .background(Color(NSColor.controlBackgroundColor))
+                .clipShape(RoundedRectangle(cornerRadius: 5))
+            }
+
+            Spacer()
+
+            // Queue count & Clear
+            if !targetQueue.queue.isEmpty {
+                HStack(spacing: 6) {
+                    Text("Queue: \(targetQueue.queue.count)")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.secondary)
+
+                    ForEach(targetQueue.queue.prefix(3)) { item in
+                        Text(item.callsign)
+                            .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(Color.blue.opacity(0.12))
+                            .clipShape(RoundedRectangle(cornerRadius: 3))
+                    }
+
+                    Button("Clear") {
+                        targetQueue.clear()
+                    }
+                    .font(.system(size: 9))
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(.red)
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 4)
+        .background(Color(NSColor.textBackgroundColor).opacity(0.6))
     }
 
     // MARK: - Top Control Bar
@@ -136,6 +248,9 @@ public struct DigitalCallRosterView: View {
 
             // Transceiver CAT Control HUD
             RigControlToolbarView()
+
+            // Antenna Rotator Control HUD
+            RotatorToolbarWidgetView()
 
             // Radio / Dial Band Indicator
             HStack(spacing: 6) {
@@ -210,7 +325,16 @@ public struct DigitalCallRosterView: View {
                 }
             }
             .pickerStyle(.segmented)
-            .frame(maxWidth: 420)
+            .frame(maxWidth: 360)
+
+            // Multi-Slice VFO Selector
+            Picker("Slice", selection: $selectedSlice) {
+                Text("All Slices").tag("All")
+                Text("VFO A (2237)").tag("VFO A")
+                Text("VFO B (2238)").tag("VFO B")
+            }
+            .pickerStyle(.segmented)
+            .frame(width: 210)
 
             // Min SNR Filter
             Menu {
@@ -398,9 +522,26 @@ public struct DigitalCallRosterView: View {
                 Text(entry.countryInfo.flagEmoji)
                     .font(.body)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(entry.callsign)
-                        .font(.system(.body, design: .monospaced))
-                        .fontWeight(.bold)
+                    HStack(spacing: 4) {
+                        Text(entry.callsign)
+                            .font(.system(.body, design: .monospaced))
+                            .fontWeight(.bold)
+                        if SuperCheckPartialEngine.shared.isKnownContestCallsign(entry.callsign) {
+                            Image(systemName: "checkmark.shield.fill")
+                                .font(.system(size: 9))
+                                .foregroundColor(.blue)
+                                .help("Verified in Master.scp Database")
+                        }
+                        if entry.sliceLabel == "VFO B" {
+                            Text("VFO B")
+                                .font(.system(size: 8, weight: .bold))
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 1)
+                                .background(Color.purple.opacity(0.18))
+                                .foregroundColor(.purple)
+                                .clipShape(Capsule())
+                        }
+                    }
                     Text(entry.countryInfo.entityName)
                         .font(.caption2)
                         .foregroundColor(.secondary)
@@ -415,9 +556,21 @@ public struct DigitalCallRosterView: View {
                     .font(.system(.caption, design: .monospaced))
                     .fontWeight(.medium)
                 if let dist = entry.distanceKm, let bearing = entry.bearingDeg {
-                    Text("\(Int(dist)) km • \(bearing)°")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
+                    HStack(spacing: 4) {
+                        Text("\(Int(dist)) km • \(bearing)°")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+
+                        Button {
+                            RotatorControlEngine.shared.setAzimuth(Double(bearing))
+                        } label: {
+                            Image(systemName: "safari")
+                                .font(.system(size: 8))
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundColor(.accentColor)
+                        .help("Turn Rotator to \(bearing)°")
+                    }
                 }
             }
             .frame(width: 140, alignment: .leading)
@@ -442,7 +595,7 @@ public struct DigitalCallRosterView: View {
                 .lineLimit(1)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            // Action: 1-Click Tune Rig & Call Reply
+            // Action: 1-Click Tune Rig, Smart Queue & Call Reply
             HStack(spacing: 4) {
                 Button {
                     let dialHz = appState.wsjtxListener.lastStatus?.dialFrequencyHz ?? 14074000
@@ -453,6 +606,22 @@ public struct DigitalCallRosterView: View {
                 }
                 .buttonStyle(.bordered)
                 .help("Tune Transceiver to this Band/Freq")
+
+                Button {
+                    targetQueue.enqueue(
+                        callsign: entry.callsign,
+                        grid: entry.grid,
+                        deltaFrequencyHz: entry.deltaFrequencyHz,
+                        snr: entry.snr,
+                        mode: entry.mode
+                    )
+                } label: {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.system(size: 9))
+                }
+                .buttonStyle(.bordered)
+                .foregroundColor(.accentColor)
+                .help("Add to Smart Auto-Sequence Target Queue")
 
                 Button {
                     callStation(entry)
@@ -468,7 +637,7 @@ public struct DigitalCallRosterView: View {
                 .buttonStyle(.borderedProminent)
                 .tint(entry.status.isNeeded ? .purple : .accentColor)
             }
-            .frame(width: 105, alignment: .trailing)
+            .frame(width: 135, alignment: .trailing)
         }
     }
 
@@ -499,7 +668,7 @@ public struct DigitalCallRosterView: View {
                     .buttonStyle(.borderedProminent)
                 }
 
-                Button("Load Live Sample Decodes") {
+                Button("Load Demo Decodes") {
                     loadSampleDecodes()
                 }
                 .buttonStyle(.bordered)
@@ -507,6 +676,7 @@ public struct DigitalCallRosterView: View {
 
             Spacer()
         }
+        .padding(24)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
@@ -514,12 +684,12 @@ public struct DigitalCallRosterView: View {
 
     private func loadSampleDecodes() {
         let samples: [WSJTXLiveDecode] = [
-            WSJTXLiveDecode(sourceID: "WSJT-X", isNew: true, timeMillis: 120000, snr: 14, deltaTimeSec: 0.2, deltaFrequencyHz: 1420, mode: "FT8", message: "CQ 3D2RR RH42", lowConfidence: false, offAir: false, callerCallsign: "3D2RR", targetCallsign: "", grid: "RH42", report: ""),
-            WSJTXLiveDecode(sourceID: "WSJT-X", isNew: true, timeMillis: 120000, snr: -4, deltaTimeSec: 0.1, deltaFrequencyHz: 1650, mode: "FT8", message: "CQ JA1ABC PM95", lowConfidence: false, offAir: false, callerCallsign: "JA1ABC", targetCallsign: "", grid: "PM95", report: ""),
-            WSJTXLiveDecode(sourceID: "WSJT-X", isNew: true, timeMillis: 120000, snr: 6, deltaTimeSec: 0.3, deltaFrequencyHz: 980, mode: "FT8", message: "CQ W1AW FN31", lowConfidence: false, offAir: false, callerCallsign: "W1AW", targetCallsign: "", grid: "FN31", report: ""),
-            WSJTXLiveDecode(sourceID: "WSJT-X", isNew: true, timeMillis: 120000, snr: -12, deltaTimeSec: 0.2, deltaFrequencyHz: 2100, mode: "FT8", message: "CQ VK3XYZ QF22", lowConfidence: false, offAir: false, callerCallsign: "VK3XYZ", targetCallsign: "", grid: "QF22", report: ""),
-            WSJTXLiveDecode(sourceID: "WSJT-X", isNew: true, timeMillis: 120000, snr: -6, deltaTimeSec: 0.1, deltaFrequencyHz: 1200, mode: "FT8", message: "EP2AES DL1ABC JO50", lowConfidence: false, offAir: false, callerCallsign: "DL1ABC", targetCallsign: "EP2AES", grid: "JO50", report: ""),
-            WSJTXLiveDecode(sourceID: "WSJT-X", isNew: true, timeMillis: 120000, snr: 8, deltaTimeSec: 0.4, deltaFrequencyHz: 1850, mode: "FT8", message: "CQ ZL1BQD RE78", lowConfidence: false, offAir: false, callerCallsign: "ZL1BQD", targetCallsign: "", grid: "RE78", report: "")
+            WSJTXLiveDecode(sourceID: "WSJT-X", isNew: true, timeMillis: 120000, snr: 14, deltaTimeSec: 0.2, deltaFrequencyHz: 1420, mode: "FT8", message: "CQ 3D2RR RH42", lowConfidence: false, offAir: false, callerCallsign: "3D2RR", targetCallsign: "", grid: "RH42", report: "", port: 2237, sliceLabel: "VFO A"),
+            WSJTXLiveDecode(sourceID: "WSJT-X", isNew: true, timeMillis: 120000, snr: -4, deltaTimeSec: 0.1, deltaFrequencyHz: 1650, mode: "FT8", message: "CQ JA1ABC PM95", lowConfidence: false, offAir: false, callerCallsign: "JA1ABC", targetCallsign: "", grid: "PM95", report: "", port: 2237, sliceLabel: "VFO A"),
+            WSJTXLiveDecode(sourceID: "WSJT-X", isNew: true, timeMillis: 120000, snr: 6, deltaTimeSec: 0.3, deltaFrequencyHz: 980, mode: "FT8", message: "CQ W1AW FN31", lowConfidence: false, offAir: false, callerCallsign: "W1AW", targetCallsign: "", grid: "FN31", report: "", port: 2238, sliceLabel: "VFO B"),
+            WSJTXLiveDecode(sourceID: "WSJT-X", isNew: true, timeMillis: 120000, snr: -12, deltaTimeSec: 0.2, deltaFrequencyHz: 2100, mode: "FT8", message: "CQ VK3XYZ QF22", lowConfidence: false, offAir: false, callerCallsign: "VK3XYZ", targetCallsign: "", grid: "QF22", report: "", port: 2237, sliceLabel: "VFO A"),
+            WSJTXLiveDecode(sourceID: "WSJT-X", isNew: true, timeMillis: 120000, snr: -6, deltaTimeSec: 0.1, deltaFrequencyHz: 1200, mode: "FT8", message: "EP2AES DL1ABC JO50", lowConfidence: false, offAir: false, callerCallsign: "DL1ABC", targetCallsign: "EP2AES", grid: "JO50", report: "", port: 2238, sliceLabel: "VFO B"),
+            WSJTXLiveDecode(sourceID: "WSJT-X", isNew: true, timeMillis: 120000, snr: 8, deltaTimeSec: 0.4, deltaFrequencyHz: 1850, mode: "FT8", message: "CQ ZL1BQD RE78", lowConfidence: false, offAir: false, callerCallsign: "ZL1BQD", targetCallsign: "", grid: "RE78", report: "", port: 2238, sliceLabel: "VFO B")
         ]
         roster.processDecodes(samples, activeBand: activeBand)
     }

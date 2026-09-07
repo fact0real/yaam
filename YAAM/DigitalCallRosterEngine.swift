@@ -84,6 +84,8 @@ public struct DigitalRosterEntry: Identifiable, Equatable, Sendable {
     public let isToMe: Bool
     public let receivedAt: Date
     public let rawDecode: WSJTXLiveDecode?
+    public var port: Int = 2237
+    public var sliceLabel: String = "VFO A"
 
     public var snrFormatted: String {
         snr >= 0 ? "+\(snr) dB" : "\(snr) dB"
@@ -274,7 +276,9 @@ public final class DigitalCallRosterEngine: ObservableObject {
                 isCQ: isCQ,
                 isToMe: isToMe,
                 receivedAt: decode.receivedAt,
-                rawDecode: decode
+                rawDecode: decode,
+                port: decode.port,
+                sliceLabel: decode.sliceLabel
             )
 
             newRosterEntries.append(entry)

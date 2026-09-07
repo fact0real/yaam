@@ -39,6 +39,7 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
     @AppStorage("zeroClickUploadClubLog") public var uploadToClubLog: Bool = true
     @AppStorage("zeroClickUploadEQSL") public var uploadToEQSL: Bool = true
     @AppStorage("zeroClickUploadWavelog") public var uploadToWavelog: Bool = true
+    @AppStorage("zeroClickUploadLoTW") public var uploadToLoTW: Bool = true
     @AppStorage("autoCommitWSJTX") public var autoCommitWSJTX: Bool = true
 
     // Real-Time Live Status
@@ -109,6 +110,16 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
         if uploadToWavelog {
             WavelogSyncEngine.shared.autoPushSingleQSO(record: record)
             successfulServices.append("Wavelog")
+        }
+
+        // 5. ARRL LoTW via TQSL CLI
+        if uploadToLoTW {
+            let lotwOutcome = await uploadToLoTWViaTQSL(record: record)
+            if lotwOutcome.success {
+                successfulServices.append("LoTW")
+            } else if !lotwOutcome.message.isEmpty && !lotwOutcome.message.contains("not found") {
+                errors.append("LoTW: \(lotwOutcome.message)")
+            }
         }
 
         let latency = Int(Date().timeIntervalSince(startTime) * 1000)
@@ -301,6 +312,61 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
         }
         out += "<EOR>\n"
         return out
+    }
+
+    // MARK: - ARRL LoTW via TQSL CLI
+    private func uploadToLoTWViaTQSL(record: QSORecordModel) async -> (success: Bool, message: String) {
+        let fileManager = FileManager.default
+        let tqslCandidates = [
+            "/Applications/TrustedQSL/tqsl.app/Contents/MacOS/tqsl",
+            "/Applications/tqsl.app/Contents/MacOS/tqsl",
+            "/opt/homebrew/bin/tqsl",
+            "/usr/local/bin/tqsl",
+            "/usr/bin/tqsl"
+        ]
+
+        guard let tqslPath = tqslCandidates.first(where: { fileManager.isExecutableFile(atPath: $0) }) else {
+            return (false, "TQSL binary not found")
+        }
+
+        let tempAdifURL = fileManager.temporaryDirectory.appendingPathComponent("yaam_lotw_\(UUID().uuidString).adi")
+        let adifContent = buildSingleQSOADIF(record)
+
+        do {
+            try adifContent.write(to: tempAdifURL, atomically: true, encoding: .utf8)
+        } catch {
+            return (false, "Failed to write temp ADIF: \(error.localizedDescription)")
+        }
+
+        defer {
+            try? fileManager.removeItem(at: tempAdifURL)
+        }
+
+        return await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: tqslPath)
+                process.arguments = ["-d", "-u", "-x", "-q", tempAdifURL.path]
+
+                let pipe = Pipe()
+                process.standardOutput = pipe
+                process.standardError = pipe
+
+                do {
+                    try process.run()
+                    process.waitUntilExit()
+                    if process.terminationStatus == 0 {
+                        continuation.resume(returning: (true, "Signed & Uploaded"))
+                    } else {
+                        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                        let output = String(data: data, encoding: .utf8) ?? "Exit code \(process.terminationStatus)"
+                        continuation.resume(returning: (false, output.trimmingCharacters(in: .whitespacesAndNewlines)))
+                    }
+                } catch {
+                    continuation.resume(returning: (false, error.localizedDescription))
+                }
+            }
+        }
     }
 
     private func urlEncode(_ string: String) -> String {

@@ -116,6 +116,8 @@ nonisolated public struct WSJTXLiveDecode: Identifiable, Equatable, Sendable {
     public var targetCallsign: String
     public var grid: String
     public var report: String
+    public var port: Int
+    public var sliceLabel: String
 
     public init(
         id: UUID = UUID(),
@@ -133,7 +135,9 @@ nonisolated public struct WSJTXLiveDecode: Identifiable, Equatable, Sendable {
         callerCallsign: String,
         targetCallsign: String,
         grid: String,
-        report: String
+        report: String,
+        port: Int = 2237,
+        sliceLabel: String = "VFO A"
     ) {
         self.id = id
         self.sourceID = sourceID
@@ -151,6 +155,8 @@ nonisolated public struct WSJTXLiveDecode: Identifiable, Equatable, Sendable {
         self.targetCallsign = targetCallsign
         self.grid = grid
         self.report = report
+        self.port = port
+        self.sliceLabel = sliceLabel
     }
 
     // Computed Properties
@@ -422,6 +428,10 @@ final public class WSJTXListener: ObservableObject {
         peers.forEach { $0.cancel() }
     }
 
+    @AppStorage("multiSliceEnabled") public var multiSliceEnabled: Bool = true
+    @AppStorage("secondaryPort") public var secondaryPort: Int = 2238
+    private var secondaryListener: NWListener?
+
     // MARK: - Lifecycle
 
     public func start(port rawPort: Int) {
@@ -446,8 +456,9 @@ final public class WSJTXListener: ObservableObject {
                     guard let self, self.listenerID == id else { return }
                     switch state {
                     case .ready:
+                        let portDesc = self.multiSliceEnabled ? "\(port.rawValue) & \(self.secondaryPort)" : "\(port.rawValue)"
                         self.state = .listening(port.rawValue)
-                        self.lastMessage = "Listening for WSJT-X on UDP \(port.rawValue)"
+                        self.lastMessage = "Listening for WSJT-X on UDP \(portDesc)"
                     case .failed(let error):
                         self.state = .failed(error.localizedDescription)
                         self.lastMessage = "UDP listener failed: \(error.localizedDescription)"
@@ -462,10 +473,26 @@ final public class WSJTXListener: ObservableObject {
             }
 
             listener.newConnectionHandler = { [weak self] connection in
-                self?.handle(connection, listenerID: id)
+                self?.handle(connection, listenerID: id, port: rawPort)
             }
 
             listener.start(queue: queue)
+
+            // Multi-slice secondary listener (e.g. port 2238 for VFO B)
+            if multiSliceEnabled && secondaryPort != rawPort {
+                if let secEndpointPort = NWEndpoint.Port(rawValue: UInt16(secondaryPort)) {
+                    do {
+                        let secListener = try NWListener(using: .udp, on: secEndpointPort)
+                        self.secondaryListener = secListener
+                        secListener.newConnectionHandler = { [weak self] connection in
+                            self?.handle(connection, listenerID: id, port: self?.secondaryPort ?? 2238)
+                        }
+                        secListener.start(queue: queue)
+                    } catch {
+                        // Secondary listener optional
+                    }
+                }
+            }
         } catch {
             state = .failed(error.localizedDescription)
             lastMessage = "Could not start UDP listener: \(error.localizedDescription)"
@@ -476,6 +503,8 @@ final public class WSJTXListener: ObservableObject {
         listenerID = UUID()
         listener?.cancel()
         listener = nil
+        secondaryListener?.cancel()
+        secondaryListener = nil
         peers.forEach { $0.cancel() }
         peers.removeAll()
         state = .stopped
@@ -625,27 +654,27 @@ final public class WSJTXListener: ObservableObject {
 
     // MARK: - Inbound Message Handling
 
-    private func handle(_ connection: NWConnection, listenerID: UUID) {
+    private func handle(_ connection: NWConnection, listenerID: UUID, port: Int = 2237) {
         peers.append(connection)
         connection.start(queue: queue)
-        receiveNextPacket(on: connection, listenerID: listenerID)
+        receiveNextPacket(on: connection, listenerID: listenerID, port: port)
     }
 
-    private func receiveNextPacket(on connection: NWConnection, listenerID: UUID) {
+    private func receiveNextPacket(on connection: NWConnection, listenerID: UUID, port: Int = 2237) {
         connection.receiveMessage { [weak self] data, _, _, error in
             guard let self, self.listenerID == listenerID else {
                 connection.cancel()
                 return
             }
 
-            if let data, !data.isEmpty, let packet = WSJTXPacketParser.parse(data) {
+            if let data, !data.isEmpty, let packet = WSJTXPacketParser.parse(data, port: port) {
                 DispatchQueue.main.async {
                     self.apply(packet)
                 }
             }
 
             if error == nil {
-                self.receiveNextPacket(on: connection, listenerID: listenerID)
+                self.receiveNextPacket(on: connection, listenerID: listenerID, port: port)
             } else {
                 connection.cancel()
                 self.peers.removeAll { $0 === connection }
@@ -700,7 +729,7 @@ final public class WSJTXListener: ObservableObject {
 nonisolated public enum WSJTXPacketParser {
     public static let magic: UInt32 = 0xADBCCBDA
 
-    public static func parse(_ data: Data) -> WSJTXPacket? {
+    public static func parse(_ data: Data, port: Int = 2237) -> WSJTXPacket? {
         var cursor = DataCursor(data: data)
         guard cursor.readUInt32() == magic,
               cursor.readUInt32() != nil, // Schema
@@ -711,22 +740,34 @@ nonisolated public enum WSJTXPacketParser {
         case 0:
             return .heartbeat(sourceID: sourceID)
         case 1:
-            guard let frequency = cursor.readUInt64(),
+            guard let dialFreq = cursor.readUInt64(),
                   let mode = cursor.readString(),
                   let dxCall = cursor.readString(),
                   let report = cursor.readString(),
-                  cursor.readString() != nil, // txMode
-                  cursor.readBool() != nil,   // txEnabled
+                  let txMode = cursor.readString(),
+                  let txEnabled = cursor.readBool(),
                   let transmitting = cursor.readBool(),
                   let decoding = cursor.readBool(),
-                  cursor.readUInt32() != nil, // rxDF
-                  cursor.readUInt32() != nil, // txDF
-                  let ownCall = cursor.readString(),
-                  let ownGrid = cursor.readString(),
-                  let dxGrid = cursor.readString() else { return nil }
+                  let _ = cursor.readUInt32(), // rxDF
+                  let _ = cursor.readUInt32(), // txDF
+                  let _ = cursor.readString(), // deCall
+                  let _ = cursor.readString(), // deGrid
+                  let dxGrid = cursor.readString(),
+                  let _ = cursor.readBool(), // watchdog
+                  let _ = cursor.readString(), // subMode
+                  let _ = cursor.readBool(), // fastMode
+                  let _ = cursor.readUInt8(), // specialOp
+                  let _ = cursor.readUInt32(), // freqTolerance
+                  let _ = cursor.readUInt32(), // trPeriod
+                  let _ = cursor.readString() // configName
+            else { return nil }
+
+            let ownCall = cursor.readString() ?? ""
+            let ownGrid = cursor.readString() ?? ""
+
             return .status(WSJTXStatusSnapshot(
                 sourceID: sourceID,
-                dialFrequencyHz: frequency,
+                dialFrequencyHz: dialFreq,
                 mode: mode,
                 dxCallsign: dxCall.uppercased(),
                 report: report,
@@ -751,6 +792,7 @@ nonisolated public enum WSJTXPacketParser {
 
             let cleanMsg = message.trimmingCharacters(in: .whitespacesAndNewlines)
             let parsed = parseMessageTokens(cleanMsg)
+            let sliceLabel = (port == 2238 || sourceID.contains("VFO-B") || sourceID.contains("Slice 2")) ? "VFO B" : (port == 2237 ? "VFO A" : "Port \(port)")
 
             return .decode(WSJTXLiveDecode(
                 sourceID: sourceID,
@@ -767,7 +809,9 @@ nonisolated public enum WSJTXPacketParser {
                 callerCallsign: parsed.caller,
                 targetCallsign: parsed.target,
                 grid: parsed.grid,
-                report: parsed.report
+                report: parsed.report,
+                port: port,
+                sliceLabel: sliceLabel
             ))
         case 3:
             let window = cursor.readUInt8() ?? 2

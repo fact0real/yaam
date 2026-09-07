@@ -597,6 +597,34 @@ private struct QuickLogPanel: View {
                             }
                         }
                     }
+
+                    // Super Check Partial (Master.scp) Matches
+                    let scpMatches = SuperCheckPartialEngine.shared.findMatches(for: appState.quickLogDraft.callsign, maxResults: 5)
+                    if !scpMatches.isEmpty && !appState.quickLogDraft.callsign.isEmpty {
+                        HStack(spacing: 5) {
+                            Image(systemName: "checkmark.shield")
+                                .font(.system(size: 9))
+                                .foregroundColor(.blue)
+                            Text("SCP:")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundColor(.secondary)
+
+                            ForEach(scpMatches) { match in
+                                Button {
+                                    appState.quickLogDraft.callsign = match.callsign
+                                } label: {
+                                    Text(match.callsign)
+                                        .font(.system(size: 10, weight: match.isExact ? .bold : .medium, design: .monospaced))
+                                        .padding(.horizontal, 5)
+                                        .padding(.vertical, 1.5)
+                                        .background(match.isExact ? Color.green.opacity(0.18) : Color.blue.opacity(0.12), in: RoundedRectangle(cornerRadius: 3))
+                                        .foregroundColor(match.isExact ? .green : .blue)
+                                }
+                                .buttonStyle(.plain)
+                                .help("Click to select \(match.callsign)")
+                            }
+                        }
+                    }
                 }
 
                 // START UTC
