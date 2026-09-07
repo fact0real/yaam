@@ -161,6 +161,12 @@ struct YAAMApp: App {
                     appState.operatorDeskSection = 10
                 }
 
+                Button("Sync Center (LoTW & QRZ)") {
+                    appState.selectedTab = 5
+                    appState.operatorDeskSection = 2
+                }
+                .keyboardShortcut("s", modifiers: [.command, .shift])
+
                 Divider()
 
                 Button("Log Statistics") {
@@ -183,7 +189,14 @@ struct YAAMApp: App {
                 Button("Check for Updates...") { appState.checkForUpdates() }
             }
             CommandGroup(replacing: .help) {
-                Button("ADIF Log Processor Help") { openWindow(id: YAAMWindowID.help) }
+                Button("YAAM User Guide & Documentation") { openWindow(id: YAAMWindowID.help) }
+                    .keyboardShortcut("?", modifiers: .command)
+                
+                Divider()
+
+                Button("Reveal Activity Audit Log in Finder...") {
+                    AuditLogger.shared.revealInFinder()
+                }
             }
         }
         

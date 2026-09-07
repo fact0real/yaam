@@ -2181,9 +2181,12 @@ class AppState: NSObject, ObservableObject {
     func deleteSelectedRecords() {
         guard !selectedRecordIDs.isEmpty else { return }
         let idsToDelete = selectedRecordIDs
+        let count = idsToDelete.count
         qsoRecords.removeAll { idsToDelete.contains($0.id) }
         selectedRecordIDs.removeAll()
         filteredRecordsCache = nil
+        AuditLogger.shared.log(action: "DELETE_QSOS", details: "Deleted \(count) selected QSO record(s)", station: currentStationCallsign)
+        appendLog("Deleted \(count) selected QSO record(s).")
         objectWillChange.send()
         autoSaveActiveWorkspace()
     }
@@ -2248,6 +2251,7 @@ class AppState: NSObject, ObservableObject {
     }
 
     func appendLog(_ text: String) {
+        AuditLogger.shared.log(action: "ACTIVITY", details: text, station: currentStationCallsign)
         DispatchQueue.main.async {
             self.logText += "\(text)\n"
             let maxLogLines = 800
@@ -7166,7 +7170,10 @@ class AppState: NSObject, ObservableObject {
 
     func updateCell(recordID: UUID, header: String, newValue: String) {
         if let idx = qsoRecords.firstIndex(where: { $0.id == recordID }) {
+            let oldVal = qsoRecords[idx][header]
+            let call = qsoRecords[idx]["CALL"]
             qsoRecords[idx][header] = newValue
+            AuditLogger.shared.log(action: "EDIT_QSO", details: "Record #\(qsoRecords[idx].index) (\(call)) [\(header)] changed from '\(oldVal)' to '\(newValue)'", station: currentStationCallsign)
             appendLog("Updated record #\(qsoRecords[idx].index) [\(header)] ➔ '\(qsoRecords[idx][header])'")
             autoSaveActiveWorkspace()
         }

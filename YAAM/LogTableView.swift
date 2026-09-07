@@ -101,6 +101,14 @@ struct LogTableView: View {
                         Label("Consolidate & Merge Duplicates", systemImage: "arrow.triangle.merge")
                     }
                     .disabled(appState.qsoRecords.isEmpty || appState.isAnalyzingDuplicates)
+
+                    Divider()
+
+                    Button {
+                        AuditLogger.shared.revealInFinder()
+                    } label: {
+                        Label("Reveal Activity Audit Log in Finder...", systemImage: "doc.text.magnifyingglass")
+                    }
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "folder.badge.gearshape")
@@ -149,98 +157,120 @@ struct LogTableView: View {
                 Divider().frame(height: 14)
                 
                 Menu {
-                    Button {
-                        appState.confirmAndFetchCloudLogbook()
-                    } label: {
-                        Label("Download LoTW Cloud Logbook...", systemImage: "icloud.and.arrow.down.fill")
+                    Section("Sync & Cloud") {
+                        Button {
+                            appState.syncConfirmations()
+                        } label: {
+                            Label("Sync New QSLs (LoTW & QRZ)", systemImage: "arrow.clockwise.icloud")
+                        }
+                        .disabled(appState.isSyncingAPI || appState.qsoRecords.isEmpty)
+
+                        Button {
+                            showFullConfirmationSyncPrompt = true
+                        } label: {
+                            Label("Full QSL History Reconciliation...", systemImage: "arrow.triangle.2.circlepath")
+                        }
+                        .disabled(appState.isSyncingAPI || appState.qsoRecords.isEmpty)
+
+                        Button {
+                            appState.confirmAndFetchCloudLogbook()
+                        } label: {
+                            Label("Download LoTW Cloud Logbook...", systemImage: "icloud.and.arrow.down.fill")
+                        }
                     }
 
                     Divider()
 
-                    if appState.isEnriching {
-                        Button {
-                            appState.stopEnrichment()
-                        } label: {
-                            Label("Stop Enriching", systemImage: "stop.circle.fill")
+                    Section("Enrichment & Ranks") {
+                        if appState.isEnriching {
+                            Button {
+                                appState.stopEnrichment()
+                            } label: {
+                                Label("Stop Enriching", systemImage: "stop.circle.fill")
+                            }
+                        } else if !appState.selectedRecordIDs.isEmpty {
+                            Button {
+                                appState.enrichSelectedRecords()
+                            } label: {
+                                Label("Enrich Selected (\(appState.selectedRecordIDs.count))", systemImage: "wand.and.stars.inverse")
+                            }
+                            Button {
+                                appState.clearSelection()
+                            } label: {
+                                Label("Clear Row Selection", systemImage: "xmark.circle")
+                            }
+                        } else {
+                            Button {
+                                appState.enrichLogData()
+                            } label: {
+                                Label("Enrich Today's QSOs", systemImage: "wand.and.stars")
+                            }
+                            Button {
+                                appState.backfillMissingQRZEmailsNow()
+                            } label: {
+                                Label("Backfill Missing QRZ Names & Emails", systemImage: "person.text.rectangle")
+                            }
                         }
-                    } else if !appState.selectedRecordIDs.isEmpty {
-                        Button {
-                            appState.enrichSelectedRecords()
-                        } label: {
-                            Label("Enrich Selected (\(appState.selectedRecordIDs.count))", systemImage: "wand.and.stars.inverse")
-                        }
-                        Button {
-                            appState.clearSelection()
-                        } label: {
-                            Label("Clear Row Selection", systemImage: "xmark.circle")
-                        }
-                    } else {
-                        Button {
-                            appState.enrichLogData()
-                        } label: {
-                            Label("Enrich Today's QSOs", systemImage: "wand.and.stars")
-                        }
-                        Button {
-                            appState.backfillMissingQRZEmailsNow()
-                        } label: {
-                            Label("Backfill Missing QRZ Names & Emails", systemImage: "person.text.rectangle")
-                        }
-                    }
 
-                    let rankCandidateCount = appState.dailyRankBackfillCandidateCount
-                    Button {
-                        appState.fetchDailyQRZRankBackfill()
-                    } label: {
-                        Label("Daily Rank Backfill (\(rankCandidateCount))", systemImage: "chart.line.uptrend.xyaxis")
+                        let rankCandidateCount = appState.dailyRankBackfillCandidateCount
+                        Button {
+                            appState.fetchDailyQRZRankBackfill()
+                        } label: {
+                            Label("Daily Rank Backfill (\(rankCandidateCount))", systemImage: "chart.line.uptrend.xyaxis")
+                        }
+                        .disabled(appState.isEnriching || rankCandidateCount == 0 || appState.dailyRankRequestsRemaining == 0)
                     }
-                    .disabled(appState.isEnriching || rankCandidateCount == 0 || appState.dailyRankRequestsRemaining == 0)
 
                     Divider()
 
-                    let qslCount = appState.recentConfirmedQSLBatchCandidateCount()
-                    let reminderCount = appState.recentUnconfirmedReminderBatchRecipientCount()
-                    Button {
-                        appState.sendRecentConfirmedQSLCardsBatch()
-                    } label: {
-                        Label("Send Recent QSL Cards (\(qslCount))", systemImage: "rectangle.stack.badge.person.crop")
-                    }
-                    .disabled(qslCount == 0 || appState.isSendingBatchMail)
+                    Section("Batch QSL & Reminders") {
+                        let qslCount = appState.recentConfirmedQSLBatchCandidateCount()
+                        let reminderCount = appState.recentUnconfirmedReminderBatchRecipientCount()
+                        Button {
+                            appState.sendRecentConfirmedQSLCardsBatch()
+                        } label: {
+                            Label("Send Recent QSL Cards (\(qslCount))", systemImage: "rectangle.stack.badge.person.crop")
+                        }
+                        .disabled(qslCount == 0 || appState.isSendingBatchMail)
 
-                    Button {
-                        appState.sendRecentUnconfirmedReminderBatch()
-                    } label: {
-                        Label("Remind Recent Unconfirmed (\(reminderCount))", systemImage: "bell.badge")
+                        Button {
+                            appState.sendRecentUnconfirmedReminderBatch()
+                        } label: {
+                            Label("Remind Recent Unconfirmed (\(reminderCount))", systemImage: "bell.badge")
+                        }
+                        .disabled(reminderCount == 0 || appState.isSendingBatchMail)
                     }
-                    .disabled(reminderCount == 0 || appState.isSendingBatchMail)
 
                     Divider()
 
-                    Button {
-                        appState.forceQRZReLogin()
-                    } label: {
-                        Label("QRZ Login (2FA / WebKit)", systemImage: "lock.shield.fill")
-                    }
+                    Section("Tools & Services") {
+                        Button {
+                            appState.forceQRZReLogin()
+                        } label: {
+                            Label("QRZ Login (2FA / WebKit)", systemImage: "lock.shield.fill")
+                        }
 
-                    Button {
-                        appState.showQRZIncomingSheet = true
-                    } label: {
-                        Label("QRZ Incoming Requests", systemImage: "tray.and.arrow.down")
-                    }
+                        Button {
+                            appState.showQRZIncomingSheet = true
+                        } label: {
+                            Label("QRZ Incoming Requests", systemImage: "tray.and.arrow.down")
+                        }
 
-                    Button {
-                        appState.showConfirmationReconciliationSheet = true
-                    } label: {
-                        Label("Confirmation Reconciliation", systemImage: "checklist")
-                    }
+                        Button {
+                            appState.showConfirmationReconciliationSheet = true
+                        } label: {
+                            Label("Confirmation Reconciliation", systemImage: "checklist")
+                        }
 
-                    Button {
-                        appState.showLogAssistantSheet = true
-                    } label: {
-                        Label("Log Assistant", systemImage: "bubble.left.and.text.bubble.right")
+                        Button {
+                            appState.showLogAssistantSheet = true
+                        } label: {
+                            Label("Log Assistant", systemImage: "bubble.left.and.text.bubble.right")
+                        }
                     }
                 } label: {
                     HStack(spacing: 4) {
-                        if appState.isEnriching || appState.isSendingBatchMail {
+                        if appState.isEnriching || appState.isSendingBatchMail || appState.isSyncingAPI {
                             ProgressView()
                                 .scaleEffect(0.55)
                                 .frame(width: 14, height: 14)
@@ -256,7 +286,7 @@ struct LogTableView: View {
                 .menuStyle(.borderlessButton)
                 .fixedSize(horizontal: true, vertical: false)
                 .disabled(appState.isEnriching || appState.isSendingBatchMail)
-                .help("Log actions: Cloud logbook, QRZ enrichment, rank backfill, QSL batch mail, and reconciliation")
+                .help("Log actions: Sync QSLs, QRZ enrichment, rank backfill, QSL batch mail, and tools")
 
                 if !appState.selectedRecordIDs.isEmpty {
                     Menu {
@@ -551,129 +581,7 @@ struct LogTableView: View {
                     .help(appState.filterCriteria.useSentEmail ? "Showing only QSOs with sent emails. Click to reset." : "Filter log table to show \(emailedCount) QSOs with sent emails")
                 }
                 
-                Divider().frame(height: 14)
-                
-                // MARK: - Unified Sync Menu
-                Menu {
-                    Button {
-                        appState.syncConfirmations()
-                    } label: {
-                        Label("Sync New QSLs (LoTW & QRZ)", systemImage: "arrow.clockwise.icloud")
-                    }
-
-                    Button {
-                        showFullConfirmationSyncPrompt = true
-                    } label: {
-                        Label("Full QSL History Reconciliation...", systemImage: "arrow.triangle.2.circlepath")
-                    }
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "arrow.clockwise.icloud")
-                            .foregroundColor(appState.isSyncingAPI ? .gray : .cyan)
-                        Text("Sync QSLs")
-                            .font(.caption)
-                            .fontWeight(.semibold)
-                    }
-                }
-                .menuStyle(.borderlessButton)
-                .fixedSize(horizontal: true, vertical: false)
-                .disabled(appState.isSyncingAPI || appState.qsoRecords.isEmpty)
-                .help("Download only new LoTW and QRZ confirmations (or reconcile full history)")
-
-                Button(action: { appState.selectedTab = 6 }) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "chart.bar.fill")
-                            .foregroundColor(.purple)
-                        Text("Stats")
-                            .font(.caption)
-                            .fontWeight(.semibold)
-                    }
-                }
-                .buttonStyle(.borderless)
-                .fixedSize(horizontal: true, vertical: false)
-                .help("Switch to Log Statistics & Analytics Tab")
-                
-                Divider().frame(height: 14)
-                
-                HStack(spacing: 8) {
-                    HStack(spacing: 3) {
-                        Image(systemName: "archivebox.fill")
-                            .foregroundStyle(.secondary)
-                        Text(appState.qsoRecords.count.formatted())
-                            .font(.caption.monospacedDigit().bold())
-                        Text("QSOs")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                    .lineLimit(1)
-                    .fixedSize(horizontal: true, vertical: false)
-                    .help("\(appState.qsoRecords.count.formatted()) QSOs in the active station log")
-                    
-                    HStack(spacing: 3) {
-                        Image(systemName: "globe")
-                            .foregroundStyle(.secondary)
-                        Text(appState.availableCountries.count.formatted())
-                            .font(.caption.monospacedDigit().bold())
-                        Text("DXCC")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                    .lineLimit(1)
-                    .fixedSize(horizontal: true, vertical: false)
-                }
-                
                 Spacer(minLength: 4)
-                
-                if appState.isLoading || appState.isSyncingAPI || (appState.isEnriching && !appState.isDailyRankBackfillRunning) {
-                    ProgressView()
-                        .scaleEffect(0.6)
-                        .padding(.trailing, 4)
-                }
-                
-                if appState.isDailyRankBackfillRunning {
-                    ProgressView(
-                        value: Double(appState.dailyRankBackfillCompleted),
-                        total: Double(max(1, appState.dailyRankBackfillTotal))
-                    )
-                    .frame(width: 80)
-
-                    Text(appState.dailyRankBackfillStatus)
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .frame(maxWidth: 150)
-                        .help(appState.dailyRankBackfillStatus)
-
-                    Button {
-                        appState.stopEnrichment()
-                    } label: {
-                        HStack(spacing: 3) {
-                            Image(systemName: "stop.circle.fill")
-                                .foregroundColor(.red)
-                            Text("Stop")
-                                .font(.caption2.bold())
-                                .foregroundColor(.red)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .help("Stop QRZ rank lookup and save current progress")
-                } else if !appState.dailyRankBackfillStatus.isEmpty {
-                    Text(appState.dailyRankBackfillStatus)
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .frame(maxWidth: 150)
-                        .help(appState.dailyRankBackfillStatus)
-                } else {
-                    Text("Select rows to enrich specific QSOs")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .frame(maxWidth: 180)
-                }
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
@@ -752,10 +660,58 @@ struct LogTableView: View {
             
             Divider()
             
-            HStack {
+            HStack(spacing: 12) {
                 Text(appState.loadedFileName.isEmpty ? "Ready" : "File: \(appState.loadedFileName)")
                     .font(.caption)
                     .foregroundColor(.secondary)
+                    .lineLimit(1)
+                
+                if appState.isDailyRankBackfillRunning {
+                    HStack(spacing: 6) {
+                        ProgressView(
+                            value: Double(appState.dailyRankBackfillCompleted),
+                            total: Double(max(1, appState.dailyRankBackfillTotal))
+                        )
+                        .frame(width: 70)
+                        
+                        Text(appState.dailyRankBackfillStatus)
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                        
+                        Button {
+                            appState.stopEnrichment()
+                        } label: {
+                            HStack(spacing: 2) {
+                                Image(systemName: "stop.circle.fill")
+                                    .foregroundColor(.red)
+                                Text("Stop")
+                                    .font(.caption2.bold())
+                                    .foregroundColor(.red)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .help("Stop QRZ rank lookup and save current progress")
+                    }
+                } else if appState.isLoading || appState.isSyncingAPI || (appState.isEnriching && !appState.isDailyRankBackfillRunning) {
+                    HStack(spacing: 4) {
+                        ProgressView()
+                            .scaleEffect(0.55)
+                            .frame(width: 12, height: 12)
+                        if !appState.dailyRankBackfillStatus.isEmpty {
+                            Text(appState.dailyRankBackfillStatus)
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                                .lineLimit(1)
+                        }
+                    }
+                } else if !appState.dailyRankBackfillStatus.isEmpty {
+                    Text(appState.dailyRankBackfillStatus)
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                }
                 
                 Spacer()
                 
@@ -764,18 +720,24 @@ struct LogTableView: View {
                         .font(.system(.caption, design: .monospaced))
                         .bold()
                         .foregroundColor(.blue)
-                        .padding(.trailing, 8)
+                }
+                
+                HStack(spacing: 3) {
+                    Image(systemName: "globe")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                    Text("\(appState.availableCountries.count.formatted()) DXCC")
+                        .font(.caption.monospacedDigit().bold())
+                        .foregroundStyle(.secondary)
                 }
                 
                 if appState.filterCriteria.isActive || !appState.searchText.isEmpty {
-                    Text("Filtered: \(visibleRecords.count) / Total: \(appState.qsoRecords.count)")
-                        .font(.system(.caption, design: .monospaced))
-                        .bold()
+                    Text("Filtered: \(visibleRecords.count.formatted()) / Total: \(appState.qsoRecords.count.formatted()) QSOs")
+                        .font(.caption.monospacedDigit().bold())
                         .foregroundColor(.orange)
                 } else {
-                    Text("QSOs: \(appState.qsoRecords.count)")
-                        .font(.system(.caption, design: .monospaced))
-                        .bold()
+                    Text("\(appState.qsoRecords.count.formatted()) QSOs")
+                        .font(.caption.monospacedDigit().bold())
                 }
             }
             .padding(.horizontal, 12)
@@ -1447,7 +1409,7 @@ struct LogTableView: View {
                             .padding(.horizontal, 4)
                             .background(Color.black.opacity(0.05))
                             .cornerRadius(4)
-                            .frame(maxWidth: .infinity, alignment: .trailing)
+                            .frame(maxWidth: .infinity, alignment: .center)
                     }
                     else if header == "GRIDSQUARE" || header == "GRID" {
                         let fullGrid = val.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -2075,9 +2037,9 @@ struct LogTableView: View {
         header == "CALL" || header == "NAME" || header == "COUNTRY" || header == "QTH" || header == "COMMENT" || header == "PROP_MODE" || header == "SAT_NAME" || header == "APP_YAAM_LAST_EMAIL"
     }
 
-    /// Columns that are numbers and right-aligned: Frequency, RST reports, Ranks, and Zones
+    /// Columns that are numbers and right-aligned: Frequency, RST reports, and Zones
     private func isRightAlignedColumn(_ header: String) -> Bool {
-        header == "FREQ" || header == "FREQ_RX" || header == "RST_SENT" || header == "RST_RCVD" || header == "DXCC" || header == "CQZ" || header == "ITUZ" || header.hasPrefix("RANK_")
+        header == "FREQ" || header == "FREQ_RX" || header == "RST_SENT" || header == "RST_RCVD" || header == "DXCC" || header == "CQZ" || header == "ITUZ"
     }
 
     private func isCompactCenteredColumn(_ header: String) -> Bool {

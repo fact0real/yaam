@@ -19,15 +19,13 @@ extension AppState {
         let externalPath = defaults.string(forKey: "externalADIFLogPath") ?? defaults.string(forKey: "sdrControlLogPath") ?? ""
         let sdrPath = defaults.string(forKey: "sdrControlLogbookPath") ?? ""
         let lotwUsername = (defaults.string(forKey: "lotwUsername") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        let qrzUsername = (defaults.string(forKey: "qrzUsername") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        let hasQRZKeyHint = activeStationProfileID.map {
-            CredentialVault.hasStationQRZAPIKeyHint(profileID: $0)
-        } ?? false
+        let lotwPassword = CredentialVault.value(for: .lotwPassword)
+        let qrzKey = activeQRZAPIKey
         let configured: [SyncSource: Bool] = [
             .externalADIF: !externalPath.isEmpty && FileManager.default.fileExists(atPath: externalPath),
             .sdrControl: (!sdrPath.isEmpty && FileManager.default.fileExists(atPath: sdrPath)) || defaults.data(forKey: "sdrControlLogbookBookmark") != nil,
-            .lotw: !lotwUsername.isEmpty,
-            .qrz: !qrzUsername.isEmpty || hasQRZKeyHint
+            .lotw: !lotwUsername.isEmpty && !lotwPassword.isEmpty,
+            .qrz: !qrzKey.isEmpty
         ]
 
         syncServiceStatuses = SyncSource.allCases.map { source in
@@ -107,7 +105,27 @@ extension AppState {
     func runSync(_ source: SyncSource) {
         guard !isUnifiedSyncRunning else { return }
         refreshSyncServiceConfiguration()
-        guard syncServiceStatuses.first(where: { $0.source == source })?.configured == true else { return }
+        guard syncServiceStatuses.first(where: { $0.source == source })?.configured == true else {
+            switch source {
+            case .qrz:
+                alertTitle = "QRZ Logbook API Key Required"
+                alertMessage = "A QRZ Logbook API key is required to synchronize confirmations for station \(currentStationCallsign.isEmpty ? "your station" : currentStationCallsign).\n\nPlease go to Settings > Stations, select this station profile, and enter your QRZ Logbook API key."
+                showAlert = true
+            case .lotw:
+                alertTitle = "LoTW Credentials Required"
+                alertMessage = "LoTW username and password are required. Please configure them in Settings > LoTW."
+                showAlert = true
+            case .externalADIF:
+                alertTitle = "External ADIF Path Required"
+                alertMessage = "Please select a valid external ADIF log file in Operator Desk."
+                showAlert = true
+            case .sdrControl:
+                alertTitle = "SDR-Control Path Required"
+                alertMessage = "Please locate your SmartSDR / SDR-Control logbook file in Settings or Operator Desk."
+                showAlert = true
+            }
+            return
+        }
 
         switch source {
         case .externalADIF:

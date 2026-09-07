@@ -191,10 +191,23 @@ struct StationProfilesSettingsView: View {
                     Section("Service Identity") {
                         TextField("LoTW station location", text: $draft.lotwStationLocation)
                         TextField("eQSL QTH nickname", text: $draft.eqslQTHNickname)
-                        SecureField("New QRZ Logbook API key (blank keeps the saved key)", text: $qrzAPIKey)
-                        Label("The existing key is not read when Settings opens. Enter a new value only to replace it for this station.", systemImage: "lock.fill")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                        HStack {
+                            SecureField("New QRZ Logbook API key (blank keeps the saved key)", text: $qrzAPIKey)
+                            if !CredentialVault.stationQRZAPIKey(profileID: draft.id).isEmpty {
+                                Image(systemName: "checkmark.shield.fill")
+                                    .foregroundStyle(.green)
+                                    .help("A QRZ Logbook API key is securely saved for this station.")
+                            }
+                        }
+                        if !CredentialVault.stationQRZAPIKey(profileID: draft.id).isEmpty {
+                            Label("QRZ Logbook API key is securely saved for this station. Enter a new value only to replace it.", systemImage: "checkmark.circle.fill")
+                                .font(.caption)
+                                .foregroundStyle(.green)
+                        } else {
+                            Label("No QRZ Logbook API key configured for this station. Enter your QRZ API key to enable QRZ Sync.", systemImage: "exclamationmark.triangle.fill")
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                        }
                     }
                 }
                 .formStyle(.grouped)

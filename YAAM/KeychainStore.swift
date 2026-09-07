@@ -107,11 +107,12 @@ nonisolated enum KeychainStore {
                    let decryptedData = try? AES.GCM.open(sealedBox, using: key),
                    let dictionary = try? JSONDecoder().decode([String: Data].self, from: decryptedData) {
                     self.memoryVault = dictionary
+                    migrateFromUserDefaultsSilently()
                     return
                 }
             }
 
-            // 3. One-time silent migration from legacy UserDefaults storage
+            // 3. Fallback migrations if fresh or empty
             migrateFromUserDefaultsSilently()
         }
 

@@ -191,6 +191,11 @@ struct HelpView: View {
                 icon: "shield.lefthalf.filled",
                 color: .blue
             )
+            HelpScreenshotCard(
+                imageName: "help_log_table",
+                title: "Master Log Grid & Workspace",
+                caption: "Decluttered sub-toolbar, live DXCC counters, and centered QRZ leaderboard ranks."
+            )
             HelpFlow(steps: [
                 HelpFlowStep(icon: "antenna.radiowaves.left.and.right", title: "Choose a station", detail: "Select the callsign profile in the Log Table toolbar."),
                 HelpFlowStep(icon: "square.and.arrow.down", title: "Import or sync", detail: "Open ADIF or SmartSDR directly, or use a configured live source."),
@@ -235,6 +240,11 @@ struct HelpView: View {
                 icon: "tablecells",
                 color: .blue
             )
+            HelpScreenshotCard(
+                imageName: "help_log_table",
+                title: "High-Performance Grid & Sub-Toolbar",
+                caption: "Reorganized actions, instant search, custom column sets, and centered Leaderboard ranks."
+            )
             HelpFlow(steps: [
                 HelpFlowStep(icon: "magnifyingglass", title: "Find", detail: "Use the toolbar search to match a callsign, country, grid, email, or any visible ADIF value."),
                 HelpFlowStep(icon: "line.3.horizontal.decrease.circle", title: "Filter", detail: "Open Filters to narrow the log by UTC date, band, mode, callsign, country, confirmation state, and more."),
@@ -243,6 +253,8 @@ struct HelpView: View {
             ])
             helpSection("Columns and Stored Data") {
                 HelpDefinition(icon: "eye.slash", title: "Hidden is not deleted", text: "Operational and service fields can be hidden by default to keep the table readable. They remain in the protected database and are available from Columns whenever needed.")
+                HelpDefinition(icon: "text.aligncenter", title: "Center-Aligned Leaderboard Ranks", text: "Band Rank, DXCC Rank, and QSO Rank columns are center-aligned in both headers and table cells for clean and balanced presentation.", color: .orange)
+                HelpDefinition(icon: "menubar.rectangle", title: "Streamlined Sub-Toolbar", text: "Redundant buttons have been eliminated, QSL sync options are unified into Log Actions, and live QSO/DXCC totals reside comfortably in the footer status bar.", color: .blue)
                 HelpDefinition(icon: "envelope", title: "Contact and QRZ data", text: "EMAIL, QRZ_URL, and rank columns remain visible by default. Other service bookkeeping fields stay available without crowding daily operation.", color: .blue)
                 HelpDefinition(icon: "slider.horizontal.3", title: "Your layout persists", text: "Column visibility is saved for the active station profile and is restored when changing tabs or reopening YAAM.")
                 HelpDefinition(icon: "number.square", title: "Filtered UTC sequence", text: "A temporary number appears beside each row only while Advanced Filters are active. Number 1 is the newest visible QSO by UTC date and time; Reset Filters removes these view-only numbers.", color: .blue)
@@ -273,6 +285,11 @@ struct HelpView: View {
                 icon: "plus.circle.fill",
                 color: .blue
             )
+            HelpScreenshotCard(
+                imageName: "help_operator_desk",
+                title: "Operator Desk & Studio Hub",
+                caption: "Two-way confirmation status matrix, live dropzone, and multi-service synchronization."
+            )
             HelpFlow(steps: [
                 HelpFlowStep(icon: "character.cursor.ibeam", title: "Enter callsign", detail: "YAAM normalizes the call and searches QRZ, HAMQTH, and local history."),
                 HelpFlowStep(icon: "waveform.path", title: "Set operation", detail: "Enter frequency; band and common digital submode are inferred."),
@@ -298,6 +315,13 @@ struct HelpView: View {
                 icon: "dot.radiowaves.left.and.right",
                 color: .orange
             )
+
+            HelpScreenshotCard(
+                imageName: "help_dx_cluster",
+                title: "Live DX Cluster",
+                caption: "Real-time spot monitoring, band filters, needed entity alerts, and 1-click Quick Log fill."
+            )
+
             HelpFlow(steps: [
                 HelpFlowStep(icon: "network", title: "Connect", detail: "Set a cluster host and port; YAAM sends the active station callsign when prompted."),
                 HelpFlowStep(icon: "line.3.horizontal.decrease.circle", title: "Focus", detail: "Filter by need, band, callsign, comment, or watchlist."),
@@ -378,6 +402,13 @@ struct HelpView: View {
                 icon: "flag.checkered",
                 color: .orange
             )
+
+            HelpScreenshotCard(
+                imageName: "help_contest",
+                title: "Contest Operations & Scoring Engine",
+                caption: "CQ WW, WPX, ARRL DX presets, Cabrillo 3.0 robot headers, and live serial numbering."
+            )
+
             HelpFlow(steps: [
                 HelpFlowStep(icon: "slider.horizontal.3", title: "Define", detail: "Enter the official contest ID, sent exchange, operator, and category."),
                 HelpFlowStep(icon: "play.fill", title: "Start", detail: "YAAM freezes the UTC start and prepares serial 1."),
@@ -908,6 +939,13 @@ struct HelpView: View {
                 icon: "chart.bar.doc.horizontal.fill",
                 color: .purple
             )
+
+            HelpScreenshotCard(
+                imageName: "help_statistics",
+                title: "Log Statistics & Confirmation Breakdown",
+                caption: "DXCC country matrix, 4-char grid square progress, and confirmation follow-up triage."
+            )
+
             HelpFlow(steps: [
                 HelpFlowStep(icon: "macwindow", title: "Open", detail: "Choose Tools > Log Statistics or press Command-T. Statistics opens as an independent window, so it can stay beside the Log Table and be resized for the amount of detail you need."),
                 HelpFlowStep(icon: "chart.bar.xaxis", title: "Analyze", detail: "Review confirmation rate, unique callsigns and modes, provider coverage, countries, bands, grids, and progress over time."),
@@ -979,12 +1017,25 @@ struct HelpView: View {
                 icon: "arrow.triangle.2.circlepath",
                 color: .green
             )
+
+            HelpScreenshotCard(
+                imageName: "help_sync_center",
+                title: "Synchronization Health & Multi-Source Sync",
+                caption: "One-click 'Sync All' for ARRL LoTW, QRZ Logbook, SDR-Control, Wavelog, and automatic scheduling."
+            )
+
             HelpFlow(steps: [
                 HelpFlowStep(icon: "gearshape", title: "Configure", detail: "Choose live ADIF or SDR files and add LoTW or QRZ credentials."),
                 HelpFlowStep(icon: "arrow.triangle.2.circlepath", title: "Sync All", detail: "YAAM processes local sources first, then online confirmations."),
                 HelpFlowStep(icon: "checkmark.shield", title: "Verify", detail: "Each source reports success, changes, duration, or a specific failure."),
                 HelpFlowStep(icon: "clock.arrow.circlepath", title: "Schedule", detail: "Enable a single automatic interval for configured sources.")
             ])
+            helpSection("Downloading Confirmations from QRZ & LoTW") {
+                HelpInstruction(number: 1, title: "Open Sync Center", text: "Click 'Operator Desk' in the main top tab bar, then select 'Sync Center' from the panel bar (or choose Tools > Sync Center / press ⌘⇧S).")
+                HelpInstruction(number: 2, title: "One-Click 'Sync All'", text: "Press the prominent blue 'Sync All' button in the top right corner. YAAM immediately contacts ARRL LoTW and QRZ Logbook to download all new confirmations.")
+                HelpInstruction(number: 3, title: "Individual Provider Sync", text: "To pull confirmations from only one source, locate the LoTW or QRZ Logbook card and click the circular refresh icon (🔄) on the bottom right of that card.")
+                HelpInstruction(number: 4, title: "Hands-Free Auto Sync", text: "Toggle 'Automatic sync' at the bottom and set an interval (e.g., 30 minutes) so YAAM automatically fetches new confirmations in the background.")
+            }
             helpSection("Source Cards") {
                 HelpDefinition(icon: "doc.text.fill", title: "External ADIF", text: "Watches the configured logger file and merges only meaningful additions or updates.")
                 HelpDefinition(icon: "radio.fill", title: "SDR-Control", text: "Reads SmartSDR.smartsdrlog directly, ignores entries marked Deleted, normalizes date/time fields, and preserves the SDR Control record ID. When SDR Control stores the same QSO once at a rounded minute/frequency and once with precise seconds/frequency, YAAM keeps the precise identity and merges the richer details and confirmations into it.")
@@ -1003,13 +1054,24 @@ struct HelpView: View {
 
     private var qslHub: some View {
         Group {
-            helpHeader(title: "Two-way QSL Hub", subtitle: "Send QSOs through official service paths, retain every pending job, and bring confirmations back without overwriting the log.", icon: "arrow.left.arrow.right.circle.fill", color: .green)
+            helpHeader(title: "Two-way QSL Hub & Dispatcher", subtitle: "Send QSOs through official service paths, dispatch personalized 2-page QSL cards via email, and bring confirmations back safely.", icon: "arrow.left.arrow.right.circle.fill", color: .green)
+            HelpScreenshotCard(
+                imageName: "help_qsl_dispatcher",
+                title: "Today's Confirmed QSL Dispatcher",
+                caption: "Automated batch delivery of personalized 2-page QSL PDFs, live card previews, and anti-duplicate safeguards."
+            )
             HelpFlow(steps: [
-                HelpFlowStep(icon: "scope", title: "Choose scope", detail: "Use selected rows, 24 hours, unsent records, or the full station log."),
-                HelpFlowStep(icon: "checkmark.circle", title: "Choose services", detail: "Enable LoTW, QRZ, eQSL, or Club Log for this batch."),
-                HelpFlowStep(icon: "tray.full", title: "Queue", detail: "YAAM saves one durable delivery job per QSO and service."),
-                HelpFlowStep(icon: "paperplane.fill", title: "Deliver", detail: "Process controlled batches and inspect success, retry, or blocked status.")
+                HelpFlowStep(icon: "checkmark.seal.fill", title: "Detect Confirmed", detail: "YAAM identifies newly confirmed QSOs from today automatically."),
+                HelpFlowStep(icon: "paperplane.fill", title: "One-Click Dispatch", detail: "Click 'Send QSLs' in the toolbar to review all un-emailed contacts."),
+                HelpFlowStep(icon: "doc.richtext", title: "Live Preview", detail: "Inspect high-resolution 2-page personalized QSL cards and email bodies."),
+                HelpFlowStep(icon: "envelope.badge.shield.half.filled", title: "Safe Send", detail: "Delivers via SMTP with built-in duplicate send protection.")
             ])
+            helpSection("Today's Confirmed QSL Dispatcher") {
+                HelpDefinition(icon: "paperplane.circle.fill", title: "Batch PDF Generation & Email", text: "Generates high-resolution 2-page personalized QSL cards (artwork + confirmation certificate) and delivers them directly to contact emails with zero manual typing.", color: .green)
+                HelpDefinition(icon: "shield.lefthalf.filled", title: "Duplicate Delivery Prevention", text: "Contacts already emailed are visually badged ('Already Sent') and unselected by default, preventing accidental repeat emails while keeping full audit history.", color: .blue)
+                HelpDefinition(icon: "flag.fill", title: "Complete Country Flag Support", text: "Accurate flag emojis for all world DXCC entities, including Taiwan, European/Asiatic Russia, Kosovo, and remote island entities.", color: .orange)
+                HelpDefinition(icon: "doc.on.doc", title: "PDF & Bureau Export", text: "Export all generated cards to a local folder or queue them for physical bureau printout.", color: .indigo)
+            }
             helpSection("Service Paths") {
                 HelpDefinition(icon: "checkmark.seal", title: "LoTW through TQSL", text: "YAAM creates ADIF and invokes your installed TrustedQSL command-line tool. Set the station location in the active Station Profile.")
                 HelpDefinition(icon: "globe.americas", title: "QRZ Logbook", text: "The official INSERT API accepts one QSO per request, so YAAM keeps the queue durable and sends records individually.")
@@ -1029,6 +1091,11 @@ struct HelpView: View {
     private var awards: some View {
         Group {
             helpHeader(title: "Awards: Online and Local Evidence", subtitle: "Review QRZ achievements, LoTW-confirmed progress, and YAAM's local planning estimates without confusing evidence with an issuer's final decision.", icon: "medal.fill", color: .orange)
+            HelpScreenshotCard(
+                imageName: "help_awards",
+                title: "Awards & Achievement Dashboard",
+                caption: "Comprehensive LoTW milestones (DXCC, WAS, VUCC) and authenticated QRZ achievements."
+            )
             HelpFlow(steps: [
                 HelpFlowStep(icon: "antenna.radiowaves.left.and.right", title: "Worked", detail: "A unique entity, state, grid, park, island, or summit appears in the log."),
                 HelpFlowStep(icon: "checkmark.circle", title: "Confirmed", detail: "At least one accepted confirmation method exists in the QSO."),
@@ -1128,19 +1195,29 @@ struct HelpView: View {
                 HelpFlowStep(icon: "clock.arrow.circlepath", title: "Choose version", detail: "Review date, reason, and file size."),
                 HelpFlowStep(icon: "arrow.counterclockwise", title: "Restore", detail: "Profiles and QSOs reload together after validation.")
             ])
-            helpCallout(icon: "internaldrive.fill", title: "Stored locally", text: "Restore points remain in YAAM's Application Support folder and are never uploaded by the backup feature.", color: .blue)
+            helpSection("Activity Audit Trail") {
+                HelpDefinition(icon: "doc.text.magnifyingglass", title: "Comprehensive Audit Log", text: "Every user and automated action is permanently recorded in activity_audit.log with ISO-8601 timestamps, operation types, targets, and result statuses.")
+                HelpDefinition(icon: "arrow.triangle.2.circlepath.circle", title: "Smart Rotation (15 MB)", text: "To prevent disk bloating, the audit log automatically rotates when it reaches 15 MB, keeping up to 5 historical compressed archives.")
+                HelpDefinition(icon: "magnifyingglass.circle.fill", title: "One-Click Finder Inspection", text: "Select 'Reveal Activity Audit Log in Finder...' from the Help or Tools menu to immediately locate and inspect your audit trail.")
+            }
+            helpCallout(icon: "internaldrive.fill", title: "Stored locally", text: "Restore points and activity audit logs remain strictly in YAAM's sandboxed Application Support folder and are never uploaded to any remote server.", color: .blue)
         }
     }
 
     private var credentials: some View {
         Group {
-            helpHeader(title: "Credentials & Keychain", subtitle: "Passwords, API keys, and QRZ browser session cookies are protected by the macOS credential store instead of preferences files.", icon: "lock.shield.fill", color: .green)
+            helpHeader(title: "Credentials & Keychain", subtitle: "Passwords, API keys, and QRZ browser session cookies are protected by the macOS credential store and Hardware-Bound AES-256-GCM encryption.", icon: "lock.shield.fill", color: .green)
             HelpFlow(steps: [
                 HelpFlowStep(icon: "rectangle.and.pencil.and.ellipsis", title: "Enter", detail: "Add the secret in the relevant Settings tab."),
-                HelpFlowStep(icon: "key.fill", title: "Protect", detail: "Press Save once to write it to this Mac's Keychain."),
-                HelpFlowStep(icon: "network", title: "Use", detail: "The value is read only when contacting that service."),
-                HelpFlowStep(icon: "trash.slash", title: "Keep private", detail: "It is not written to preferences or exported with ADIF.")
+                HelpFlowStep(icon: "key.fill", title: "Protect", detail: "Press Save once to write it to macOS Keychain and Secure Vault."),
+                HelpFlowStep(icon: "network", title: "Use", detail: "The value is decrypted in memory only when contacting that service."),
+                HelpFlowStep(icon: "trash.slash", title: "Keep private", detail: "It is never written to plain text preferences or exported with ADIF.")
             ])
+            helpSection("Hardware-Bound AES-256-GCM Secure Vault") {
+                HelpDefinition(icon: "cpu", title: "Bound to Mac Hardware", text: "Sensitive tokens and credentials are encrypted using AES-256-GCM with a key derived from your Mac's unique hardware platform UUID (IOPlatformUUID). Even if database or setting files are copied to another computer, they cannot be decrypted.")
+                HelpDefinition(icon: "shield.lefthalf.filled", title: "Cryptographic Salt & POSIX Permissions", text: "Each installation generates a unique 256-bit cryptographic salt stored with POSIX 0o600 permissions (user-read/write only), safeguarding credentials against unauthorized access.")
+                HelpDefinition(icon: "key.viewfinder", title: "Dual Keychain Fallback", text: "YAAM pairs macOS Keychain Services with the Hardware-Bound Vault for maximum reliability across sandboxed environments and headless operations.")
+            }
             helpSection("Credential Scope") {
                 HelpDefinition(icon: "person.crop.circle", title: "Account-wide", text: "QRZ login password, LoTW password, HAMQTH password, and SMTP app password.")
                 HelpDefinition(icon: "chart.line.uptrend.xyaxis", title: "QRZ Rank Service", text: "Leaderboard and log enrichment use a personal API token from qrz-rank.asis.sh. Generate it in the QRZ Rank panel, then save it in Settings > Rank Service. The token is stored in Keychain and is separate from your QRZ.com credentials.")
@@ -1178,6 +1255,13 @@ struct HelpView: View {
                 icon: "square.and.arrow.up.circle.fill",
                 color: .blue
             )
+
+            HelpScreenshotCard(
+                imageName: "help_convert_export",
+                title: "Log Conversion & Multi-Format Export",
+                caption: "Export to Excel/CSV, Cabrillo 3.0 contest format, ADIF 3.1.4, and interactive HTML."
+            )
+
             HelpFlow(steps: [
                 HelpFlowStep(icon: "tray.full.fill", title: "1. Select Source", detail: "Choose External File (.adi, .smartsdrlog) or active YAAM SQLite Database."),
                 HelpFlowStep(icon: "slider.horizontal.3", title: "2. Set Filters", detail: "Optionally apply UTC Contest window, Band, or Mode filters."),
@@ -1206,6 +1290,13 @@ struct HelpView: View {
                 icon: "globe.americas.fill",
                 color: .cyan
             )
+
+            HelpScreenshotCard(
+                imageName: "help_globe",
+                title: "3D Globe & GridTracker Workspace",
+                caption: "Maidenhead grid overlays, real-time grayline terminator, and great-circle QSO paths."
+            )
+
             HelpFlow(steps: [
                 HelpFlowStep(icon: "globe.americas", title: "Projection", detail: "Switch between 3D Spherical Globe, 2D Equirectangular, or Mercator views."),
                 HelpFlowStep(icon: "sun.max.fill", title: "Solar Terminator", detail: "Real-time grayline calculation showing day/night boundaries and solar subpoint."),
@@ -1251,6 +1342,13 @@ struct HelpView: View {
                 icon: "chart.line.uptrend.xyaxis",
                 color: .purple
             )
+
+            HelpScreenshotCard(
+                imageName: "help_leaderboard",
+                title: "Leaderboard & 360° Radar",
+                caption: "Rival performance trajectories, rank percentiles, and band coverage."
+            )
+
             HelpFlow(steps: [
                 HelpFlowStep(icon: "person.crop.circle.badge.plus", title: "Add Rival", detail: "Enter competitor callsign, baseline confirmed QSOs, and monthly rate."),
                 HelpFlowStep(icon: "chart.xyaxis.line", title: "Progression Curve", detail: "Compare your station's growth against all rivals over -12m to +12m timelines."),
@@ -1446,5 +1544,49 @@ struct FAQItem: View {
         .focusEffectDisabled()
         .padding(.vertical, 8)
         Divider()
+    }
+}
+
+struct HelpScreenshotCard: View {
+    let imageName: String
+    let title: String
+    let caption: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Image(imageName)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(Color.primary.opacity(0.12), lineWidth: 1)
+                )
+                .shadow(color: Color.black.opacity(0.15), radius: 6, x: 0, y: 3)
+
+            HStack(spacing: 6) {
+                Image(systemName: "camera.viewfinder")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.primary)
+                Text("— \(caption)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 4)
+            .padding(.bottom, 2)
+        }
+        .padding(8)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color(NSColor.controlBackgroundColor).opacity(0.6))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(Color(NSColor.separatorColor).opacity(0.3), lineWidth: 0.8)
+        )
+        .padding(.vertical, 6)
     }
 }

@@ -557,6 +557,11 @@ struct ContentView: View {
             appState.showStatsSheet = false
             appState.selectedTab = 6
         }
+        .alert(appState.alertTitle, isPresented: $appState.showAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(appState.alertMessage)
+        }
     }
 
     // MARK: - Helper Functions
@@ -1266,6 +1271,8 @@ private struct TabButton: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .focusable(false)
+        .focusEffectDisabled()
         .animation(.easeInOut(duration: 0.12), value: isSelected)
         .animation(.easeInOut(duration: 0.12), value: isHovered)
         .onHover { hovering in

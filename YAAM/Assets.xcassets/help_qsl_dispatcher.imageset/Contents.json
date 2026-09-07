@@ -1,0 +1,12 @@
+{
+  "images" : [
+    {
+      "filename" : "help_qsl_dispatcher.png",
+      "idiom" : "universal"
+    }
+  ],
+  "info" : {
+    "author" : "xcode",
+    "version" : 1
+  }
+}
