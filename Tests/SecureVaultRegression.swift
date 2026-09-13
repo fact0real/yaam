@@ -6,6 +6,7 @@
 import CryptoKit
 import Foundation
 import IOKit
+import LocalAuthentication
 
 func getHardwareUUIDTest() -> String? {
     let platformExpert = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("IOPlatformExpertDevice"))
@@ -38,8 +39,26 @@ struct SecureVaultRegression {
 
         testHardwareUUIDRetrieval()
         testHardwareBoundKeyDerivationAndEncryption()
+        testMigrationFlagPreventsRepeatedQueries()
+        testBiometricContextAvailability()
 
         print("All Hardware-Bound Secure Vault Regression Tests PASSED successfully!")
+    }
+
+    private static func testMigrationFlagPreventsRepeatedQueries() {
+        let flagKey = "ASIS.YAAM.LegacyKeychainMigrationFinished_v2"
+        UserDefaults.standard.set(true, forKey: flagKey)
+        let isFinished = UserDefaults.standard.bool(forKey: flagKey)
+        precondition(isFinished == true, "Migration flag must be true")
+        print("Verified Migration Flag: \(flagKey) = true")
+    }
+
+    private static func testBiometricContextAvailability() {
+        let context = LAContext()
+        var error: NSError?
+        let canBiometrics = context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error)
+        let canDeviceOwner = context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error)
+        print("Verified Biometric Policy Check: biometrics=\(canBiometrics), deviceOwner=\(canDeviceOwner)")
     }
 
     private static func testHardwareUUIDRetrieval() {

@@ -51,6 +51,7 @@ public struct RigControlToolbarView: View {
                 )
             }
             .buttonStyle(.plain)
+            .help("Configure Transceiver CAT Control")
             .popover(isPresented: $showConfigPopover) {
                 RigConfigPopoverView(rig: rig)
             }
@@ -139,71 +140,120 @@ struct RigConfigPopoverView: View {
     @ObservedObject var rig: RigControlEngine
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
+        VStack(alignment: .leading, spacing: 16) {
+            // Header with Live Connection Badge
+            HStack(alignment: .center) {
                 Label("Transceiver CAT Control", systemImage: "antenna.radiowaves.left.and.right")
                     .font(.headline)
+                    .fontWeight(.bold)
+
                 Spacer()
+
                 if rig.isConnected {
-                    Text("ONLINE")
-                        .font(.system(size: 9, weight: .heavy, design: .monospaced))
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 2)
-                        .background(Color.green, in: Capsule())
-                        .foregroundStyle(Color.black)
+                    HStack(spacing: 5) {
+                        Circle()
+                            .fill(Color.green)
+                            .frame(width: 8, height: 8)
+                        Text(rig.rigModel.uppercased())
+                            .font(.system(size: 10, weight: .heavy, design: .monospaced))
+                            .foregroundStyle(Color.green)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Color.green.opacity(0.12), in: Capsule())
+                    .overlay(Capsule().stroke(Color.green.opacity(0.3), lineWidth: 1))
+                } else {
+                    HStack(spacing: 5) {
+                        Circle()
+                            .fill(Color.secondary.opacity(0.5))
+                            .frame(width: 8, height: 8)
+                        Text("OFFLINE")
+                            .font(.system(size: 10, weight: .heavy, design: .monospaced))
+                            .foregroundStyle(Color.secondary)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Color.secondary.opacity(0.1), in: Capsule())
                 }
             }
 
             Divider()
 
-            // Driver Picker
-            VStack(alignment: .leading, spacing: 4) {
-                Text("CAT Driver / Bridge:")
+            // Protocol Driver Cards
+            VStack(alignment: .leading, spacing: 6) {
+                Text("CAT Driver / Bridge Protocol:")
                     .font(.caption)
+                    .fontWeight(.semibold)
                     .foregroundStyle(.secondary)
 
-                Picker("Driver", selection: $rig.driverType) {
-                    ForEach(RigDriverType.allCases) { driver in
-                        Text(driver.rawValue).tag(driver)
+                HStack(spacing: 8) {
+                    driverCard(
+                        title: "Flrig",
+                        subtitle: "XML-RPC (:12345)",
+                        icon: "waveform.badge.magnifyingglass",
+                        driver: .flrig
+                    )
+                    driverCard(
+                        title: "Hamlib",
+                        subtitle: "rigctld TCP (:4532)",
+                        icon: "cable.connector",
+                        driver: .rigctld
+                    )
+                    driverCard(
+                        title: "Disabled",
+                        subtitle: "Manual / Off",
+                        icon: "power",
+                        driver: .disabled
+                    )
+                }
+            }
+
+            // Host and Port Configuration
+            if rig.driverType != .disabled {
+                HStack(spacing: 14) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Label("Host IP / Address", systemImage: "network")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        TextField("127.0.0.1", text: $rig.host)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(.body, design: .monospaced))
+                    }
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Label("Port", systemImage: "number")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        TextField("Port", value: $rig.port, format: .number.grouping(.never))
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(.body, design: .monospaced))
+                            .frame(width: 100)
                     }
                 }
-                .pickerStyle(.segmented)
-                .onChange(of: rig.driverType) { _, newType in
-                    rig.port = newType.defaultPort
-                    rig.connect()
-                }
             }
 
-            // Host and Port
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Host IP:")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    TextField("127.0.0.1", text: $rig.host)
-                        .textFieldStyle(.roundedBorder)
-                }
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Port:")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    TextField("Port", value: $rig.port, format: .number)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 80)
-                }
-            }
-
-            // Quick Band Tune Buttons
+            // Quick FT8 Band Jumps (All 10 major HF/VHF bands)
             VStack(alignment: .leading, spacing: 6) {
-                Text("Quick Band Jump (FT8):")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                HStack {
+                    Text("Quick Band Jump (FT8 Digital):")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text("Tunes VFO & Sets USB-D")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
 
-                HStack(spacing: 6) {
-                    ForEach(["40M", "20M", "15M", "10M", "6M"], id: \.self) { band in
-                        Button(band) {
+                let bands = ["160M", "80M", "40M", "30M", "20M", "17M", "15M", "12M", "10M", "6M"]
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 5), spacing: 6) {
+                    ForEach(bands, id: \.self) { band in
+                        Button {
                             tuneToFT8(band: band)
+                        } label: {
+                            Text(band)
+                                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                                .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
@@ -211,24 +261,93 @@ struct RigConfigPopoverView: View {
                 }
             }
 
+            // Live Connection Status or Error Banner
+            if let err = rig.lastError, !rig.isConnected {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    Text(err)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .padding(8)
+                .background(Color.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 6))
+            } else if rig.isConnected {
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                    Text("Connected to \(rig.rigModel) on \(rig.host):\(rig.port)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text(rig.formattedFrequency)
+                        .font(.system(.caption, design: .monospaced))
+                        .fontWeight(.bold)
+                        .foregroundStyle(.cyan)
+                }
+                .padding(8)
+                .background(Color.green.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+            }
+
             Divider()
 
-            // Connect / Disconnect Action
+            // Footer Action Strip
             HStack {
                 Toggle("Auto-Connect on Launch", isOn: $rig.autoConnect)
                     .font(.caption)
+                    .toggleStyle(.checkbox)
 
                 Spacer()
 
-                Button(rig.isConnected ? "Disconnect" : "Connect") {
+                Button(rig.isConnected ? "Disconnect Transceiver" : "Connect Transceiver") {
                     rig.toggleConnection()
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(rig.isConnected ? .red : .blue)
+                .tint(rig.isConnected ? .red : .accentColor)
             }
         }
-        .padding(16)
-        .frame(width: 320)
+        .padding(20)
+        .frame(width: 450)
+    }
+
+    private func driverCard(title: String, subtitle: String, icon: String, driver: RigDriverType) -> some View {
+        let isSelected = rig.driverType == driver
+        return Button {
+            rig.driverType = driver
+            rig.port = driver.defaultPort
+            if driver != .disabled {
+                rig.connect()
+            } else {
+                rig.disconnect()
+            }
+        } label: {
+            VStack(spacing: 4) {
+                Image(systemName: icon)
+                    .font(.system(size: 14))
+                    .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+
+                Text(title)
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(isSelected ? Color.primary : Color.secondary)
+
+                Text(subtitle)
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+            .padding(.horizontal, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(isSelected ? Color.accentColor.opacity(0.12) : Color(NSColor.controlBackgroundColor))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(isSelected ? Color.accentColor : Color.secondary.opacity(0.2), lineWidth: isSelected ? 1.5 : 1)
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     private func tuneToFT8(band: String) {

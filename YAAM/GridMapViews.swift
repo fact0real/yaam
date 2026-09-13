@@ -399,7 +399,7 @@ public struct GlobeAndGridTrackerWorkspaceView: View {
                 showTrafficArcs: showTrafficArcs,
                 showCountryLabels: showCountryLabels,
                 azimuthalRangeKm: azimuthalRangeKm,
-                stationCallsign: appState.activeStationProfile?.callsign ?? "EP2AES",
+                stationCallsign: appState.isRoverActive ? "ROVER · \(appState.effectiveStationGrid)" : (appState.activeStationProfile?.callsign ?? "EP2AES"),
                 onSelectMarker: { marker in
                     selectedMarker = marker
                     selectedGridDetail = nil
@@ -865,6 +865,9 @@ public struct GlobeAndGridTrackerWorkspaceView: View {
     // MARK: - Data Aggregation Helpers (Multi-Source Ingestion)
 
     private var userHomeCoordinate: GeoCoordinate {
+        if appState.isRoverActive {
+            return appState.effectiveStationCoordinate
+        }
         if let prof = appState.activeStationProfile {
             if !prof.grid.isEmpty, let box = MaidenheadGridEngine.boundingBox(for: prof.grid) {
                 return box.center

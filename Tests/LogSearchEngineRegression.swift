@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(YAAM)
+@testable import YAAM
+#endif
 
 @main
 struct LogSearchEngineRegression {
@@ -27,7 +30,7 @@ struct LogSearchEngineRegression {
         let goran = LogSearchEngine.makeDocument(
             fields: [
                 "CALL": "SM6CWP",
-                "NAME": "G\\u{00F6}ran \\"George\\" Holmdahl",
+                "NAME": "G\u{00F6}ran \"George\" Holmdahl",
                 "MODE": "FT8"
             ],
             country: "Sweden",
@@ -37,6 +40,31 @@ struct LogSearchEngineRegression {
 
         precondition(LogSearchEngine.matches(goran, query: "Goran Holmdahl", mode: .name))
 
+        // Test PreparedLogSearchQuery
+        let preparedCallsign = PreparedLogSearchQuery(query: "sp6fcq", mode: .callsign)
+        precondition(preparedCallsign.matches(marian))
+        precondition(!preparedCallsign.matches(goran))
+
+        let preparedQuick = PreparedLogSearchQuery(query: "poland ft8", mode: .quick)
+        precondition(preparedQuick.matches(marian))
+        precondition(!preparedQuick.matches(goran))
+
+        // Test EnglishSearchInputFilter
+        let persianDigits = "۱۲۳۴۵۶۷۸۹۰"
+        precondition(EnglishSearchInputFilter.sanitize(persianDigits) == "1234567890", "Failed to convert Persian digits")
+
+        let arabicDigits = "١٢٣٤٥٦٧٨٩٠"
+        precondition(EnglishSearchInputFilter.sanitize(arabicDigits) == "1234567890", "Failed to convert Arabic digits")
+
+        // Accidental Persian typing of "EP2LMA":
+        // E -> ث, P -> ح, 2 -> ۲ or 2, L -> م, M -> پ, A -> ش
+        let accidentalPersian = "ثح۲مپش"
+        let convertedCall = EnglishSearchInputFilter.sanitize(accidentalPersian)
+        precondition(convertedCall == "EP2LMA", "Expected EP2LMA, got \(convertedCall)")
+
+        print("All LogSearchEngine & PreparedLogSearchQuery & EnglishSearchInputFilter checks PASSED!")
+
+        #if canImport(YAAM)
         // Test Club Log Personal Spots with the exact HTML structure provided by user
         let clubLogHTML = """
         <table cellspacing="0" cellpadding="0" width="100%" style="font-size:9pt;">
@@ -126,5 +154,6 @@ struct LogSearchEngineRegression {
         precondition(s2.mode == "FT8", "Expected FT8, got \(s2.mode)")
 
         print("All Club Log exact table parsing regression checks passed successfully!")
+        #endif
     }
 }

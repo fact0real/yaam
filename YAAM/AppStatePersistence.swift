@@ -3,6 +3,7 @@
 //  YAAM
 //
 
+import Combine
 import Foundation
 
 enum YAAMPersistenceError: LocalizedError {
@@ -27,6 +28,54 @@ extension AppState {
     var activeStationProfile: StationProfile? {
         guard let activeStationProfileID else { return nil }
         return stationProfiles.first { $0.id == activeStationProfileID }
+    }
+
+    var effectiveStationGrid: String {
+        let home = activeStationProfile?.grid ?? ""
+        return RoverModeEngine.shared.effectiveGrid(homeGrid: home)
+    }
+
+    var effectiveStationCoordinate: GeoCoordinate {
+        let homeCoord: GeoCoordinate
+        if let prof = activeStationProfile {
+            if !prof.grid.isEmpty, let box = MaidenheadGridEngine.boundingBox(for: prof.grid) {
+                homeCoord = box.center
+            } else if let lat = Double(prof.latitude), let lon = Double(prof.longitude) {
+                homeCoord = GeoCoordinate(latitude: lat, longitude: lon)
+            } else {
+                homeCoord = GeoCoordinate(latitude: 35.6892, longitude: 51.3890)
+            }
+        } else {
+            homeCoord = GeoCoordinate(latitude: 35.6892, longitude: 51.3890)
+        }
+        return RoverModeEngine.shared.effectiveCoordinate(homeCoordinate: homeCoord)
+    }
+
+    var isRoverActive: Bool {
+        RoverModeEngine.shared.isRoverActive
+    }
+
+    func handleRoverModeChanged() {
+        let effGrid = effectiveStationGrid
+        let effCoord = effectiveStationCoordinate
+
+        // 1. Refresh Weather Safety Radar for rover location
+        Task { @MainActor in
+            await StationWeatherSafetyEngine.shared.refresh(forcedGrid: effGrid)
+        }
+
+        // 2. Refresh 6m Magic Band telemetry
+        SixMeterPropagationEngine.shared.setHomeLocation(
+            grid: effGrid,
+            latitude: String(effCoord.latitude),
+            longitude: String(effCoord.longitude)
+        )
+
+        // 3. Update DX Cluster spotter distance calculation
+        dxClusterClient.updateHomeGrid(effGrid)
+
+        // 4. Force UI change notification
+        objectWillChange.send()
     }
 
     var activeQRZAPIKey: String {
@@ -460,6 +509,8 @@ extension AppState {
         defaults.set(profile.powerWatts, forKey: "radioPowerWatts")
         defaults.set(profile.antennaDescription, forKey: "antennaDescription")
         defaults.set(profile.antennaHeightMeters, forKey: "antennaHeightMeters")
+        defaults.set(profile.lotwStationLocation, forKey: "lotwStationLocation")
+        defaults.set(profile.eqslQTHNickname, forKey: "eqslQTHNickname")
 
         OnTheAirMonitorService.shared.setStation(
             callsign: profile.normalizedCallsign,
@@ -636,9 +687,22 @@ extension AppState {
         var tagged = fields
         tagged["APP_YAAM_STATION_PROFILE_ID"] = profile.id.uuidString
         if (tagged["STATION_CALLSIGN"] ?? "").isEmpty { tagged["STATION_CALLSIGN"] = profile.normalizedCallsign }
-        if (tagged["MY_GRIDSQUARE"] ?? "").isEmpty, !profile.normalizedGrid.isEmpty { tagged["MY_GRIDSQUARE"] = profile.normalizedGrid }
-        if (tagged["MY_LAT"] ?? "").isEmpty, !profile.latitude.isEmpty { tagged["MY_LAT"] = profile.latitude }
-        if (tagged["MY_LON"] ?? "").isEmpty, !profile.longitude.isEmpty { tagged["MY_LON"] = profile.longitude }
+
+        // Rover Mode override for outgoing QSOs if active and configured
+        if let session = RoverModeEngine.shared.activeSession,
+           !session.isExpired,
+           session.stampInOutgoingQSOs,
+           !session.targetGrid.isEmpty {
+            tagged["MY_GRIDSQUARE"] = session.targetGrid
+            if let box = MaidenheadGridEngine.boundingBox(for: session.targetGrid) {
+                tagged["MY_LAT"] = String(format: "%.4f", box.center.latitude)
+                tagged["MY_LON"] = String(format: "%.4f", box.center.longitude)
+            }
+        } else {
+            if (tagged["MY_GRIDSQUARE"] ?? "").isEmpty, !profile.normalizedGrid.isEmpty { tagged["MY_GRIDSQUARE"] = profile.normalizedGrid }
+            if (tagged["MY_LAT"] ?? "").isEmpty, !profile.latitude.isEmpty { tagged["MY_LAT"] = profile.latitude }
+            if (tagged["MY_LON"] ?? "").isEmpty, !profile.longitude.isEmpty { tagged["MY_LON"] = profile.longitude }
+        }
         if (tagged["MY_DXCC"] ?? "").isEmpty, !profile.dxccCode.isEmpty { tagged["MY_DXCC"] = profile.dxccCode }
         if (tagged["MY_CQ_ZONE"] ?? "").isEmpty, !profile.cqZone.isEmpty { tagged["MY_CQ_ZONE"] = profile.cqZone }
         if (tagged["MY_ITU_ZONE"] ?? "").isEmpty, !profile.ituZone.isEmpty { tagged["MY_ITU_ZONE"] = profile.ituZone }

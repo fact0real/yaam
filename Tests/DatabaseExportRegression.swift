@@ -4,6 +4,7 @@
 //
 
 import Foundation
+@testable import YAAM
 
 struct TestADIFConversionFilter {
     var startUTCKey: String?

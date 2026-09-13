@@ -8,6 +8,15 @@
 import SwiftUI
 import AppKit
 
+enum CountryBandCoverageScope: String, CaseIterable, Identifiable {
+    case worked = "Worked"
+    case confirmed = "Confirmed"
+    case all = "All DXCC"
+    case needed = "Needed"
+
+    var id: String { rawValue }
+}
+
 // MARK: - Interactive Log Statistics Window
 struct StatisticsView: View {
     var isEmbeddedInTab: Bool = false
@@ -15,9 +24,10 @@ struct StatisticsView: View {
     @Environment(\.dismissWindow) private var dismissWindow
     @Environment(\.openWindow) private var openWindow
     
-    @State private var selectedTab = 0
+    @State private var selectedTab = 7
     @State private var selectedUnconfirmedBand = "All Bands"
     @State private var countryBandSearchText = ""
+    @State private var countryBandCoverageScope: CountryBandCoverageScope = .worked
     @State private var selectedCoverageCountry: String?
     @State private var snapshot = StatisticsSnapshot.empty
     @State private var snapshotGeneration = 0
@@ -28,7 +38,13 @@ struct StatisticsView: View {
     @ObservedObject private var competitorStore = CompetitorTrackingStore.shared
 
     private var currentSnapshot: StatisticsSnapshot {
-        snapshot
+        if snapshot.totalQSOCount > 0 {
+            return snapshot
+        }
+        if let cached = appState.cachedStatisticsSnapshot, cached.totalQSOCount > 0 {
+            return cached
+        }
+        return snapshot
     }
 
     private var unconfirmedBandOptions: [String] {
@@ -49,15 +65,30 @@ struct StatisticsView: View {
 
     private var visibleCountryBandCoverage: [CountryBandCoverage] {
         let query = countryBandSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return currentSnapshot.countryBandCoverage }
-        return currentSnapshot.countryBandCoverage.filter {
-            $0.country.localizedCaseInsensitiveContains(query)
+        if !query.isEmpty {
+            return currentSnapshot.countryBandCoverage.filter {
+                CountryNameNormalizer.matchesSearch(country: $0.country, query: query)
+            }
+        }
+
+        switch countryBandCoverageScope {
+        case .worked:
+            return currentSnapshot.countryBandCoverage.filter { $0.isWorked }
+        case .confirmed:
+            return currentSnapshot.countryBandCoverage.filter { $0.isConfirmed }
+        case .all:
+            return currentSnapshot.countryBandCoverage
+        case .needed:
+            return currentSnapshot.countryBandCoverage.filter { !$0.isWorked }
         }
     }
 
     private var selectedCountryBandCoverage: CountryBandCoverage? {
-        let selectedCountry = selectedCoverageCountry ?? visibleCountryBandCoverage.first?.country
-        return currentSnapshot.countryBandCoverage.first { $0.country == selectedCountry }
+        if let selected = selectedCoverageCountry,
+           visibleCountryBandCoverage.contains(where: { $0.country == selected }) {
+            return currentSnapshot.countryBandCoverage.first { $0.country == selected }
+        }
+        return visibleCountryBandCoverage.first
     }
 
     private var visibleFollowUpCandidates: [StatisticsFollowUpCandidate] {
@@ -96,7 +127,7 @@ struct StatisticsView: View {
                 Spacer()
 
                 Button {
-                    refreshSnapshot()
+                    refreshSnapshot(force: true)
                 } label: {
                     if isRefreshingSnapshot {
                         Label {
@@ -113,7 +144,7 @@ struct StatisticsView: View {
 
                 Button {
                     appState.syncConfirmations(completion: { _ in
-                        refreshSnapshot()
+                        refreshSnapshot(force: true)
                     })
                 } label: {
                     Label(appState.isSyncingAPI ? "Syncing" : "Sync QSLs", systemImage: "icloud.and.arrow.down")
@@ -175,6 +206,7 @@ struct StatisticsView: View {
                 Text("Country Bands").tag(4)
                 Text("Progress").tag(5)
                 Text("Activity Matrix").tag(6)
+                Text("Visual Analytics").tag(7)
             }
             .pickerStyle(.segmented)
             .padding(.vertical, 2)
@@ -466,8 +498,13 @@ struct StatisticsView: View {
                 countryBandCoverageView
             } else if selectedTab == 5 {
                 confirmedProgressView
-            } else {
+            } else if selectedTab == 6 {
                 LocalActivityMatrixView(
+                    records: appState.qsoRecords,
+                    onShowInLog: showRecordInLog
+                )
+            } else {
+                VisualAnalyticsView(
                     records: appState.qsoRecords,
                     onShowInLog: showRecordInLog
                 )
@@ -514,10 +551,16 @@ struct StatisticsView: View {
         }
         .onAppear {
             appState.refreshOwnerQRZRankIfNeeded()
-            refreshSnapshot()
+            if let cached = appState.cachedStatisticsSnapshot, cached.totalQSOCount > 0 {
+                self.snapshot = cached
+                if selectedCoverageCountry == nil {
+                    selectedCoverageCountry = cached.countryBandCoverage.first?.country
+                }
+            }
+            refreshSnapshot(force: false)
         }
         .onReceive(NotificationCenter.default.publisher(for: .amateurBandsConfigurationDidChange)) { _ in
-            refreshSnapshot()
+            refreshSnapshot(force: true)
         }
     }
 
@@ -667,22 +710,27 @@ struct StatisticsView: View {
         .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.gray.opacity(0.3), lineWidth: 1))
     }
 
-    private func refreshSnapshot() {
-        let records = appState.qsoRecords
-        let ownerRankData = appState.ownerRankData
-        let emailHistory = appState.emailHistory
+    private func refreshSnapshot(force: Bool = false) {
+        if !force,
+           let cached = appState.cachedStatisticsSnapshot,
+           appState.cachedStatisticsRevision == appState.qsoRecordsRevision,
+           cached.totalQSOCount > 0 {
+            self.snapshot = cached
+            let selectedStillExists = selectedCoverageCountry.map { selected in
+                cached.countryBandCoverage.contains { $0.country == selected }
+            } ?? false
+            if !selectedStillExists {
+                selectedCoverageCountry = cached.countryBandCoverage.first?.country
+            }
+            return
+        }
+
         snapshotGeneration += 1
         let generation = snapshotGeneration
         isRefreshingSnapshot = true
 
         Task {
-            let refreshed = await Task.detached(priority: .userInitiated) {
-                StatisticsSnapshot.make(
-                    records: records,
-                    ownerRankData: ownerRankData,
-                    emailHistory: emailHistory
-                )
-            }.value
+            let refreshed = await appState.getOrComputeStatisticsSnapshot(force: force)
             guard generation == snapshotGeneration else { return }
             snapshot = refreshed
             isRefreshingSnapshot = false
@@ -763,17 +811,18 @@ struct StatisticsView: View {
         let callsign = record["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         let rawURL = record["QRZ_URL"].trimmingCharacters(in: .whitespacesAndNewlines)
         let urlString = rawURL.isEmpty ? "https://www.qrz.com/db/\(callsign)" : rawURL
-        guard !callsign.isEmpty, let url = URL(string: urlString) else { return }
+guard !callsign.isEmpty, let url = URL(string: urlString) else { return }
         NSWorkspace.shared.open(url)
     }
 
     private var countryBandCoverageView: some View {
-        HStack(spacing: 0) {
-            VStack(spacing: 8) {
+        VStack(spacing: 0) {
+            // Top Toolbar: Search Field & Scope Filters
+            HStack(spacing: 14) {
                 HStack(spacing: 6) {
                     Image(systemName: "magnifyingglass")
                         .foregroundStyle(.secondary)
-                    TextField("Find country", text: $countryBandSearchText)
+                    TextField("Find country...", text: $countryBandSearchText)
                         .textFieldStyle(.plain)
                     if !countryBandSearchText.isEmpty {
                         Button {
@@ -786,10 +835,34 @@ struct StatisticsView: View {
                     }
                 }
                 .padding(.horizontal, 8)
-                .frame(height: 30)
+                .frame(width: 250, height: 28)
                 .background(Color(NSColor.controlBackgroundColor))
                 .clipShape(RoundedRectangle(cornerRadius: 6))
 
+                let workedCount = currentSnapshot.countryBandCoverage.filter { $0.isWorked }.count
+                let confirmedCount = currentSnapshot.countryBandCoverage.filter { $0.isConfirmed }.count
+                let allCount = currentSnapshot.countryBandCoverage.count
+                let neededCount = currentSnapshot.countryBandCoverage.filter { !$0.isWorked }.count
+
+                Picker("", selection: $countryBandCoverageScope) {
+                    Text("Worked (\(workedCount))").tag(CountryBandCoverageScope.worked)
+                    Text("Confirmed (\(confirmedCount))").tag(CountryBandCoverageScope.confirmed)
+                    Text("All (\(allCount))").tag(CountryBandCoverageScope.all)
+                    Text("Needed (\(neededCount))").tag(CountryBandCoverageScope.needed)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(maxWidth: 450)
+
+                Spacer()
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(Color(NSColor.controlBackgroundColor).opacity(0.4))
+
+            Divider()
+
+            HStack(spacing: 0) {
                 ScrollView {
                     LazyVStack(spacing: 2) {
                         ForEach(visibleCountryBandCoverage) { coverage in
@@ -802,9 +875,15 @@ struct StatisticsView: View {
                                         Text(coverage.country)
                                             .font(.caption.weight(.semibold))
                                             .lineLimit(1)
-                                        Text("\(coverage.confirmedBandCount) confirmed · \(coverage.workedUnconfirmedBandCount) pending")
-                                            .font(.caption2.monospacedDigit())
-                                            .foregroundStyle(.secondary)
+                                        if coverage.isWorked {
+                                            Text("\(coverage.confirmedBandCount) confirmed · \(coverage.workedUnconfirmedBandCount) pending")
+                                                .font(.caption2.monospacedDigit())
+                                                .foregroundStyle(.secondary)
+                                        } else {
+                                            Text("Needed DXCC · \(coverage.neededBandCount) bands open")
+                                                .font(.caption2.monospacedDigit())
+                                                .foregroundStyle(.secondary)
+                                        }
                                     }
                                     Spacer(minLength: 0)
                                     if selectedCountryBandCoverage?.country == coverage.country {
@@ -825,93 +904,98 @@ struct StatisticsView: View {
                             .buttonStyle(.plain)
                         }
                     }
+                    .padding(.vertical, 4)
                 }
-            }
-            .padding(8)
-            .frame(width: 238)
-            .background(Color(NSColor.textBackgroundColor))
+                .frame(width: 250)
+                .background(Color(NSColor.textBackgroundColor))
 
-            Divider()
+                Divider()
 
-            if let coverage = selectedCountryBandCoverage {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack(spacing: 10) {
-                        Text(countryToFlag(coverage.country))
-                            .font(.title2)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(coverage.country)
-                                .font(.headline)
-                            Text("Band confirmation coverage")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-
-                        Spacer()
-
-                        CountryBandSummaryChip(
-                            title: "Confirmed",
-                            value: coverage.confirmedBandCount,
-                            icon: "checkmark.circle.fill",
-                            color: .green
-                        )
-                        CountryBandSummaryChip(
-                            title: "Pending",
-                            value: coverage.workedUnconfirmedBandCount,
-                            icon: "clock.fill",
-                            color: .orange
-                        )
-                        CountryBandSummaryChip(
-                            title: "Needed",
-                            value: coverage.neededBandCount,
-                            icon: "scope",
-                            color: .secondary
-                        )
-
-                        Button {
-                            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-                        } label: {
-                            HStack(spacing: 4) {
-                                Image(systemName: "slider.horizontal.3")
-                                    .font(.system(size: 10, weight: .bold))
-                                Text("Bands (\(AmateurBandSettings.shared.activeBands.count))")
-                                    .font(.system(size: 10.5, weight: .semibold))
+                if let coverage = selectedCountryBandCoverage {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack(spacing: 10) {
+                            Text(countryToFlag(coverage.country))
+                                .font(.title2)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(coverage.country)
+                                    .font(.headline)
+                                if let info = DXCCDatabase.allEntities.first(where: { $0.entityName == coverage.country }) {
+                                    Text("Band confirmation coverage · \(info.continent) · CQ Zone \(info.cqZone) · ITU Zone \(info.ituZone)")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                } else {
+                                    Text("Band confirmation coverage")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
                             }
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 5)
-                            .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.12)))
-                            .foregroundColor(.primary)
-                        }
-                        .buttonStyle(.plain)
-                        .help("Open Settings > Bands to choose which amateur radio bands to monitor")
-                    }
 
-                    ScrollView {
-                        LazyVGrid(
-                            columns: [GridItem(.adaptive(minimum: 118, maximum: 150), spacing: 8)],
-                            alignment: .leading,
-                            spacing: 8
-                        ) {
-                            ForEach(coverage.bands) { band in
-                                CountryBandCoverageTile(item: band) {
-                                    showCountryBandQSOs(country: coverage.country, band: band)
+                            Spacer()
+
+                            CountryBandSummaryChip(
+                                title: "Confirmed",
+                                value: coverage.confirmedBandCount,
+                                icon: "checkmark.circle.fill",
+                                color: .green
+                            )
+                            CountryBandSummaryChip(
+                                title: "Pending",
+                                value: coverage.workedUnconfirmedBandCount,
+                                icon: "clock.fill",
+                                color: .orange
+                            )
+                            CountryBandSummaryChip(
+                                title: "Needed",
+                                value: coverage.neededBandCount,
+                                icon: "scope",
+                                color: .secondary
+                            )
+
+                            Button {
+                                NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "slider.horizontal.3")
+                                        .font(.system(size: 10, weight: .bold))
+                                    Text("Bands (\(AmateurBandSettings.shared.activeBands.count))")
+                                        .font(.system(size: 10.5, weight: .semibold))
+                                }
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 5)
+                                .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.12)))
+                                .foregroundColor(.primary)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Open Settings > Bands to choose which amateur radio bands to monitor")
+                        }
+
+                        ScrollView {
+                            LazyVGrid(
+                                columns: [GridItem(.adaptive(minimum: 118, maximum: 150), spacing: 8)],
+                                alignment: .leading,
+                                spacing: 8
+                            ) {
+                                ForEach(coverage.bands) { band in
+                                    CountryBandCoverageTile(item: band) {
+                                        showCountryBandQSOs(country: coverage.country, band: band)
+                                    }
                                 }
                             }
                         }
-                        .padding(.bottom, 4)
                     }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                } else {
+                    VStack(spacing: 10) {
+                        Image(systemName: "globe.desk.fill")
+                            .font(.largeTitle)
+                            .foregroundStyle(.secondary)
+                        Text("No confirmed country matches this search.")
+                            .font(.headline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-                .padding(12)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            } else {
-                VStack(spacing: 10) {
-                    Image(systemName: "globe.desk.fill")
-                        .font(.largeTitle)
-                        .foregroundStyle(.secondary)
-                    Text("No confirmed country matches this search.")
-                        .font(.headline)
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .background(Color(NSColor.textBackgroundColor))
@@ -1027,17 +1111,18 @@ struct StatisticsView: View {
         let normalizedBand = band.band.lowercased()
         let records = appState.qsoRecords
             .filter { record in
-                canonicalCountryName(record["COUNTRY"]) == normalizedCountry
+                ConfirmationOpportunityIndex.normalizedCountry(for: record) == normalizedCountry
                     && ConfirmationOpportunityIndex.normalizedBand(for: record).lowercased() == normalizedBand
                     && (band.state == .confirmed ? record.isConfirmed : !record.isConfirmed)
             }
-            .sorted { StatisticsSnapshot.chronologicalKey(for: $0) > StatisticsSnapshot.chronologicalKey(for: $1) }
+        let mapped = records.map { (key: StatisticsSnapshot.fastChronologicalSortKey(for: $0), record: $0) }
+        let sortedRecords = mapped.sorted { $0.key > $1.key }.map(\.record)
 
         selectedCountryBandDetails = StatisticsCountryBandDetailSelection(
             country: country,
             band: band.band,
             state: band.state,
-            records: records
+            records: sortedRecords
         )
     }
 
@@ -1810,15 +1895,13 @@ nonisolated struct StatisticsSnapshot: Sendable {
     ) -> StatisticsSnapshot {
         let availableCountries = Set(
             records.compactMap { record -> String? in
-                let country = canonicalCountryName(record["COUNTRY"])
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                let country = ConfirmationOpportunityIndex.normalizedCountry(for: record)
                 return country.isEmpty ? nil : country
             }
         )
         let confirmedDxccCountries = Set(
             records.compactMap { record -> String? in
-                let country = canonicalCountryName(record["COUNTRY"])
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                let country = ConfirmationOpportunityIndex.normalizedCountry(for: record)
                 return record.isConfirmed && !country.isEmpty ? country : nil
             }
         )
@@ -1853,14 +1936,24 @@ nonisolated struct StatisticsSnapshot: Sendable {
             if !record["QRZ_URL"].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { score += 5 }
             return StatisticsFollowUpCandidate(record: record, opportunity: opportunity, priorityScore: score)
         }
-        .sorted { lhs, rhs in
-            if lhs.priorityScore != rhs.priorityScore { return lhs.priorityScore > rhs.priorityScore }
-            return chronologicalKey(for: lhs.record) > chronologicalKey(for: rhs.record)
+        let mappedFollowUps = followUpCandidates.map { candidate in
+            (score: candidate.priorityScore, key: fastChronologicalSortKey(for: candidate.record), candidate: candidate)
         }
-        let recentConfirmedRecords = records
-            .filter(\.isConfirmed)
-            .sorted { chronologicalKey(for: $0) > chronologicalKey(for: $1) }
+        let sortedFollowUps = mappedFollowUps
+            .sorted { lhs, rhs in
+                if lhs.score != rhs.score { return lhs.score > rhs.score }
+                return lhs.key > rhs.key
+            }
+            .map(\.candidate)
+
+        let confirmedRecords = records.filter(\.isConfirmed)
+        let mappedConfirmed = confirmedRecords.map { record in
+            (key: fastChronologicalSortKey(for: record), record: record)
+        }
+        let recentConfirmedRecords = mappedConfirmed
+            .sorted { $0.key > $1.key }
             .prefix(20)
+            .map(\.record)
 
         return StatisticsSnapshot(
             totalQSOCount: totalCount,
@@ -1881,7 +1974,7 @@ nonisolated struct StatisticsSnapshot: Sendable {
                 return mode.isEmpty ? nil : mode
             }).count,
             providerStatistics: providerStatistics,
-            followUpCandidates: followUpCandidates,
+            followUpCandidates: sortedFollowUps,
             recentConfirmedRecords: Array(recentConfirmedRecords),
             bandStatistics: makeBandStatistics(records: records),
             countryStatistics: makeCountryStatistics(records: records),
@@ -1898,8 +1991,7 @@ nonisolated struct StatisticsSnapshot: Sendable {
         for record in records {
             let normalizedBand = ConfirmationOpportunityIndex.normalizedBand(for: record)
             let band = normalizedBand.isEmpty ? "UNKNOWN" : normalizedBand.uppercased()
-            let country = canonicalCountryName(record["COUNTRY"])
-                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let country = ConfirmationOpportunityIndex.normalizedCountry(for: record)
             var value = values[band] ?? (
                 total: 0,
                 confirmed: 0,
@@ -1934,8 +2026,7 @@ nonisolated struct StatisticsSnapshot: Sendable {
     private static func makeCountryStatistics(records: [QSORecordModel]) -> [CountryStatModel] {
         var values: [String: (total: Int, confirmed: Int)] = [:]
         for record in records {
-            let canonical = canonicalCountryName(record["COUNTRY"])
-                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let canonical = ConfirmationOpportunityIndex.normalizedCountry(for: record)
             let country = canonical.isEmpty ? "Unknown" : canonical
             var value = values[country] ?? (0, 0)
             value.total += 1
@@ -1977,7 +2068,7 @@ nonisolated struct StatisticsSnapshot: Sendable {
         for record in records {
             let normalizedBand = ConfirmationOpportunityIndex.normalizedBand(for: record)
             let band = normalizedBand.isEmpty ? "UNKNOWN" : normalizedBand.uppercased()
-            let canonical = canonicalCountryName(record["COUNTRY"])
+            let canonical = ConfirmationOpportunityIndex.normalizedCountry(for: record)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             let country = canonical.isEmpty ? "Unknown" : canonical
             var countryValues = values[band] ?? [:]
@@ -2108,19 +2199,65 @@ nonisolated struct StatisticsSnapshot: Sendable {
         return ["Y", "V", "C", "CONFIRMED", "VERIFIED"].contains(value)
     }
 
+    struct ChronologicalSortKey: Comparable, Sendable {
+        let dateTime: UInt64
+        let index: Int
+
+        static func < (lhs: ChronologicalSortKey, rhs: ChronologicalSortKey) -> Bool {
+            if lhs.dateTime != rhs.dateTime {
+                return lhs.dateTime < rhs.dateTime
+            }
+            return lhs.index < rhs.index
+        }
+    }
+
+    static func fastChronologicalSortKey(for record: QSORecordModel) -> ChronologicalSortKey {
+        var dateNum: UInt64 = 0
+        if let dateStr = record.fields["QSO_DATE"] {
+            for byte in dateStr.utf8 {
+                if byte >= 48 && byte <= 57 {
+                    dateNum = dateNum * 10 + UInt64(byte - 48)
+                }
+            }
+        }
+        var timeNum: UInt64 = 0
+        var timeDigits = 0
+        if let timeStr = record.fields["TIME_ON"] {
+            for byte in timeStr.utf8 {
+                if byte >= 48 && byte <= 57 {
+                    timeNum = timeNum * 10 + UInt64(byte - 48)
+                    timeDigits += 1
+                    if timeDigits == 6 { break }
+                }
+            }
+        }
+        while timeDigits < 6 {
+            timeNum *= 10
+            timeDigits += 1
+        }
+        let dateTime = dateNum * 1_000_000 + (timeNum % 1_000_000)
+        return ChronologicalSortKey(dateTime: dateTime, index: record.index)
+    }
+
     static func chronologicalKey(for record: QSORecordModel) -> String {
         let date = record["QSO_DATE"].filter(\.isNumber)
         let time = record["TIME_ON"].filter(\.isNumber)
-        return "\(date)\(time.padding(toLength: 6, withPad: "0", startingAt: 0))\(String(format: "%012d", record.index))"
+        let paddedTime = time.count < 6 ? time.padding(toLength: 6, withPad: "0", startingAt: 0) : String(time.prefix(6))
+        return "\(date)\(paddedTime)\(record.index)"
     }
+
+    private static let gmtCalendar: Calendar = {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(secondsFromGMT: 0) ?? Calendar.current.timeZone
+        return cal
+    }()
 
     // Reusable ADIF date parser (yyyyMMdd -> Date)
     private static func parseADIFDate(_ raw: String) -> Date? {
         let clean = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard clean.count == 8 else { return nil }
         var components = DateComponents()
-        components.calendar = Calendar(identifier: .gregorian)
-        components.timeZone = TimeZone(secondsFromGMT: 0)
+        components.calendar = gmtCalendar
         components.year = Int(clean.prefix(4))
         components.month = Int(clean.dropFirst(4).prefix(2))
         components.day = Int(clean.suffix(2))
@@ -2216,13 +2353,18 @@ nonisolated enum ConfirmedProgressAnalyzer {
         return nil
     }
 
+    private static let gmtCalendar: Calendar = {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(secondsFromGMT: 0) ?? Calendar.current.timeZone
+        return cal
+    }()
+
     private static func parseADIFDate(_ raw: String) -> Date? {
         let clean = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard clean.count == 8 else { return nil }
 
         var components = DateComponents()
-        components.calendar = Calendar(identifier: .gregorian)
-        components.timeZone = TimeZone(secondsFromGMT: 0)
+        components.calendar = gmtCalendar
         components.year = Int(clean.prefix(4))
         components.month = Int(clean.dropFirst(4).prefix(2))
         components.day = Int(clean.suffix(2))

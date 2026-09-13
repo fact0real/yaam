@@ -8,6 +8,7 @@
 //
 
 import Foundation
+@testable import YAAM
 
 // Standalone stub for AmateurBandPlan when running test suite independently
 nonisolated enum AmateurBandPlan {

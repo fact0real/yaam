@@ -133,7 +133,7 @@ public final class OnTheAirMonitorService: ObservableObject {
     // MARK: - Background Polling Loop
     private func startPollerLoop() {
         pollerTask?.cancel()
-        pollerTask = Task { [weak self] in
+        pollerTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
                 guard let self = self else { return }
@@ -161,8 +161,8 @@ public final class OnTheAirMonitorService: ObservableObject {
     public func refreshNow() {
         guard !isPolling, !currentCallsign.isEmpty else { return }
         countdownSeconds = pollIntervalSeconds
-        Task {
-            await fetchOnAirTelemetry()
+        Task { @MainActor in
+            await self.fetchOnAirTelemetry()
         }
     }
 

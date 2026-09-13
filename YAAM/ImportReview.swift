@@ -66,7 +66,14 @@ nonisolated struct PendingImportReview: Identifiable, Sendable {
 
 nonisolated enum ImportReviewAnalyzer {
     private static let confirmationFields = Set([
-        "LOTW_QSL_RCVD", "QRZLOG_QSL_RCVD", "QSL_RCVD", "EQSL_QSL_RCVD"
+        "LOTW_QSL_RCVD", "QRZLOG_QSL_RCVD", "QSL_RCVD", "EQSL_QSL_RCVD",
+        "APP_YAAM_CLUBLOG_LOTW_STATE", "APP_YAAM_CONFIRMATION_STATUS", "APP_YAAM_NEW_CONFIRMED"
+    ])
+
+    private static let protectedEnrichmentFields = Set([
+        "RANK_DXCC", "RANK_QSO", "RANK_BAND", "APP_YAAM_RANK_STATUS",
+        "APP_YAAM_ENRICHED", "APP_YAAM_EMAIL_CHECKED", "APP_YAAM_RANK_CHECKED",
+        "EMAIL", "QRZ_URL", "APP_YAAM_LAST_EMAIL", "APP_YAAM_EMAIL_SENT_DATE"
     ])
 
     static func analyze(
@@ -173,10 +180,19 @@ nonisolated enum ImportReviewAnalyzer {
             let cleanValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !cleanValue.isEmpty else { continue }
 
-            if (merged[cleanKey] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let existingValue = (merged[cleanKey] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if existingValue.isEmpty {
                 merged[cleanKey] = cleanValue
-            } else if confirmationFields.contains(cleanKey), isAffirmative(cleanValue) {
-                merged[cleanKey] = cleanValue
+            } else if confirmationFields.contains(cleanKey) {
+                // If existing is not affirmative and incoming is affirmative, update it.
+                // If existing is already affirmative, never downgrade to non-affirmative.
+                if isAffirmative(cleanValue) && !isAffirmative(existingValue) {
+                    merged[cleanKey] = cleanValue
+                }
+            } else if protectedEnrichmentFields.contains(cleanKey) {
+                if existingValue.isEmpty {
+                    merged[cleanKey] = cleanValue
+                }
             }
         }
         return merged
@@ -199,7 +215,7 @@ nonisolated enum ImportReviewAnalyzer {
     }
 
     private static func isAffirmative(_ value: String) -> Bool {
-        ["Y", "V", "C", "CONFIRMED"].contains(value.uppercased())
+        ["Y", "V", "C", "YES", "TRUE", "1", "CONFIRMED", "RECEIVED"].contains(value.trimmingCharacters(in: .whitespacesAndNewlines).uppercased())
     }
 
     private static func normalizedUniqueKey(_ fields: [String: String]) -> String {

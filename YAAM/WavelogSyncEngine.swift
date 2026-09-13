@@ -79,7 +79,7 @@ public final class WavelogSyncEngine: ObservableObject {
         let url = serverURL
         let stationID = selectedStationProfileID
 
-        Task {
+        Task { @MainActor [weak self] in
             do {
                 _ = try await WavelogClient.shared.pushQSO(
                     record: record,
@@ -87,10 +87,10 @@ public final class WavelogSyncEngine: ObservableObject {
                     apiKey: key,
                     stationProfileID: stationID
                 )
-                self.syncedQSOsCount += 1
-                self.lastStatusMessage = "Pushed \(record["CALL"]) to Wavelog."
+                self?.syncedQSOsCount += 1
+                self?.lastStatusMessage = "Pushed \(record["CALL"]) to Wavelog."
             } catch {
-                self.lastError = "Auto-push failed for \(record["CALL"]): \(error.localizedDescription)"
+                self?.lastError = "Auto-push failed for \(record["CALL"]): \(error.localizedDescription)"
             }
         }
     }

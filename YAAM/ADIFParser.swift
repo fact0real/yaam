@@ -259,18 +259,30 @@ nonisolated func generateADIF(originalContent: String, records: [[String: String
     let priorityKeys = ["QSO_DATE", "TIME_ON", "CALL", "FREQ", "BAND", "MODE", "RST_SENT", "RST_RCVD", "NAME", "QTH", "COMMENT"]
     
     for record in records {
+        var rec = record
+        let currentMode = rec["MODE"] ?? ""
+        let currentSubmode = rec["SUBMODE"] ?? ""
+        let freq = Double(rec["FREQ"] ?? "")
+        let effective = AmateurBandPlan.effectiveADIFMode(mode: currentMode, submode: currentSubmode, frequencyMHz: freq)
+        if !effective.isEmpty {
+            rec["MODE"] = effective
+            if effective == "FT8" || effective == "FT4" || effective == "JS8" {
+                rec["SUBMODE"] = effective
+            }
+        }
+
         var recordStr = ""
-        var remainingKeys = Set(record.keys)
+        var remainingKeys = Set(rec.keys)
         
         for key in priorityKeys {
-            if let val = record[key], !val.isEmpty {
+            if let val = rec[key], !val.isEmpty {
                 recordStr += "<\(key):\(val.count)>\(val)"
                 remainingKeys.remove(key)
             }
         }
         
         for key in remainingKeys.sorted() {
-            if let val = record[key], !val.isEmpty {
+            if let val = rec[key], !val.isEmpty {
                 recordStr += "<\(key):\(val.count)>\(val)"
             }
         }

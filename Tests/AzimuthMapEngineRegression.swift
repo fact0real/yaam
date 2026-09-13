@@ -5,6 +5,7 @@
 
 import CoreGraphics
 import Foundation
+@testable import YAAM
 
 @main
 struct AzimuthMapEngineRegression {

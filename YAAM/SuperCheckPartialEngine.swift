@@ -24,9 +24,15 @@ public struct SuperCheckPartialMatch: Identifiable, Hashable, Sendable {
 public final class SuperCheckPartialEngine: ObservableObject {
     public static let shared = SuperCheckPartialEngine()
 
-    @AppStorage("scpEnabled") public var isEnabled: Bool = true
-    @AppStorage("scpAutoUpdate") public var autoUpdate: Bool = true
-    @AppStorage("scpLastUpdated") public var lastUpdatedTimestamp: Double = 0
+    @Published public var isEnabled: Bool {
+        didSet { UserDefaults.standard.set(isEnabled, forKey: "scpEnabled") }
+    }
+    @Published public var autoUpdate: Bool {
+        didSet { UserDefaults.standard.set(autoUpdate, forKey: "scpAutoUpdate") }
+    }
+    @Published public var lastUpdatedTimestamp: Double {
+        didSet { UserDefaults.standard.set(lastUpdatedTimestamp, forKey: "scpLastUpdated") }
+    }
 
     @Published public var totalCallsigns: Int = 0
     @Published public var isDownloading: Bool = false
@@ -52,6 +58,9 @@ public final class SuperCheckPartialEngine: ObservableObject {
     ]
 
     private init() {
+        self.isEnabled = UserDefaults.standard.object(forKey: "scpEnabled") as? Bool ?? true
+        self.autoUpdate = UserDefaults.standard.object(forKey: "scpAutoUpdate") as? Bool ?? true
+        self.lastUpdatedTimestamp = UserDefaults.standard.double(forKey: "scpLastUpdated")
         loadStoredDatabase()
     }
 

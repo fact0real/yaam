@@ -18,6 +18,12 @@ nonisolated struct DXpeditionEntry: Codable, Hashable, Identifiable, Sendable {
     let details: String
     let bulletin: String
     let lastReportedAt: Date?
+    let bands: [String]?
+    let modes: [String]?
+    let qslInfo: String?
+    let rawIota: String?
+    let operators: [String]?
+    let grid: String?
 
     init(
         id: String,
@@ -29,7 +35,13 @@ nonisolated struct DXpeditionEntry: Codable, Hashable, Identifiable, Sendable {
         sourceURLs: [String] = [],
         details: String = "",
         bulletin: String = "",
-        lastReportedAt: Date? = nil
+        lastReportedAt: Date? = nil,
+        bands: [String]? = nil,
+        modes: [String]? = nil,
+        qslInfo: String? = nil,
+        iota: String? = nil,
+        operators: [String]? = nil,
+        grid: String? = nil
     ) {
         self.id = id
         self.callsign = callsign
@@ -41,10 +53,19 @@ nonisolated struct DXpeditionEntry: Codable, Hashable, Identifiable, Sendable {
         self.details = details
         self.bulletin = bulletin
         self.lastReportedAt = lastReportedAt
+        self.bands = bands
+        self.modes = modes
+        self.qslInfo = qslInfo
+        self.rawIota = iota
+        self.operators = operators
+        self.grid = grid
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, callsign, entity, start, end, sources, sourceURLs, details, bulletin, lastReportedAt
+        case bands, modes, qslInfo
+        case rawIota = "iota"
+        case operators, grid
     }
 
     init(from decoder: Decoder) throws {
@@ -59,6 +80,39 @@ nonisolated struct DXpeditionEntry: Codable, Hashable, Identifiable, Sendable {
         details = try container.decodeIfPresent(String.self, forKey: .details) ?? ""
         bulletin = try container.decodeIfPresent(String.self, forKey: .bulletin) ?? ""
         lastReportedAt = try container.decodeIfPresent(Date.self, forKey: .lastReportedAt)
+        bands = try container.decodeIfPresent([String].self, forKey: .bands)
+        modes = try container.decodeIfPresent([String].self, forKey: .modes)
+        qslInfo = try container.decodeIfPresent(String.self, forKey: .qslInfo)
+        rawIota = try container.decodeIfPresent(String.self, forKey: .rawIota)
+        operators = try container.decodeIfPresent([String].self, forKey: .operators)
+        grid = try container.decodeIfPresent(String.self, forKey: .grid)
+    }
+
+    var iota: String {
+        if let rawIota, !rawIota.isEmpty { return rawIota }
+        if let range = details.range(of: #"[A-Z]{2}-\d{3}"#, options: .regularExpression) {
+            return String(details[range])
+        }
+        return ""
+    }
+
+    var hasRichInfo: Bool {
+        (bands?.isEmpty == false) || (modes?.isEmpty == false) || !iota.isEmpty || (qslInfo?.isEmpty == false)
+    }
+
+    var bandsSummary: String? {
+        guard let bands, !bands.isEmpty else { return nil }
+        return bands.joined(separator: ", ")
+    }
+
+    var modesSummary: String? {
+        guard let modes, !modes.isEmpty else { return nil }
+        return modes.joined(separator: ", ")
+    }
+
+    var operatorsSummary: String? {
+        guard let operators, !operators.isEmpty else { return nil }
+        return operators.joined(separator: ", ")
     }
 
     var isActive: Bool {
@@ -102,16 +156,154 @@ nonisolated struct DXpeditionEntry: Codable, Hashable, Identifiable, Sendable {
     }
 }
 
+nonisolated struct DXNewsArticle: Codable, Hashable, Identifiable, Sendable {
+    var id: String
+    var title: String
+    var summary: String
+    var body: String
+    var source: String
+    var sourceURL: String
+    var publishedAt: Date?
+    var category: String
+    var callsigns: [String]
+    var entity: String
+    var bands: [String]
+    var modes: [String]
+    var iota: String
+    var audioURL: String?
+
+    init(
+        id: String = UUID().uuidString,
+        title: String = "",
+        summary: String = "",
+        body: String = "",
+        source: String = "",
+        sourceURL: String = "",
+        publishedAt: Date? = nil,
+        category: String = "DX News",
+        callsigns: [String] = [],
+        entity: String = "",
+        bands: [String] = [],
+        modes: [String] = [],
+        iota: String = "",
+        audioURL: String? = nil
+    ) {
+        self.id = id
+        self.title = title
+        self.summary = summary
+        self.body = body
+        self.source = source
+        self.sourceURL = sourceURL
+        self.publishedAt = publishedAt
+        self.category = category
+        self.callsigns = callsigns
+        self.entity = entity
+        self.bands = bands
+        self.modes = modes
+        self.iota = iota
+        self.audioURL = audioURL
+    }
+
+    var displayDate: String {
+        guard let publishedAt else { return "" }
+        let f = DateFormatter()
+        f.dateStyle = .medium
+        f.timeStyle = .none
+        return f.string(from: publishedAt)
+    }
+
+    var primaryURL: URL? {
+        guard !sourceURL.isEmpty else { return nil }
+        return URL(string: sourceURL)
+    }
+}
+
+nonisolated struct DXBulletin: Codable, Hashable, Identifiable, Sendable {
+    var id: String
+    var title: String
+    var source: String
+    var issue: String
+    var publishedAt: Date?
+    var sourceURL: String
+    var content: String
+    var operationCount: Int
+
+    init(
+        id: String = UUID().uuidString,
+        title: String = "",
+        source: String = "",
+        issue: String = "",
+        publishedAt: Date? = nil,
+        sourceURL: String = "",
+        content: String = "",
+        operationCount: Int = 0
+    ) {
+        self.id = id
+        self.title = title
+        self.source = source
+        self.issue = issue
+        self.publishedAt = publishedAt
+        self.sourceURL = sourceURL
+        self.content = content
+        self.operationCount = operationCount
+    }
+
+    var displayDate: String {
+        guard let publishedAt else { return "" }
+        let f = DateFormatter()
+        f.dateStyle = .medium
+        f.timeStyle = .none
+        return f.string(from: publishedAt)
+    }
+
+    var primaryURL: URL? {
+        guard !sourceURL.isEmpty else { return nil }
+        return URL(string: sourceURL)
+    }
+}
+
 nonisolated struct DXpeditionCache: Codable, Sendable {
     let entries: [DXpeditionEntry]
+    var newsArticles: [DXNewsArticle]
+    var bulletins: [DXBulletin]
     let updatedAt: Date
+
+    init(
+        entries: [DXpeditionEntry],
+        updatedAt: Date,
+        newsArticles: [DXNewsArticle] = [],
+        bulletins: [DXBulletin] = []
+    ) {
+        self.entries = entries
+        self.updatedAt = updatedAt
+        self.newsArticles = newsArticles
+        self.bulletins = bulletins
+    }
 }
 
 nonisolated struct DXpeditionFetchResult: Sendable {
     let entries: [DXpeditionEntry]
+    var newsArticles: [DXNewsArticle]
+    var bulletins: [DXBulletin]
     let successfulSources: [String]
     let failedSources: [String]
     let bulletinNotes: [String]
+
+    init(
+        entries: [DXpeditionEntry],
+        successfulSources: [String] = [],
+        failedSources: [String] = [],
+        bulletinNotes: [String] = [],
+        newsArticles: [DXNewsArticle] = [],
+        bulletins: [DXBulletin] = []
+    ) {
+        self.entries = entries
+        self.successfulSources = successfulSources
+        self.failedSources = failedSources
+        self.bulletinNotes = bulletinNotes
+        self.newsArticles = newsArticles
+        self.bulletins = bulletins
+    }
 }
 
 private nonisolated struct DXpeditionSourcePayload: Sendable {
@@ -119,6 +311,8 @@ private nonisolated struct DXpeditionSourcePayload: Sendable {
     let entries: [DXpeditionEntry]
     let bulletinNote: String
     let error: String?
+    var newsArticles: [DXNewsArticle] = []
+    var bulletins: [DXBulletin] = []
 }
 
 private nonisolated struct DXWorldFeedItem: Sendable {
@@ -187,6 +381,102 @@ private nonisolated final class DXWorldFeedParser: NSObject, XMLParserDelegate {
     }
 }
 
+private nonisolated struct GenericRSSItem: Sendable {
+    let title: String
+    let link: String
+    let publishedAt: Date?
+    let description: String
+    let audioURL: String?
+}
+
+private nonisolated final class GenericRSSFeedParser: NSObject, XMLParserDelegate {
+    private(set) var items: [GenericRSSItem] = []
+    private var currentElement = ""
+    private var title = ""
+    private var link = ""
+    private var published = ""
+    private var itemDescription = ""
+    private var enclosureURL = ""
+    private var isInsideItem = false
+
+    func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName qName: String?, attributes attributeDict: [String: String] = [:]) {
+        currentElement = elementName.lowercased()
+        if currentElement == "item" {
+            isInsideItem = true
+            title = ""
+            link = ""
+            published = ""
+            itemDescription = ""
+            enclosureURL = ""
+        } else if isInsideItem && currentElement == "enclosure" {
+            if let url = attributeDict["url"], url.contains(".mp3") || (attributeDict["type"]?.contains("audio") == true) {
+                enclosureURL = url
+            }
+        }
+    }
+
+    func parser(_ parser: XMLParser, foundCharacters string: String) {
+        guard isInsideItem else { return }
+        switch currentElement {
+        case "title": title += string
+        case "link": link += string
+        case "pubdate", "dc:date", "date": published += string
+        case "description", "content:encoded": itemDescription += string
+        default: break
+        }
+    }
+
+    func parser(_ parser: XMLParser, foundCDATA CDATABlock: Data) {
+        guard isInsideItem, let value = String(data: CDATABlock, encoding: .utf8) else { return }
+        switch currentElement {
+        case "title": title += value
+        case "description", "content:encoded": itemDescription += value
+        default: break
+        }
+    }
+
+    func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName qName: String?) {
+        if elementName.lowercased() == "item" {
+            let pubDate = Self.parseDate(published.trimmingCharacters(in: .whitespacesAndNewlines))
+            let desc = itemDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+            var audio = enclosureURL.isEmpty ? nil : enclosureURL
+            if audio == nil, let regex = try? NSRegularExpression(pattern: #"(?i)href=["']([^"']+\.mp3)["']"#),
+               let match = regex.firstMatch(in: desc, range: NSRange(desc.startIndex..., in: desc)),
+               match.numberOfRanges > 1,
+               let range = Range(match.range(at: 1), in: desc) {
+                audio = String(desc[range])
+            }
+            items.append(
+                GenericRSSItem(
+                    title: title.trimmingCharacters(in: .whitespacesAndNewlines),
+                    link: link.trimmingCharacters(in: .whitespacesAndNewlines),
+                    publishedAt: pubDate,
+                    description: desc,
+                    audioURL: audio
+                )
+            )
+            isInsideItem = false
+        }
+        currentElement = ""
+    }
+
+    private static func parseDate(_ string: String) -> Date? {
+        guard !string.isEmpty else { return nil }
+        let f1 = DateFormatter()
+        f1.locale = Locale(identifier: "en_US_POSIX")
+        f1.dateFormat = "EEE, dd MMM yyyy HH:mm:ss Z"
+        if let d = f1.date(from: string) { return d }
+
+        let f2 = DateFormatter()
+        f2.locale = Locale(identifier: "en_US_POSIX")
+        f2.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
+        if let d = f2.date(from: string) { return d }
+
+        let iso = ISO8601DateFormatter()
+        return iso.date(from: string)
+    }
+}
+
 private nonisolated extension Calendar {
     static var utc: Calendar {
         var calendar = Calendar(identifier: .gregorian)
@@ -202,6 +492,9 @@ nonisolated enum DXpeditionService {
     static let fourTwentyFiveBulletinURL = URL(string: "https://www.425dxn.org/index.php?op=wbull")!
     static let dxWorldFeedURL = URL(string: "https://www.dx-world.net/category/dx-news/feed/")!
     static let dxWorldCategoryURL = URL(string: "https://www.dx-world.net/category/dx-news/")!
+    static let ng3kURL = URL(string: "https://www.ng3k.com/Misc/adxo.html")!
+    static let arrlNewsFeedURL = URL(string: "https://www.arrl.org/arrl.rss")!
+    static let arNewslineFeedURL = URL(string: "https://www.arnewsline.org/news?format=rss")!
 
     static func fetchAll(version: String) async -> DXpeditionFetchResult {
         async let dxping = fetchSource(name: "DXPing", url: dxpingURL, version: version) { data in
@@ -209,18 +502,25 @@ nonisolated enum DXpeditionService {
         }
         async let fourTwentyFive = fetch425(version: version)
         async let dxWorld = fetchDXWorld(version: version)
+        async let ng3k = fetchNG3K(version: version)
+        async let arrl = fetchARRLNews(version: version)
+        async let arNewsline = fetchARNewsline(version: version)
 
-        let payloads = await [dxping, fourTwentyFive, dxWorld]
+        let payloads = await [dxping, fourTwentyFive, dxWorld, ng3k, arrl, arNewsline]
         let successful = payloads.filter { $0.error == nil }.map(\.name)
         let failed = payloads.compactMap { $0.error == nil ? nil : $0.name }
         let notes = payloads.map(\.bulletinNote).filter { !$0.isEmpty }
         let merged = merge(payloads.flatMap(\.entries)).filter(isRelevant)
+        let allArticles = payloads.flatMap(\.newsArticles).sorted { ($0.publishedAt ?? .distantPast) > ($1.publishedAt ?? .distantPast) }
+        let allBulletins = payloads.flatMap(\.bulletins).sorted { ($0.publishedAt ?? .distantPast) > ($1.publishedAt ?? .distantPast) }
 
         return DXpeditionFetchResult(
             entries: merged,
             successfulSources: successful,
             failedSources: failed,
-            bulletinNotes: notes
+            bulletinNotes: notes,
+            newsArticles: allArticles,
+            bulletins: allBulletins
         )
     }
 
@@ -268,6 +568,14 @@ nonisolated enum DXpeditionService {
             let periodDates = parse425Period(period, referenceDate: referenceDate)
             let dates = detailDates.start.isEmpty && detailDates.end.isEmpty ? periodDates : detailDates
 
+            let fullInfo = "\(operationTitle) \(details)"
+            let iota = extractIOTA(from: fullInfo)
+            let qsl = extractQSLInfo(from: details)
+            let bands = extractBands(from: details)
+            let modes = extractModes(from: details)
+            let ops = extractOperators(from: details)
+            let grid = extractGrid(from: details)
+
             return callsigns.map { call in
                 DXpeditionEntry(
                     id: stableID(call: call, start: dates.start, end: dates.end),
@@ -278,7 +586,13 @@ nonisolated enum DXpeditionService {
                     sources: ["425 DX News"],
                     sourceURLs: [fourTwentyFiveCalendarURL.absoluteString, fourTwentyFiveBulletinURL.absoluteString],
                     details: details,
-                    bulletin: bulletin
+                    bulletin: bulletin,
+                    bands: bands,
+                    modes: modes,
+                    qslInfo: qsl,
+                    iota: iota,
+                    operators: ops,
+                    grid: grid
                 )
             }
         }
@@ -331,6 +645,13 @@ nonisolated enum DXpeditionService {
 
             let dates = dateRange(in: details, referenceDate: referenceDate)
             let storedDetails = String(details.prefix(900))
+            let iota = extractIOTA(from: details)
+            let grid = extractGrid(from: details)
+            let modes = extractModes(from: details)
+            let bands = extractBands(from: details)
+            let qsl = extractQSLInfo(from: details)
+            let ops = extractOperators(from: details)
+
             entries.append(contentsOf: callsigns.map { call in
                 DXpeditionEntry(
                     id: stableID(call: call, start: dates.start, end: dates.end),
@@ -342,7 +663,13 @@ nonisolated enum DXpeditionService {
                     sourceURLs: sourceURLs,
                     details: storedDetails,
                     bulletin: bulletin,
-                    lastReportedAt: referenceDate
+                    lastReportedAt: referenceDate,
+                    bands: bands,
+                    modes: modes,
+                    qslInfo: qsl,
+                    iota: iota,
+                    operators: ops,
+                    grid: grid
                 )
             })
         }
@@ -375,17 +702,20 @@ nonisolated enum DXpeditionService {
         entries: [DXpeditionEntry],
         bulletin: String,
         bulletinPageURL: String,
-        bulletinPublishedAt: Date?
+        bulletinPublishedAt: Date?,
+        newsArticles: [DXNewsArticle]
     ) {
         let delegate = DXWorldFeedParser()
         let parser = XMLParser(data: data)
         parser.delegate = delegate
-        guard parser.parse() else { return ([], "", "", nil) }
+        guard parser.parse() else { return ([], "", "", nil, []) }
 
         var bulletin = ""
         var bulletinPageURL = ""
         var bulletinPublishedAt: Date?
         var entries: [DXpeditionEntry] = []
+        var newsArticles: [DXNewsArticle] = []
+
         for item in delegate.items {
             let title = plainText(item.title)
             let description = plainText(item.description)
@@ -397,26 +727,64 @@ nonisolated enum DXpeditionService {
                 continue
             }
 
-            guard let split = splitOperationTitle(title) else { continue }
-            let callsigns = extractCallsigns(from: split.callsigns)
-            guard !callsigns.isEmpty else { continue }
-            let dates = dateRange(in: description, referenceDate: item.publishedAt ?? Date())
+            let fullText = "\(title) \(description)"
+            let articleBands = extractBands(from: fullText)
+            let articleModes = extractModes(from: fullText)
+            let articleIota = extractIOTA(from: fullText)
+            let articleGrid = extractGrid(from: fullText)
+            let articleQSL = extractQSLInfo(from: fullText)
+            let articleOps = extractOperators(from: fullText)
 
-            entries.append(contentsOf: callsigns.map { call in
-                DXpeditionEntry(
-                    id: stableID(call: call, start: dates.start, end: dates.end),
-                    callsign: call,
-                    entity: split.entity,
-                    start: dates.start,
-                    end: dates.end,
-                    sources: ["DX-World"],
-                    sourceURLs: [item.link.isEmpty ? dxWorldCategoryURL.absoluteString : item.link],
-                    details: description,
-                    lastReportedAt: item.publishedAt
-                )
-            })
+            var operationCallsigns: [String] = []
+            var entity = ""
+
+            if let split = splitOperationTitle(title) {
+                operationCallsigns = extractCallsigns(from: split.callsigns)
+                entity = split.entity
+            } else {
+                operationCallsigns = extractCallsignsFromFreeformTitle(title)
+            }
+
+            if !operationCallsigns.isEmpty {
+                let dates = dateRange(in: description, referenceDate: item.publishedAt ?? Date())
+                entries.append(contentsOf: operationCallsigns.map { call in
+                    DXpeditionEntry(
+                        id: stableID(call: call, start: dates.start, end: dates.end),
+                        callsign: call,
+                        entity: entity.isEmpty ? "Announced operation" : entity,
+                        start: dates.start,
+                        end: dates.end,
+                        sources: ["DX-World"],
+                        sourceURLs: [item.link.isEmpty ? dxWorldCategoryURL.absoluteString : item.link],
+                        details: description,
+                        lastReportedAt: item.publishedAt,
+                        bands: articleBands,
+                        modes: articleModes,
+                        qslInfo: articleQSL,
+                        iota: articleIota,
+                        operators: articleOps,
+                        grid: articleGrid
+                    )
+                })
+            }
+
+            newsArticles.append(DXNewsArticle(
+                id: item.link.isEmpty ? UUID().uuidString : item.link,
+                title: title,
+                summary: String(description.prefix(280)),
+                body: description,
+                source: "DX-World",
+                sourceURL: item.link,
+                publishedAt: item.publishedAt,
+                category: "DX News",
+                callsigns: operationCallsigns,
+                entity: entity,
+                bands: articleBands,
+                modes: articleModes,
+                iota: articleIota
+            ))
         }
-        return (entries, bulletin, bulletinPageURL, bulletinPublishedAt)
+        return (entries, bulletin, bulletinPageURL, bulletinPublishedAt, newsArticles)
     }
 
     static func parseDXWorldBulletin(
@@ -457,6 +825,13 @@ nonisolated enum DXpeditionService {
             let dates = dateRange(in: details, referenceDate: referenceDate)
             let storedDetails = String(details.prefix(900))
 
+            let iota = extractIOTA(from: details)
+            let bands = extractBands(from: details)
+            let modes = extractModes(from: details)
+            let qsl = extractQSLInfo(from: details)
+            let ops = extractOperators(from: details)
+            let grid = extractGrid(from: details)
+
             entries.append(contentsOf: callsigns.map { call in
                 DXpeditionEntry(
                     id: stableID(call: call, start: dates.start, end: dates.end),
@@ -468,7 +843,13 @@ nonisolated enum DXpeditionService {
                     sourceURLs: sourceURLs,
                     details: storedDetails,
                     bulletin: bulletin,
-                    lastReportedAt: referenceDate
+                    lastReportedAt: referenceDate,
+                    bands: bands,
+                    modes: modes,
+                    qslInfo: qsl,
+                    iota: iota,
+                    operators: ops,
+                    grid: grid
                 )
             })
         }
@@ -502,6 +883,9 @@ nonisolated enum DXpeditionService {
 
         var entries: [DXpeditionEntry] = []
         var issueNumbers: [Int] = []
+        var bulletins: [DXBulletin] = []
+        var newsArticles: [DXNewsArticle] = []
+
         if let calendarResult {
             let calendarEntries = parse425Calendar(decodeText(calendarResult))
             entries.append(contentsOf: calendarEntries)
@@ -512,17 +896,58 @@ nonisolated enum DXpeditionService {
            let latest = latest425Bulletin(
                in: decodeText(bulletinListResult),
                relativeTo: fourTwentyFiveBulletinURL
-           ),
-           let pdfData = await optionalData(from: latest.url, version: version),
-           let text = pdfText(from: pdfData) {
-            let publication = bulletinPublicationDate(in: text) ?? Date()
-            entries.append(contentsOf: parse425Bulletin(
-                text,
-                bulletin: latest.issue,
-                sourceURLs: [latest.url.absoluteString, fourTwentyFiveBulletinURL.absoluteString],
-                referenceDate: publication
-            ))
-            if let issue = Int(latest.issue) { issueNumbers.append(issue) }
+           ) {
+            var text: String? = nil
+            let pdfData = await optionalData(from: latest.url, version: version)
+            if let pdfData {
+                text = pdfText(from: pdfData)
+            }
+
+            if text == nil || text?.isEmpty == true {
+                let textBulletinURL = URL(string: "https://www.425dxn.org/wbull.php?op=wbull&query=\(latest.issue)")!
+                if let rawTextData = await optionalData(from: textBulletinURL, version: version) {
+                    text = plainText(decodeText(rawTextData))
+                }
+            }
+
+            if let text, !text.isEmpty {
+                let publication = bulletinPublicationDate(in: text) ?? Date()
+                let parsedBulletins = parse425Bulletin(
+                    text,
+                    bulletin: latest.issue,
+                    sourceURLs: [latest.url.absoluteString, fourTwentyFiveBulletinURL.absoluteString],
+                    referenceDate: publication
+                )
+                entries.append(contentsOf: parsedBulletins)
+                if let issue = Int(latest.issue) { issueNumbers.append(issue) }
+
+                bulletins.append(DXBulletin(
+                    source: "425 DX News",
+                    issue: "Issue #\(latest.issue)",
+                    publishedAt: publication,
+                    sourceURL: latest.url.absoluteString,
+                    content: text,
+                    operationCount: parsedBulletins.count
+                ))
+
+                for op in parsedBulletins.prefix(15) {
+                    newsArticles.append(DXNewsArticle(
+                        id: "425-\(latest.issue)-\(op.callsign)",
+                        title: "\(op.callsign) - \(op.entity)",
+                        summary: String(op.details.prefix(280)),
+                        body: op.details,
+                        source: "425 DX News",
+                        sourceURL: latest.url.absoluteString,
+                        publishedAt: publication,
+                        category: "Bulletin Report",
+                        callsigns: [op.callsign],
+                        entity: op.entity,
+                        bands: op.bands ?? [],
+                        modes: op.modes ?? [],
+                        iota: op.iota
+                    ))
+                }
+            }
         }
 
         guard !entries.isEmpty else {
@@ -530,7 +955,9 @@ nonisolated enum DXpeditionService {
                 name: "425 DX News",
                 entries: [],
                 bulletinNote: "",
-                error: "No operations parsed"
+                error: "No operations parsed",
+                newsArticles: newsArticles,
+                bulletins: bulletins
             )
         }
         let bulletinNote = issueNumbers.max().map { "425 DX News #\($0)" } ?? ""
@@ -538,7 +965,9 @@ nonisolated enum DXpeditionService {
             name: "425 DX News",
             entries: merge(entries),
             bulletinNote: bulletinNote,
-            error: nil
+            error: nil,
+            newsArticles: newsArticles,
+            bulletins: bulletins
         )
     }
 
@@ -547,6 +976,7 @@ nonisolated enum DXpeditionService {
             let data = try await fetchData(from: dxWorldFeedURL, version: version)
             let parsed = parseDXWorldFeed(data)
             var entries = parsed.entries
+            var bulletins: [DXBulletin] = []
 
             if let pageURL = URL(string: parsed.bulletinPageURL) {
                 do {
@@ -563,6 +993,15 @@ nonisolated enum DXpeditionService {
                                 referenceDate: parsed.bulletinPublishedAt ?? Date()
                             )
                             entries.append(contentsOf: bulletinEntries)
+
+                            bulletins.append(DXBulletin(
+                                source: "DX-World Weekly",
+                                issue: issue.isEmpty ? parsed.bulletin : "Issue #\(issue)",
+                                publishedAt: parsed.bulletinPublishedAt,
+                                sourceURL: pdfURL.absoluteString,
+                                content: text,
+                                operationCount: bulletinEntries.count
+                            ))
                         }
                     }
                 } catch {
@@ -571,11 +1010,169 @@ nonisolated enum DXpeditionService {
             }
 
             guard !entries.isEmpty else {
-                return DXpeditionSourcePayload(name: "DX-World", entries: [], bulletinNote: parsed.bulletin, error: "No operations parsed")
+                return DXpeditionSourcePayload(name: "DX-World", entries: [], bulletinNote: parsed.bulletin, error: "No operations parsed", newsArticles: parsed.newsArticles, bulletins: bulletins)
             }
-            return DXpeditionSourcePayload(name: "DX-World", entries: merge(entries), bulletinNote: parsed.bulletin, error: nil)
+            return DXpeditionSourcePayload(name: "DX-World", entries: merge(entries), bulletinNote: parsed.bulletin, error: nil, newsArticles: parsed.newsArticles, bulletins: bulletins)
         } catch {
             return DXpeditionSourcePayload(name: "DX-World", entries: [], bulletinNote: "", error: error.localizedDescription)
+        }
+    }
+
+    static func parseNG3K(_ html: String) -> [DXpeditionEntry] {
+        guard let rowRegex = try? NSRegularExpression(pattern: #"(?is)<tr class="adxoitem"[^>]*>(.*?)</tr>"#) else { return [] }
+        let matches = rowRegex.matches(in: html, range: NSRange(html.startIndex..., in: html))
+        var entries: [DXpeditionEntry] = []
+
+        for match in matches {
+            guard let range = Range(match.range(at: 1), in: html) else { continue }
+            let rowContent = String(html[range])
+
+            let dateMatches = captureAll(in: rowContent, pattern: #"(?is)<td class="date">([^<]+)</td>"#)
+            guard dateMatches.count >= 2 else { continue }
+            let startDate = dateMatches[0].trimmingCharacters(in: .whitespacesAndNewlines)
+            let endDate = dateMatches[1].trimmingCharacters(in: .whitespacesAndNewlines)
+            guard date(fromDisplayValue: startDate) != nil, date(fromDisplayValue: endDate) != nil else { continue }
+
+            let entity = firstCapture(in: rowContent, pattern: #"(?is)<td class="cty">([^<]+)</td>"#)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let qslRaw = firstCapture(in: rowContent, pattern: #"(?is)<td class="qsl">([^<]+)</td>"#)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let infoRaw = firstCapture(in: rowContent, pattern: #"(?is)<td class="info">([^<]+)</td>"#)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let cleanInfo = plainText(infoRaw)
+
+            // Extract callsigns from spots link, "as CALL" in info, or span.call
+            var candidateCalls: [String] = []
+            if let spotCall = firstCapture(in: rowContent, pattern: #"c=([A-Za-z0-9/]+)"#) {
+                candidateCalls.append(spotCall)
+            }
+            let asCalls = captureAll(in: cleanInfo, pattern: #"\bas\s+([A-Za-z0-9/]+)"#)
+            for c in asCalls {
+                if !candidateCalls.contains(c) {
+                    candidateCalls.append(c)
+                }
+            }
+            if candidateCalls.isEmpty {
+                if let spanCall = firstCapture(in: rowContent, pattern: #"(?is)<span class="call">(.*?)</span>"#) {
+                    let stripped = plainText(spanCall)
+                    if !stripped.isEmpty {
+                        candidateCalls.append(stripped)
+                    }
+                }
+            }
+
+            let validCalls = candidateCalls
+                .map(normalizedCallsign)
+                .filter(isPlausibleCallsign)
+
+            guard !validCalls.isEmpty else { continue }
+
+            let bands = extractBands(from: cleanInfo)
+            let modes = extractModes(from: cleanInfo)
+            let iota = extractIOTA(from: cleanInfo)
+            let grid = extractGrid(from: cleanInfo)
+            let operators = extractOperators(from: cleanInfo)
+            let qsl = (qslRaw?.isEmpty == false ? qslRaw : nil) ?? extractQSLInfo(from: cleanInfo)
+
+            for call in validCalls {
+                let resolvedEntity = entity.isEmpty ? DXCCDatabase.resolve(callsign: call).entityName : entity
+                entries.append(DXpeditionEntry(
+                    id: stableID(call: call, start: startDate, end: endDate),
+                    callsign: call,
+                    entity: resolvedEntity,
+                    start: startDate,
+                    end: endDate,
+                    sources: ["NG3K"],
+                    sourceURLs: [ng3kURL.absoluteString],
+                    details: cleanInfo,
+                    bands: bands.isEmpty ? nil : bands,
+                    modes: modes.isEmpty ? nil : modes,
+                    qslInfo: qsl,
+                    iota: iota.isEmpty ? nil : iota,
+                    operators: operators.isEmpty ? nil : operators,
+                    grid: grid
+                ))
+            }
+        }
+
+        return merge(entries)
+    }
+
+    static func parseRSSFeed(_ data: Data, defaultSource: String, defaultCategory: String) -> [DXNewsArticle] {
+        let parser = GenericRSSFeedParser()
+        let xmlParser = XMLParser(data: data)
+        xmlParser.delegate = parser
+        xmlParser.parse()
+
+        return parser.items.map { item in
+            let cleanDesc = plainText(item.description)
+            let summary: String
+            if cleanDesc.count > 280 {
+                summary = String(cleanDesc.prefix(277)) + "..."
+            } else {
+                summary = cleanDesc
+            }
+
+            let combinedText = item.title + " " + cleanDesc
+            let calls = extractCallsigns(from: combinedText)
+            let entity = calls.first.map { DXCCDatabase.resolve(callsign: $0).entityName } ?? ""
+            let bands = extractBands(from: cleanDesc)
+            let modes = extractModes(from: cleanDesc)
+            let iota = extractIOTA(from: cleanDesc)
+
+            return DXNewsArticle(
+                id: UUID().uuidString,
+                title: item.title,
+                summary: summary,
+                body: cleanDesc,
+                source: defaultSource,
+                sourceURL: item.link,
+                publishedAt: item.publishedAt,
+                category: defaultCategory,
+                callsigns: calls,
+                entity: entity,
+                bands: bands,
+                modes: modes,
+                iota: iota,
+                audioURL: item.audioURL
+            )
+        }
+    }
+
+    private static func fetchNG3K(version: String) async -> DXpeditionSourcePayload {
+        do {
+            let data = try await fetchData(from: ng3kURL, version: version)
+            let html = decodeText(data)
+            let entries = parseNG3K(html)
+            guard !entries.isEmpty else {
+                return DXpeditionSourcePayload(name: "NG3K ADXO", entries: [], bulletinNote: "", error: "No operations parsed")
+            }
+            return DXpeditionSourcePayload(name: "NG3K ADXO", entries: entries, bulletinNote: "NG3K ADXO (\(entries.count) ops)", error: nil)
+        } catch {
+            return DXpeditionSourcePayload(name: "NG3K ADXO", entries: [], bulletinNote: "", error: error.localizedDescription)
+        }
+    }
+
+    private static func fetchARRLNews(version: String) async -> DXpeditionSourcePayload {
+        do {
+            let data = try await fetchData(from: arrlNewsFeedURL, version: version)
+            let articles = parseRSSFeed(data, defaultSource: "ARRL News", defaultCategory: "ARRL News")
+            guard !articles.isEmpty else {
+                return DXpeditionSourcePayload(name: "ARRL News", entries: [], bulletinNote: "", error: "No articles parsed")
+            }
+            return DXpeditionSourcePayload(name: "ARRL News", entries: [], bulletinNote: "ARRL News (\(articles.count) articles)", error: nil, newsArticles: articles)
+        } catch {
+            return DXpeditionSourcePayload(name: "ARRL News", entries: [], bulletinNote: "", error: error.localizedDescription)
+        }
+    }
+
+    private static func fetchARNewsline(version: String) async -> DXpeditionSourcePayload {
+        do {
+            let data = try await fetchData(from: arNewslineFeedURL, version: version)
+            let articles = parseRSSFeed(data, defaultSource: "ARNewsline", defaultCategory: "ARNewsline")
+            guard !articles.isEmpty else {
+                return DXpeditionSourcePayload(name: "ARNewsline", entries: [], bulletinNote: "", error: "No reports parsed")
+            }
+            return DXpeditionSourcePayload(name: "ARNewsline", entries: [], bulletinNote: "ARNewsline (\(articles.count) reports)", error: nil, newsArticles: articles)
+        } catch {
+            return DXpeditionSourcePayload(name: "ARNewsline", entries: [], bulletinNote: "", error: error.localizedDescription)
         }
     }
 
@@ -649,6 +1246,13 @@ nonisolated enum DXpeditionService {
             let bulletin = preferred.bulletin.isEmpty ? alternate.bulletin : preferred.bulletin
             let reported = [preferred.lastReportedAt, alternate.lastReportedAt].compactMap { $0 }.max()
 
+            let mergedBands = unique((preferred.bands ?? []) + (alternate.bands ?? []))
+            let mergedModes = unique((preferred.modes ?? []) + (alternate.modes ?? []))
+            let mergedOperators = unique((preferred.operators ?? []) + (alternate.operators ?? []))
+            let qsl = (preferred.qslInfo?.isEmpty == false) ? preferred.qslInfo : alternate.qslInfo
+            let iotaVal = (!preferred.iota.isEmpty) ? preferred.iota : alternate.iota
+            let gridVal = (preferred.grid?.isEmpty == false) ? preferred.grid : alternate.grid
+
             merged[key] = DXpeditionEntry(
                 id: stableID(call: preferred.callsign, start: preferred.start, end: preferred.end),
                 callsign: preferred.callsign,
@@ -659,7 +1263,13 @@ nonisolated enum DXpeditionService {
                 sourceURLs: urls,
                 details: details,
                 bulletin: bulletin,
-                lastReportedAt: reported
+                lastReportedAt: reported,
+                bands: mergedBands.isEmpty ? nil : mergedBands,
+                modes: mergedModes.isEmpty ? nil : mergedModes,
+                qslInfo: qsl,
+                iota: iotaVal.isEmpty ? nil : iotaVal,
+                operators: mergedOperators.isEmpty ? nil : mergedOperators,
+                grid: gridVal
             )
         }
 
@@ -910,12 +1520,33 @@ nonisolated enum DXpeditionService {
     }
 
     private static func bulletinOperationHeader(_ firstLine: String) -> (prefix: String, entity: String)? {
-        guard let comma = firstLine.firstIndex(of: ",") else { return nil }
-        let prefix = normalizedCallsign(String(firstLine[..<comma]))
-        guard isPlausibleCallsign(prefix), prefix.count <= 8 else { return nil }
+        let trimmed = firstLine.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let comma = trimmed.firstIndex(of: ",") {
+            let prefix = normalizedCallsign(String(trimmed[..<comma]))
+            if isPlausibleCallsign(prefix), prefix.count <= 8 {
+                let remainder = String(trimmed[trimmed.index(after: comma)...])
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                if let entity = parseEntityFromHeaderRemainder(remainder) {
+                    return (prefix, entity)
+                }
+            }
+        }
+        for sep in [" - ", " – ", " — "] {
+            if let range = trimmed.range(of: sep) {
+                let prefix = normalizedCallsign(String(trimmed[..<range.lowerBound]))
+                if isPlausibleCallsign(prefix), prefix.count <= 8 {
+                    let remainder = String(trimmed[range.upperBound...])
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    if let entity = parseEntityFromHeaderRemainder(remainder) {
+                        return (prefix, entity)
+                    }
+                }
+            }
+        }
+        return nil
+    }
 
-        let remainder = firstLine[firstLine.index(after: comma)...]
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+    private static func parseEntityFromHeaderRemainder(_ remainder: String) -> String? {
         let punctuation = CharacterSet(charactersIn: ",:;.")
         var entityParts: [String] = []
 
@@ -937,7 +1568,124 @@ nonisolated enum DXpeditionService {
         let entity = entityParts.joined(separator: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines.union(punctuation))
         guard !entity.isEmpty else { return nil }
-        return (prefix, entity)
+        return entity
+    }
+
+    static func extractIOTA(from text: String) -> String {
+        let pattern = #"(?i)\b(?:IOTA\s+)?([A-Z]{2}-\d{3})\b"#
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+              let iota = capture(match, 1, in: text)?.uppercased()
+        else { return "" }
+        let continentPrefixes = ["AF", "AN", "AS", "EU", "NA", "OC", "SA"]
+        let prefix = String(iota.prefix(2))
+        guard continentPrefixes.contains(prefix) else { return "" }
+        return iota
+    }
+
+    static func extractGrid(from text: String) -> String {
+        let pattern = #"(?i)\b(?:WWL\s+|grid\s+)?([A-R]{2}\d{2}[A-X]{2})\b"#
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+              let grid = capture(match, 1, in: text)?.uppercased()
+        else { return "" }
+        return grid
+    }
+
+    static func extractModes(from text: String) -> [String] {
+        var modes: [String] = []
+        let upper = text.uppercased()
+        if upper.contains("FT8") { modes.append("FT8") }
+        if upper.contains("FT4") { modes.append("FT4") }
+        if upper.range(of: #"\bCW\b"#, options: .regularExpression) != nil { modes.append("CW") }
+        if upper.range(of: #"\bSSB\b"#, options: .regularExpression) != nil { modes.append("SSB") }
+        if upper.contains("RTTY") { modes.append("RTTY") }
+        if upper.contains("SUPERFOX") { modes.append("SuperFox") }
+        if upper.contains("MSK144") { modes.append("MSK144") }
+        if upper.contains("DIGITAL") && !modes.contains("FT8") { modes.append("Digital") }
+        return modes
+    }
+
+    static func extractBands(from text: String) -> [String] {
+        var bands: [String] = []
+        let lower = text.lowercased()
+        let known = ["160m", "80m", "60m", "40m", "30m", "20m", "17m", "15m", "12m", "10m", "6m", "4m", "2m", "70cm"]
+        for b in known {
+            if lower.contains(b) { bands.append(b) }
+        }
+
+        // Support range expressions like 160-6m, 80-10m, 40-10m, 60-6m, 40-6m, etc.
+        let pattern = #"(?i)\b(\d{1,3})m?\s*-\s*(\d{1,3})m\b"#
+        if let regex = try? NSRegularExpression(pattern: pattern) {
+            let matches = regex.matches(in: lower, range: NSRange(lower.startIndex..., in: lower))
+            for match in matches {
+                if let r1 = Range(match.range(at: 1), in: lower),
+                   let r2 = Range(match.range(at: 2), in: lower) {
+                    let b1 = String(lower[r1]) + "m"
+                    let b2 = String(lower[r2]) + "m"
+                    if let idx1 = known.firstIndex(of: b1), let idx2 = known.firstIndex(of: b2) {
+                        let lowIdx = min(idx1, idx2)
+                        let highIdx = max(idx1, idx2)
+                        for b in known[lowIdx...highIdx] {
+                            if !bands.contains(b) { bands.append(b) }
+                        }
+                    }
+                }
+            }
+        }
+
+        if lower.contains("6 metres") || lower.contains("6 meters") || lower.contains("50 mhz") {
+            if !bands.contains("6m") { bands.append("6m") }
+        }
+        if lower.contains("hf bands") || lower.contains("all hf") {
+            if !bands.contains("HF") { bands.append("HF") }
+        }
+        return bands
+    }
+
+    static func extractQSLInfo(from text: String) -> String {
+        var routes: [String] = []
+        let lower = text.lowercased()
+        if lower.contains("lotw") { routes.append("LoTW") }
+        if lower.contains("club log") || lower.contains("oqrs") { routes.append("Club Log OQRS") }
+        if lower.contains("bureau") { routes.append("Bureau") }
+        if lower.contains("direct") { routes.append("Direct") }
+        if let match = firstCapture(in: text, pattern: #"(?i)\bQSL\s+via\s+([A-Z0-9/]+)\b"#) {
+            let mgr = match.uppercased()
+            if !routes.contains("via \(mgr)") && mgr != "LOTW" {
+                routes.append("via \(mgr)")
+            }
+        }
+        return routes.joined(separator: ", ")
+    }
+
+    static func extractOperators(from text: String) -> [String] {
+        let pattern = #"(?i)\b([A-Z][a-z]+(?:-[A-Z][a-z]+)?)\s*,?\s+([A-Z0-9]{1,3}\d[A-Z0-9]+)\b"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+        var ops: [String] = []
+        for match in regex.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
+            guard let name = capture(match, 1, in: text),
+                  let call = capture(match, 2, in: text)?.uppercased(),
+                  isPlausibleCallsign(call)
+            else { continue }
+            let op = "\(name) (\(call))"
+            if !ops.contains(op) { ops.append(op) }
+        }
+        return ops
+    }
+
+    static func extractCallsignsFromFreeformTitle(_ title: String) -> [String] {
+        let pattern = #"(?i)\b[A-Z0-9]+(?:/[A-Z0-9]+)+\b|\b[A-Z]{1,2}\d[A-Z0-9]{1,4}\b|\b\d[A-Z]{1,2}\d[A-Z0-9]{1,4}\b"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+        var result: [String] = []
+        for match in regex.matches(in: title, range: NSRange(title.startIndex..., in: title)) {
+            guard let range = Range(match.range(at: 0), in: title) else { continue }
+            let candidate = normalizedCallsign(String(title[range]))
+            if isPlausibleCallsign(candidate) && !result.contains(candidate) {
+                result.append(candidate)
+            }
+        }
+        return result
     }
 
     private static func bulletinCallsigns(in text: String, excludingPrefix prefix: String) -> [String] {
@@ -1053,6 +1801,13 @@ nonisolated enum DXpeditionService {
         return capture(match, 1, in: value)
     }
 
+    static func captureAll(in value: String, pattern: String, group: Int = 1) -> [String] {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+        return regex.matches(in: value, range: NSRange(value.startIndex..., in: value)).compactMap { match in
+            capture(match, group, in: value)
+        }
+    }
+
     private static func capture(_ match: NSTextCheckingResult, _ index: Int, in value: String) -> String? {
         guard index < match.numberOfRanges, match.range(at: index).location != NSNotFound,
               let range = Range(match.range(at: index), in: value)
@@ -1093,6 +1848,8 @@ extension AppState {
         let data = defaults.data(forKey: Self.dxpeditionCacheKey) ?? defaults.data(forKey: Self.legacyDXpeditionCacheKey)
         guard let data, let cache = try? JSONDecoder().decode(DXpeditionCache.self, from: data) else { return }
         dxpeditionEntries = cache.entries
+        dxNewsArticles = cache.newsArticles
+        dxBulletins = cache.bulletins
         dxpeditionLastUpdated = cache.updatedAt
         dxpeditionStatus = "Showing the last saved multi-source DXpedition list."
     }
@@ -1121,14 +1878,16 @@ extension AppState {
 
             let now = Date()
             self.dxpeditionEntries = result.entries
+            self.dxNewsArticles = result.newsArticles
+            self.dxBulletins = result.bulletins
             self.dxpeditionLastUpdated = now
             let sourceText = result.successfulSources.joined(separator: ", ")
             let bulletinText = result.bulletinNotes.isEmpty ? "" : " · \(result.bulletinNotes.joined(separator: " · "))"
             let partialText = result.failedSources.isEmpty ? "" : " · Unavailable: \(result.failedSources.joined(separator: ", "))"
-            self.dxpeditionStatus = "Loaded \(result.entries.count) operations from \(sourceText)\(bulletinText)\(partialText)."
+            self.dxpeditionStatus = "Loaded \(result.entries.count) operations (\(result.newsArticles.count) news articles) from \(sourceText)\(bulletinText)\(partialText)."
             self.scheduleDXpeditionOpportunityNotifications()
 
-            if let data = try? JSONEncoder().encode(DXpeditionCache(entries: result.entries, updatedAt: now)) {
+            if let data = try? JSONEncoder().encode(DXpeditionCache(entries: result.entries, updatedAt: now, newsArticles: result.newsArticles, bulletins: result.bulletins)) {
                 UserDefaults.standard.set(data, forKey: Self.dxpeditionCacheKey)
             }
         }

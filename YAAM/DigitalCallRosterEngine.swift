@@ -86,6 +86,7 @@ public struct DigitalRosterEntry: Identifiable, Equatable, Sendable {
     public let rawDecode: WSJTXLiveDecode?
     public var port: Int = 2237
     public var sliceLabel: String = "VFO A"
+    public let tacticalScore: Int
 
     public var snrFormatted: String {
         snr >= 0 ? "+\(snr) dB" : "\(snr) dB"
@@ -111,6 +112,7 @@ public final class DigitalCallRosterEngine: ObservableObject {
 
     // MARK: - Published Outputs
     @Published public private(set) var entries: [DigitalRosterEntry] = []
+    @Published public private(set) var apexTarget: DigitalRosterEntry? = nil
     @Published public private(set) var totalDecodesCount: Int = 0
     @Published public private(set) var neededCount: Int = 0
     @Published public private(set) var cqCount: Int = 0
@@ -205,7 +207,7 @@ public final class DigitalCallRosterEngine: ObservableObject {
 
     // MARK: - Ingestion & Triage Processing
 
-    public func processDecodes(_ rawDecodes: [WSJTXLiveDecode], activeBand: String) {
+    public func processDecodes(_ rawDecodes: [WSJTXLiveDecode], activeBand: String, isSimulation: Bool = false) {
         guard !rawDecodes.isEmpty else { return }
 
         var newRosterEntries: [DigitalRosterEntry] = []
@@ -242,20 +244,44 @@ public final class DigitalCallRosterEngine: ObservableObject {
 
             if isToMe {
                 status = .callingMe
-                audio.announceDirectedToMe(caller: caller, snr: decode.snr, band: band)
+                if !isSimulation {
+                    audio.announceDirectedToMe(caller: caller, snr: decode.snr, band: band)
+                }
             } else if !countryName.isEmpty && countryName != "Unknown" && !workedCountries.contains(countryName) {
                 status = .newDXCC
-                audio.announceNewDXCC(callsign: caller, country: countryName, band: band)
+                if !isSimulation {
+                    audio.announceNewDXCC(callsign: caller, country: countryName, band: band)
+                }
             } else if !countryName.isEmpty && countryName != "Unknown" && !workedCountryBands.contains("\(countryName)_\(band)") {
                 status = .newBand
-                audio.announceNewBand(callsign: caller, country: countryName, band: band)
+                if !isSimulation {
+                    audio.announceNewBand(callsign: caller, country: countryName, band: band)
+                }
             } else if !gridKey.isEmpty && !workedGrids.contains(gridKey) {
                 status = .newGrid
-                audio.announceNewGrid(callsign: caller, grid: grid, band: band)
+                if !isSimulation {
+                    audio.announceNewGrid(callsign: caller, grid: grid, band: band)
+                }
             } else if confirmedCallsigns.contains("\(caller)_\(band)") {
                 status = .confirmed
             } else {
                 status = .worked
+            }
+
+            var tacticalScore = 0
+            switch status {
+            case .callingMe: tacticalScore += 1000
+            case .newDXCC: tacticalScore += 500
+            case .newBand: tacticalScore += 250
+            case .newGrid: tacticalScore += 120
+            case .newMode: tacticalScore += 80
+            case .worked: tacticalScore += 10
+            case .confirmed: tacticalScore += 0
+            }
+            if isCQ { tacticalScore += 60 }
+            tacticalScore += max(-20, min(30, Int(decode.snr) + 20))
+            if let dist = distanceKm {
+                tacticalScore += min(30, Int(dist / 1000.0))
             }
 
             let entry = DigitalRosterEntry(
@@ -278,7 +304,8 @@ public final class DigitalCallRosterEngine: ObservableObject {
                 receivedAt: decode.receivedAt,
                 rawDecode: decode,
                 port: decode.port,
-                sliceLabel: decode.sliceLabel
+                sliceLabel: decode.sliceLabel,
+                tacticalScore: tacticalScore
             )
 
             newRosterEntries.append(entry)
@@ -293,10 +320,10 @@ public final class DigitalCallRosterEngine: ObservableObject {
             existingMap[newEntry.callsign] = newEntry
         }
 
-        // Sort: Priority first, then SNR descending
+        // Sort: Tactical Score descending, then SNR descending
         let sorted = existingMap.values.sorted {
-            if $0.status.priorityOrder != $1.status.priorityOrder {
-                return $0.status.priorityOrder < $1.status.priorityOrder
+            if $0.tacticalScore != $1.tacticalScore {
+                return $0.tacticalScore > $1.tacticalScore
             }
             return $0.snr > $1.snr
         }
@@ -305,7 +332,11 @@ public final class DigitalCallRosterEngine: ObservableObject {
         self.totalDecodesCount = self.entries.count
         self.neededCount = self.entries.filter { $0.status.isNeeded }.count
         self.cqCount = self.entries.filter { $0.isCQ }.count
+        self.apexTarget = self.entries.first(where: { $0.isToMe || ($0.isCQ && $0.status.isNeeded) }) ?? self.entries.first(where: { $0.isCQ })
         self.lastProcessedCycle = Date()
+
+        // Forward to Tactical Band Advisor
+        TacticalBandAdvisor.shared.recordDecodes(rawDecodes, onBand: activeBand)
     }
 
     public func clearRoster() {

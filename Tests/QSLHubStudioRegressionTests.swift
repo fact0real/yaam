@@ -11,6 +11,7 @@
 //
 
 import Foundation
+@testable import YAAM
 
 // Isolated types for standalone test execution
 struct TestQSORecord {

@@ -134,7 +134,7 @@ extension AppState {
         let providers = Set(raw.split(separator: ",").compactMap { QSLProvider(rawValue: String($0)) })
         guard !providers.isEmpty else { return }
         enqueueQSL(records: [record], providers: providers)
-        Task { await processQSLQueue() }
+        Task { @MainActor in await self.processQSLQueue() }
     }
 
     @MainActor
@@ -314,7 +314,12 @@ extension AppState {
             qrzAPIKey: providers.contains(.qrz) ? activeQRZAPIKey : "",
             lotwCallsign: defaults.string(forKey: "lotwUsername") ?? currentStationCallsign,
             lotwPassword: providers.contains(.lotw) ? CredentialVault.value(for: .lotwPassword) : "",
-            lotwStationLocation: activeStationProfile?.lotwStationLocation ?? "",
+            lotwStationLocation: {
+                let profLoc = (activeStationProfile?.lotwStationLocation ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                if !profLoc.isEmpty { return profLoc }
+                return (defaults.string(forKey: "lotwStationLocation") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            }(),
+            lotwCertificatePassword: providers.contains(.lotw) ? CredentialVault.value(for: .lotwCertificatePassword) : "",
             tqslExecutablePath: defaults.string(forKey: "tqslExecutablePath") ?? "",
             tqslBookmarkData: defaults.data(forKey: "tqslExecutableBookmark"),
             eqslUsername: defaults.string(forKey: "eqslUsername") ?? currentStationCallsign,
@@ -403,9 +408,21 @@ extension AppState {
     }
 
     private func qslADIFRecord(_ fields: [String: String]) -> String {
+        var normalizedFields = fields
+        let currentMode = normalizedFields["MODE"] ?? ""
+        let currentSubmode = normalizedFields["SUBMODE"] ?? ""
+        let freq = Double(normalizedFields["FREQ"] ?? "")
+        let effective = AmateurBandPlan.effectiveADIFMode(mode: currentMode, submode: currentSubmode, frequencyMHz: freq)
+        if !effective.isEmpty {
+            normalizedFields["MODE"] = effective
+            if effective == "FT8" || effective == "FT4" || effective == "JS8" {
+                normalizedFields["SUBMODE"] = effective
+            }
+        }
+
         var result = ""
-        for key in fields.keys.sorted() {
-            guard let value = fields[key], !value.isEmpty else { continue }
+        for key in normalizedFields.keys.sorted() {
+            guard let value = normalizedFields[key], !value.isEmpty else { continue }
             result += "<\(key):\(value.utf8.count)>\(value)"
         }
         return result + "<EOR>"

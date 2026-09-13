@@ -155,11 +155,25 @@ nonisolated enum SDRControlMergeEngine {
         let loser: [String: String]
 
         if preferSDRCanonical && prefersSDRIdentity(rhs, over: lhs) {
-            winner = rhs
-            loser = lhs
+            let rhsScore = richnessScore(rhs)
+            let lhsScore = richnessScore(lhs)
+            if lhsScore > rhsScore {
+                winner = lhs
+                loser = rhs
+            } else {
+                winner = rhs
+                loser = lhs
+            }
         } else if preferSDRCanonical && prefersSDRIdentity(lhs, over: rhs) {
-            winner = lhs
-            loser = rhs
+            let rhsScore = richnessScore(rhs)
+            let lhsScore = richnessScore(lhs)
+            if rhsScore > lhsScore {
+                winner = rhs
+                loser = lhs
+            } else {
+                winner = lhs
+                loser = rhs
+            }
         } else if richnessScore(rhs) > richnessScore(lhs) {
             winner = rhs
             loser = lhs
@@ -173,6 +187,16 @@ nonisolated enum SDRControlMergeEngine {
             if let fallbackMode = loser["MODE"], !fallbackMode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 merged["MODE"] = fallbackMode
             }
+        }
+        if hasNonZeroSeconds(loser) && !hasNonZeroSeconds(merged) {
+            if let tOn = loser["TIME_ON"] { merged["TIME_ON"] = tOn }
+            if let tOff = loser["TIME_OFF"] { merged["TIME_OFF"] = tOff }
+        }
+        if frequencyDecimalPrecision(loser["FREQ"] ?? "") > frequencyDecimalPrecision(merged["FREQ"] ?? "") {
+            if let freq = loser["FREQ"] { merged["FREQ"] = freq }
+        }
+        if (merged["APP_SDR_CONTROL_ID"] ?? "").isEmpty, let sdrID = loser["APP_SDR_CONTROL_ID"], !sdrID.isEmpty {
+            merged["APP_SDR_CONTROL_ID"] = sdrID
         }
         return merged
     }
@@ -216,8 +240,7 @@ nonisolated enum SDRControlMergeEngine {
             if !callDateBand.isEmpty, let candidates = indexesByCallDateBand[callDateBand] {
                 if let match = candidates.first(where: { index in
                     records.indices.contains(index) &&
-                    (isRoundedSDRDuplicate(records[index].fields, fields) ||
-                     QSOIdentity.isSameQSO(lhs: records[index].fields, rhs: fields, timeToleranceSeconds: 300))
+                    isRoundedSDRDuplicate(records[index].fields, fields)
                 }) {
                     return match
                 }
@@ -342,7 +365,8 @@ nonisolated enum SDRControlMergeEngine {
             if !value.isEmpty { count += 1 }
         }
         let confirmationFields = [
-            "QSL_RCVD", "LOTW_QSL_RCVD", "QRZLOG_QSL_RCVD", "EQSL_QSL_RCVD"
+            "QSL_RCVD", "LOTW_QSL_RCVD", "QRZLOG_QSL_RCVD", "EQSL_QSL_RCVD",
+            "APP_YAAM_CLUBLOG_LOTW_STATE", "APP_YAAM_CONFIRMATION_STATUS", "APP_YAAM_NEW_CONFIRMED"
         ]
         let confirmedCount = confirmationFields.reduce(into: 0) { count, key in
             if isAffirmative(normalized[key] ?? "") { count += 1 }
@@ -350,7 +374,10 @@ nonisolated enum SDRControlMergeEngine {
         let highValueFields = [
             "NAME", "EMAIL", "COUNTRY", "DXCC", "GRIDSQUARE", "LAT", "LON",
             "CQZ", "ITUZ", "QSL_RCVD_DATE", "LOTW_QSLRDATE", "QRZLOG_QSLRDATE",
-            "EQSL_QSLRDATE", "APP_QRZLOG_LOGID", "APP_LOTW_QSO_TIMESTAMP"
+            "EQSL_QSLRDATE", "APP_QRZLOG_LOGID", "APP_LOTW_QSO_TIMESTAMP",
+            "RANK_DXCC", "RANK_QSO", "RANK_BAND", "APP_YAAM_RANK_STATUS",
+            "APP_YAAM_ENRICHED", "APP_YAAM_EMAIL_CHECKED", "APP_YAAM_RANK_CHECKED",
+            "QRZ_URL", "APP_YAAM_LAST_EMAIL", "APP_YAAM_EMAIL_SENT_DATE"
         ]
         let highValueCount = highValueFields.reduce(into: 0) { count, key in
             if !(normalized[key] ?? "").isEmpty { count += 1 }
@@ -359,6 +386,6 @@ nonisolated enum SDRControlMergeEngine {
     }
 
     private static func isAffirmative(_ value: String) -> Bool {
-        ["Y", "YES", "TRUE", "1", "C", "CONFIRMED", "RECEIVED"].contains(value.uppercased())
+        ["Y", "YES", "TRUE", "1", "C", "V", "CONFIRMED", "RECEIVED"].contains(value.trimmingCharacters(in: .whitespacesAndNewlines).uppercased())
     }
 }

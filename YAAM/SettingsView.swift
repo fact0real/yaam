@@ -12,7 +12,7 @@ import UniformTypeIdentifiers
 // MARK: - macOS Preferences & Credentials Settings Sheet
 struct SettingsView: View {
     private enum Tabs: Hashable {
-        case stations, dataSafety, bands, qrz, qrzRank, clubLog, lotw, eqsl, wavelog, clubs, tci, winkeyer, on4kst, hrdlog, hamqth, smtp, externalADIF, sdrControl, assistant
+        case stations, dataSafety, antennaWeatherSafety, bands, qrz, qrzRank, clubLog, lotw, eqsl, wavelog, clubs, tci, winkeyer, on4kst, hrdlog, hamqth, smtp, externalADIF, sdrControl, assistant, audioAlerts
     }
 
     @EnvironmentObject var appState: AppState
@@ -32,11 +32,13 @@ struct SettingsView: View {
     @State private var showSettingsClubLogLoginSheet = false
     
     @AppStorage("lotwUsername") private var lotwUsername = ""
+    @AppStorage("lotwStationLocation") private var lotwStationLocation = ""
     @State private var lotwPassword = ""
     @State private var lotwCredentialStatus = ""
     @AppStorage("lotwCertificateContainerPath") private var lotwCertificateContainerPath = ""
     @State private var lotwCertificatePassword = ""
     @State private var lotwCertificateStatus = ""
+    @State private var tqslSyncStatus = ""
 
     @AppStorage("eqslUsername") private var eqslUsername = ""
     @State private var eqslPassword = ""
@@ -86,6 +88,12 @@ struct SettingsView: View {
                         Label("Safety", systemImage: "externaldrive.fill.badge.checkmark")
                     }
                     .tag(Tabs.dataSafety)
+
+                AntennaWeatherSafetySettingsView()
+                    .tabItem {
+                        Label("Antenna Safety", systemImage: "bolt.trianglebadge.exclamationmark.fill")
+                    }
+                    .tag(Tabs.antennaWeatherSafety)
 
                 AmateurBandsSettingsView()
                     .tabItem {
@@ -196,6 +204,18 @@ struct SettingsView: View {
 
                     SecureField("Personal API token (blank keeps the saved token):", text: $qrzRankAPIToken)
                         .textFieldStyle(.roundedBorder)
+
+                    HStack(spacing: 8) {
+                        if !CredentialVault.value(for: .qrzRankAPIToken).isEmpty {
+                            Label("Saved API token active in Keychain", systemImage: "checkmark.seal.fill")
+                                .font(.caption)
+                                .foregroundStyle(.green)
+                        } else {
+                            Label("No API token saved yet", systemImage: "exclamationmark.triangle")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
 
                     Label("Stored in macOS Keychain and sent only as an Authorization header", systemImage: "lock.fill")
                         .font(.caption)
@@ -357,6 +377,13 @@ struct SettingsView: View {
                     SecureField("New password (blank keeps the saved password):", text: $lotwPassword)
                         .textFieldStyle(.roundedBorder)
 
+                    TextField("Default Station Location (e.g. EP2AES-Home):", text: $lotwStationLocation)
+                        .textFieldStyle(.roundedBorder)
+
+                    Text("Station Location name defined in TQSL for this callsign (also synced with active Station Profile).")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
                     Label("Stored in macOS Keychain", systemImage: "lock.fill")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -375,6 +402,22 @@ struct SettingsView: View {
                         }
 
                         credentialStatus(lotwCredentialStatus)
+                    }
+
+                    HStack(spacing: 12) {
+                        Button {
+                            let outcome = TQSLService.synchronizeTQSLStorage()
+                            tqslSyncStatus = outcome.message
+                        } label: {
+                            Label("Sync TQSL Data (~/.tqsl)", systemImage: "arrow.triangle.2.circlepath")
+                        }
+                        .buttonStyle(.bordered)
+
+                        if !tqslSyncStatus.isEmpty {
+                            Text(tqslSyncStatus)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
 
                     Divider()
@@ -1068,6 +1111,12 @@ struct SettingsView: View {
                 Label("SDR-Ctrl", systemImage: "antenna.radiowaves.left.and.right")
             }
             .tag(Tabs.sdrControl)
+
+            AudioAlertSettingsView()
+                .tabItem {
+                    Label("Voice Alerts", systemImage: "speaker.wave.2.fill")
+                }
+                .tag(Tabs.audioAlerts)
             }
         }
         .padding(10)
@@ -1197,4 +1246,150 @@ private struct SettingsWindowConfigurator: NSViewRepresentable {
         }
     }
 }
+
+// MARK: - Antenna & Station Weather Safety Settings
+struct AntennaWeatherSafetySettingsView: View {
+    @ObservedObject private var engine = StationWeatherSafetyEngine.shared
+    @AppStorage("weatherRadarEnabled") private var weatherRadarEnabled = true
+    @AppStorage("weatherAudioAlertsEnabled") private var weatherAudioAlertsEnabled = true
+    @AppStorage("weatherHighWindThreshold") private var weatherHighWindThreshold: Double = 50.0
+
+    var body: some View {
+        Form {
+            VStack(alignment: .leading, spacing: 18) {
+                // Header
+                HStack(spacing: 12) {
+                    Image(systemName: "bolt.trianglebadge.exclamationmark.fill")
+                        .font(.system(size: 28))
+                        .foregroundStyle(Color.red)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Station Weather & Antenna Safety Radar")
+                            .font(.headline)
+                        Text("Monitors live atmospheric telemetry to prevent lightning strikes, coaxial cable ESD arcing, and wind load damage to Yagi antennas and masts.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Divider()
+
+                // Main Toggles
+                VStack(alignment: .leading, spacing: 12) {
+                    Toggle("Enable Weather & Antenna Safety Radar", isOn: $weatherRadarEnabled)
+                        .font(.subheadline.bold())
+
+                    Toggle("Voice Audio Alerts for Critical Hazards (Thunderstorm / Severe Lightning)", isOn: $weatherAudioAlertsEnabled)
+                        .font(.subheadline)
+                        .disabled(!weatherRadarEnabled)
+
+                    Text("When critical lightning is detected within your station's area, YAAM speaks an emergency tactical alert to disconnect feedlines.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+
+                Divider()
+
+                // Wind Threshold Slider
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("High Wind & Gust Warning Threshold:")
+                            .font(.subheadline.weight(.semibold))
+                        Spacer()
+                        Text("\(Int(weatherHighWindThreshold)) km/h (\(Int(weatherHighWindThreshold * 0.539957)) knots)")
+                            .font(.system(size: 12, weight: .bold, design: .monospaced))
+                            .foregroundStyle(Color.accentColor)
+                    }
+
+                    Slider(value: $weatherHighWindThreshold, in: 30...90, step: 5)
+                        .disabled(!weatherRadarEnabled)
+
+                    HStack {
+                        Text("30 km/h (Light masts / wire antennas)")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text("90 km/h (Heavy towers / reinforced beams)")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Divider()
+
+                // Live Telemetry Diagnostic Card
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Station QTH Diagnostic Status")
+                        .font(.subheadline.weight(.semibold))
+
+                    HStack(spacing: 16) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Grid Locator:")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text(engine.resolvedGrid.isEmpty ? "Not configured" : engine.resolvedGrid)
+                                .font(.system(size: 13, weight: .bold, design: .monospaced))
+                        }
+
+                        if let coords = engine.resolvedCoordinates {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Coordinates:")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Text(String(format: "%.4f°, %.4f°", coords.lat, coords.lon))
+                                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                            }
+                        }
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Current Threat Level:")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            HStack(spacing: 4) {
+                                Circle()
+                                    .fill(engine.threatLevel.color)
+                                    .frame(width: 8, height: 8)
+                                Text(engine.threatLevel.rawValue)
+                                    .font(.system(size: 12, weight: .bold))
+                                    .foregroundStyle(engine.threatLevel.color)
+                            }
+                        }
+
+                        Spacer()
+
+                        Button {
+                            Task {
+                                await engine.refresh()
+                            }
+                        } label: {
+                            Label("Refresh", systemImage: "arrow.clockwise")
+                        }
+                        .controlSize(.small)
+                        .disabled(engine.isFetching)
+                    }
+                    .padding(10)
+                    .background(Color(NSColor.controlBackgroundColor).opacity(0.6), in: RoundedRectangle(cornerRadius: 8))
+                }
+
+                // Audio Test Button
+                HStack {
+                    Button {
+                        engine.speak(message: "Warning. Severe lightning or thunderstorm hazard detected at your station locator. Disconnect antenna coaxial cables immediately.")
+                    } label: {
+                        Label("Test Voice Warning Announcement", systemImage: "speaker.wave.2.fill")
+                    }
+                    .controlSize(.small)
+
+                    Spacer()
+
+                    Text("Weather telemetry powered by Open-Meteo REST API (No API key needed)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding()
+        }
+    }
+}
+
 

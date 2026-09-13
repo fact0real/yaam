@@ -64,11 +64,34 @@ nonisolated enum ContestCalendarService {
         guard let separator = line.firstIndex(of: ":") else { return nil }
         let title = String(line[..<separator]).trimmingCharacters(in: .whitespacesAndNewlines)
         let window = String(line[line.index(after: separator)...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let lower = title.lowercased()
+
+        let excludedFieldPrefixes = [
+            "submit log",
+            "upload log",
+            "log due",
+            "logs due",
+            "e-mail log",
+            "mail log",
+            "post log",
+            "find rules",
+            "score calculation",
+            "qso point",
+            "multiplier",
+            "geographic",
+            "participation",
+            "mode",
+            "bands",
+            "classes",
+            "exchange",
+            "max power",
+            "last updated"
+        ]
+
         guard title.count >= 3, title.count <= 140,
               window.contains("Z"),
               window.range(of: #"\b\d{4}Z"#, options: .regularExpression) != nil,
-              !title.hasPrefix("Geographic"),
-              !title.hasPrefix("Last updated")
+              !excludedFieldPrefixes.contains(where: { lower.hasPrefix($0) })
         else { return nil }
         return (title, window)
     }

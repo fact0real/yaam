@@ -22,13 +22,135 @@ public final class TQSLService: ObservableObject {
     @Published public var lastError: String? = nil
 
     public init() {
+        Self.synchronizeTQSLStorage()
         checkTQSLInstallation()
+    }
+
+    // MARK: - Storage & Sandbox Synchronization
+
+    public nonisolated static func realUserHomeDirectory() -> String {
+        if let pw = getpwuid(getuid()), let dir = pw.pointee.pw_dir {
+            return String(cString: dir)
+        }
+        return NSHomeDirectory()
+    }
+
+    public nonisolated static func realTQSLDirectory() -> String {
+        (realUserHomeDirectory() as NSString).appendingPathComponent(".tqsl")
+    }
+
+    public nonisolated static func containerTQSLDirectory() -> String {
+        (NSHomeDirectory() as NSString).appendingPathComponent(".tqsl")
+    }
+
+    @discardableResult
+    public nonisolated static func synchronizeTQSLStorage() -> (synced: Bool, message: String) {
+        let fileManager = FileManager.default
+        let realTQSL = realTQSLDirectory()
+        let containerTQSL = containerTQSLDirectory()
+
+        if realTQSL == containerTQSL {
+            return (true, "Direct access: \(realTQSL)")
+        }
+
+        let realStationData = (realTQSL as NSString).appendingPathComponent("station_data")
+        let containerStationData = (containerTQSL as NSString).appendingPathComponent("station_data")
+
+        let sourceDir: String
+        let targetDir: String
+
+        if fileManager.fileExists(atPath: realStationData) {
+            sourceDir = realTQSL
+            targetDir = containerTQSL
+        } else if fileManager.fileExists(atPath: containerStationData) {
+            sourceDir = containerTQSL
+            targetDir = realTQSL
+        } else {
+            return (false, "No station_data found")
+        }
+
+        do {
+            if !fileManager.fileExists(atPath: targetDir) {
+                try fileManager.createDirectory(atPath: targetDir, withIntermediateDirectories: true)
+            }
+
+            let items = try fileManager.contentsOfDirectory(atPath: sourceDir)
+            var count = 0
+            for item in items {
+                let srcItem = (sourceDir as NSString).appendingPathComponent(item)
+                let dstItem = (targetDir as NSString).appendingPathComponent(item)
+
+                var isDir: ObjCBool = false
+                if fileManager.fileExists(atPath: srcItem, isDirectory: &isDir) {
+                    if isDir.boolValue {
+                        if !fileManager.fileExists(atPath: dstItem) {
+                            try? fileManager.copyItem(atPath: srcItem, toPath: dstItem)
+                            count += 1
+                        } else {
+                            let subItems = (try? fileManager.contentsOfDirectory(atPath: srcItem)) ?? []
+                            for sub in subItems {
+                                let subSrc = (srcItem as NSString).appendingPathComponent(sub)
+                                let subDst = (dstItem as NSString).appendingPathComponent(sub)
+                                if !fileManager.fileExists(atPath: subDst) {
+                                    try? fileManager.copyItem(atPath: subSrc, toPath: subDst)
+                                    count += 1
+                                }
+                            }
+                        }
+                    } else {
+                        let srcAttrs = try? fileManager.attributesOfItem(atPath: srcItem)
+                        let dstAttrs = try? fileManager.attributesOfItem(atPath: dstItem)
+                        let srcMod = (srcAttrs?[.modificationDate] as? Date) ?? Date.distantPast
+                        let dstMod = (dstAttrs?[.modificationDate] as? Date) ?? Date.distantPast
+
+                        if !fileManager.fileExists(atPath: dstItem) || srcMod > dstMod {
+                            try? fileManager.removeItem(atPath: dstItem)
+                            try? fileManager.copyItem(atPath: srcItem, toPath: dstItem)
+                            count += 1
+                        }
+                    }
+                }
+            }
+            return (true, "Synchronized \(count) items to \(targetDir)")
+        } catch {
+            return (false, "Sync failed: \(error.localizedDescription)")
+        }
+    }
+
+    public nonisolated static func tqslProcessEnvironment() -> [String: String] {
+        var env = ProcessInfo.processInfo.environment
+        let realHome = realUserHomeDirectory()
+        let realTQSL = realTQSLDirectory()
+        let containerTQSL = containerTQSLDirectory()
+
+        if FileManager.default.fileExists(atPath: (realTQSL as NSString).appendingPathComponent("station_data")) {
+            env["TQSLDIR"] = realTQSL
+            env["HOME"] = realHome
+        } else if FileManager.default.fileExists(atPath: (containerTQSL as NSString).appendingPathComponent("station_data")) {
+            env["TQSLDIR"] = containerTQSL
+        }
+        return env
     }
 
     // MARK: - Installation Discovery
 
     public func checkTQSLInstallation() {
-        let potentialPaths = [
+        var customCandidates: [String] = []
+        if let bookmark = UserDefaults.standard.data(forKey: "tqslExecutableBookmark") {
+            var stale = false
+            if let scopedURL = try? URL(resolvingBookmarkData: bookmark, options: [.withSecurityScope], relativeTo: nil, bookmarkDataIsStale: &stale) {
+                if scopedURL.startAccessingSecurityScopedResource() {
+                    customCandidates.append(scopedURL.path)
+                    scopedURL.stopAccessingSecurityScopedResource()
+                }
+            }
+        }
+        let configuredPath = (UserDefaults.standard.string(forKey: "tqslExecutablePath") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !configuredPath.isEmpty {
+            customCandidates.append(configuredPath)
+        }
+
+        let potentialPaths = customCandidates + [
             "/Applications/TrustedQSL/tqsl.app/Contents/MacOS/tqsl",
             "/Applications/tqsl.app/Contents/MacOS/tqsl",
             "/usr/local/bin/tqsl",
@@ -67,10 +189,12 @@ public final class TQSLService: ObservableObject {
 
         return try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
+                Self.synchronizeTQSLStorage()
                 let process = Process()
                 process.executableURL = URL(fileURLWithPath: binaryPath)
+                process.environment = Self.tqslProcessEnvironment()
 
-                var arguments: [String] = ["-d", "-u", "-x"]
+                var arguments: [String] = ["-d", "-u", "-x", "-q"]
                 if !stationLocation.isEmpty {
                     arguments.append(contentsOf: ["-l", stationLocation])
                 }

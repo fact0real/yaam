@@ -174,7 +174,11 @@ public struct FT8OpportunityAlert: Identifiable, Sendable {
     public let timestamp: Date = Date()
 }
 
-nonisolated struct FT8DecodedRow: Identifiable, Sendable {
+nonisolated struct FT8DecodedRow: Identifiable, Sendable, Equatable {
+    static func == (lhs: FT8DecodedRow, rhs: FT8DecodedRow) -> Bool {
+        lhs.id == rhs.id
+    }
+
     let id: UUID
     let slotStart: Date
     let text: String
@@ -973,7 +977,7 @@ final class FT8EngineService: ObservableObject {
             }
         }
 
-        transmitTask = Task { [weak self] in
+        transmitTask = Task { @MainActor [weak self] in
             guard let self else { return }
             do {
                 let sampleRate = 48_000
@@ -1534,7 +1538,7 @@ final class FT8EngineService: ObservableObject {
 
     private func startClock() {
         clockTask?.cancel()
-        clockTask = Task { [weak self] in
+        clockTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
                 let now = Date().timeIntervalSince1970
@@ -1559,7 +1563,7 @@ final class FT8EngineService: ObservableObject {
 
     private func startProgressClock(duration: TimeInterval) -> Task<Void, Never> {
         let started = Date()
-        return Task { [weak self] in
+        return Task { @MainActor [weak self] in
             while !Task.isCancelled {
                 self?.transmitProgress = min(1, Float(Date().timeIntervalSince(started) / duration))
                 try? await Task.sleep(for: .milliseconds(50))

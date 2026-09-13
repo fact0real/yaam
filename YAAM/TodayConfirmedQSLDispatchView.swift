@@ -1095,11 +1095,9 @@ Warm 73,
         guard !recordsToDispatch.isEmpty else { return }
 
         // Validate SMTP
-        let user = UserDefaults.standard.string(forKey: "smtpUser") ?? ""
-        let pass = CredentialVault.value(for: .smtpPassword)
-        if user.isEmpty || pass.isEmpty {
+        if !appState.isSMTPConfigured {
             alertTitle = "SMTP Configuration Required"
-            alertMessage = "Please enter your SMTP Username and Password in Settings > SMTP before sending QSL cards."
+            alertMessage = "Please enter your SMTP Username and Password in Settings > Email before sending QSL cards."
             showAlert = true
             return
         }

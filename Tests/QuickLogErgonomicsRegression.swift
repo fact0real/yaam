@@ -1,4 +1,5 @@
 import Foundation
+@testable import YAAM
 
 #if STANDALONE_TEST
 nonisolated enum PortableOperatingRole: String, CaseIterable, Identifiable, Sendable {

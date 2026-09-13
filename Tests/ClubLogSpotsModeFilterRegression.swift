@@ -3,7 +3,9 @@
 //  YAAM Tests
 //
 
-import Foundation
+#if canImport(YAAM)
+@testable import YAAM
+#endif
 
 // Local mirror for standalone regression testing
 struct SpotModelTest {

@@ -113,7 +113,7 @@ public final class ON4KSTClient: ObservableObject {
     private var pingTimer: Timer?
 
     public init() {
-        populateInitialSampleMessages()
+        // Start with empty state — real messages arrive after connect()
     }
 
     // MARK: - Connect & Login
@@ -132,6 +132,9 @@ public final class ON4KSTClient: ObservableObject {
             return
         }
 
+        // Clear any stale or sample messages before a fresh connection
+        self.messages = []
+        self.onlineUsers = []
         self.statusMessage = "Connecting to \(selectedRoom.title)..."
         self.isLoggingIn = true
 
@@ -142,7 +145,7 @@ public final class ON4KSTClient: ObservableObject {
         self.connection = conn
 
         conn.stateUpdateHandler = { [weak self] state in
-            Task { @MainActor [weak self] in
+            DispatchQueue.main.async {
                 guard let self else { return }
                 switch state {
                 case .ready:
@@ -160,7 +163,7 @@ public final class ON4KSTClient: ObservableObject {
             }
         }
 
-        conn.start(queue: .global(qos: .userInitiated))
+        conn.start(queue: .main)
     }
 
     public func disconnect() {
@@ -194,7 +197,7 @@ public final class ON4KSTClient: ObservableObject {
         guard let conn = connection else { return }
 
         conn.receive(minimumIncompleteLength: 1, maximumLength: 4096) { [weak self] data, _, _, error in
-            Task { @MainActor [weak self] in
+            DispatchQueue.main.async {
                 guard let self else { return }
                 if let data = data, let text = String(data: data, encoding: .isoLatin1) ?? String(data: data, encoding: .utf8) {
                     self.processIncomingChunk(text, callsign: callsign, password: password)
@@ -362,26 +365,4 @@ public final class ON4KSTClient: ObservableObject {
         }
     }
 
-    // MARK: - Initial Seeded Sample Data for Offline Display
-
-    private func populateInitialSampleMessages() {
-        let sample = [
-            ON4KSTMessage(sender: "ON4KST", text: "Welcome to the ON4KST Real-Time 50/70MHz & VHF/UHF Chat Network", isSpot: false),
-            ON4KSTMessage(sender: "DL1VHF", text: "CQ 50.313 FT8 beam 120° into Middle East & Asia", detectedFrequencyMHz: 50.313),
-            ON4KSTMessage(sender: "G4FOC", recipient: "EP2AES", text: "Hi Mehdi, any Sporadic-E opening on 6m towards Tehran?", isDirected: true),
-            ON4KSTMessage(sender: "SV1DH", text: "DX de SV1DH: 144.174 EP2AES KM17ww -> LN35ir FT8 strong ES 12:45Z", isSpot: true, detectedFrequencyMHz: 144.174),
-            ON4KSTMessage(sender: "IK0FTA", text: "QRV on 70.154 CW listening East", detectedFrequencyMHz: 70.154),
-            ON4KSTMessage(sender: "OE3FVU", text: "CQ 432.200 SSB beaming 110° for tropo skeds", detectedFrequencyMHz: 432.200)
-        ]
-        self.messages = sample
-
-        let users = [
-            ON4KSTUser(callsign: "DL1VHF", locator: "JO50xe", distanceKm: 3820, bearingDeg: 312, extraInfo: "6el Yagi 100W"),
-            ON4KSTUser(callsign: "G4FOC", locator: "IO91ws", distanceKm: 4410, bearingDeg: 318, extraInfo: "5el LFA 400W"),
-            ON4KSTUser(callsign: "SV1DH", locator: "KM17ww", distanceKm: 2150, bearingDeg: 284, extraInfo: "7el Yagi"),
-            ON4KSTUser(callsign: "IK0FTA", locator: "JN61fv", distanceKm: 3420, bearingDeg: 300, extraInfo: "4el SteppIR"),
-            ON4KSTUser(callsign: "OE3FVU", locator: "JN78ve", distanceKm: 3590, bearingDeg: 308, extraInfo: "12el M2")
-        ]
-        self.onlineUsers = users
-    }
 }

@@ -45,7 +45,7 @@ public final class SerialPortService: @unchecked Sendable {
     public func openPort(
         path: String,
         baudRate: Int = 1200,
-        onReceive: (@escaping @Sendable (Data) -> Void)
+        onReceive: (@Sendable (Data) -> Void)? = nil
     ) -> Bool {
         closePort()
 
@@ -109,10 +109,45 @@ public final class SerialPortService: @unchecked Sendable {
     public func closePort() {
         isReading = false
         if fileDescriptor >= 0 {
+            // Drop modem lines safely on close
+            var lines: Int32 = TIOCM_DTR | TIOCM_RTS
+            _ = ioctl(fileDescriptor, TIOCMBIC, &lines)
             close(fileDescriptor)
             fileDescriptor = -1
         }
         readCallback = nil
+    }
+
+    // MARK: - Hardware Modem Control Lines (DTR & RTS)
+
+    @discardableResult
+    public func setDTR(active: Bool) -> Bool {
+        guard fileDescriptor >= 0 else { return false }
+        var bit: Int32 = TIOCM_DTR
+        let res = active ? ioctl(fileDescriptor, TIOCMBIS, &bit) : ioctl(fileDescriptor, TIOCMBIC, &bit)
+        return res == 0
+    }
+
+    @discardableResult
+    public func setRTS(active: Bool) -> Bool {
+        guard fileDescriptor >= 0 else { return false }
+        var bit: Int32 = TIOCM_RTS
+        let res = active ? ioctl(fileDescriptor, TIOCMBIS, &bit) : ioctl(fileDescriptor, TIOCMBIC, &bit)
+        return res == 0
+    }
+
+    public func getControlLines() -> (dtr: Bool, rts: Bool, cts: Bool, dsr: Bool, dcd: Bool, ri: Bool)? {
+        guard fileDescriptor >= 0 else { return nil }
+        var status: Int32 = 0
+        guard ioctl(fileDescriptor, TIOCMGET, &status) == 0 else { return nil }
+        return (
+            dtr: (status & TIOCM_DTR) != 0,
+            rts: (status & TIOCM_RTS) != 0,
+            cts: (status & TIOCM_CTS) != 0,
+            dsr: (status & TIOCM_DSR) != 0,
+            dcd: (status & TIOCM_CAR) != 0,
+            ri:  (status & TIOCM_RI) != 0
+        )
     }
 
     // MARK: - Transmit Bytes
@@ -137,6 +172,7 @@ public final class SerialPortService: @unchecked Sendable {
     // MARK: - Background Read Loop
 
     private func startReading() {
+        guard readCallback != nil else { return }
         isReading = true
         readQueue.async { [weak self] in
             var buffer = [UInt8](repeating: 0, count: 256)

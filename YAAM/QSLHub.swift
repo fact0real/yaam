@@ -97,6 +97,7 @@ nonisolated struct QSLServiceCredentials: Sendable {
     var lotwCallsign = ""
     var lotwPassword = ""
     var lotwStationLocation = ""
+    var lotwCertificatePassword = ""
     var tqslExecutablePath = ""
     var tqslBookmarkData: Data?
     var eqslUsername = ""
@@ -410,12 +411,17 @@ actor QSLHubClient {
         try Data(adif.utf8).write(to: inputURL, options: .atomic)
         defer { try? FileManager.default.removeItem(at: inputURL) }
 
+        TQSLService.synchronizeTQSLStorage()
         let process = Process()
         let pipe = Pipe()
         process.executableURL = URL(fileURLWithPath: executable)
-        var arguments = ["-u", "-q"]
+        process.environment = TQSLService.tqslProcessEnvironment()
+        var arguments = ["-d", "-u", "-x", "-q"]
         if !credentials.lotwStationLocation.isEmpty {
             arguments += ["-l", credentials.lotwStationLocation]
+        }
+        if !credentials.lotwCertificatePassword.isEmpty {
+            arguments += ["-p", credentials.lotwCertificatePassword]
         }
         arguments.append(inputURL.path)
         process.arguments = arguments

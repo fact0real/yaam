@@ -272,6 +272,12 @@ public enum DXCCDatabase {
         entry("S5", "Slovenia", "SI", "🇸🇮", "EU", 15, 28),
         entry("E7", "Bosnia-Herzegovina", "BA", "🇧🇦", "EU", 15, 28),
         entry("Z6", "Kosovo", "XK", "🇽🇰", "EU", 15, 28),
+        entry("Z60", "Kosovo", "XK", "🇽🇰", "EU", 15, 28),
+        entry("Z61", "Kosovo", "XK", "🇽🇰", "EU", 15, 28),
+        entry("Z62", "Kosovo", "XK", "🇽🇰", "EU", 15, 28),
+        entry("Z63", "Kosovo", "XK", "🇽🇰", "EU", 15, 28),
+        entry("Z68", "Kosovo", "XK", "🇽🇰", "EU", 15, 28),
+        entry("Z69", "Kosovo", "XK", "🇽🇰", "EU", 15, 28),
 
         // North America
         entry("K", "United States", "US", "🇺🇸", "NA", 5, 8),
@@ -395,6 +401,22 @@ public enum DXCCDatabase {
         entry("D4", "Cape Verde", "CV", "🇨🇻", "AF", 35, 46)
     ].sorted { $0.prefix.count > $1.prefix.count }
 
+    public nonisolated static let allEntities: [DXCCEntityInfo] = {
+        var seen = Set<String>()
+        var list: [DXCCEntityInfo] = []
+        for entry in entries {
+            if !seen.contains(entry.entity.entityName) {
+                seen.insert(entry.entity.entityName)
+                list.append(entry.entity)
+            }
+        }
+        return list.sorted { $0.entityName.localizedStandardCompare($1.entityName) == .orderedAscending }
+    }()
+
+    public nonisolated static let allEntityNames: [String] = {
+        allEntities.map(\.entityName)
+    }()
+
     private nonisolated static func entry(
         _ prefix: String,
         _ name: String,
@@ -420,10 +442,20 @@ public enum DXCCDatabase {
     /// Resolves an international amateur callsign into its DXCC entity, continent, and flag.
     public nonisolated static func resolve(callsign: String, country: String? = nil) -> DXCCEntityInfo {
         let clean = callsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        let cleanCountry = (country ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let cleanCountry = (country ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
 
-        if cleanCountry == "TAIWAN" || cleanCountry == "REPUBLIC OF CHINA" || cleanCountry == "ROC" || cleanCountry.contains("TAIWAN") || cleanCountry == "CHINESE TAIPEI" || cleanCountry == "FORMOSA" {
-            return DXCCEntityInfo(entityName: "Taiwan", countryCode: "TW", flagEmoji: "🇹🇼", continent: "AS", cqZone: 24, ituZone: 44)
+        if !cleanCountry.isEmpty {
+            let canonical = canonicalCountryName(cleanCountry)
+            let upper = canonical.uppercased()
+            if upper == "TAIWAN" || upper == "REPUBLIC OF CHINA" || upper == "ROC" || upper.contains("TAIWAN") || upper == "CHINESE TAIPEI" || upper == "FORMOSA" {
+                return DXCCEntityInfo(entityName: "Taiwan", countryCode: "TW", flagEmoji: "🇹🇼", continent: "AS", cqZone: 24, ituZone: 44)
+            }
+            if let matched = entries.first(where: {
+                $0.entity.entityName.localizedCaseInsensitiveCompare(canonical) == .orderedSame ||
+                $0.entity.countryCode.localizedCaseInsensitiveCompare(cleanCountry) == .orderedSame
+            }) {
+                return matched.entity
+            }
         }
 
         guard !clean.isEmpty else {
@@ -431,6 +463,34 @@ public enum DXCCDatabase {
                 return DXCCEntityInfo(entityName: cleanCountry, countryCode: "--", flagEmoji: countryToFlag(cleanCountry), continent: "??", cqZone: 0, ituZone: 0)
             }
             return DXCCEntityInfo(entityName: "Unknown", countryCode: "--", flagEmoji: "🌐", continent: "??", cqZone: 0, ituZone: 0)
+        }
+
+        // Handle slash callsigns: e.g. Z6/OE1EMS, OE1EMS/Z6, W1AW/P, EA8/G4XYZ
+        if clean.contains("/") {
+            let parts = clean.components(separatedBy: "/")
+            if parts.count == 2 {
+                let firstPart = parts[0]
+                let lastPart = parts[1]
+                let portableIndicators: Set<String> = ["P", "M", "MM", "AM", "QRP", "R", "B", "LGT", "LH", "J", "A", "FF", "POTA", "SOTA"]
+
+                // If first part is a guest operating DXCC prefix (e.g. Z6/OE1EMS, SV9/G4IRN, VP8/K1TTT):
+                if !portableIndicators.contains(firstPart) && firstPart.count <= lastPart.count {
+                    for entry in entries {
+                        if firstPart == entry.prefix || (firstPart.hasPrefix(entry.prefix) && firstPart.count <= entry.prefix.count + 2) {
+                            return entry.entity
+                        }
+                    }
+                }
+
+                // If last part is a guest operating DXCC prefix (e.g. OE1EMS/Z6, OE1EMS/KH6):
+                if !portableIndicators.contains(lastPart) && lastPart.count < firstPart.count {
+                    for entry in entries {
+                        if lastPart == entry.prefix || (lastPart.hasPrefix(entry.prefix) && lastPart.count <= entry.prefix.count + 2) {
+                            return entry.entity
+                        }
+                    }
+                }
+            }
         }
 
         // Strip portable indicators like /P, /M, /MM

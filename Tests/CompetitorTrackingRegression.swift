@@ -4,6 +4,7 @@
 //
 
 import Foundation
+@testable import YAAM
 
 struct TestProgressPoint: Identifiable, Sendable {
     var id = UUID()

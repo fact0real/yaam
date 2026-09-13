@@ -40,6 +40,7 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
     @AppStorage("zeroClickUploadEQSL") public var uploadToEQSL: Bool = true
     @AppStorage("zeroClickUploadWavelog") public var uploadToWavelog: Bool = true
     @AppStorage("zeroClickUploadLoTW") public var uploadToLoTW: Bool = true
+    @AppStorage("lotwStationLocation") public var lotwStationLocation: String = ""
     @AppStorage("autoCommitWSJTX") public var autoCommitWSJTX: Bool = true
 
     // Real-Time Live Status
@@ -57,7 +58,12 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
     private init() {}
 
     // MARK: - Main Dispatch Entry Point
-    func dispatch(record: QSORecordModel, stationID: String? = nil, qrzKeyOverride: String? = nil) {
+    func dispatch(
+        record: QSORecordModel,
+        stationID: String? = nil,
+        stationLocation: String? = nil,
+        qrzKeyOverride: String? = nil
+    ) {
         guard isEnabled else { return }
 
         let call = record["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
@@ -65,12 +71,22 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
 
         Task { [weak self] in
             guard let self = self else { return }
-            await self.executeUpload(record: record, stationID: stationID, qrzKeyOverride: qrzKeyOverride)
+            await self.executeUpload(
+                record: record,
+                stationID: stationID,
+                stationLocation: stationLocation,
+                qrzKeyOverride: qrzKeyOverride
+            )
         }
     }
 
     // MARK: - Upload Worker
-    private func executeUpload(record: QSORecordModel, stationID: String?, qrzKeyOverride: String?) async {
+    private func executeUpload(
+        record: QSORecordModel,
+        stationID: String?,
+        stationLocation: String?,
+        qrzKeyOverride: String?
+    ) async {
         let startTime = Date()
         isUploading = true
         defer { isUploading = false }
@@ -114,7 +130,11 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
 
         // 5. ARRL LoTW via TQSL CLI
         if uploadToLoTW {
-            let lotwOutcome = await uploadToLoTWViaTQSL(record: record)
+            let lotwOutcome = await uploadToLoTWViaTQSL(
+                record: record,
+                stationID: stationID,
+                stationLocation: stationLocation
+            )
             if lotwOutcome.success {
                 successfulServices.append("LoTW")
             } else if !lotwOutcome.message.isEmpty && !lotwOutcome.message.contains("not found") {
@@ -303,7 +323,18 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
     // MARK: - Single QSO ADIF Generator
     private func buildSingleQSOADIF(_ record: QSORecordModel) -> String {
         var out = "<ADIF_VER:5>3.1.4 <PROGRAMID:4>YAAM <EOH>\n"
-        for (key, val) in record.fields {
+        var normalizedFields = record.fields
+        let currentMode = normalizedFields["MODE"] ?? ""
+        let currentSubmode = normalizedFields["SUBMODE"] ?? ""
+        let freq = Double(normalizedFields["FREQ"] ?? "")
+        let effective = AmateurBandPlan.effectiveADIFMode(mode: currentMode, submode: currentSubmode, frequencyMHz: freq)
+        if !effective.isEmpty {
+            normalizedFields["MODE"] = effective
+            if effective == "FT8" || effective == "FT4" || effective == "JS8" {
+                normalizedFields["SUBMODE"] = effective
+            }
+        }
+        for (key, val) in normalizedFields {
             let cleanVal = val.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !cleanVal.isEmpty else { continue }
             // Filter non-standard internal fields
@@ -315,15 +346,37 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
     }
 
     // MARK: - ARRL LoTW via TQSL CLI
-    private func uploadToLoTWViaTQSL(record: QSORecordModel) async -> (success: Bool, message: String) {
+    private func uploadToLoTWViaTQSL(
+        record: QSORecordModel,
+        stationID: String? = nil,
+        stationLocation: String? = nil
+    ) async -> (success: Bool, message: String) {
         let fileManager = FileManager.default
+
+        var scopedURL: URL?
+        var didAccessScopedURL = false
+        if let bookmark = UserDefaults.standard.data(forKey: "tqslExecutableBookmark") {
+            var stale = false
+            scopedURL = try? URL(
+                resolvingBookmarkData: bookmark,
+                options: [.withSecurityScope],
+                relativeTo: nil,
+                bookmarkDataIsStale: &stale
+            )
+            if let scopedURL { didAccessScopedURL = scopedURL.startAccessingSecurityScopedResource() }
+        }
+        defer { if didAccessScopedURL { scopedURL?.stopAccessingSecurityScopedResource() } }
+
+        let customPath = (UserDefaults.standard.string(forKey: "tqslExecutablePath") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let tqslCandidates = [
+            scopedURL?.path ?? "",
+            customPath,
             "/Applications/TrustedQSL/tqsl.app/Contents/MacOS/tqsl",
             "/Applications/tqsl.app/Contents/MacOS/tqsl",
             "/opt/homebrew/bin/tqsl",
             "/usr/local/bin/tqsl",
             "/usr/bin/tqsl"
-        ]
+        ].filter { !$0.isEmpty }
 
         guard let tqslPath = tqslCandidates.first(where: { fileManager.isExecutableFile(atPath: $0) }) else {
             return (false, "TQSL binary not found")
@@ -342,11 +395,46 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
             try? fileManager.removeItem(at: tempAdifURL)
         }
 
+        var resolvedLocation = (stationLocation ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if resolvedLocation.isEmpty {
+            resolvedLocation = (UserDefaults.standard.string(forKey: "lotwStationLocation") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        if resolvedLocation.isEmpty {
+            if let db = try? LogbookDatabase(), let profiles = try? db.loadStationProfiles() {
+                if let sid = stationID, let uuid = UUID(uuidString: sid),
+                   let prof = profiles.first(where: { $0.id == uuid }),
+                   !prof.lotwStationLocation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    resolvedLocation = prof.lotwStationLocation.trimmingCharacters(in: .whitespacesAndNewlines)
+                } else if let activeID = UserDefaults.standard.string(forKey: "activeStationProfileID").flatMap(UUID.init(uuidString:)),
+                          let prof = profiles.first(where: { $0.id == activeID }),
+                          !prof.lotwStationLocation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    resolvedLocation = prof.lotwStationLocation.trimmingCharacters(in: .whitespacesAndNewlines)
+                } else if let firstProf = profiles.first,
+                          !firstProf.lotwStationLocation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    resolvedLocation = firstProf.lotwStationLocation.trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+            }
+        }
+
         return await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
+                TQSLService.synchronizeTQSLStorage()
                 let process = Process()
                 process.executableURL = URL(fileURLWithPath: tqslPath)
-                process.arguments = ["-d", "-u", "-x", "-q", tempAdifURL.path]
+                process.environment = TQSLService.tqslProcessEnvironment()
+
+                var arguments: [String] = ["-d", "-u", "-x", "-q"]
+                if !resolvedLocation.isEmpty {
+                    arguments.append(contentsOf: ["-l", resolvedLocation])
+                }
+
+                let certPassword = CredentialVault.value(for: .lotwCertificatePassword).trimmingCharacters(in: .whitespacesAndNewlines)
+                if !certPassword.isEmpty {
+                    arguments.append(contentsOf: ["-p", certPassword])
+                }
+
+                arguments.append(tempAdifURL.path)
+                process.arguments = arguments
 
                 let pipe = Pipe()
                 process.standardOutput = pipe

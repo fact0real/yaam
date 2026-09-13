@@ -217,3 +217,33 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -scheme YAAM
 3. **Respect Timezone Semantics:**
    - All logbook storage and ADIF exchanges **MUST** remain in strict **UTC**.
    - Local time conversions (`TimeZone.current`) are strictly for presentation layer views (such as `LocalActivityMatrixView` and `ClubLogSpotsView`).
+
+---
+
+## 10. DX News, Weekly Bulletins & Feedback Subsystem
+
+### 10.1 DX-World & 425 DX News Intelligence Pipeline (`DXpeditionService.swift`)
+YAAM unifies multi-source weekly DX intelligence into structured, rich domain models (`DXpeditionEntry`, `DXNewsArticle`, `DXBulletin`):
+- **425 DX News:**
+  - Ingests weekly HTML calendar (`wcal.php`) and official weekly bulletins (`wbull.php` plain-text and `wbullpdf.php` PDF).
+  - Normalizes announcement windows, extracts Maidenhead grid locators (`extractGrid`), IOTA island tags (`extractIOTA`), operating modes (FT8, CW, SSB), bands (160m–6m), QSL managers (`extractQSLInfo`), and team operators (`extractOperators`).
+- **DX-World:**
+  - Parses official RSS feed (`/category/dx-news/feed/`) without discarding free-form titles via `DXCCDatabase.resolve(callsign:)`.
+  - Downloads linked weekly PDF bulletins (`dx-world-weekly-bulletin-NNN`), extracting multi-operator teams and operating periods across international date formats.
+- **Deduplication & Union:**
+  - `merge(_:)` combines matching operations across sources while unioning bands, modes, and operators without data loss.
+  - Cached locally in `UserDefaults` under `dxpeditionCache.v2` for offline resilience.
+
+### 10.2 DX News & Intelligence Desk (`DXNewsAndIntelligenceView.swift`)
+Located in Operator Desk (Desk Tab 21, shortcut `Cmd+Shift+N`):
+1. **DXpeditions Intelligence:** Live cluster spot cross-referencing, filter chips (Active Now, Upcoming, ATNO/Needed, Digital FT8, 6m, IOTA), and one-click rig QSY.
+2. **Live DX News Feed:** Full-text searchable cards with category tagging and an in-app article reader sheet.
+3. **Weekly Bulletins Reader:** Full-text viewer for DX-World and 425 issues with in-text search, copy to clipboard, and direct web links.
+
+### 10.3 Instant Feedback & Community Engine (`FeedbackView.swift`)
+Accessible from anywhere in the application (`Cmd+Shift+F`, Help menu, About dialog, and HelpView banner):
+- **Categories:** Feature Requests, Bug Reports, DX Data Suggestions, and General feedback.
+- **Triage & Metadata:** Priority selector, optional operator callsign and email, and an optional non-sensitive environment diagnostics snapshot (macOS version, YAAM build, active station, hardware bridge statuses).
+- **Submission Channels:** Direct `mailto:` email composer, GitHub Issue URL builder with prepopulated markdown labels, and Clipboard copy.
+- **Local Audit History:** Preserves submitted feedback in `UserDefaults` (`savedFeedbackHistory_v1`) so operators can track past suggestions.
+

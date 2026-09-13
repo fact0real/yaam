@@ -7,6 +7,7 @@
 //
 
 import Foundation
+@testable import YAAM
 import SwiftUI
 
 // Lightweight stubs for independent test runner execution

@@ -81,7 +81,7 @@ public final class RotatorService: ObservableObject {
         self.connection = nwConnection
 
         nwConnection.stateUpdateHandler = { [weak self] state in
-            Task { @MainActor [weak self] in
+            DispatchQueue.main.async {
                 guard let self else { return }
                 switch state {
                 case .ready:
@@ -103,7 +103,7 @@ public final class RotatorService: ObservableObject {
             }
         }
 
-        nwConnection.start(queue: .global(qos: .userInitiated))
+        nwConnection.start(queue: .main)
     }
 
     public func disconnect() {
@@ -119,7 +119,7 @@ public final class RotatorService: ObservableObject {
     public func startPolling() {
         stopPolling()
         pollTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in
+            DispatchQueue.main.async {
                 self?.requestPosition()
             }
         }
@@ -136,7 +136,7 @@ public final class RotatorService: ObservableObject {
         let command = "p\n".data(using: .utf8)!
         connection.send(content: command, completion: .contentProcessed { [weak self] error in
             if error == nil {
-                Task { @MainActor [weak self] in
+                DispatchQueue.main.async {
                     self?.receivePositionResponse()
                 }
             }
@@ -146,7 +146,7 @@ public final class RotatorService: ObservableObject {
     private func receivePositionResponse() {
         guard let connection else { return }
         connection.receive(minimumIncompleteLength: 1, maximumLength: 128) { [weak self] data, _, _, _ in
-            Task { @MainActor [weak self] in
+            DispatchQueue.main.async {
                 guard let self, let data, let responseStr = String(data: data, encoding: .utf8) else { return }
                 let lines = responseStr.components(separatedBy: .newlines).filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
                 if let first = lines.first, let az = Double(first.trimmingCharacters(in: .whitespaces)) {
@@ -162,6 +162,10 @@ public final class RotatorService: ObservableObject {
     }
 
     // MARK: - Turn Commands
+
+    public func setTargetAzimuth(_ azimuth: Double) {
+        turnTo(azimuth: azimuth)
+    }
 
     public func turnTo(azimuth: Double) {
         let normalized = (azimuth.truncatingRemainder(dividingBy: 360.0) + 360.0).truncatingRemainder(dividingBy: 360.0)

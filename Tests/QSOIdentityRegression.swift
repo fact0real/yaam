@@ -1,4 +1,5 @@
 import Foundation
+@testable import YAAM
 
 @main
 struct QSOIdentityRegression {

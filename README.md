@@ -25,9 +25,11 @@ YAAM, short for Yet Another ADIF Manager, is a native macOS amateur-radio logboo
 4. Sync LoTW and QRZ confirmations to keep local counts aligned with cloud logbooks.
 5. Track QRZ Rank competitors and use the leaderboard recommendation to decide whether to invest in QSO volume, band coverage, DXCC reach, or 6m opportunities.
 
-## Developer Documentation & Architecture Guides
+## Developer & User Documentation Guides
 
-Comprehensive architectural blueprints and engineering guides are available for core contributors:
+Comprehensive user manuals and architectural blueprints are available:
+- [English Comprehensive User Manual](USER_MANUAL.md): Step-by-step user guide covering all 17 operational chapters including LoTW TQSL digital signing, Default Station Location, Tactical Rover Mode, Spectrum Bandmap & Waterfall Studio, QSL Card Label Studio, International Club Memberships, and Club Log Live Spots.
+- [Persian Comprehensive User Manual (راهنمای جامع کاربری نرم‌افزار YAAM به زبان فارسی)](USER_MANUAL_FA.md): راهنمای گام به گام تمام قابلیت‌های جدید، امضای دیجیتال لاگ‌ها با TQSL برای LoTW و مفهوم Default Station Location، مدهای مورس، ساعت شَک، رادار هواشناسی و مدهای دیجیتال.
 - [English Developer & Architecture Guide](DEVELOPER_DOCUMENTATION.md): Deep-dive into system layers, Icom UDP protocols (CI-V MK2 registers, audio jitter avoidance), SQLite persistence, ESM contest engines, FT8 modems, and 11-band calculations.
 - [Persian Developer Guide (راهنمای جامع معماری و توسعه به فارسی)](DEVELOPER_GUIDE_FA.md): تفکیک کامل لایه‌ها، پروتکل‌های شبکه رادیویی، ساختار لاگ‌بوک و نکات کلیدی برای توسعه‌دهندگان بعدی.
 

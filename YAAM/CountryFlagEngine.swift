@@ -519,7 +519,7 @@ nonisolated func countryToFlag(_ country: String) -> String {
     case "sao tome and principe", "sao tome & principe": return "🇸🇹"
 
     // MARK: - Europe
-    case "republic of kosovo", "kosovo": return "🇽🇰"
+    case "republic of kosovo", "kosovo", "kosova", "republic of kosova", "kosovë": return "🇽🇰"
     case "armenia", "republic of armenia": return "🇦🇲"
     case "england", "uk", "united kingdom", "great britain": return "🇬🇧"
     case "scotland": return "🏴󠁧󠁢󠁳󠁣󠁴󠁿"
@@ -660,7 +660,7 @@ nonisolated func countryToFlag(_ country: String) -> String {
     if clean.contains("cameroon") { return "🇨🇲" }
     if clean.contains("democratic") && clean.contains("congo") { return "🇨🇩" }
     if clean.contains("congo") { return "🇨🇬" }
-    if clean.contains("kosovo") { return "🇽🇰" }
+    if clean.contains("kosovo") || clean.contains("kosova") { return "🇽🇰" }
     if clean.contains("armenia") { return "🇦🇲" }
     if clean.contains("malawi") { return "🇲🇼" }
     if clean.contains("canary") { return "🇮🇨" }

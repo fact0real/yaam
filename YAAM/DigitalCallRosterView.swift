@@ -9,6 +9,8 @@
 
 import AppKit
 import AVFoundation
+import FT8Codec
+import FT8808Engine
 import SwiftUI
 
 public struct DigitalCallRosterView: View {
@@ -23,11 +25,12 @@ public struct DigitalCallRosterView: View {
     @State private var searchText: String = ""
     @State private var selectedEntryID: UUID? = nil
     @State private var showingAudioSettings = false
+    @State private var showingUDPConfigPopover = false
     @State private var showingDetailSheet = false
     @State private var selectedEntryForDetail: DigitalRosterEntry? = nil
 
     public enum RosterFilterMode: String, CaseIterable, Identifiable {
-        case neededOnly = "⚡️ Needed Only"
+        case neededOnly = "⚡️ Needed"
         case cqOnly = "CQ Only"
         case directedToMe = "To Me"
         case all = "All Decodes"
@@ -73,9 +76,12 @@ public struct DigitalCallRosterView: View {
                 }
             }
 
-            // Slice Filter
+            // Slice / Modem Source Filter
             if selectedSlice == "VFO A" && entry.sliceLabel != "VFO A" { return false }
             if selectedSlice == "VFO B" && entry.sliceLabel != "VFO B" { return false }
+            if selectedSlice == "VFO C" && entry.sliceLabel != "VFO C" { return false }
+            if selectedSlice == "VFO D" && entry.sliceLabel != "VFO D" { return false }
+            if selectedSlice == "Internal" && entry.sliceLabel != "Internal" { return false }
 
             return true
         }
@@ -85,8 +91,16 @@ public struct DigitalCallRosterView: View {
         VStack(spacing: 0) {
             topControlBar
             Divider()
-            targetQueueStrip
+            TacticalPilotHUDView()
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
             Divider()
+
+            if targetQueue.activeTarget != nil || !targetQueue.queue.isEmpty {
+                targetQueueStrip
+                Divider()
+            }
+
             filterAndStatsBar
             Divider()
 
@@ -105,13 +119,14 @@ public struct DigitalCallRosterView: View {
         }
         .onAppear {
             if !appState.wsjtxListener.state.isListening {
-                appState.wsjtxListener.start(port: 2237)
+                appState.wsjtxListener.start()
             }
             syncContextAndRebuild()
             if !appState.wsjtxListener.liveDecodes.isEmpty {
                 roster.processDecodes(appState.wsjtxListener.liveDecodes, activeBand: activeBand)
-            } else if roster.entries.isEmpty {
-                loadSampleDecodes()
+            }
+            if !appState.ft8Engine.decodedRows.isEmpty {
+                processInternalDecodes(appState.ft8Engine.decodedRows)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .init("DigitalTargetQueueDidTriggerCall"))) { notif in
@@ -126,6 +141,35 @@ public struct DigitalCallRosterView: View {
         .onChange(of: appState.wsjtxListener.liveDecodes) { _, newDecodes in
             roster.processDecodes(newDecodes, activeBand: activeBand)
         }
+        .onChange(of: appState.ft8Engine.decodedRows) { _, internalRows in
+            processInternalDecodes(internalRows)
+        }
+    }
+
+    private func processInternalDecodes(_ rows: [FT8DecodedRow]) {
+        guard !rows.isEmpty else { return }
+        let liveDecodes: [WSJTXLiveDecode] = rows.map { row in
+            WSJTXLiveDecode(
+                sourceID: "YAAM Internal FT8",
+                isNew: true,
+                timeMillis: UInt32(row.slotStart.timeIntervalSince1970.truncatingRemainder(dividingBy: 86400) * 1000),
+                snr: Int32(row.estimatedSNR),
+                deltaTimeSec: Double(row.timeOffset),
+                deltaFrequencyHz: UInt32(max(0, row.audioFrequencyHz)),
+                mode: appState.ft8Engine.operatingProtocol == .ft4 ? "FT4" : "FT8",
+                message: row.text,
+                lowConfidence: false,
+                offAir: false,
+                receivedAt: row.slotStart,
+                callerCallsign: row.callerCall ?? "",
+                targetCallsign: row.parsed?.toCall ?? "",
+                grid: row.callerGrid ?? (row.parsed?.grid ?? ""),
+                report: row.parsed?.report.map(String.init) ?? "",
+                port: 0,
+                sliceLabel: "Internal"
+            )
+        }
+        roster.processDecodes(liveDecodes, activeBand: activeBand)
     }
 
     // MARK: - Smart Target Auto-Pilot Queue Strip
@@ -268,22 +312,29 @@ public struct DigitalCallRosterView: View {
             .background(Color(NSColor.controlBackgroundColor))
             .cornerRadius(6)
 
-            // WSJT-X Listener Start/Stop Button
+            // WSJT-X / JTDX Ingestion UDP Button & Popover
             Button {
-                if appState.wsjtxListener.state.isListening {
-                    appState.wsjtxListener.stop()
-                } else {
-                    appState.wsjtxListener.start(port: 2237)
-                }
+                showingUDPConfigPopover.toggle()
             } label: {
-                Label(
-                    appState.wsjtxListener.state.isListening ? "Listening (2237)" : "Start Listener",
-                    systemImage: appState.wsjtxListener.state.isListening ? "antenna.radiowaves.left.and.right" : "play.fill"
-                )
-                .font(.caption)
+                HStack(spacing: 5) {
+                    Circle()
+                        .fill(appState.wsjtxListener.state.isListening ? Color.green : Color.secondary.opacity(0.5))
+                        .frame(width: 8, height: 8)
+                    Text(appState.wsjtxListener.state.isListening ? "Listening (\(String(appState.wsjtxListener.currentPort)))" : "UDP (\(String(appState.wsjtxListener.currentPort))) Off")
+                        .font(.system(size: 11, weight: .semibold))
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
             }
             .buttonStyle(.bordered)
-            .tint(appState.wsjtxListener.state.isListening ? .green : .blue)
+            .tint(appState.wsjtxListener.state.isListening ? .green : .secondary)
+            .popover(isPresented: $showingUDPConfigPopover) {
+                UDPPortConfigPopoverView()
+            }
+            .help("Configure UDP port and ingestion for WSJT-X / JTDX / SDR-Control")
 
             // Audio Speech Alerts Popover Button
             Button {
@@ -316,8 +367,20 @@ public struct DigitalCallRosterView: View {
 
     // MARK: - Filter & Counters Bar
 
+    private func sliceLabelDisplay(_ slice: String) -> String {
+        switch slice {
+        case "All": return "All Slices"
+        case "Internal": return "Internal FT8"
+        case "VFO A": return "VFO A (2237)"
+        case "VFO B": return "VFO B (2238)"
+        case "VFO C": return "VFO C (2239)"
+        case "VFO D": return "VFO D (2240)"
+        default: return slice
+        }
+    }
+
     private var filterAndStatsBar: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
             // Mode Segmented Control
             Picker("", selection: $filterMode) {
                 ForEach(RosterFilterMode.allCases) { mode in
@@ -325,16 +388,68 @@ public struct DigitalCallRosterView: View {
                 }
             }
             .pickerStyle(.segmented)
-            .frame(maxWidth: 360)
+            .labelsHidden()
+            .fixedSize()
 
-            // Multi-Slice VFO Selector
-            Picker("Slice", selection: $selectedSlice) {
-                Text("All Slices").tag("All")
-                Text("VFO A (2237)").tag("VFO A")
-                Text("VFO B (2238)").tag("VFO B")
+            Divider()
+                .frame(height: 18)
+                .padding(.horizontal, 2)
+
+            // Multi-Slice & Internal Modem Selector
+            Menu {
+                Button {
+                    selectedSlice = "All"
+                } label: {
+                    Label("All Slices & Modem", systemImage: "antenna.radiowaves.left.and.right")
+                }
+
+                Divider()
+
+                Button {
+                    selectedSlice = "Internal"
+                } label: {
+                    Label("Internal Modem (Direct Icom / Audio)", systemImage: "waveform.circle.fill")
+                }
+
+                Divider()
+
+                Button {
+                    selectedSlice = "VFO A"
+                } label: {
+                    Label("VFO A (UDP 2237)", systemImage: "1.circle")
+                }
+
+                Button {
+                    selectedSlice = "VFO B"
+                } label: {
+                    Label("VFO B (UDP 2238)", systemImage: "2.circle")
+                }
+
+                Button {
+                    selectedSlice = "VFO C"
+                } label: {
+                    Label("VFO C (UDP 2239)", systemImage: "3.circle")
+                }
+
+                Button {
+                    selectedSlice = "VFO D"
+                } label: {
+                    Label("VFO D (UDP 2240)", systemImage: "4.circle")
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: selectedSlice == "Internal" ? "waveform.circle.fill" : "antenna.radiowaves.left.and.right")
+                        .foregroundColor(.accentColor)
+                    Text(sliceLabelDisplay(selectedSlice))
+                }
+                .font(.caption)
             }
-            .pickerStyle(.segmented)
-            .frame(width: 210)
+            .menuStyle(.borderedButton)
+            .fixedSize()
+
+            Divider()
+                .frame(height: 18)
+                .padding(.horizontal, 2)
 
             // Min SNR Filter
             Menu {
@@ -352,7 +467,12 @@ public struct DigitalCallRosterView: View {
                 }
                 .font(.caption)
             }
-            .frame(width: 120)
+            .menuStyle(.borderedButton)
+            .fixedSize()
+
+            Divider()
+                .frame(height: 18)
+                .padding(.horizontal, 2)
 
             // Search Field
             HStack {
@@ -377,6 +497,7 @@ public struct DigitalCallRosterView: View {
             .padding(.vertical, 4)
             .background(Color(NSColor.controlBackgroundColor))
             .cornerRadius(6)
+            .frame(minWidth: 130, maxWidth: 200)
 
             Spacer()
 
@@ -646,32 +767,45 @@ public struct DigitalCallRosterView: View {
     private var emptyRosterState: some View {
         VStack(spacing: 16) {
             Spacer()
-            Image(systemName: "waveform.badge.magnifyingglass")
-                .font(.system(size: 48))
-                .foregroundColor(.secondary.opacity(0.5))
+            ZStack {
+                Circle()
+                    .fill(Color.green.opacity(0.12))
+                    .frame(width: 80, height: 80)
+                Image(systemName: "waveform.and.person.filled")
+                    .font(.system(size: 38))
+                    .foregroundColor(.green)
+            }
 
             VStack(spacing: 6) {
-                Text("Listening for Digital Mode Decodes")
-                    .font(.headline)
-                Text("Incoming FT8 / FT4 decodes on port \(appState.wsjtxListener.currentPort) will automatically appear here with real-time log-matching.")
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(Color.green)
+                        .frame(width: 8, height: 8)
+                    Text("Operational Standby — Live Listening")
+                        .font(.headline)
+                        .fontWeight(.bold)
+                }
+
+                Text("YAAM is actively listening for live digital decodes (FT8 / FT4) on UDP port \(String(appState.wsjtxListener.currentPort)) and internal modem. As soon as signals are received, they will be triaged here against your log in real time.")
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
-                    .frame(maxWidth: 420)
+                    .frame(maxWidth: 440)
             }
 
             HStack(spacing: 12) {
                 if !appState.wsjtxListener.state.isListening {
-                    Button("Start WSJT-X Listener (Port 2237)") {
-                        appState.wsjtxListener.start(port: 2237)
+                    Button("Start UDP Listener (Port \(String(appState.wsjtxListener.currentPort)))") {
+                        appState.wsjtxListener.start()
                     }
                     .buttonStyle(.borderedProminent)
                 }
 
-                Button("Load Demo Decodes") {
+                Button("Load Simulation (Muted Preview)") {
                     loadSampleDecodes()
                 }
                 .buttonStyle(.bordered)
+                .help("Loads sample decodes for layout testing without playing any voice alerts")
             }
 
             Spacer()
@@ -688,18 +822,29 @@ public struct DigitalCallRosterView: View {
             WSJTXLiveDecode(sourceID: "WSJT-X", isNew: true, timeMillis: 120000, snr: -4, deltaTimeSec: 0.1, deltaFrequencyHz: 1650, mode: "FT8", message: "CQ JA1ABC PM95", lowConfidence: false, offAir: false, callerCallsign: "JA1ABC", targetCallsign: "", grid: "PM95", report: "", port: 2237, sliceLabel: "VFO A"),
             WSJTXLiveDecode(sourceID: "WSJT-X", isNew: true, timeMillis: 120000, snr: 6, deltaTimeSec: 0.3, deltaFrequencyHz: 980, mode: "FT8", message: "CQ W1AW FN31", lowConfidence: false, offAir: false, callerCallsign: "W1AW", targetCallsign: "", grid: "FN31", report: "", port: 2238, sliceLabel: "VFO B"),
             WSJTXLiveDecode(sourceID: "WSJT-X", isNew: true, timeMillis: 120000, snr: -12, deltaTimeSec: 0.2, deltaFrequencyHz: 2100, mode: "FT8", message: "CQ VK3XYZ QF22", lowConfidence: false, offAir: false, callerCallsign: "VK3XYZ", targetCallsign: "", grid: "QF22", report: "", port: 2237, sliceLabel: "VFO A"),
-            WSJTXLiveDecode(sourceID: "WSJT-X", isNew: true, timeMillis: 120000, snr: -6, deltaTimeSec: 0.1, deltaFrequencyHz: 1200, mode: "FT8", message: "EP2AES DL1ABC JO50", lowConfidence: false, offAir: false, callerCallsign: "DL1ABC", targetCallsign: "EP2AES", grid: "JO50", report: "", port: 2238, sliceLabel: "VFO B"),
+            WSJTXLiveDecode(sourceID: "WSJT-X", isNew: true, timeMillis: 120000, snr: -6, deltaTimeSec: 0.1, deltaFrequencyHz: 1200, mode: "FT8", message: "CQ DL1ABC JO50", lowConfidence: false, offAir: false, callerCallsign: "DL1ABC", targetCallsign: "", grid: "JO50", report: "", port: 2238, sliceLabel: "VFO B"),
             WSJTXLiveDecode(sourceID: "WSJT-X", isNew: true, timeMillis: 120000, snr: 8, deltaTimeSec: 0.4, deltaFrequencyHz: 1850, mode: "FT8", message: "CQ ZL1BQD RE78", lowConfidence: false, offAir: false, callerCallsign: "ZL1BQD", targetCallsign: "", grid: "RE78", report: "", port: 2238, sliceLabel: "VFO B")
         ]
-        roster.processDecodes(samples, activeBand: activeBand)
+        roster.processDecodes(samples, activeBand: activeBand, isSimulation: true)
     }
 
     private func callStation(_ entry: DigitalRosterEntry) {
         if let raw = entry.rawDecode {
-            appState.wsjtxListener.sendReply(to: raw)
+            if raw.sliceLabel == "Internal" || raw.port == 0 {
+                // Reply directly via YAAM Internal FT8 Modem
+                if let match = appState.ft8Engine.decodedRows.first(where: { $0.callerCall == entry.callsign }) {
+                    appState.ft8Engine.selectForReply(match)
+                } else {
+                    appState.ft8Engine.txText = "\(entry.callsign) \(appState.currentStationCallsign) \(appState.activeStationProfile?.grid ?? "")"
+                    appState.ft8Engine.txAudioFrequencyHz = Float(entry.deltaFrequencyHz)
+                    appState.ft8Engine.transmitArmed = true
+                }
+            } else {
+                appState.wsjtxListener.sendReply(to: raw)
+            }
         }
         if RigControlEngine.shared.isConnected {
-            let dialHz = appState.wsjtxListener.lastStatus?.dialFrequencyHz ?? 14074000
+            let dialHz = appState.wsjtxListener.lastStatus?.dialFrequencyHz ?? (appState.ft8Engine.dialFrequencyHz > 0 ? appState.ft8Engine.dialFrequencyHz : 14074000)
             RigControlEngine.shared.tune(frequencyHz: dialHz, mode: "USB-D")
         }
     }
@@ -715,83 +860,10 @@ public struct DigitalCallRosterView: View {
     // MARK: - Audio Settings Sheet
 
     private var audioSettingsSheet: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack {
-                Label("Smart Audio Speech Alerts", systemImage: "speaker.wave.3.fill")
-                    .font(.headline)
-                Spacer()
-                Button("Done") {
-                    showingAudioSettings = false
-                }
-                .buttonStyle(.borderedProminent)
-            }
-
-            Divider()
-
-            Toggle("Enable Hands-Free Speech Alerts", isOn: $audioAlerts.isEnabled)
-                .font(.subheadline)
-                .fontWeight(.semibold)
-
-            if audioAlerts.isEnabled {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("ALERT TRIGGERS")
-                        .font(.caption2)
-                        .fontWeight(.bold)
-                        .foregroundColor(.secondary)
-
-                    Toggle("⭐️ All-Time New DXCC (ATNO)", isOn: $audioAlerts.alertOnNewDXCC)
-                    Toggle("🎯 New DXCC Entity on Current Band", isOn: $audioAlerts.alertOnNewBand)
-                    Toggle("💠 New Maidenhead Grid Square", isOn: $audioAlerts.alertOnNewGrid)
-                    Toggle("🔔 Station Calling Me Directly", isOn: $audioAlerts.alertOnDirectedToMe)
-                    Toggle("Play Chime Before Speaking", isOn: $audioAlerts.playChimeFirst)
-                }
-                .padding(12)
-                .background(Color(NSColor.controlBackgroundColor))
-                .cornerRadius(8)
-
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("VOICE & SPEED")
-                        .font(.caption2)
-                        .fontWeight(.bold)
-                        .foregroundColor(.secondary)
-
-                    HStack {
-                        Text("Speech Rate:")
-                            .font(.caption)
-                        Slider(value: $audioAlerts.speechRate, in: 0.3...0.7)
-                        Text(String(format: "%.2fx", audioAlerts.speechRate / 0.5))
-                            .font(.caption)
-                            .frame(width: 40)
-                    }
-
-                    HStack {
-                        Text("Volume:")
-                            .font(.caption)
-                        Slider(value: $audioAlerts.speechVolume, in: 0.2...1.0)
-                        Text("\(Int(audioAlerts.speechVolume * 100))%")
-                            .font(.caption)
-                            .frame(width: 40)
-                    }
-
-                    Button {
-                        audioAlerts.testVoiceAlert()
-                    } label: {
-                        HStack {
-                            Image(systemName: "play.circle.fill")
-                            Text("Test Voice Announcement")
-                        }
-                    }
-                    .buttonStyle(.bordered)
-                }
-                .padding(12)
-                .background(Color(NSColor.controlBackgroundColor))
-                .cornerRadius(8)
-            }
-
-            Spacer()
+        AudioAlertSettingsView(showDismissButton: true) {
+            showingAudioSettings = false
         }
-        .padding(20)
-        .frame(width: 450, height: 460)
+        .frame(width: 480, height: 550)
     }
 
     // MARK: - Detail Sheet
@@ -819,8 +891,39 @@ public struct DigitalCallRosterView: View {
 
             Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 10) {
                 GridRow {
+                    Text("Decoder Source:").foregroundColor(.secondary)
+                    HStack(spacing: 4) {
+                        Image(systemName: entry.sliceLabel == "Internal" ? "waveform.circle.fill" : "antenna.radiowaves.left.and.right")
+                            .foregroundColor(.accentColor)
+                        Text(entry.sliceLabel == "Internal" ? "YAAM Internal FT8 Modem" : "WSJT-X UDP (\(entry.sliceLabel))")
+                            .fontWeight(.semibold)
+                    }
+                }
+                GridRow {
                     Text("Triage Status:").foregroundColor(.secondary)
                     Text(entry.status.rawValue).fontWeight(.bold).foregroundColor(entry.status.badgeColor)
+                }
+                GridRow {
+                    Text("Super Check Partial:").foregroundColor(.secondary)
+                    if SuperCheckPartialEngine.shared.isKnownContestCallsign(entry.callsign) {
+                        Label("Verified Master Contest Call (SCP)", systemImage: "rosette")
+                            .foregroundColor(.green)
+                            .fontWeight(.semibold)
+                    } else {
+                        Text("Standard Amateur Call").foregroundColor(.secondary)
+                    }
+                }
+                GridRow {
+                    Text("Previous in Log:").foregroundColor(.secondary)
+                    let prevQSOs = appState.qsoRecords.filter { $0.call.uppercased() == entry.callsign.uppercased() }
+                    if prevQSOs.isEmpty {
+                        Text("0 QSOs (All-Time New Station)")
+                            .foregroundColor(.purple)
+                            .fontWeight(.semibold)
+                    } else {
+                        Text("\(prevQSOs.count) QSO(s) logged (\(prevQSOs.map(\.band).joined(separator: ", ")))")
+                            .foregroundColor(.primary)
+                    }
                 }
                 GridRow {
                     Text("Grid Square:").foregroundColor(.secondary)
@@ -852,7 +955,7 @@ public struct DigitalCallRosterView: View {
                     }
                 }
                 Spacer()
-                Button("Reply in WSJT-X ⚡️") {
+                Button(entry.sliceLabel == "Internal" ? "Reply via YAAM FT8 Modem ⚡️" : "Reply in WSJT-X ⚡️") {
                     callStation(entry)
                     selectedEntryForDetail = nil
                 }
@@ -860,6 +963,368 @@ public struct DigitalCallRosterView: View {
             }
         }
         .padding(20)
-        .frame(width: 420, height: 320)
+        .frame(width: 480, height: 380)
+    }
+}
+
+// MARK: - Dedicated Voice & Speech Alerts Settings View
+
+public struct AudioAlertSettingsView: View {
+    @ObservedObject private var audioAlerts = DigitalAudioAlertEngine.shared
+    public var showDismissButton: Bool = false
+    public var onDismiss: (() -> Void)? = nil
+
+    private var currentSpeedLabel: String {
+        let mult = audioAlerts.speechRate / 0.5
+        if mult < 0.85 {
+            return String(format: "%.1fx (Slow)", mult)
+        } else if mult <= 1.15 {
+            return String(format: "%.1fx (Normal)", mult)
+        } else if mult <= 1.35 {
+            return String(format: "%.1fx (Fast)", mult)
+        } else {
+            return String(format: "%.1fx (Rapid)", mult)
+        }
+    }
+
+    public init(showDismissButton: Bool = false, onDismiss: (() -> Void)? = nil) {
+        self.showDismissButton = showDismissButton
+        self.onDismiss = onDismiss
+    }
+
+    public var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            if showDismissButton {
+                HStack {
+                    HStack(spacing: 8) {
+                        Image(systemName: "speaker.wave.3.fill")
+                            .foregroundColor(.accentColor)
+                            .font(.title2)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Smart Voice & Audio Alerts")
+                                .font(.headline)
+                                .fontWeight(.bold)
+                            Text("Real-time spoken alerts for DXCC, bands, grids, and directed calls")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    Spacer()
+                    Button("Done") {
+                        onDismiss?()
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+                Divider()
+            }
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    // Master Switch
+                    VStack(alignment: .leading, spacing: 6) {
+                        Toggle("Enable Hands-Free Speech Alerts", isOn: $audioAlerts.isEnabled)
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                        Text("When enabled, incoming DX opportunities and direct calls are spoken aloud using macOS Speech Synthesis.")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(12)
+                    .background(Color(NSColor.controlBackgroundColor))
+                    .cornerRadius(8)
+
+                    if audioAlerts.isEnabled {
+                        // Section 1: Voice & Speed
+                        VStack(alignment: .leading, spacing: 12) {
+                            Label("SPEAKER VOICE & SPEED", systemImage: "waveform")
+                                .font(.caption2)
+                                .fontWeight(.bold)
+                                .foregroundColor(.secondary)
+
+                            // Voice Selector
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Speaker Voice:")
+                                    .font(.caption)
+                                    .fontWeight(.medium)
+
+                                Picker("", selection: $audioAlerts.selectedVoiceID) {
+                                    Text("🇺🇸 Samantha (System Default)").tag("")
+                                    Divider()
+                                    ForEach(audioAlerts.voiceOptions) { voice in
+                                        Text(voice.displayName).tag(voice.id)
+                                    }
+                                }
+                                .labelsHidden()
+                                .pickerStyle(.menu)
+                            }
+
+                            Divider()
+
+                            // Speech Speed / Rate Slider & Presets
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack {
+                                    Text("Speech Speed:")
+                                        .font(.caption)
+                                        .fontWeight(.medium)
+                                    Spacer()
+                                    Text(currentSpeedLabel)
+                                        .font(.caption)
+                                        .fontWeight(.semibold)
+                                        .monospacedDigit()
+                                        .foregroundColor(.accentColor)
+                                }
+
+                                HStack(spacing: 8) {
+                                    Text("🐢").font(.caption)
+                                    Slider(value: $audioAlerts.speechRate, in: 0.30...0.75, step: 0.02)
+                                    Text("⚡️").font(.caption)
+                                }
+
+                                HStack(spacing: 6) {
+                                    Button("Slow (0.8x)") {
+                                        audioAlerts.speechRate = 0.40
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.small)
+
+                                    Button("Normal (1.0x)") {
+                                        audioAlerts.speechRate = 0.50
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.small)
+
+                                    Button("Fast (1.2x)") {
+                                        audioAlerts.speechRate = 0.60
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.small)
+
+                                    Button("Rapid (1.4x)") {
+                                        audioAlerts.speechRate = 0.70
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.small)
+                                }
+                            }
+
+                            Divider()
+
+                            // Volume Slider
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Text("Volume:")
+                                        .font(.caption)
+                                        .fontWeight(.medium)
+                                    Spacer()
+                                    Text("\(Int(audioAlerts.speechVolume * 100))%")
+                                        .font(.caption)
+                                        .monospacedDigit()
+                                        .foregroundColor(.secondary)
+                                }
+                                Slider(value: $audioAlerts.speechVolume, in: 0.1...1.0, step: 0.05)
+                            }
+
+                            // Chime
+                            Toggle("Play chime before speaking announcement", isOn: $audioAlerts.playChimeFirst)
+                                .font(.caption)
+
+                            // Test & Stop
+                            HStack(spacing: 10) {
+                                Button {
+                                    audioAlerts.testVoiceAlert()
+                                } label: {
+                                    HStack(spacing: 5) {
+                                        Image(systemName: "play.circle.fill")
+                                        Text("Test Voice Announcement")
+                                    }
+                                }
+                                .buttonStyle(.borderedProminent)
+
+                                if audioAlerts.isSpeaking {
+                                    Button {
+                                        audioAlerts.stopSpeaking()
+                                    } label: {
+                                        HStack(spacing: 4) {
+                                            Image(systemName: "stop.circle.fill")
+                                            Text("Stop")
+                                        }
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .foregroundColor(.red)
+                                }
+                            }
+                            .padding(.top, 4)
+                        }
+                        .padding(14)
+                        .background(Color(NSColor.controlBackgroundColor))
+                        .cornerRadius(8)
+
+                        // Section 2: Alert Triggers
+                        VStack(alignment: .leading, spacing: 10) {
+                            Label("ALERT TRIGGERS", systemImage: "bell.badge.fill")
+                                .font(.caption2)
+                                .fontWeight(.bold)
+                                .foregroundColor(.secondary)
+
+                            Toggle("⭐️ All-Time New DXCC (ATNO)", isOn: $audioAlerts.alertOnNewDXCC)
+                            Toggle("🎯 New DXCC Entity on Current Band", isOn: $audioAlerts.alertOnNewBand)
+                            Toggle("💠 New Maidenhead Grid Square", isOn: $audioAlerts.alertOnNewGrid)
+                            Toggle("🔔 Station Calling Me Directly", isOn: $audioAlerts.alertOnDirectedToMe)
+                        }
+                        .padding(14)
+                        .background(Color(NSColor.controlBackgroundColor))
+                        .cornerRadius(8)
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+        }
+        .padding(showDismissButton ? 18 : 10)
+    }
+}
+
+// MARK: - UDP Port Configuration Popover
+
+struct UDPPortConfigPopoverView: View {
+    @EnvironmentObject private var appState: AppState
+    @AppStorage("wsjtxUDPPort") private var wsjtxPort = 2237
+    @AppStorage("multiSliceEnabled") private var multiSliceEnabled = true
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            // Header
+            HStack {
+                Label("Digital Ingestion (UDP)", systemImage: "network")
+                    .font(.headline)
+                    .fontWeight(.bold)
+                Spacer()
+                if appState.wsjtxListener.state.isListening {
+                    HStack(spacing: 5) {
+                        Circle().fill(Color.green).frame(width: 7, height: 7)
+                        Text("LISTENING (\(String(appState.wsjtxListener.currentPort)))")
+                            .font(.system(size: 9, weight: .heavy, design: .monospaced))
+                            .foregroundStyle(.green)
+                    }
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(Color.green.opacity(0.12), in: Capsule())
+                } else {
+                    HStack(spacing: 5) {
+                        Circle().fill(Color.secondary).frame(width: 7, height: 7)
+                        Text("STOPPED")
+                            .font(.system(size: 9, weight: .heavy, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(Color.secondary.opacity(0.12), in: Capsule())
+                }
+            }
+
+            Text("YAAM ingests live decodes and sends 1-click QSO replies via local UDP broadcast with WSJT-X, JTDX, or SDR-Control.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+
+            Divider()
+
+            // Port Selection
+            VStack(alignment: .leading, spacing: 6) {
+                Text("UDP Listener Port:")
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.secondary)
+
+                HStack(spacing: 8) {
+                    TextField("2237", value: $wsjtxPort, format: .number.grouping(.never))
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.body, design: .monospaced))
+                        .frame(width: 100)
+
+                    Text("Active: \(String(appState.wsjtxListener.currentPort))")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            // Quick Port Presets
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Quick Port Presets:")
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.secondary)
+
+                HStack(spacing: 6) {
+                    portPresetButton(title: "2237", subtitle: "WSJT-X / JTDX", port: 2237)
+                    portPresetButton(title: "2238", subtitle: "JTDX / VFO B", port: 2238)
+                    portPresetButton(title: "2239", subtitle: "Slice C", port: 2239)
+                    portPresetButton(title: "2240", subtitle: "Slice D", port: 2240)
+                }
+            }
+
+            Divider()
+
+            // Multi-Slice Option
+            Toggle("Multi-Slice Quad Listeners (Ports 2237–2240)", isOn: $multiSliceEnabled)
+                .font(.caption)
+                .help("Simultaneously listen on secondary ports for FlexRadio / SDR multi-slice decodes")
+                .onChange(of: multiSliceEnabled) { _, newValue in
+                    appState.wsjtxListener.multiSliceEnabled = newValue
+                }
+
+            Divider()
+
+            // Footer Actions
+            HStack {
+                Button(appState.wsjtxListener.state.isListening ? "Stop Listener" : "Start Listener") {
+                    if appState.wsjtxListener.state.isListening {
+                        appState.wsjtxListener.stop()
+                    } else {
+                        appState.wsjtxListener.start(port: wsjtxPort)
+                    }
+                }
+                .buttonStyle(.bordered)
+                .tint(appState.wsjtxListener.state.isListening ? .red : .green)
+
+                Spacer()
+
+                Button("Apply & Restart") {
+                    appState.wsjtxListener.start(port: wsjtxPort)
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(18)
+        .frame(width: 380)
+    }
+
+    private func portPresetButton(title: String, subtitle: String, port: Int) -> some View {
+        Button {
+            wsjtxPort = port
+            if appState.wsjtxListener.state.isListening {
+                appState.wsjtxListener.start(port: port)
+            }
+        } label: {
+            VStack(spacing: 2) {
+                Text(title)
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundStyle(wsjtxPort == port ? Color.accentColor : Color.primary)
+                Text(subtitle)
+                    .font(.system(size: 8))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(wsjtxPort == port ? Color.accentColor.opacity(0.15) : Color(NSColor.controlBackgroundColor))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(wsjtxPort == port ? Color.accentColor : Color.secondary.opacity(0.2), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
     }
 }

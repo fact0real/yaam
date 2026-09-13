@@ -21,6 +21,7 @@ public struct ON4KSTView: View {
     @State private var selectedRecipient: String = "ALL"
     @State private var userSearchText: String = ""
     @State private var actionBanner: String = ""
+    @State private var showOnlyDirected: Bool = false
 
     public init() {}
 
@@ -35,11 +36,11 @@ public struct ON4KSTView: View {
             HSplitView {
                 // Left: Live Chat & Sked Stream
                 chatPane
-                    .frame(minWidth: 420)
+                    .frame(minWidth: 460)
 
                 // Right: Online Active Operators Roster
                 usersSidebar
-                    .frame(minWidth: 220, maxWidth: 300)
+                    .frame(minWidth: 260, maxWidth: 340)
             }
 
             Divider()
@@ -58,13 +59,31 @@ public struct ON4KSTView: View {
 
     private var topBar: some View {
         HStack(spacing: 12) {
-            HStack(spacing: 6) {
-                Image(systemName: "bubble.left.and.bubble.right.fill")
-                    .foregroundColor(.blue)
-                    .font(.title3)
-                Text("ON4KST Chat")
-                    .font(.headline.bold())
+            HStack(spacing: 8) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 7)
+                        .fill(Color.blue.opacity(0.15))
+                        .frame(width: 30, height: 30)
+                    Image(systemName: "bubble.left.and.bubble.right.fill")
+                        .foregroundColor(.blue)
+                        .font(.system(size: 14, weight: .bold))
+                }
+
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack(spacing: 6) {
+                        Text("ON4KST Chat & DX Skeds")
+                            .font(.system(size: 13, weight: .bold))
+                        Text("VHF / UHF / Microwave / 160m")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(.secondary)
+                    }
+                    Text("Direct propagation coordination & real-time chat gateway")
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
+                }
             }
+
+            Spacer()
 
             // Room Picker Segment
             Picker("Room", selection: $kst.selectedRoom) {
@@ -73,47 +92,59 @@ public struct ON4KSTView: View {
                 }
             }
             .pickerStyle(.segmented)
-            .frame(width: 250)
+            .labelsHidden()
+            .frame(width: 270)
             .onChange(of: kst.selectedRoom) { _, newRoom in
                 if kst.isConnected {
                     kst.connect(room: newRoom, callsign: inputCallsign, password: inputPassword)
                 }
             }
 
-            Spacer()
+            Divider()
+                .frame(height: 20)
 
             if !kst.isConnected {
-                TextField("Callsign", text: $inputCallsign)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 90)
-
-                SecureField("Password (or blank)", text: $inputPassword)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 110)
-
-                Button("Connect") {
-                    kst.connect(callsign: inputCallsign, password: inputPassword)
-                }
-                .buttonStyle(.borderedProminent)
-            } else {
                 HStack(spacing: 6) {
-                    Circle().fill(Color.green).frame(width: 8, height: 8)
-                    Text("Connected to \(kst.selectedRoom.shortName)")
-                        .font(.caption.bold())
-                        .foregroundColor(.green)
-                }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(Color.green.opacity(0.12), in: Capsule())
+                    TextField("Callsign", text: $inputCallsign)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 95)
 
-                Button("Disconnect", role: .destructive) {
-                    kst.disconnect()
+                    SecureField("Password (optional)", text: $inputPassword)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 120)
+
+                    Button {
+                        kst.connect(callsign: inputCallsign, password: inputPassword)
+                    } label: {
+                        Label("Connect", systemImage: "bolt.fill")
+                            .font(.caption.bold())
+                    }
+                    .buttonStyle(.borderedProminent)
                 }
-                .buttonStyle(.bordered)
+            } else {
+                HStack(spacing: 8) {
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(Color.green)
+                            .frame(width: 8, height: 8)
+                        Text("Online (\(kst.selectedRoom.shortName))")
+                            .font(.caption.bold())
+                            .foregroundColor(.green)
+                    }
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 4)
+                    .background(Color.green.opacity(0.12), in: Capsule())
+
+                    Button("Disconnect", role: .destructive) {
+                        kst.disconnect()
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
             }
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(.vertical, 9)
         .background(Color(NSColor.windowBackgroundColor))
     }
 
@@ -121,39 +152,90 @@ public struct ON4KSTView: View {
 
     private var chatPane: some View {
         VStack(spacing: 0) {
-            if !actionBanner.isEmpty {
-                HStack(spacing: 8) {
+            // Action & Filter Notification Bar
+            HStack(spacing: 8) {
+                if !actionBanner.isEmpty {
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundColor(.green)
+                        .font(.caption)
                     Text(actionBanner)
                         .font(.caption.bold())
+                        .foregroundColor(.primary)
                     Spacer()
                     Button {
                         actionBanner = ""
                     } label: {
                         Image(systemName: "xmark")
+                            .font(.caption2)
                     }
                     .buttonStyle(.plain)
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(Color.green.opacity(0.15))
-            }
-
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 8) {
-                        ForEach(kst.messages) { msg in
-                            messageBubble(msg)
-                                .id(msg.id)
-                        }
+                } else {
+                    Text("ROOM: \(kst.selectedRoom.title)")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.secondary)
+                    Spacer()
+                    Toggle(isOn: $showOnlyDirected) {
+                        Label("Directed to me", systemImage: "at")
+                            .font(.system(size: 11, weight: .medium))
                     }
-                    .padding(12)
+                    .toggleStyle(.checkbox)
                 }
-                .onChange(of: kst.messages.count) { _, _ in
-                    if let last = kst.messages.last {
-                        withAnimation {
-                            proxy.scrollTo(last.id, anchor: .bottom)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 5)
+            .background(actionBanner.isEmpty ? Color(NSColor.controlBackgroundColor).opacity(0.6) : Color.green.opacity(0.14))
+
+            Divider()
+
+            if filteredMessages.isEmpty {
+                VStack(spacing: 12) {
+                    Image(systemName: kst.isConnected ? "bubble.left.and.bubble.right" : "network.slash")
+                        .font(.system(size: 38))
+                        .foregroundColor(.secondary.opacity(0.6))
+                    if !kst.isConnected {
+                        Text("Not Connected to ON4KST")
+                            .font(.headline)
+                            .foregroundColor(.primary)
+                        Text("Enter your callsign and click **Connect** in the top bar to join \(kst.selectedRoom.title) and receive live messages.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: 380)
+                    } else {
+                        Text("No Messages in \(kst.selectedRoom.shortName)")
+                            .font(.headline)
+                            .foregroundColor(.primary)
+                        Text("Connected to \(kst.selectedRoom.title). Waiting for incoming DX spots and chat messages...")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: 380)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding()
+            } else {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 10) {
+                            let displayedMessages = filteredMessages
+                            ForEach(Array(displayedMessages.enumerated()), id: \.element.id) { index, msg in
+                                // Date divider if day changed
+                                if shouldShowDateDivider(messages: displayedMessages, at: index) {
+                                    dateDivider(for: msg.timestamp)
+                                }
+
+                                messageCard(msg)
+                                    .id(msg.id)
+                            }
+                        }
+                        .padding(14)
+                    }
+                    .onChange(of: kst.messages.count) { _, _ in
+                        if let last = kst.messages.last {
+                            withAnimation {
+                                proxy.scrollTo(last.id, anchor: .bottom)
+                            }
                         }
                     }
                 }
@@ -162,59 +244,161 @@ public struct ON4KSTView: View {
         .background(Color(NSColor.textBackgroundColor))
     }
 
-    private func messageBubble(_ msg: ON4KSTMessage) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
+    private var filteredMessages: [ON4KSTMessage] {
+        if showOnlyDirected {
+            let myCall = (appState.activeStationProfile?.callsign ?? "EP2AES").uppercased()
+            return kst.messages.filter { $0.isDirected || $0.recipient?.uppercased() == myCall || $0.text.localizedCaseInsensitiveContains(myCall) }
+        }
+        return kst.messages
+    }
+
+    // MARK: - Date Divider
+
+    private func shouldShowDateDivider(messages: [ON4KSTMessage], at index: Int) -> Bool {
+        guard index < messages.count else { return false }
+        if index == 0 { return true }
+        let prev = messages[index - 1].timestamp
+        let curr = messages[index].timestamp
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        return !calendar.isDate(prev, inSameDayAs: curr)
+    }
+
+    private func dateDivider(for date: Date) -> some View {
+        HStack {
+            VStack { Divider() }
+            HStack(spacing: 5) {
+                Image(systemName: "calendar")
+                    .font(.system(size: 10))
+                Text(formattedDateHeader(date))
+                    .font(.system(size: 11, weight: .bold))
+            }
+            .foregroundColor(.secondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 3)
+            .background(Color(NSColor.controlBackgroundColor), in: Capsule())
+            .overlay(Capsule().stroke(Color.secondary.opacity(0.2), lineWidth: 1))
+            VStack { Divider() }
+        }
+        .padding(.vertical, 6)
+    }
+
+    private func formattedDateHeader(_ date: Date) -> String {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+
+        if calendar.isDateInToday(date) {
+            let f = DateFormatter()
+            f.dateFormat = "EEEE, dd MMMM yyyy"
+            f.timeZone = TimeZone(secondsFromGMT: 0)
+            return "Today — " + f.string(from: date) + " UTC"
+        } else if calendar.isDateInYesterday(date) {
+            let f = DateFormatter()
+            f.dateFormat = "EEEE, dd MMMM yyyy"
+            f.timeZone = TimeZone(secondsFromGMT: 0)
+            return "Yesterday — " + f.string(from: date) + " UTC"
+        } else {
+            let f = DateFormatter()
+            f.dateFormat = "EEEE, dd MMMM yyyy 'UTC'"
+            f.timeZone = TimeZone(secondsFromGMT: 0)
+            return f.string(from: date)
+        }
+    }
+
+    // MARK: - Message Card
+
+    private func messageCard(_ msg: ON4KSTMessage) -> some View {
+        let isMe = msg.sender.uppercased() == (appState.activeStationProfile?.callsign ?? "EP2AES").uppercased()
+
+        return VStack(alignment: .leading, spacing: 6) {
+            // Header: Sender, Recipient, Badges, Full Date & Time
             HStack(spacing: 8) {
                 // Sender Badge
                 Button {
                     selectedRecipient = msg.sender
                 } label: {
-                    Text(msg.sender)
-                        .font(.system(size: 11.5, weight: .bold, design: .monospaced))
-                        .foregroundColor(msg.isSpot ? .orange : (msg.isDirected ? .purple : .blue))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(
-                            (msg.isSpot ? Color.orange : (msg.isDirected ? Color.purple : Color.blue)).opacity(0.15),
-                            in: RoundedRectangle(cornerRadius: 4)
-                        )
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill(msg.isSpot ? Color.orange : (msg.isDirected ? Color.purple : (isMe ? Color.green : Color.blue)))
+                            .frame(width: 6, height: 6)
+                        Text(msg.sender)
+                            .font(.system(size: 12, weight: .bold, design: .monospaced))
+                    }
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(
+                        (msg.isSpot ? Color.orange : (msg.isDirected ? Color.purple : (isMe ? Color.green : Color.blue))).opacity(0.14),
+                        in: RoundedRectangle(cornerRadius: 5)
+                    )
+                    .foregroundColor(msg.isSpot ? .orange : (msg.isDirected ? .purple : (isMe ? .green : .blue)))
                 }
                 .buttonStyle(.plain)
+                .help("Click to reply directly to \(msg.sender)")
 
-                if let recip = msg.recipient {
+                // Directed Recipient Arrow
+                if let recip = msg.recipient, !recip.isEmpty, recip != "ALL" {
                     Image(systemName: "arrow.right")
-                        .font(.caption2)
+                        .font(.system(size: 10, weight: .bold))
                         .foregroundColor(.secondary)
                     Text(recip)
                         .font(.system(size: 11, weight: .bold, design: .monospaced))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(.purple)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(Color.purple.opacity(0.1), in: RoundedRectangle(cornerRadius: 4))
+                }
+
+                if msg.isSpot {
+                    Text("DX SPOT")
+                        .font(.system(size: 9, weight: .black))
+                        .foregroundColor(.orange)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1.5)
+                        .background(Color.orange.opacity(0.12), in: Capsule())
                 }
 
                 Spacer()
 
-                Text(formattedTime(msg.timestamp))
-                    .font(.system(size: 9.5, design: .monospaced))
-                    .foregroundColor(.secondary)
+                // Explicit Date & Time UTC stamp
+                HStack(spacing: 4) {
+                    Text(formattedTime(msg.timestamp))
+                        .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
+                        .foregroundColor(.primary.opacity(0.8))
+                    Text("· " + formattedShortDate(msg.timestamp))
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(.secondary)
+                }
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 4))
             }
 
-            // Message Body
+            // Message Body Text
             Text(msg.text)
-                .font(.system(size: 12.5))
+                .font(.system(size: 13, weight: .regular))
                 .foregroundColor(.primary)
                 .textSelection(.enabled)
+                .lineSpacing(2)
 
-            // Detected Sked / Frequency Action Bar
+            // Detected Frequency & Sked Action Toolbar
             if let freq = msg.detectedFrequencyMHz {
                 HStack(spacing: 8) {
-                    Label(String(format: "%.3f MHz", freq), systemImage: "waveform")
-                        .font(.caption.bold().monospacedDigit())
-                        .foregroundColor(.indigo)
+                    HStack(spacing: 5) {
+                        Image(systemName: "waveform")
+                            .foregroundColor(.indigo)
+                        Text(String(format: "%.3f MHz", freq))
+                            .font(.system(size: 11.5, weight: .bold, design: .monospaced))
+                            .foregroundColor(.indigo)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.indigo.opacity(0.1), in: RoundedRectangle(cornerRadius: 5))
 
                     Button {
                         qsyToFrequency(freq, callsign: msg.sender)
                     } label: {
-                        Text("QSY")
-                            .font(.caption2.bold())
+                        Label("QSY Radio", systemImage: "dial.low.fill")
+                            .font(.system(size: 10.5, weight: .bold))
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(.indigo)
@@ -226,26 +410,38 @@ public struct ON4KSTView: View {
                         appState.selectedTab = 5
                         appState.operatorDeskSection = 0
                     } label: {
-                        Text("Log Draft")
-                            .font(.caption2)
+                        Label("Log Draft", systemImage: "square.and.pencil")
+                            .font(.system(size: 10.5, weight: .medium))
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.mini)
 
                     Spacer()
+
+                    Button {
+                        selectedRecipient = msg.sender
+                    } label: {
+                        Label("Reply", systemImage: "arrowshape.turn.up.left.fill")
+                            .font(.system(size: 10.5))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundColor(.secondary)
                 }
                 .padding(6)
-                .background(Color.indigo.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+                .background(Color.indigo.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
             }
         }
-        .padding(8)
+        .padding(10)
         .background(
-            RoundedRectangle(cornerRadius: 8)
+            RoundedRectangle(cornerRadius: 9)
                 .fill(msg.isDirected ? Color.purple.opacity(0.06) : Color(NSColor.controlBackgroundColor))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(msg.isDirected ? Color.purple.opacity(0.3) : Color.secondary.opacity(0.12), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 9)
+                .stroke(
+                    msg.isDirected ? Color.purple.opacity(0.35) : (msg.isSpot ? Color.orange.opacity(0.3) : Color.secondary.opacity(0.12)),
+                    lineWidth: 1
+                )
         )
     }
 
@@ -257,8 +453,10 @@ public struct ON4KSTView: View {
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass")
                     .foregroundColor(.secondary)
-                TextField("Search stations...", text: $userSearchText)
+                    .font(.caption)
+                TextField("Filter by callsign, grid...", text: $userSearchText)
                     .textFieldStyle(.plain)
+                    .font(.system(size: 12))
             }
             .padding(8)
             .background(Color(NSColor.controlBackgroundColor))
@@ -270,54 +468,81 @@ public struct ON4KSTView: View {
                     .font(.system(size: 10, weight: .bold))
                     .foregroundColor(.secondary)
                 Spacer()
+                Text("Bearing / Dist")
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundColor(.secondary)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
+            .background(Color(NSColor.windowBackgroundColor))
+
+            Divider()
 
             List(filteredUsers) { user in
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: 4) {
                     HStack {
                         Button {
                             selectedRecipient = user.callsign
                         } label: {
-                            Text(user.callsign)
-                                .font(.system(size: 12, weight: .bold, design: .monospaced))
-                                .foregroundColor(.primary)
+                            HStack(spacing: 4) {
+                                Circle().fill(Color.green).frame(width: 6, height: 6)
+                                Text(user.callsign)
+                                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                                    .foregroundColor(.primary)
+                            }
                         }
                         .buttonStyle(.plain)
+                        .help("Click to select \(user.callsign) as recipient")
 
                         Spacer()
 
                         if !user.locator.isEmpty {
                             Text(user.locator)
-                                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                                .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
                                 .foregroundColor(.secondary)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 1)
+                                .background(Color.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: 3))
                         }
                     }
 
                     if let dist = user.distanceKm, let bearing = user.bearingDeg {
                         HStack(spacing: 6) {
                             Text("\(Int(dist)) km")
-                                .font(.caption2.monospacedDigit())
+                                .font(.system(size: 10, design: .monospaced))
                                 .foregroundColor(.secondary)
 
                             Text("• \(Int(bearing))° \(GeodesicMath.compassCardinal(for: bearing))")
-                                .font(.caption2.bold())
+                                .font(.system(size: 10, weight: .bold, design: .monospaced))
                                 .foregroundColor(.blue)
 
                             Spacer()
 
                             Button {
                                 rotator.turnTo(azimuth: bearing)
-                                actionBanner = "Rotator turning to \(user.callsign) at \(Int(bearing))°"
+                                actionBanner = "Antenna turning to \(user.callsign) at \(Int(bearing))°"
                             } label: {
-                                Image(systemName: "location.north.line.fill")
-                                    .font(.caption2)
+                                HStack(spacing: 2) {
+                                    Image(systemName: "location.north.line.fill")
+                                        .font(.system(size: 9))
+                                    Text("Aim")
+                                        .font(.system(size: 9.5, weight: .bold))
+                                }
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.orange.opacity(0.14), in: Capsule())
+                                .foregroundColor(.orange)
                             }
                             .buttonStyle(.plain)
-                            .foregroundColor(.orange)
-                            .help("Turn rotator to \(user.callsign)")
+                            .help("Rotate beam antenna to \(user.callsign) (\(Int(bearing))°)")
                         }
+                    }
+
+                    if !user.extraInfo.isEmpty {
+                        Text(user.extraInfo)
+                            .font(.system(size: 9.5))
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
                     }
                 }
                 .padding(.vertical, 4)
@@ -333,7 +558,8 @@ public struct ON4KSTView: View {
         }
         return kst.onlineUsers.filter {
             $0.callsign.localizedCaseInsensitiveContains(userSearchText) ||
-            $0.locator.localizedCaseInsensitiveContains(userSearchText)
+            $0.locator.localizedCaseInsensitiveContains(userSearchText) ||
+            $0.extraInfo.localizedCaseInsensitiveContains(userSearchText)
         }
     }
 
@@ -345,10 +571,11 @@ public struct ON4KSTView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
                     quickCQButton("CQ 50.313 FT8", freq: "50.313", mode: "FT8")
+                    quickCQButton("CQ 70.154 CW", freq: "70.154", mode: "CW")
                     quickCQButton("CQ 144.174 FT8", freq: "144.174", mode: "FT8")
                     quickCQButton("CQ 144.200 SSB", freq: "144.200", mode: "SSB")
                     quickCQButton("CQ 432.200 SSB", freq: "432.200", mode: "SSB")
-                    quickCQButton("Any 6m Es opening?", freq: "50.313", mode: "FT8")
+                    quickCQButton("1.2 GHz Tropo Sked?", freq: "1296.200", mode: "SSB")
                 }
                 .padding(.horizontal, 12)
             }
@@ -356,14 +583,15 @@ public struct ON4KSTView: View {
             HStack(spacing: 10) {
                 // Recipient Dropdown / Selector
                 Picker("To:", selection: $selectedRecipient) {
-                    Text("ALL (Public)").tag("ALL")
+                    Text("📢 ALL (Public Room)").tag("ALL")
+                    Divider()
                     ForEach(kst.onlineUsers) { u in
-                        Text(u.callsign).tag(u.callsign)
+                        Text("🔒 \(u.callsign)").tag(u.callsign)
                     }
                 }
-                .frame(width: 140)
+                .frame(width: 175)
 
-                TextField("Type chat message or /sked proposal...", text: $outgoingMessage)
+                TextField("Type message or sked proposal...", text: $outgoingMessage)
                     .textFieldStyle(.roundedBorder)
                     .onSubmit {
                         sendMessage()
@@ -373,9 +601,11 @@ public struct ON4KSTView: View {
                     sendMessage()
                 } label: {
                     Label("Send", systemImage: "paperplane.fill")
+                        .font(.system(size: 12, weight: .bold))
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(outgoingMessage.trimmingCharacters(in: .whitespaces).isEmpty)
+                .disabled(outgoingMessage.trimmingCharacters(in: .whitespaces).isEmpty || !kst.isConnected)
+                .help(kst.isConnected ? "Send message" : "Connect to ON4KST in the top bar first")
             }
             .padding(.horizontal, 14)
             .padding(.bottom, 10)
@@ -385,15 +615,23 @@ public struct ON4KSTView: View {
 
     private func quickCQButton(_ title: String, freq: String, mode: String) -> some View {
         Button {
+            guard kst.isConnected else {
+                actionBanner = "⚠️ Connect to ON4KST room first before broadcasting CQ"
+                return
+            }
             kst.sendCQ(frequencyMHz: freq, mode: mode)
-            actionBanner = "Posted '\(title)' to \(kst.selectedRoom.shortName)"
+            actionBanner = "Broadcasted '\(title)' to \(kst.selectedRoom.shortName)"
         } label: {
-            Text(title)
-                .font(.caption.bold())
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(Color.blue.opacity(0.12), in: Capsule())
-                .foregroundColor(.blue)
+            HStack(spacing: 4) {
+                Image(systemName: "antenna.radiowaves.left.and.right")
+                    .font(.system(size: 9))
+                Text(title)
+                    .font(.system(size: 11, weight: .semibold))
+            }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 4)
+            .background(Color.blue.opacity(0.12), in: Capsule())
+            .foregroundColor(.blue)
         }
         .buttonStyle(.plain)
     }
@@ -401,6 +639,10 @@ public struct ON4KSTView: View {
     private func sendMessage() {
         let text = outgoingMessage.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
+        guard kst.isConnected else {
+            actionBanner = "⚠️ Cannot send message: Not connected to ON4KST. Click Connect above."
+            return
+        }
         kst.sendMessage(text: text, recipient: selectedRecipient == "ALL" ? nil : selectedRecipient)
         outgoingMessage = ""
     }
@@ -426,6 +668,13 @@ public struct ON4KSTView: View {
     private func formattedTime(_ date: Date) -> String {
         let f = DateFormatter()
         f.dateFormat = "HH:mm:ss 'UTC'"
+        f.timeZone = TimeZone(secondsFromGMT: 0)
+        return f.string(from: date)
+    }
+
+    private func formattedShortDate(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
         f.timeZone = TimeZone(secondsFromGMT: 0)
         return f.string(from: date)
     }

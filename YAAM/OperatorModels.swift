@@ -4,6 +4,7 @@
 //
 
 import Foundation
+import SwiftUI
 
 nonisolated enum AmateurBandPlan {
     private static let ranges: [(ClosedRange<Double>, String)] = [
@@ -96,6 +97,47 @@ nonisolated enum AmateurBandPlan {
         }
     }
 
+    /// Returns standard ADIF Mode, ensuring digital submodes (like FT8, FT4, JS8) are properly emitted as the primary MODE.
+    public static func effectiveADIFMode(mode: String, submode: String, frequencyMHz: Double? = nil) -> String {
+        let upperMode = mode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let upperSub = submode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+
+        let digitalModes: Set<String> = [
+            "FT8", "FT4", "JS8", "JT65", "JT9", "Q65", "MSK144", "FST4", "VARAC", "SSTV",
+            "PSK31", "PSK63", "PSK125", "SIM31", "RTTY", "WSPR", "OPERA", "ROS"
+        ]
+
+        // 1. If submode is an actual recognized digital mode, that is the primary ADIF mode for modern loggers/services
+        if digitalModes.contains(upperSub) {
+            return upperSub
+        }
+
+        // 2. If mode itself is an actual recognized digital mode, keep it
+        if digitalModes.contains(upperMode) {
+            return upperMode
+        }
+
+        // 3. If mode is already specific (SSB, CW, FM, AM, RTTY, etc.), keep it
+        if !upperMode.isEmpty && upperMode != "DATA" && upperMode != "DIGI" && upperMode != "MFSK" {
+            return upperMode
+        }
+
+        // 4. If mode was MFSK/DATA/DIGI and submode was specified, use submode
+        if !upperSub.isEmpty {
+            return upperSub
+        }
+
+        // 5. If mode is generic DATA or empty, attempt smart inference from frequency if provided
+        if let freq = frequencyMHz, freq > 0 {
+            let smart = smartInfer(frequencyMHz: freq)
+            if !smart.mode.isEmpty && smart.mode != "DATA" && smart.mode != "DIGI" {
+                return smart.mode
+            }
+        }
+
+        return upperMode.isEmpty ? "SSB" : upperMode
+    }
+
     /// Automatically normalizes Mode and Submode to prevent logical contradictions (e.g., Mode=SSB with Submode=FT8).
     static func normalizeModeAndSubmode(mode: inout String, submode: inout String) {
         let upperMode = mode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
@@ -108,9 +150,16 @@ nonisolated enum AmateurBandPlan {
             if digitalSubmodes.contains(upperSub) || pskSubmodes.contains(upperSub) {
                 submode = ""
             }
+        } else if upperMode == "DATA" || upperMode == "DIGI" || upperMode == "MFSK" {
+            if digitalSubmodes.contains(upperSub) || pskSubmodes.contains(upperSub) {
+                submode = upperSub
+            }
         } else if digitalSubmodes.contains(upperSub) || pskSubmodes.contains(upperSub) {
-            if upperMode.isEmpty || upperMode != "DATA" {
-                mode = "DATA"
+            mode = "DATA"
+            submode = upperSub
+        } else if digitalSubmodes.contains(upperMode) || pskSubmodes.contains(upperMode) {
+            if submode.isEmpty {
+                submode = upperMode
             }
         } else if upperSub == "RTTY" {
             mode = "RTTY"
@@ -123,6 +172,8 @@ nonisolated enum AmateurBandPlan {
     /// Returns recommended submodes for a given primary ADIF Mode.
     static func submodes(forMode mode: String) -> [String] {
         switch mode.uppercased() {
+        case "FT8", "FT4", "JS8":
+            return ["", mode.uppercased()]
         case "DATA", "DIGI", "MFSK":
             return ["", "FT8", "FT4", "JS8", "PSK31", "PSK63", "JT65", "JT9", "Q65", "MSK144", "FST4", "VARAC", "SSTV"]
         case "SSB":
@@ -171,7 +222,7 @@ nonisolated enum AmateurBandPlan {
             return (detectedBand, "CW", "", "599")
         }
         if frequencyMHz < 30 && fractionalKHz >= 70 && fractionalKHz <= 100 {
-            return (detectedBand, "DATA", "RTTY", "599")
+            return (detectedBand, "RTTY", "", "599")
         }
         return (detectedBand, "SSB", "", "59")
     }
@@ -411,6 +462,24 @@ nonisolated struct LogWorkIndex: Equatable, Sendable {
         return .worked
     }
 
+    func isWorked(callsign: String) -> Bool {
+        summary(for: callsign).total > 0
+    }
+
+    func isEntityWorked(_ entityName: String) -> Bool {
+        let clean = entityName.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard !clean.isEmpty else { return false }
+        for (call, summary) in callsigns {
+            if summary.total > 0 {
+                let info = DXCCDatabase.resolve(callsign: call)
+                if info.entityName.localizedCaseInsensitiveCompare(clean) == .orderedSame {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
     private static func isConfirmed(_ record: [String: String]) -> Bool {
         let values = ["LOTW_QSL_RCVD", "QRZLOG_QSL_RCVD", "QSL_RCVD", "EQSL_QSL_RCVD"]
             .map { (record[$0] ?? "").uppercased() }
@@ -431,9 +500,88 @@ nonisolated struct DXSpot: Identifiable, Hashable, Sendable {
     var spottedAt: Date
     var lastSeenAt: Date
     var reportCount: Int
+    var lotwLastUpload: Date?
+    var isLoTWActive: Bool
+    var spotterDistanceKm: Double?
+    var spotterBearingDeg: Double?
+    var spotterCardinalDirection: String?
+    var matchedAlertSlotIndex: Int?
+    var matchedAlertColorHex: String?
+
+    // P0-B: SNR from RBN spots (extracted from comment, e.g. "25dB")
+    var snrDB: Int?
+
+    // P0-C: Beam heading from user's home grid to the spotted station (via CTY lat/lon)
+    var beamHeadingDeg: Double?
+
+    // P0-C: DXCC entity info for flag emoji display
+    var dxccEntityName: String
+    var flagEmoji: String
+
+    init(
+        id: String,
+        callsign: String,
+        spotter: String,
+        frequencyKHz: Double,
+        band: String,
+        mode: String,
+        submode: String,
+        comment: String,
+        grid: String,
+        spottedAt: Date,
+        lastSeenAt: Date,
+        reportCount: Int,
+        lotwLastUpload: Date? = nil,
+        isLoTWActive: Bool = false,
+        spotterDistanceKm: Double? = nil,
+        spotterBearingDeg: Double? = nil,
+        spotterCardinalDirection: String? = nil,
+        matchedAlertSlotIndex: Int? = nil,
+        matchedAlertColorHex: String? = nil,
+        snrDB: Int? = nil,
+        beamHeadingDeg: Double? = nil,
+        dxccEntityName: String = "",
+        flagEmoji: String = ""
+    ) {
+        self.id = id
+        self.callsign = callsign
+        self.spotter = spotter
+        self.frequencyKHz = frequencyKHz
+        self.band = band
+        self.mode = mode
+        self.submode = submode
+        self.comment = comment
+        self.grid = grid
+        self.spottedAt = spottedAt
+        self.lastSeenAt = lastSeenAt
+        self.reportCount = reportCount
+        self.lotwLastUpload = lotwLastUpload
+        self.isLoTWActive = isLoTWActive
+        self.spotterDistanceKm = spotterDistanceKm
+        self.spotterBearingDeg = spotterBearingDeg
+        self.spotterCardinalDirection = spotterCardinalDirection
+        self.matchedAlertSlotIndex = matchedAlertSlotIndex
+        self.matchedAlertColorHex = matchedAlertColorHex
+        self.snrDB = snrDB
+        self.beamHeadingDeg = beamHeadingDeg
+        self.dxccEntityName = dxccEntityName
+        self.flagEmoji = flagEmoji
+    }
 
     var frequencyMHz: Double { frequencyKHz / 1_000 }
+
+    /// Color-coded SNR for RBN spots
+    var snrColor: Color {
+        guard let snr = snrDB else { return .secondary }
+        if snr >= 20 { return .green }
+        if snr >= 10 { return .yellow }
+        if snr >= 3  { return .orange }
+        return .red
+    }
+
+    var snrText: String { snrDB.map { "\($0)dB" } ?? "-" }
 }
+
 
 nonisolated enum DXClusterConnectionState: Equatable, Sendable {
     case disconnected
@@ -465,6 +613,8 @@ nonisolated enum DXSpotParser {
     )
     private static let timeRegex = try! NSRegularExpression(pattern: #"\b([0-2][0-9][0-5][0-9])Z\b"#, options: [.caseInsensitive])
     private static let gridRegex = try! NSRegularExpression(pattern: #"\b([A-R]{2}[0-9]{2}(?:[A-X]{2})?)\b"#, options: [.caseInsensitive])
+    // P0-B: Extract RBN SNR values like "25dB", "25 dB", "-3dB"
+    private static let snrRegex  = try! NSRegularExpression(pattern: #"\b(-?\d+)\s*dB\b"#, options: [.caseInsensitive])
 
     static func parse(line: String, now: Date = Date()) -> DXSpot? {
         let clean = line
@@ -492,6 +642,15 @@ nonisolated enum DXSpotParser {
             comment = comment.replacingOccurrences(of: grid, with: "", options: .caseInsensitive)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
         }
+
+        // P0-B: Extract SNR before stripping from comment
+        let snrDB = extractSNR(from: comment)
+        if snrDB != nil {
+            comment = comment
+                .replacingOccurrences(of: #"\b-?\d+\s*dB\b"#, with: "", options: [.regularExpression, .caseInsensitive])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
         comment = comment.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
 
         let frequencyMHz = frequencyKHz / 1_000
@@ -499,10 +658,14 @@ nonisolated enum DXSpotParser {
         let mode = AmateurBandPlan.inferredMode(frequencyMHz: frequencyMHz, comment: comment)
         let submode = AmateurBandPlan.submode(from: comment)
         let spottedAt = date(forUTC: time, relativeTo: now)
-        let idFrequency = Int((frequencyKHz * 10).rounded())
+
+        // P0-A: Deduplication bucket — use 2kHz-wide buckets (round to nearest 2kHz)
+        // Spots within ±1kHz of each other get the same bucket ID and will be merged
+        let bucketKHz = (frequencyKHz / 2.0).rounded() * 2.0
+        let bucketID = Int(bucketKHz * 10)
 
         return DXSpot(
-            id: "\(callsign)-\(idFrequency)",
+            id: "\(callsign)-\(bucketID)",
             callsign: callsign,
             spotter: spotter,
             frequencyKHz: frequencyKHz,
@@ -513,8 +676,17 @@ nonisolated enum DXSpotParser {
             grid: grid,
             spottedAt: spottedAt,
             lastSeenAt: now,
-            reportCount: 1
+            reportCount: 1,
+            snrDB: snrDB
         )
+    }
+
+    /// P0-B: Extract numeric SNR value (dB) from RBN-style comments
+    private static func extractSNR(from text: String) -> Int? {
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        guard let match = snrRegex.firstMatch(in: text, range: range),
+              let captureRange = Range(match.range(at: 1), in: text) else { return nil }
+        return Int(text[captureRange])
     }
 
     private static func firstCapture(_ regex: NSRegularExpression, in value: String) -> String? {
@@ -539,6 +711,129 @@ nonisolated enum DXSpotParser {
             result = calendar.date(byAdding: .day, value: -1, to: result) ?? result
         }
         return result
+    }
+}
+
+struct SpotAlertRule: Identifiable, Codable, Hashable, Sendable {
+    var id: UUID
+    var slotIndex: Int // 1 to 5
+    var title: String
+    var isEnabled: Bool
+    var dxccEntity: String
+    var band: String
+    var mode: String
+    var callsignPattern: String
+    var onlyUnworkedOrUnconfirmed: Bool
+    var colorHex: String
+    var soundName: String
+    var cooldownMinutes: Int
+    var sendNotification: Bool
+
+    init(
+        id: UUID = UUID(),
+        slotIndex: Int,
+        title: String,
+        isEnabled: Bool = false,
+        dxccEntity: String = "",
+        band: String = "",
+        mode: String = "",
+        callsignPattern: String = "",
+        onlyUnworkedOrUnconfirmed: Bool = false,
+        colorHex: String = "#FF9500",
+        soundName: String = "Notice",
+        cooldownMinutes: Int = 10,
+        sendNotification: Bool = false
+    ) {
+        self.id = id
+        self.slotIndex = slotIndex
+        self.title = title
+        self.isEnabled = isEnabled
+        self.dxccEntity = dxccEntity
+        self.band = band
+        self.mode = mode
+        self.callsignPattern = callsignPattern
+        self.onlyUnworkedOrUnconfirmed = onlyUnworkedOrUnconfirmed
+        self.colorHex = colorHex
+        self.soundName = soundName
+        self.cooldownMinutes = cooldownMinutes
+        self.sendNotification = sendNotification
+    }
+
+    static func defaultRules() -> [SpotAlertRule] {
+        [
+            SpotAlertRule(slotIndex: 1, title: "Alert 1 (DXCC Entity)", isEnabled: false, dxccEntity: "", band: "", mode: "", colorHex: "#FF3B30", soundName: "Ping", cooldownMinutes: 10),
+            SpotAlertRule(slotIndex: 2, title: "Alert 2 (Needed Bands)", isEnabled: false, onlyUnworkedOrUnconfirmed: true, colorHex: "#FF9500", soundName: "Notice", cooldownMinutes: 10),
+            SpotAlertRule(slotIndex: 3, title: "Alert 3 (Magic 6m)", isEnabled: false, band: "6m", colorHex: "#AF52DE", soundName: "Hero", cooldownMinutes: 5),
+            SpotAlertRule(slotIndex: 4, title: "Alert 4 (CW / SSB)", isEnabled: false, mode: "CW", colorHex: "#007AFF", soundName: "Submarine", cooldownMinutes: 10),
+            SpotAlertRule(slotIndex: 5, title: "Alert 5 (Callsign Wildcard)", isEnabled: false, callsignPattern: "*", colorHex: "#34C759", soundName: "Glass", cooldownMinutes: 15)
+        ]
+    }
+
+    func matches(spot: DXSpot, entityName: String, status: DXSpotNeedStatus) -> Bool {
+        guard isEnabled else { return false }
+
+        // DXCC check
+        if !dxccEntity.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let target = dxccEntity.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !entityName.localizedCaseInsensitiveContains(target) {
+                return false
+            }
+        }
+
+        // Band check
+        if !band.isEmpty && band != "All" && spot.band != band {
+            return false
+        }
+
+        // Mode check
+        if !mode.isEmpty && mode != "All" {
+            let m = mode.uppercased()
+            if spot.mode.uppercased() != m && spot.submode.uppercased() != m {
+                return false
+            }
+        }
+
+        // Status check
+        if onlyUnworkedOrUnconfirmed && status != .newCallsign && status != .newBand {
+            return false
+        }
+
+        // Callsign wildcard check
+        let pattern = callsignPattern.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if !pattern.isEmpty && pattern != "*" {
+            if !WildcardPatternMatcher.matches(pattern: pattern, text: spot.callsign) {
+                return false
+            }
+        }
+
+        return true
+    }
+}
+
+public enum WildcardPatternMatcher {
+    public static func matches(pattern: String, text: String) -> Bool {
+        let cleanPat = pattern.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanPat.isEmpty else { return true }
+        if cleanPat == "*" { return true }
+
+        var regexPattern = "^"
+        for ch in cleanPat {
+            if ch == "*" {
+                regexPattern.append(".*")
+            } else if ch == "?" {
+                regexPattern.append(".")
+            } else {
+                regexPattern.append(NSRegularExpression.escapedPattern(for: String(ch)))
+            }
+        }
+        regexPattern.append("$")
+
+        guard let regex = try? NSRegularExpression(pattern: regexPattern, options: [.caseInsensitive]) else {
+            return cleanText.localizedCaseInsensitiveContains(cleanPat)
+        }
+        let range = NSRange(cleanText.startIndex..<cleanText.endIndex, in: cleanText)
+        return regex.firstMatch(in: cleanText, range: range) != nil
     }
 }
 
@@ -666,3 +961,29 @@ nonisolated struct ConfirmationMatchIndex: Sendable {
         value.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
     }
 }
+
+public struct RBNMatrixSettings: Codable, Equatable, Sendable {
+    public var cw: Bool = true
+    public var rtty: Bool = true
+    public var ft8: Bool = true
+    public var ft4: Bool = true
+    public var psk: Bool = false
+    public var beacons: Bool = false
+
+    public init(
+        cw: Bool = true,
+        rtty: Bool = true,
+        ft8: Bool = true,
+        ft4: Bool = true,
+        psk: Bool = false,
+        beacons: Bool = false
+    ) {
+        self.cw = cw
+        self.rtty = rtty
+        self.ft8 = ft8
+        self.ft4 = ft4
+        self.psk = psk
+        self.beacons = beacons
+    }
+}
+

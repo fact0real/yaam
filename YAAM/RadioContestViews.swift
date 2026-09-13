@@ -12,6 +12,7 @@ struct RadioBridgePanel: View {
         case tci = "TCI (SDR)"
         case rotator = "Rotator"
         case ft8 = "FT8 Station"
+        case digitalModem = "Digital Modes Suite"
 
         var id: String { rawValue }
     }
@@ -50,6 +51,9 @@ struct RadioBridgePanel: View {
                     rig: rig
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if workspace == .digitalModem {
+                DigitalMasterStationView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
@@ -124,6 +128,12 @@ struct RadioBridgePanel: View {
                 settingField("TCP Port", width: 100) {
                     TextField("4532", value: $rigPort, format: .number).textFieldStyle(.roundedBorder)
                 }
+                Button("SDR-Control (5001)") {
+                    rigPort = 5001
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help("Set port to 5001 for SDR-Control CAT Server")
 
                 Divider().frame(height: 40).padding(.horizontal, 4)
 
@@ -171,6 +181,9 @@ struct RadioBridgePanel: View {
                 .buttonStyle(.borderedProminent)
                 .tint(wsjtx.state.isListening ? .secondary : .accentColor)
             }
+
+            // Tactical Pilot Heads-Up Display
+            TacticalPilotHUDView()
 
             // Real-Time Live Decodes Stream & 1-Click Reply Console
             WSJTXLiveStreamView(wsjtx: wsjtx)

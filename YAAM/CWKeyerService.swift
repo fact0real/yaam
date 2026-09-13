@@ -3,8 +3,9 @@
 //  YAAM
 //
 //  Native Morse Code Keyer & Macro Automation Engine
-//  Supports Morse over CAT, cwdaemon network keying, and local macOS sine-wave sidetone audio.
-//  Includes PARIS-calibrated timing, customizable F1-F8 macros, and live transmit queues.
+//  Supports Morse over CAT, WinKeyer, TCI DSP, cwdaemon network keying, and local macOS sine-wave sidetone audio.
+//  Includes PARIS-calibrated timing, customizable F1-F12 memory banks (RUN, S&P, Ragchew, Custom),
+//  dynamic tokens, cut-numbers (5NN), Auto-CQ repeat scheduler, and live transmit streams.
 //
 
 import AVFoundation
@@ -13,24 +14,69 @@ import Foundation
 import Network
 
 public enum CWTransmissionMode: String, CaseIterable, Identifiable, Sendable {
-    case catMorse = "CAT Morse (Rig/FLRig)"
     case winkeyer = "K1EL WinKeyer (USB Serial)"
+    case serialDTR_RTS = "Serial Pin (DTR/RTS Keying)"
+    case catMorse = "CAT Morse (Rig/FLRig)"
     case tci = "TCI DSP (SunSDR / Thetis)"
     case cwdaemon = "cwdaemon (UDP 6789)"
     case audioOnly = "Audio Sidetone Only"
 
     public var id: String { rawValue }
+
+    public var iconName: String {
+        switch self {
+        case .winkeyer: return "cable.connector.horizontal"
+        case .serialDTR_RTS: return "cable.connector"
+        case .catMorse: return "antenna.radiowaves.left.and.right"
+        case .tci: return "waveform.badge.magnifyingglass"
+        case .cwdaemon: return "network"
+        case .audioOnly: return "speaker.wave.2.fill"
+        }
+    }
+}
+
+public enum CWMemoryBank: String, CaseIterable, Identifiable, Codable, Sendable {
+    case run = "RUN (CQ Pileup)"
+    case searchAndPounce = "S&P (Search & Pounce)"
+    case ragchew = "DX / Ragchew"
+    case custom = "Custom Bank"
+
+    public var id: String { rawValue }
+
+    public var shortTitle: String {
+        switch self {
+        case .run: return "RUN"
+        case .searchAndPounce: return "S&P"
+        case .ragchew: return "Ragchew"
+        case .custom: return "Custom"
+        }
+    }
+
+    public var iconName: String {
+        switch self {
+        case .run: return "flame.fill"
+        case .searchAndPounce: return "binoculars.fill"
+        case .ragchew: return "quote.bubble.fill"
+        case .custom: return "slider.horizontal.3"
+        }
+    }
 }
 
 public struct CWMacro: Identifiable, Codable, Sendable {
-    public let id: Int // 1...8 (F1...F8)
+    public let id: Int // 1...12 (F1...F12)
     public var label: String
     public var template: String
+    public var bank: CWMemoryBank
 
-    public init(id: Int, label: String, template: String) {
+    public init(id: Int, label: String, template: String, bank: CWMemoryBank = .run) {
         self.id = id
         self.label = label
         self.template = template
+        self.bank = bank
+    }
+
+    public var functionKeyTitle: String {
+        return "F\(id)"
     }
 }
 
@@ -43,29 +89,97 @@ public final class CWKeyerService: ObservableObject {
     @Published public var wpm: Int = 24
     @Published public var sidetonePitchHz: Double = 650.0
     @Published public var sidetoneEnabled: Bool = true
+    @Published public var sidetoneVolume: Float = 0.5
     @Published public var transmissionMode: CWTransmissionMode = .catMorse
     @Published public var activeBufferText: String = ""
+    @Published public var currentlyTransmittingChar: String = ""
     @Published public var sentHistory: [String] = []
     @Published public var cwdaemonHost: String = "127.0.0.1"
     @Published public var cwdaemonPort: Int = 6789
 
-    @Published public var macros: [CWMacro] = [
-        CWMacro(id: 1, label: "F1: CQ", template: "CQ CQ DE {MYCALL} {MYCALL} K"),
-        CWMacro(id: 2, label: "F2: 5NN TU", template: "{CALL} 5NN TU"),
-        CWMacro(id: 3, label: "F3: My Call", template: "{MYCALL}"),
-        CWMacro(id: 4, label: "F4: His Call", template: "{CALL}"),
-        CWMacro(id: 5, label: "F5: Name/QTH", template: "NAME {NAME} QTH {QTH} BK"),
-        CWMacro(id: 6, label: "F6: Contest", template: "{CALL} 5NN {SERIAL}"),
-        CWMacro(id: 7, label: "F7: QRZ?", template: "QRZ? DE {MYCALL} K"),
-        CWMacro(id: 8, label: "F8: 73 SK", template: "73 TU EE")
-    ]
+    // Bank Selection & Cut-Numbers
+    @Published public var activeBank: CWMemoryBank = .run
+    @Published public var useCutNumbers: Bool = true // 599 -> 5NN, 001 -> TT1
+
+    // Auto-CQ Loop State
+    @Published public var isAutoCQActive: Bool = false
+    @Published public var autoCQIntervalSeconds: Int = 4
+    @Published public var autoCQCountdown: Int = 0
+
+    // Memory Store for all 4 banks
+    @Published public var bankStorage: [CWMemoryBank: [CWMacro]] = [:]
+
+    // Computed property for backwards compatibility
+    public var macros: [CWMacro] {
+        get {
+            return bankStorage[activeBank] ?? defaultMacros(for: activeBank)
+        }
+        set {
+            bankStorage[activeBank] = newValue
+            saveMacros()
+        }
+    }
 
     private var audioEngine: AVAudioEngine?
     private var playerNode: AVAudioPlayerNode?
     private var transmitTask: Task<Void, Never>?
+    private var autoCQTask: Task<Void, Never>?
+    weak var rigControlClientRef: RigControlClient?
 
     public init() {
+        self.wpm = UserDefaults.standard.integer(forKey: "cwKeyerWPM") > 0 ? UserDefaults.standard.integer(forKey: "cwKeyerWPM") : 24
+        self.sidetonePitchHz = UserDefaults.standard.double(forKey: "cwSidetonePitch") > 0 ? UserDefaults.standard.double(forKey: "cwSidetonePitch") : 650.0
+        self.useCutNumbers = UserDefaults.standard.object(forKey: "cwUseCutNumbers") as? Bool ?? true
+        let storedInterval = UserDefaults.standard.integer(forKey: "cwAutoCQInterval")
+        self.autoCQIntervalSeconds = storedInterval >= 2 ? storedInterval : 4
+
+        loadMacros()
         setupAudioEngine()
+        setupWinKeyerBindings()
+    }
+
+    private func setupWinKeyerBindings() {
+        WinKeyerDriver.shared.onCharacterEchoed = { [weak self] char in
+            Task { @MainActor [weak self] in
+                guard let self = self, self.transmissionMode == .winkeyer else { return }
+                self.currentlyTransmittingChar = char
+            }
+        }
+        WinKeyerDriver.shared.onTransmissionComplete = { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self = self, self.transmissionMode == .winkeyer else { return }
+                self.isTransmitting = false
+                self.currentlyTransmittingChar = ""
+                self.activeBufferText = ""
+            }
+        }
+    }
+
+    public var hardwareStatusSummary: (isConnected: Bool, title: String, detail: String) {
+        switch transmissionMode {
+        case .winkeyer:
+            let wk = WinKeyerDriver.shared
+            return (wk.isConnected, wk.isConnected ? wk.wkVersion : "Disconnected", wk.selectedPort.isEmpty ? "No port" : wk.selectedPort.components(separatedBy: "/").last ?? wk.selectedPort)
+        case .serialDTR_RTS:
+            let sk = SerialKeyerDriver.shared
+            let pinDesc = "CW:\(sk.cwPin.rawValue) PTT:\(sk.pttPin.rawValue)"
+            return (sk.isConnected, sk.isConnected ? "Serial Keyer" : "Disconnected", sk.isConnected ? pinDesc : (sk.selectedPort.isEmpty ? "No port" : sk.selectedPort.components(separatedBy: "/").last ?? sk.selectedPort))
+        case .catMorse:
+            if rigControlClientRef?.state.isConnected == true {
+                let snap = rigControlClientRef?.snapshot
+                return (true, "Hamlib CAT", snap != nil ? "\(snap!.frequencyMHz) \(snap!.mode)" : "Connected")
+            } else if FLRigClient.shared.isConnected {
+                return (true, "FLRig CAT", "\(String(format: "%.3f", FLRigClient.shared.frequencyHz / 1_000_000)) MHz")
+            } else {
+                return (false, "CAT Offline", "Connect Rig / FLRig")
+            }
+        case .tci:
+            return (TCIClient.shared.isConnected, TCIClient.shared.isConnected ? "TCI Connected" : "TCI Offline", "ExpertSDR")
+        case .cwdaemon:
+            return (true, "cwdaemon", "\(cwdaemonHost):\(cwdaemonPort)")
+        case .audioOnly:
+            return (true, "Audio Sidetone", "Local Sounder")
+        }
     }
 
     // MARK: - Audio Sidetone Setup
@@ -90,15 +204,39 @@ public final class CWKeyerService: ObservableObject {
 
     // MARK: - WPM Adjustment
 
-    public func increaseWPM() {
-        wpm = min(50, wpm + 1)
+    public func increaseWPM(_ delta: Int = 1) {
+        wpm = min(50, wpm + delta)
+        UserDefaults.standard.set(wpm, forKey: "cwKeyerWPM")
     }
 
-    public func decreaseWPM() {
-        wpm = max(10, wpm - 1)
+    public func decreaseWPM(_ delta: Int = 1) {
+        wpm = max(10, wpm - delta)
+        UserDefaults.standard.set(wpm, forKey: "cwKeyerWPM")
     }
 
-    // MARK: - Macro Expansion
+    public func setWPM(_ newWpm: Int) {
+        wpm = max(10, min(50, newWpm))
+        UserDefaults.standard.set(wpm, forKey: "cwKeyerWPM")
+    }
+
+    // MARK: - Cut-Numbers Translation (Standard Contest Conventions)
+
+    public func applyCutNumbers(_ text: String) -> String {
+        guard useCutNumbers else { return text }
+        var result = text
+        result = result.replacingOccurrences(of: "599", with: "5NN")
+        return result
+    }
+
+    public func cutSerial(_ serial: Int) -> String {
+        let raw = String(format: "%03d", serial)
+        guard useCutNumbers else { return raw }
+        return raw
+            .replacingOccurrences(of: "0", with: "T")
+            .replacingOccurrences(of: "9", with: "N")
+    }
+
+    // MARK: - Macro Expansion with Rich Ham Radio Tokens
 
     public func expandMacro(
         _ template: String,
@@ -107,15 +245,31 @@ public final class CWKeyerService: ObservableObject {
         rst: String = "599",
         name: String = "",
         qth: String = "",
-        serial: Int = 1
+        serial: Int = 1,
+        exch: String = "",
+        band: String = "",
+        freq: String = ""
     ) -> String {
-        return template
+        let sentRst = useCutNumbers && rst == "599" ? "5NN" : (rst.isEmpty ? "5NN" : rst)
+        let serialFormatted = useCutNumbers ? cutSerial(serial) : String(format: "%03d", serial)
+
+        var result = template
             .replacingOccurrences(of: "{MYCALL}", with: myCall.uppercased())
             .replacingOccurrences(of: "{CALL}", with: call.uppercased())
-            .replacingOccurrences(of: "{RST}", with: rst)
-            .replacingOccurrences(of: "{NAME}", with: name)
-            .replacingOccurrences(of: "{QTH}", with: qth)
-            .replacingOccurrences(of: "{SERIAL}", with: String(format: "%03d", serial))
+            .replacingOccurrences(of: "{RST}", with: sentRst)
+            .replacingOccurrences(of: "{SENT_RST}", with: sentRst)
+            .replacingOccurrences(of: "{NAME}", with: name.uppercased())
+            .replacingOccurrences(of: "{QTH}", with: qth.uppercased())
+            .replacingOccurrences(of: "{SERIAL}", with: serialFormatted)
+            .replacingOccurrences(of: "{EXCH}", with: exch.uppercased())
+            .replacingOccurrences(of: "{BAND}", with: band.uppercased())
+            .replacingOccurrences(of: "{FREQ}", with: freq)
+
+        if useCutNumbers {
+            result = applyCutNumbers(result)
+        }
+
+        return result
     }
 
     // MARK: - Send Transmission
@@ -127,7 +281,10 @@ public final class CWKeyerService: ObservableObject {
         rst: String = "599",
         name: String = "",
         qth: String = "",
-        serial: Int = 1
+        serial: Int = 1,
+        exch: String = "",
+        band: String = "",
+        freq: String = ""
     ) {
         let expanded = expandMacro(
             text,
@@ -136,84 +293,229 @@ public final class CWKeyerService: ObservableObject {
             rst: rst,
             name: name,
             qth: qth,
-            serial: serial
+            serial: serial,
+            exch: exch,
+            band: band,
+            freq: freq
         ).trimmingCharacters(in: .whitespacesAndNewlines)
 
         guard !expanded.isEmpty else { return }
 
-        stop() // Abort previous if any
+        stopTransmitOnly()
         self.isTransmitting = true
         self.activeBufferText = expanded
-        self.sentHistory.insert(expanded, at: 0)
+        self.currentlyTransmittingChar = ""
+
+        if !sentHistory.contains(expanded) {
+            sentHistory.insert(expanded, at: 0)
+            if sentHistory.count > 30 {
+                sentHistory.removeLast()
+            }
+        }
 
         transmitTask = Task { [weak self] in
             guard let self else { return }
 
-            // 1. Send via chosen backend
+            // 1. Hardware / Network backend execution
             switch self.transmissionMode {
-            case .catMorse:
-                await self.sendViaCAT(text: expanded)
             case .winkeyer:
                 WinKeyerDriver.shared.setSpeed(self.wpm)
                 WinKeyerDriver.shared.sendMorseText(expanded)
+                // Sidetone and progress handled by WinKeyer echo callbacks
+                return
+            case .serialDTR_RTS:
+                SerialKeyerDriver.shared.sendMorse(
+                    text: expanded,
+                    wpm: self.wpm,
+                    onCharacter: { [weak self] ch in self?.currentlyTransmittingChar = ch },
+                    onComplete: { [weak self] in
+                        self?.isTransmitting = false
+                        self?.activeBufferText = ""
+                        self?.currentlyTransmittingChar = ""
+                    }
+                )
+                // Progress driven by SerialKeyerDriver callbacks; also play sidetone
+                if self.sidetoneEnabled {
+                    await self.playMorseSidetone(text: expanded)
+                } else {
+                    await self.simulateTransmitProgress(text: expanded)
+                }
+            case .catMorse:
+                await self.sendViaCAT(text: expanded)
+                if self.sidetoneEnabled {
+                    await self.playMorseSidetone(text: expanded)
+                } else {
+                    await self.simulateTransmitProgress(text: expanded)
+                }
             case .tci:
                 TCIClient.shared.sendCW(text: expanded, wpm: self.wpm)
+                await self.simulateTransmitProgress(text: expanded)
             case .cwdaemon:
                 self.sendViaCWDaemon(text: expanded)
+                if self.sidetoneEnabled {
+                    await self.playMorseSidetone(text: expanded)
+                } else {
+                    await self.simulateTransmitProgress(text: expanded)
+                }
             case .audioOnly:
-                break
-            }
-
-            // 2. Play sidetone simulation if enabled (unless WinKeyer hardware sidetone is used)
-            if self.sidetoneEnabled && self.transmissionMode != .winkeyer {
-                await self.playMorseSidetone(text: expanded)
+                if self.sidetoneEnabled {
+                    await self.playMorseSidetone(text: expanded)
+                }
             }
 
             self.isTransmitting = false
             self.activeBufferText = ""
+            self.currentlyTransmittingChar = ""
         }
     }
 
-    public func stop() {
+    private func stopTransmitOnly() {
         transmitTask?.cancel()
         transmitTask = nil
         isTransmitting = false
         activeBufferText = ""
+        currentlyTransmittingChar = ""
 
-        if transmissionMode == .winkeyer {
+        switch transmissionMode {
+        case .winkeyer:
             WinKeyerDriver.shared.abort()
-        } else if transmissionMode == .tci {
+        case .serialDTR_RTS:
+            SerialKeyerDriver.shared.abort()
+        case .tci:
             TCIClient.shared.stopCW()
-        } else if transmissionMode == .cwdaemon {
-            // cwdaemon abort byte (\x1b)
+        case .cwdaemon:
             sendCWDaemonPacket(data: Data([0x1B]))
+        case .catMorse:
+            Task { [weak self] in
+                guard let self else { return }
+                if self.rigControlClientRef?.state.isConnected == true {
+                    self.rigControlClientRef?.stopMorse()
+                } else if FLRigClient.shared.isConnected {
+                    try? await FLRigClient.shared.stopMorse()
+                }
+            }
+        case .audioOnly:
+            break
         }
+    }
+
+    public func stop() {
+        stopAutoCQ()
+        stopTransmitOnly()
+    }
+
+    // MARK: - Auto-CQ Repeater Loop
+
+    public func toggleAutoCQ(
+        template: String,
+        myCall: String = "",
+        call: String = "",
+        rst: String = "599",
+        name: String = "",
+        qth: String = "",
+        serial: Int = 1,
+        exch: String = "",
+        band: String = "",
+        freq: String = ""
+    ) {
+        if isAutoCQActive {
+            stopAutoCQ()
+        } else {
+            startAutoCQ(
+                template: template,
+                myCall: myCall,
+                call: call,
+                rst: rst,
+                name: name,
+                qth: qth,
+                serial: serial,
+                exch: exch,
+                band: band,
+                freq: freq
+            )
+        }
+    }
+
+    public func startAutoCQ(
+        template: String,
+        myCall: String = "",
+        call: String = "",
+        rst: String = "599",
+        name: String = "",
+        qth: String = "",
+        serial: Int = 1,
+        exch: String = "",
+        band: String = "",
+        freq: String = ""
+    ) {
+        stopAutoCQ()
+        isAutoCQActive = true
+
+        autoCQTask = Task { [weak self] in
+            guard let self else { return }
+
+            while self.isAutoCQActive && !Task.isCancelled {
+                // Send the CQ macro
+                self.send(
+                    text: template,
+                    myCall: myCall,
+                    call: call,
+                    rst: rst,
+                    name: name,
+                    qth: qth,
+                    serial: serial,
+                    exch: exch,
+                    band: band,
+                    freq: freq
+                )
+
+                // Wait for transmission to finish
+                while self.isTransmitting && !Task.isCancelled {
+                    try? await Task.sleep(nanoseconds: 100_000_000)
+                }
+
+                guard self.isAutoCQActive && !Task.isCancelled else { break }
+
+                // Countdown pause interval
+                for remaining in stride(from: self.autoCQIntervalSeconds, through: 1, by: -1) {
+                    guard self.isAutoCQActive && !Task.isCancelled else { break }
+                    self.autoCQCountdown = remaining
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                }
+                self.autoCQCountdown = 0
+            }
+
+            self.isAutoCQActive = false
+            self.autoCQCountdown = 0
+        }
+    }
+
+    public func stopAutoCQ() {
+        isAutoCQActive = false
+        autoCQCountdown = 0
+        autoCQTask?.cancel()
+        autoCQTask = nil
     }
 
     // MARK: - CAT Morse Sender
 
     private func sendViaCAT(text: String) async {
-        // Direct CAT command transmission over FLRig XML-RPC or Hamlib
-        if FLRigClient.shared.isConnected {
-            // FLRig set PTT or send CW text
-            try? await FLRigClient.shared.setPTT(active: true)
-            // Wait for transmission duration based on WPM
-            let ditMs = 1200.0 / Double(wpm)
-            let totalDits = estimateDits(for: text)
-            let sleepSec = (Double(totalDits) * ditMs) / 1000.0
-            try? await Task.sleep(nanoseconds: UInt64(sleepSec * 1_000_000_000))
-            try? await FLRigClient.shared.setPTT(active: false)
+        // Priority 1: Hamlib rigctld \send_morse
+        if rigControlClientRef?.state.isConnected == true {
+            rigControlClientRef?.setKeyerSpeed(wpm)
+            rigControlClientRef?.sendMorse(text)
+        // Priority 2: FLRig XML-RPC rig.send_morse
+        } else if FLRigClient.shared.isConnected {
+            try? await FLRigClient.shared.sendMorse(text)
         }
     }
 
     // MARK: - cwdaemon UDP Sender
 
     private func sendViaCWDaemon(text: String) {
-        // cwdaemon speed set byte: ESC '2' <WPM>
         let speedCmd = "\u{1b}2\(wpm)".data(using: .ascii)!
         sendCWDaemonPacket(data: speedCmd)
 
-        // cwdaemon message
         if let msgData = text.data(using: .ascii) {
             sendCWDaemonPacket(data: msgData)
         }
@@ -231,17 +533,28 @@ public final class CWKeyerService: ObservableObject {
     // MARK: - Morse Code Timing & Sidetone Synthesizer
 
     private func estimateDits(for text: String) -> Int {
-        // PARIS standard calibration: Average 50 dits per word
         let wordCount = max(1, text.split(separator: " ").count)
         return wordCount * 50
     }
 
+    private func simulateTransmitProgress(text: String) async {
+        let ditDuration = 1.2 / Double(wpm)
+        for char in text.uppercased() {
+            guard !Task.isCancelled else { break }
+            self.currentlyTransmittingChar = String(char)
+            let ditCount = Self.morseAlphabet[char]?.count ?? 2
+            let charDuration = ditDuration * Double(ditCount * 2 + 2)
+            try? await Task.sleep(nanoseconds: UInt64(charDuration * 1_000_000_000))
+        }
+    }
+
     private func playMorseSidetone(text: String) async {
-        let ditDuration = 1.2 / Double(wpm) // standard PARIS dit duration in seconds
+        let ditDuration = 1.2 / Double(wpm)
         let morseTable = Self.morseAlphabet
 
         for char in text.uppercased() {
             guard !Task.isCancelled else { break }
+            self.currentlyTransmittingChar = String(char)
 
             if char == " " {
                 try? await Task.sleep(nanoseconds: UInt64(ditDuration * 7 * 1_000_000_000))
@@ -271,23 +584,147 @@ public final class CWKeyerService: ObservableObject {
     }
 
     private func playTone(duration: TimeInterval) {
-        // Sidetone beep audio buffer synthesis
         guard let player = playerNode, let engine = audioEngine, engine.isRunning else { return }
-        let sampleRate = 44100.0
+        let format = player.outputFormat(forBus: 0)
+        let sampleRate = format.sampleRate > 0 ? format.sampleRate : 48000.0
+        let channels = Int(format.channelCount)
+        guard channels > 0 else { return }
+
         let frameCount = AVAudioFrameCount(sampleRate * duration)
-        guard let buffer = AVAudioPCMBuffer(pcmFormat: AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1)!, frameCapacity: frameCount) else { return }
+        guard frameCount > 0,
+              let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else { return }
         buffer.frameLength = frameCount
 
-        let channels = buffer.floatChannelData!
         let freq = sidetonePitchHz
+        let amp = Float(sidetoneVolume) * 0.3
+        let rampFrames = min(Int(sampleRate * 0.005), Int(frameCount) / 2) // 5ms soft cosine ramp
+
+        var monoSamples = [Float](repeating: 0, count: Int(frameCount))
         for frame in 0..<Int(frameCount) {
-            let sample = Float(sin(2.0 * .pi * freq * Double(frame) / sampleRate)) * 0.25
-            channels[0][frame] = sample
+            let pureSin = Float(sin(2.0 * .pi * freq * Double(frame) / sampleRate))
+            var envelope: Float = 1.0
+            if frame < rampFrames {
+                envelope = 0.5 * (1.0 - cos(Float.pi * Float(frame) / Float(rampFrames)))
+            } else if frame > Int(frameCount) - rampFrames {
+                let endFrame = Int(frameCount) - frame
+                envelope = 0.5 * (1.0 - cos(Float.pi * Float(endFrame) / Float(rampFrames)))
+            }
+            monoSamples[frame] = pureSin * amp * envelope
+        }
+
+        for ch in 0..<channels {
+            if let chData = buffer.floatChannelData?[ch] {
+                for i in 0..<Int(frameCount) {
+                    chData[i] = monoSamples[i]
+                }
+            }
         }
 
         player.scheduleBuffer(buffer, at: nil, options: .interrupts, completionHandler: nil)
         if !player.isPlaying {
             player.play()
+        }
+    }
+
+    // MARK: - Macro Memory Persistence & Defaults
+
+    public func updateMacro(bank: CWMemoryBank, id: Int, label: String, template: String) {
+        var bankMacros = bankStorage[bank] ?? defaultMacros(for: bank)
+        if let index = bankMacros.firstIndex(where: { $0.id == id }) {
+            bankMacros[index].label = label
+            bankMacros[index].template = template
+        } else {
+            bankMacros.append(CWMacro(id: id, label: label, template: template, bank: bank))
+        }
+        bankStorage[bank] = bankMacros
+        saveMacros()
+    }
+
+    public func resetBankToDefaults(bank: CWMemoryBank) {
+        bankStorage[bank] = defaultMacros(for: bank)
+        saveMacros()
+    }
+
+    private func saveMacros() {
+        if let encoded = try? JSONEncoder().encode(bankStorage) {
+            UserDefaults.standard.set(encoded, forKey: "cwBankStorageV2")
+        }
+    }
+
+    private func loadMacros() {
+        if let data = UserDefaults.standard.data(forKey: "cwBankStorageV2"),
+           let decoded = try? JSONDecoder().decode([CWMemoryBank: [CWMacro]].self, from: data) {
+            self.bankStorage = decoded
+        } else {
+            // Seed all default banks
+            for bank in CWMemoryBank.allCases {
+                self.bankStorage[bank] = defaultMacros(for: bank)
+            }
+        }
+    }
+
+    public func defaultMacros(for bank: CWMemoryBank) -> [CWMacro] {
+        switch bank {
+        case .run:
+            return [
+                CWMacro(id: 1, label: "CQ TEST", template: "CQ TEST {MYCALL} {MYCALL} TEST", bank: .run),
+                CWMacro(id: 2, label: "EXCH", template: "{CALL} 5NN {SERIAL}", bank: .run),
+                CWMacro(id: 3, label: "TU NOW", template: "TU {MYCALL} TEST", bank: .run),
+                CWMacro(id: 4, label: "MY CALL", template: "{MYCALL}", bank: .run),
+                CWMacro(id: 5, label: "HIS CALL", template: "{CALL}", bank: .run),
+                CWMacro(id: 6, label: "CORRECT", template: "{CALL} 5NN {SERIAL}", bank: .run),
+                CWMacro(id: 7, label: "REPEAT EXCH", template: "EXCH {SERIAL}", bank: .run),
+                CWMacro(id: 8, label: "AGN?", template: "AGN?", bank: .run),
+                CWMacro(id: 9, label: "QRZ?", template: "QRZ? {MYCALL}", bank: .run),
+                CWMacro(id: 10, label: "RST ONLY", template: "5NN", bank: .run),
+                CWMacro(id: 11, label: "CHECK/ZONE", template: "{EXCH}", bank: .run),
+                CWMacro(id: 12, label: "73 TU", template: "73 TU {MYCALL}", bank: .run)
+            ]
+        case .searchAndPounce:
+            return [
+                CWMacro(id: 1, label: "MY CALL", template: "{MYCALL}", bank: .searchAndPounce),
+                CWMacro(id: 2, label: "SEND EXCH", template: "5NN {SERIAL}", bank: .searchAndPounce),
+                CWMacro(id: 3, label: "TU", template: "TU", bank: .searchAndPounce),
+                CWMacro(id: 4, label: "HIS CALL", template: "{CALL}", bank: .searchAndPounce),
+                CWMacro(id: 5, label: "MY CALL X2", template: "{MYCALL} {MYCALL}", bank: .searchAndPounce),
+                CWMacro(id: 6, label: "REPEAT EXCH", template: "EXCH {SERIAL} {SERIAL}", bank: .searchAndPounce),
+                CWMacro(id: 7, label: "QTH / STATE", template: "QTH {QTH}", bank: .searchAndPounce),
+                CWMacro(id: 8, label: "NAME", template: "NAME {NAME}", bank: .searchAndPounce),
+                CWMacro(id: 9, label: "?", template: "?", bank: .searchAndPounce),
+                CWMacro(id: 10, label: "RST", template: "5NN", bank: .searchAndPounce),
+                CWMacro(id: 11, label: "CONFIRM", template: "CFM TU", bank: .searchAndPounce),
+                CWMacro(id: 12, label: "73 SK", template: "73 GL EE", bank: .searchAndPounce)
+            ]
+        case .ragchew:
+            return [
+                CWMacro(id: 1, label: "CQ DX", template: "CQ CQ DX DE {MYCALL} {MYCALL} K", bank: .ragchew),
+                CWMacro(id: 2, label: "5NN TU", template: "{CALL} UR 5NN 5NN TU", bank: .ragchew),
+                CWMacro(id: 3, label: "MY CALL", template: "{MYCALL} DE {MYCALL} K", bank: .ragchew),
+                CWMacro(id: 4, label: "HIS CALL", template: "{CALL} DE {MYCALL} PSE K", bank: .ragchew),
+                CWMacro(id: 5, label: "NAME & QTH", template: "TNX FER CALL BT OP {NAME} ES QTH {QTH} BT HW CPY? {CALL} DE {MYCALL} K", bank: .ragchew),
+                CWMacro(id: 6, label: "RIG & ANT", template: "RIG HR 100W ES DIPOLE BT HW? DE {MYCALL} K", bank: .ragchew),
+                CWMacro(id: 7, label: "WEATHER", template: "WX HR SUNNY ES WARM BT {CALL} DE {MYCALL} K", bank: .ragchew),
+                CWMacro(id: 8, label: "QSL VIA", template: "QSL VIA LOTW ES BURO BT {CALL} DE {MYCALL} K", bank: .ragchew),
+                CWMacro(id: 9, label: "PSE AGN", template: "PSE AGN? DE {MYCALL} K", bank: .ragchew),
+                CWMacro(id: 10, label: "FB OM", template: "FB OM TNX FER FB QSO BT 73", bank: .ragchew),
+                CWMacro(id: 11, label: "QRU", template: "QRU NIL HR BT 73 GL", bank: .ragchew),
+                CWMacro(id: 12, label: "73 SK", template: "TNX FER QSO 73 ES CUAGN {CALL} DE {MYCALL} SK ..", bank: .ragchew)
+            ]
+        case .custom:
+            return [
+                CWMacro(id: 1, label: "F1: Custom CQ", template: "CQ CQ DE {MYCALL} {MYCALL} K", bank: .custom),
+                CWMacro(id: 2, label: "F2: Custom Exch", template: "{CALL} 5NN {SERIAL}", bank: .custom),
+                CWMacro(id: 3, label: "F3: Callsign", template: "{MYCALL}", bank: .custom),
+                CWMacro(id: 4, label: "F4: Target Call", template: "{CALL}", bank: .custom),
+                CWMacro(id: 5, label: "F5: Info", template: "OP {NAME} QTH {QTH}", bank: .custom),
+                CWMacro(id: 6, label: "F6: Contest Serial", template: "NR {SERIAL}", bank: .custom),
+                CWMacro(id: 7, label: "F7: QRZ?", template: "QRZ? DE {MYCALL}", bank: .custom),
+                CWMacro(id: 8, label: "F8: 73", template: "73 TU EE", bank: .custom),
+                CWMacro(id: 9, label: "F9: BK", template: "BK", bank: .custom),
+                CWMacro(id: 10, label: "F10: CFM", template: "CFM TU", bank: .custom),
+                CWMacro(id: 11, label: "F11: TEST", template: "TEST {MYCALL}", bank: .custom),
+                CWMacro(id: 12, label: "F12: SK", template: "SK EE", bank: .custom)
+            ]
         }
     }
 
@@ -302,6 +739,6 @@ public final class CWKeyerService: ObservableObject {
         "Z": "--..", "1": ".----", "2": "..---", "3": "...--", "4": "....-",
         "5": ".....", "6": "-....", "7": "--...", "8": "---..", "9": "----.",
         "0": "-----", "/": "-..-.", "?": "..--..", "=": "-...-", ",": "--..--",
-        ".": ".-.-.-"
+        ".": ".-.-.-", "!": "-.-.--", "-": "-....-", "@": ".--.-."
     ]
 }

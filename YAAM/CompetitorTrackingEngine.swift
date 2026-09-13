@@ -295,4 +295,12 @@ extension Color {
 
         self.init(.sRGB, red: r, green: g, blue: b, opacity: a)
     }
+
+    public func toHex() -> String? {
+        guard let components = NSColor(self).usingColorSpace(.sRGB) else { return nil }
+        let r = Int((components.redComponent * 255.0).rounded())
+        let g = Int((components.greenComponent * 255.0).rounded())
+        let b = Int((components.blueComponent * 255.0).rounded())
+        return String(format: "#%02X%02X%02X", r, g, b)
+    }
 }

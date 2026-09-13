@@ -129,6 +129,14 @@ public final class FLRigClient: ObservableObject {
         self.isPTTActive = active
     }
 
+    public func sendMorse(_ text: String) async throws {
+        _ = try await sendXMLRPC(method: "rig.send_morse", paramString: text)
+    }
+
+    public func stopMorse() async throws {
+        _ = try await sendXMLRPC(method: "rig.cw_stop")
+    }
+
     // MARK: - XML-RPC Transport
 
     private func sendXMLRPC(

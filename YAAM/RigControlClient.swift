@@ -44,6 +44,8 @@ nonisolated struct RigSnapshot: Equatable, Sendable {
 }
 
 final class RigControlClient: ObservableObject {
+    public static let shared = RigControlClient()
+
     @Published private(set) var state: RigConnectionState = .disconnected
     @Published private(set) var snapshot: RigSnapshot?
     @Published private(set) var isTransmitting = false
@@ -78,8 +80,10 @@ final class RigControlClient: ObservableObject {
         connectionID = id
         let connection = NWConnection(host: NWEndpoint.Host(host), port: port, using: .tcp)
         self.connection = connection
-        state = .connecting
-        lastMessage = "Opening \(host):\(rawPort)..."
+        DispatchQueue.main.async {
+            self.state = .connecting
+            self.lastMessage = "Opening \(host):\(rawPort)..."
+        }
 
         connection.stateUpdateHandler = { [weak self] newState in
             guard let self else { return }
@@ -95,7 +99,6 @@ final class RigControlClient: ObservableObject {
         if isTransmitting { send("T 0\n") }
         pttWatchdog?.cancel()
         pttWatchdog = nil
-        isTransmitting = false
         connectionID = UUID()
         pollTimer?.cancel()
         pollTimer = nil
@@ -103,8 +106,11 @@ final class RigControlClient: ObservableObject {
         connection?.cancel()
         connection = nil
         receiveBuffer = ""
-        state = .disconnected
-        lastMessage = "Rig Control disconnected"
+        DispatchQueue.main.async {
+            self.isTransmitting = false
+            self.state = .disconnected
+            self.lastMessage = "Rig Control disconnected"
+        }
     }
 
     func refresh() {
@@ -129,15 +135,19 @@ final class RigControlClient: ObservableObject {
     /// the transmitter on. Calling with `false` is always safe and idempotent.
     func setPTT(_ enabled: Bool, maximumDuration: TimeInterval = 14) {
         guard state.isConnected else {
-            if !enabled { isTransmitting = false }
+            if !enabled {
+                DispatchQueue.main.async { self.isTransmitting = false }
+            }
             return
         }
 
         pttWatchdog?.cancel()
         pttWatchdog = nil
         send(enabled ? "T 1\n" : "T 0\n")
-        isTransmitting = enabled
-        lastMessage = enabled ? "PTT active" : "PTT released"
+        DispatchQueue.main.async {
+            self.isTransmitting = enabled
+            self.lastMessage = enabled ? "PTT active" : "PTT released"
+        }
 
         guard enabled else { return }
         let watchdog = DispatchWorkItem { [weak self] in
@@ -150,6 +160,35 @@ final class RigControlClient: ObservableObject {
         }
         pttWatchdog = watchdog
         queue.asyncAfter(deadline: .now() + max(1, maximumDuration), execute: watchdog)
+    }
+
+    // MARK: - Hamlib CAT CW Keying
+
+    /// Sends Morse text directly to transceiver's internal keyer via Hamlib \\send_morse
+    func sendMorse(_ text: String) {
+        guard state.isConnected else { return }
+        let clean = text.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard !clean.isEmpty else { return }
+        send("b \(clean)\n")
+        DispatchQueue.main.async {
+            self.lastMessage = "Transmitting CW: \(clean)"
+        }
+    }
+
+    /// Aborts current Morse transmission on transceiver
+    func stopMorse() {
+        guard state.isConnected else { return }
+        send("b\n")
+        DispatchQueue.main.async {
+            self.lastMessage = "CW Transmission Aborted"
+        }
+    }
+
+    /// Sets transceiver internal keyer speed in WPM
+    func setKeyerSpeed(_ wpm: Int) {
+        guard state.isConnected else { return }
+        let clamped = max(5, min(60, wpm))
+        send("L KEYSPD \(clamped)\n")
     }
 
     private func handle(_ newState: NWConnection.State, connectionID: UUID, host: String, port: Int) {

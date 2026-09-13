@@ -61,6 +61,8 @@ struct AboutView: View {
                     
                     Link("https://github.com/fact0real/yaam", destination: URL(string: "https://github.com/fact0real/yaam")!)
                         .font(.system(size: 12))
+                        .focusable(false)
+                        .focusEffectDisabled()
                 }
 
                 VStack(spacing: 2) {
@@ -70,6 +72,8 @@ struct AboutView: View {
                     
                     Link("https://qrz-rank.asis.sh/", destination: URL(string: "https://qrz-rank.asis.sh/")!)
                         .font(.system(size: 12))
+                        .focusable(false)
+                        .focusEffectDisabled()
                 }
             }
             .padding(.top, 2)
@@ -87,12 +91,22 @@ struct AboutView: View {
                     .foregroundColor(.secondary)
             }
             
-            // 7. Action Button
-            Button("Close") {
-                dismiss()
+            // 7. Action Buttons
+            HStack(spacing: 12) {
+                Button {
+                    dismiss()
+                    appState.showFeedbackSheet = true
+                } label: {
+                    Label("Send Feedback...", systemImage: "paperplane.fill")
+                }
+                .controlSize(.regular)
+
+                Button("Close") {
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
+                .controlSize(.regular)
             }
-            .keyboardShortcut(.defaultAction)
-            .controlSize(.regular)
             .padding(.top, 4)
         }
         .padding(20)

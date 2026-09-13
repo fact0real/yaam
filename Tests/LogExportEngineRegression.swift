@@ -1,6 +1,13 @@
 import Foundation
+@testable import YAAM
 
-func runExportRegressionTests() {
+@main
+struct LogExportEngineRegression {
+    static func main() {
+        runExportRegressionTests()
+    }
+
+    static func runExportRegressionTests() {
     print("🧪 Running LogExportEngine Multi-Format Regression Tests...")
 
     let mockRecords: [[String: String]] = [
@@ -72,6 +79,5 @@ func runExportRegressionTests() {
     print("✅ Text Summary Export Test Passed")
 
     print("🎉 ALL LogExportEngine Tests PASSED 100%!")
+    }
 }
-
-runExportRegressionTests()

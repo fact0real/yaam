@@ -4,6 +4,7 @@
 //  Created by factoreal on 7/29/26.
 //
 
+import AppIntents
 import SwiftUI
 import Combine
 
@@ -11,6 +12,8 @@ enum YAAMWindowID {
     static let statistics = "statistics-window"
     static let console = "activity-console-window"
     static let help = "help-window"
+    static let feedback = "feedback-window"
+    static let hamClock = "hamclock-kiosk-window"
 }
 
 // MARK: - Main Application Entry Point & Global Menu Commands
@@ -23,11 +26,20 @@ struct YAAMApp: App {
         WindowGroup("YAAM - Yet Another ADIF Manager") {
             ContentView()
                 .environmentObject(appState)
-                .frame(minWidth: 750, idealWidth: 900, minHeight: 500, idealHeight: 600)
+                .frame(
+                    minWidth: 1000,
+                    idealWidth: 1620,
+                    maxWidth: .infinity,
+                    minHeight: 620,
+                    idealHeight: 940,
+                    maxHeight: .infinity
+                )
                 .onAppear {
                     appState.loadRecentLogsFromDatabase()
                 }
         }
+        .defaultSize(width: 1620, height: 940)
+        .windowResizability(.contentMinSize)
         .commands {
             // MARK: - File Menu Commands
             CommandGroup(replacing: .newItem) {
@@ -134,6 +146,34 @@ struct YAAMApp: App {
                 }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
 
+                Button("CW Keyer Memories Console") {
+                    appState.selectedTab = 5
+                    appState.operatorDeskSection = 14
+                    appState.cwWorkstationSection = 0
+                }
+                .keyboardShortcut("k", modifiers: [.command, .shift])
+
+                Button("CW Academy & Trainer") {
+                    appState.selectedTab = 5
+                    appState.operatorDeskSection = 14
+                    appState.cwWorkstationSection = 1
+                }
+                .keyboardShortcut("a", modifiers: [.command, .shift])
+
+                Button("CW Q-Codes & Prosigns Reference") {
+                    appState.selectedTab = 5
+                    appState.operatorDeskSection = 14
+                    appState.cwWorkstationSection = 2
+                }
+                .keyboardShortcut("q", modifiers: [.command, .shift])
+
+                Button("Real-Time CW Audio Decoder") {
+                    appState.selectedTab = 5
+                    appState.operatorDeskSection = 14
+                    appState.cwWorkstationSection = 3
+                }
+                .keyboardShortcut("d", modifiers: [.command, .shift])
+
                 Button("3D Globe & Grid Tracker") {
                     appState.selectedTab = 5
                     appState.operatorDeskSection = 12
@@ -162,16 +202,54 @@ struct YAAMApp: App {
                     appState.operatorDeskSection = 1
                 }
 
+                Button("Bandmap Studio") {
+                    appState.selectedTab = 5
+                    appState.operatorDeskSection = 13
+                }
+                .keyboardShortcut("b", modifiers: [.command, .option])
+
                 Button("Club Log Personal Spots") {
                     appState.selectedTab = 5
                     appState.operatorDeskSection = 10
                 }
+
+                Button("DX News & Intelligence") {
+                    appState.selectedTab = 5
+                    appState.operatorDeskSection = 21
+                }
+                .keyboardShortcut("n", modifiers: [.command, .shift])
 
                 Button("Sync Center (LoTW & QRZ)") {
                     appState.selectedTab = 5
                     appState.operatorDeskSection = 2
                 }
                 .keyboardShortcut("s", modifiers: [.command, .shift])
+
+                Button("ON4KST Chat & Skeds") {
+                    appState.selectedTab = 5
+                    appState.operatorDeskSection = 17
+                }
+
+                Button("QSL Labels Studio") {
+                    appState.selectedTab = 5
+                    appState.operatorDeskSection = 19
+                }
+                .keyboardShortcut("p", modifiers: [.command, .option])
+
+                Button("Connected Station (Ecosystem)") {
+                    appState.selectedTab = 5
+                    appState.operatorDeskSection = 8
+                }
+
+                Button("Shack Clock & Mission Control (HamClock)") {
+                    appState.selectedTab = 5
+                    appState.operatorDeskSection = 22
+                }
+                .keyboardShortcut("h", modifiers: [.command, .option])
+
+                Button("Open Shack Clock in Separate Window...") {
+                    openWindow(id: YAAMWindowID.hamClock)
+                }
 
                 Divider()
 
@@ -192,17 +270,36 @@ struct YAAMApp: App {
                 Button("About YAAM") { appState.showAboutDialog() }
             }
             CommandGroup(after: .appInfo) {
+                Button("Submit Feedback & Suggestions...") {
+                    appState.showFeedbackSheet = true
+                }
                 Button("Check for Updates...") { appState.checkForUpdates() }
             }
             CommandGroup(replacing: .help) {
                 Button("YAAM User Guide & Documentation") { openWindow(id: YAAMWindowID.help) }
                     .keyboardShortcut("?", modifiers: .command)
+
+                Button("Submit Feedback & Suggestions...") {
+                    appState.showFeedbackSheet = true
+                }
+                .keyboardShortcut("f", modifiers: [.command, .shift])
+
+                Button("Open Feedback in Separate Window...") {
+                    openWindow(id: YAAMWindowID.feedback)
+                }
                 
                 Divider()
 
                 Button("Reveal Activity Audit Log in Finder...") {
                     AuditLogger.shared.revealInFinder()
                 }
+            }
+
+            CommandGroup(after: .windowArrangement) {
+                Button("Fit Window to Screen Width") {
+                    fitMainWindowToScreen()
+                }
+                .keyboardShortcut("w", modifiers: [.command, .option])
             }
         }
         
@@ -267,5 +364,57 @@ struct YAAMApp: App {
         }
         .defaultSize(width: 980, height: 700)
         .windowResizability(.contentMinSize)
+
+        // MARK: - Feedback Window Scene
+        Window("YAAM Feedback & Suggestions", id: YAAMWindowID.feedback) {
+            FeedbackView()
+                .environmentObject(appState)
+                .frame(
+                    minWidth: 700,
+                    idealWidth: 800,
+                    maxWidth: 950,
+                    minHeight: 550,
+                    idealHeight: 700,
+                    maxHeight: 850
+                )
+        }
+        .defaultSize(width: 800, height: 700)
+        .windowResizability(.contentMinSize)
+
+        // MARK: - HamClock Shack Mission Control Standalone Window Scene
+        Window("YAAM Shack Clock & Mission Control", id: YAAMWindowID.hamClock) {
+            HamClockShackView(isEmbedded: false)
+                .environmentObject(appState)
+                .frame(
+                    minWidth: 1100,
+                    idealWidth: 1440,
+                    maxWidth: .infinity,
+                    minHeight: 680,
+                    idealHeight: 900,
+                    maxHeight: .infinity
+                )
+        }
+        .defaultSize(width: 1440, height: 900)
+        .windowResizability(.contentMinSize)
     }
+}
+
+// MARK: - Window Screen Adaptation Helpers
+@MainActor
+func fitMainWindowToScreen() {
+    guard let window = NSApp.windows.first(where: {
+        $0.styleMask.contains(.titled) && ($0.title.contains("YAAM") || $0.canBecomeMain) && !($0 is NSPanel) && !$0.isSheet
+    }) else { return }
+
+    let screen = window.screen ?? NSScreen.main ?? NSScreen.screens.first
+    guard let screenFrame = screen?.visibleFrame else { return }
+
+    let targetWidth = min(screenFrame.width - 40, max(1560, screenFrame.width * 0.94))
+    let targetHeight = min(screenFrame.height - 40, max(880, screenFrame.height * 0.90))
+
+    var newFrame = window.frame
+    newFrame.size.width = targetWidth
+    newFrame.size.height = max(newFrame.size.height, targetHeight)
+    window.setFrame(newFrame, display: true, animate: true)
+    window.center()
 }

@@ -6,7 +6,7 @@
 import SwiftUI
 
 private enum HelpTopic: String, CaseIterable, Identifiable {
-    case start, stations, logTable, quickLog, convertExport, globeGrids, cwWinKeyer, competitors, tciSdr, dxCluster, on4kst, radioBridge, contest, digitalContest, digitalRoster, contestCalendar, dxpeditions, magicBand, syncCenter, qslHub, confirmations, statistics, qrzIncoming, logAssistant, awards, portable, connectivity, importReview, dataSafety, credentials, workflows, faq
+    case start, stations, logTable, quickLog, roverMode, convertExport, globeGrids, bandmap, cwWinKeyer, cwAcademy, competitors, tciSdr, dxCluster, clubLogSpots, on4kst, radioBridge, contest, digitalContest, digitalRoster, contestCalendar, dxpeditions, magicBand, tacticalPilot, hamClockShack, weatherRadar, satellites, clubMembership, syncCenter, lotwTqsl, qslHub, qslLabels, todayQSL, confirmations, statistics, qrzIncoming, logAssistant, awards, portable, connectivity, importReview, dataSafety, credentials, workflows, faq
     var id: String { rawValue }
 
     var title: String {
@@ -15,12 +15,16 @@ private enum HelpTopic: String, CaseIterable, Identifiable {
         case .stations: return "Station Profiles"
         case .logTable: return "Log Table & Filters"
         case .quickLog: return "Quick Log"
+        case .roverMode: return "Tactical Rover Mode"
         case .convertExport: return "Convert & Export"
         case .globeGrids: return "3D Globe & GridTracker"
+        case .bandmap: return "Spectrum Bandmap & Waterfall"
         case .cwWinKeyer: return "CW Keyer & WinKeyer"
+        case .cwAcademy: return "CW Academy & Audio Decoder"
         case .competitors: return "Competitor Tracking"
         case .tciSdr: return "TCI & SDR Integration"
         case .dxCluster: return "DX Cluster"
+        case .clubLogSpots: return "Club Log Live Spots"
         case .on4kst: return "ON4KST Chat & Microwave"
         case .radioBridge: return "Radio, Icom & FT8"
         case .contest: return "Contest Workspace"
@@ -29,8 +33,16 @@ private enum HelpTopic: String, CaseIterable, Identifiable {
         case .contestCalendar: return "Contest Calendar"
         case .dxpeditions: return "DXpedition Watch"
         case .magicBand: return "6m & Propagation"
+        case .tacticalPilot: return "Tactical Pilot & HF Propagation"
+        case .hamClockShack: return "HamClock & Remote Server"
+        case .weatherRadar: return "Station Weather & Lightning Safety"
+        case .satellites: return "Satellite & APRS Tracking"
+        case .clubMembership: return "International Club Memberships"
         case .syncCenter: return "Sync Center"
+        case .lotwTqsl: return "LoTW & TQSL Digital Signing"
         case .qslHub: return "QSL Hub"
+        case .qslLabels: return "QSL Card Label Studio"
+        case .todayQSL: return "Today's QSL Email Dispatcher"
         case .confirmations: return "Confirmation Reconciliation"
         case .statistics: return "Statistics & Action Center"
         case .qrzIncoming: return "QRZ Incoming Requests"
@@ -52,12 +64,16 @@ private enum HelpTopic: String, CaseIterable, Identifiable {
         case .stations: return "antenna.radiowaves.left.and.right"
         case .logTable: return "tablecells"
         case .quickLog: return "plus.circle.fill"
+        case .roverMode: return "shoeprints.fill"
         case .convertExport: return "square.and.arrow.up.circle.fill"
         case .globeGrids: return "globe.americas.fill"
+        case .bandmap: return "waveform.path.ecg.rectangle"
         case .cwWinKeyer: return "cable.connector.horizontal"
+        case .cwAcademy: return "headphones.circle.fill"
         case .competitors: return "chart.line.uptrend.xyaxis"
         case .tciSdr: return "waveform.path.ecg.rectangle"
         case .dxCluster: return "dot.radiowaves.left.and.right"
+        case .clubLogSpots: return "person.3.fill"
         case .on4kst: return "bubble.left.and.bubble.right.fill"
         case .radioBridge: return "wave.3.right.circle"
         case .contest: return "flag.checkered"
@@ -66,8 +82,16 @@ private enum HelpTopic: String, CaseIterable, Identifiable {
         case .contestCalendar: return "calendar.badge.clock"
         case .dxpeditions: return "binoculars.fill"
         case .magicBand: return "bolt.badge.clock.fill"
+        case .tacticalPilot: return "point.topleft.down.to.point.bottomright.curvepath.fill"
+        case .hamClockShack: return "deskclock.fill"
+        case .weatherRadar: return "cloud.bolt.rain.fill"
+        case .satellites: return "antenna.radiowaves.left.and.right.circle.fill"
+        case .clubMembership: return "person.3.sequence.fill"
         case .syncCenter: return "arrow.triangle.2.circlepath"
+        case .lotwTqsl: return "signature"
         case .qslHub: return "arrow.left.arrow.right.circle"
+        case .qslLabels: return "printer.fill"
+        case .todayQSL: return "envelope.badge.shield.half.filled"
         case .confirmations: return "checklist"
         case .statistics: return "chart.bar.doc.horizontal.fill"
         case .qrzIncoming: return "tray.and.arrow.down.fill"
@@ -85,16 +109,40 @@ private enum HelpTopic: String, CaseIterable, Identifiable {
 
     var searchTerms: String {
         switch self {
+        case .roverMode:
+            return "\(title) rover tactical grid square scout pota sota stepped compass north south east west duration timer auto restore home qth session telemetry qso stamping"
+        case .bandmap:
+            return "\(title) bandmap spectrum waterfall sdr 3-pane ruler vfo split qsy cat flrig tci hamlib spot hunter panadapter heatmap iaru privileges"
+        case .clubLogSpots:
+            return "\(title) club log live spots cluster activity stream band opportunity recommendation score needed dxcc entities dominant mode oqrs"
+        case .clubMembership:
+            return "\(title) club membership skcc cwops fists licw 30mdg epc a1 club roster member number auto detect exchange lookup search"
+        case .qslLabels:
+            return "\(title) qsl labels label studio printing avery 5160 5162 5163 a4 l7160 skip matrix peel off printer alignment calibration pdf export"
+        case .lotwTqsl:
+            return "\(title) lotw tqsl arrl digital signature default station location ep2aes .p12 certificate private key sign .tq8 sandbox ~/.tqsl synchronize security keychain zero-click upload daemon auto background confirmation reconciliation"
+        case .cwAcademy:
+            return "\(title) cw academy morse koch method training effective speed farnsworth echo tutor adaptive accuracy audio decoder goertzel fft dsp wpm q-codes abbreviations winkeyer k1el paddle"
+        case .hamClockShack:
+            return "\(title) hamclock shack clock remote web server local ip tablet ipad sdo solar observatory drap d-region ionosphere absorption sfi ssn kp a-index grayline solar terminator"
+        case .tacticalPilot:
+            return "\(title) tactical pilot hf propagation voacap snr muf path reliability great circle azimuth beam heading tactical band advisor sdo sunspot"
+        case .weatherRadar:
+            return "\(title) station weather radar nexrad lightning storm detection wind gust antenna safety safety engine alert warning safe zone"
+        case .satellites:
+            return "\(title) satellite tracking pass aos los doppler shift ao-91 iss amateur radio aprs high altitude balloon telemetry tracking"
+        case .todayQSL:
+            return "\(title) today qsl email dispatcher 2-page pdf card artwork confirmation certificate batch smtp send anti-dupe duplicate delivery prevention flag"
         case .digitalRoster:
             return "\(title) digital call roster ft8 ft4 js8 wsjt-x jtdx udp voice alerts speech triage new dxcc atno new band new grid reply calling me snr beam heading hands-free"
         case .digitalContest:
-            return "\(title) digital contest ft8 ft4 wsjt-x jtdx cabrillo 3.0 multiplier matrix rate meter cq ww digi arrl exchange dupe qso sdr-control waterfall swr alc power"
+            return "\(title) digital contest ft8 ft4 wsjt-x jtdx cabrillo 3.0 multiplier matrix rate meter cq ww digi arrl exchange dupe qso sdr-control waterfall swr alc power master.scp super check partial"
         case .convertExport:
             return "\(title) excel csv cabrillo adif json html text export format contest slice utc band mode"
         case .globeGrids:
-            return "\(title) 3d globe gridtracker maidenhead grid square solar terminator grayline propagation day night map"
+            return "\(title) 3d globe gridtracker maidenhead grid square solar terminator grayline propagation day night map azimuthal flat map"
         case .cwWinKeyer:
-            return "\(title) cw keyer winkeyer k1el paddle speed wpm macro f1 f12 sidetone"
+            return "\(title) cw keyer winkeyer k1el paddle speed wpm macro f1 f12 sidetone serial dtr rts"
         case .competitors:
             return "\(title) competitor rival confirmed qso progress progression curve velocity monthly forecast overtake"
         case .tciSdr:
@@ -102,7 +150,7 @@ private enum HelpTopic: String, CaseIterable, Identifiable {
         case .on4kst:
             return "\(title) on4kst chat microwave vhf uhf 50mhz 144mhz 432mhz 1296mhz"
         case .logTable:
-            return "\(title) chronological UTC row number numbering advanced filters columns hidden database ID"
+            return "\(title) chronological UTC row number numbering advanced filters columns hidden database ID band credit grid credit done new have leaderboard ranks center-aligned"
         case .awards:
             return "\(title) QRZ LoTW local progress achievement granted DXCC WAS VUCC WAC WPX 6m grids"
         default:
@@ -114,6 +162,7 @@ private enum HelpTopic: String, CaseIterable, Identifiable {
 struct HelpView: View {
     @State private var selection: HelpTopic? = .start
     @State private var searchText = ""
+    @State private var showFeedbackSheet = false
 
     private var visibleTopics: [HelpTopic] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -141,14 +190,50 @@ struct HelpView: View {
         } detail: {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
+                    feedbackBanner
                     detail(for: selection ?? .start)
                 }
                 .frame(maxWidth: 820, alignment: .leading)
                 .padding(28)
             }
             .navigationTitle(selection?.title ?? "YAAM Help")
+            .sheet(isPresented: $showFeedbackSheet) {
+                FeedbackView()
+            }
         }
         .frame(minWidth: 820, minHeight: 600)
+    }
+
+    private var feedbackBanner: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "sparkles.rectangle.stack.fill")
+                .font(.title2)
+                .foregroundStyle(Color.accentColor)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Have a suggestion, bug report, or feature request?")
+                    .font(.subheadline.bold())
+                Text("Help shape YAAM! Submit ideas, report shortcomings, or request DX tools directly.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            Button {
+                showFeedbackSheet = true
+            } label: {
+                Label("Submit Feedback", systemImage: "paperplane.fill")
+            }
+            .controlSize(.small)
+            .buttonStyle(.borderedProminent)
+        }
+        .padding(12)
+        .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(Color.accentColor.opacity(0.2), lineWidth: 1)
+        )
     }
 
     @ViewBuilder
@@ -158,12 +243,16 @@ struct HelpView: View {
         case .stations: stationProfiles
         case .logTable: logTable
         case .quickLog: quickLog
+        case .roverMode: roverModeView
         case .convertExport: convertExportView
         case .globeGrids: globeGridsView
+        case .bandmap: bandmapView
         case .cwWinKeyer: cwWinKeyerView
+        case .cwAcademy: cwAcademyView
         case .competitors: competitorsView
         case .tciSdr: tciSdrView
         case .dxCluster: dxCluster
+        case .clubLogSpots: clubLogSpotsView
         case .on4kst: on4kstView
         case .radioBridge: radioBridge
         case .contest: contest
@@ -172,8 +261,16 @@ struct HelpView: View {
         case .contestCalendar: contestCalendar
         case .dxpeditions: dxpeditions
         case .magicBand: magicBand
+        case .tacticalPilot: tacticalPilotView
+        case .hamClockShack: hamClockShackView
+        case .weatherRadar: weatherRadarView
+        case .satellites: satellitesView
+        case .clubMembership: clubMembershipView
         case .syncCenter: syncCenter
+        case .lotwTqsl: lotwTqslView
         case .qslHub: qslHub
+        case .qslLabels: qslLabelsView
+        case .todayQSL: todayQSLView
         case .confirmations: confirmations
         case .statistics: statistics
         case .qrzIncoming: qrzIncoming
@@ -313,6 +410,85 @@ struct HelpView: View {
         }
     }
 
+    private var roverModeView: some View {
+        Group {
+            helpHeader(
+                title: "Tactical Rover Mode",
+                subtitle: "Temporarily project your station to alternate Maidenhead grids for POTA, SOTA, VHF/UHF rovering, and propagation exploration with automatic timer restore, compass grid stepping, and live telemetry.",
+                icon: "shoeprints.fill",
+                color: .orange
+            )
+
+            HelpRoverModeMockup()
+
+            HelpFlow(steps: [
+                HelpFlowStep(icon: "figure.walk", title: "1. Open Rover Sheet", detail: "Click the Rover pill in the top navigation bar or choose Tools > Rover Mode (or press Option-Command-R)."),
+                HelpFlowStep(icon: "mappin.and.ellipse", title: "2. Set Target Grid", detail: "Enter any 4- or 6-character Maidenhead locator (e.g. LL46) or select from built-in and custom presets."),
+                HelpFlowStep(icon: "clock.badge.checkmark", title: "3. Choose Duration", detail: "Select 1 Hour (Quick Scout), 4 Hours (Half-Day), 8 Hours, Until End of UTC Day, or Manual Indefinite."),
+                HelpFlowStep(icon: "arrow.up.and.down.and.arrow.left.and.right", title: "4. Compass Stepping", detail: "As your vehicle travels, tap North, South, East, or West to advance squares in real time."),
+                HelpFlowStep(icon: "arrow.uturn.backward.circle.fill", title: "5. Automatic Safe Return", detail: "When time expires or on manual deactivation, YAAM cleanly reverts to your home QTH with voice confirmation.")
+            ])
+
+            helpSection("Non-Destructive Station Projection") {
+                HelpDefinition(
+                    icon: "shield.lefthalf.filled",
+                    title: "Master Profile Isolation",
+                    text: "Rover Mode intercepts effective grid and geographic coordinates in memory for all real-time tools (Tactical Pilot, DX Cluster, 3D Globe, Bandmap, HamClock) without modifying your permanent SQLite database station profile.",
+                    color: .orange
+                )
+                HelpDefinition(
+                    icon: "tag.fill",
+                    title: "Outbound QSO Stamping",
+                    text: "When 'Stamp MY_GRIDSQUARE in outgoing QSOs' is enabled, QSOs logged via Quick Log, WSJT-X, or FT8 record your current rover grid and QTH, ensuring accurate logs for POTA activators and VHF rover contests.",
+                    color: .green
+                )
+            }
+
+            helpSection("4-Way Compass Grid Stepper") {
+                HelpDefinition(
+                    icon: "compass.drawing",
+                    title: "Mathematical Maidenhead Indexing",
+                    text: "The stepper increments and decrements field and square indices along longitude and latitude. Longitude wraps around the globe (0 to 179 squares) while latitude clamps safely to polar limits.",
+                    color: .blue
+                )
+                HelpDefinition(
+                    icon: "character.textbox",
+                    title: "Subsquare Preservation",
+                    text: "If you enter a 6-character locator (e.g. LL46ab), stepping to neighboring squares preserves your precision subsquares (e.g. LL47ab) automatically.",
+                    color: .secondary
+                )
+            }
+
+            helpSection("Geodesic Telemetry & Audio Feedback") {
+                HelpDefinition(
+                    icon: "ruler.fill",
+                    title: "Live Distance & Bearing",
+                    text: "Continuously computes geodesic distance in kilometers and miles, initial great-circle bearing, and 16-point compass heading relative to your permanent home QTH.",
+                    color: .purple
+                )
+                HelpDefinition(
+                    icon: "sun.horizon.fill",
+                    title: "Astronomical Solar Window",
+                    text: "Calculates exact UTC sunrise and sunset times for the rover grid, helping you anticipate low-band grayline openings on location.",
+                    color: .yellow
+                )
+                HelpDefinition(
+                    icon: "speaker.wave.3.fill",
+                    title: "Voice Announcements & Audio Chimes",
+                    text: "Distinct macOS chimes sound on activation, extension (+1 Hour), and deactivation. If Voice Alerts are enabled, the speech synthesizer announces status changes hands-free.",
+                    color: .teal
+                )
+            }
+
+            helpCallout(
+                icon: "sparkles",
+                title: "Top Navigation Status Pill",
+                text: "While Rover Mode is active, an amber glowing pill in the window title bar displays your active grid and remaining countdown time. Click it at any time to adjust duration or return home with one click.",
+                color: .orange
+            )
+        }
+    }
+
     private var dxCluster: some View {
         Group {
             helpHeader(
@@ -347,6 +523,54 @@ struct HelpView: View {
                 HelpDefinition(icon: "rectangle.stack.badge.minus", title: "Efficient stream", text: "Repeated spots are coalesced, updates are applied in batches, and the visible feed is capped to keep long sessions responsive.")
             }
             helpCallout(icon: "person.badge.key.fill", title: "Cluster access", text: "Some cluster nodes require registration, a password, or a different port. Enter the node details supplied by that cluster operator.", color: .orange)
+        }
+    }
+
+    private var clubLogSpotsView: some View {
+        Group {
+            helpHeader(
+                title: "Club Log Live Spots & Band Intelligence",
+                subtitle: "Real-time activity stream from Club Log cluster servers, automatic DXCC band-need cross referencing, and the Band Opportunity Recommendation Engine.",
+                icon: "person.3.fill",
+                color: .blue
+            )
+
+            HelpClubLogSpotsMockup()
+
+            HelpFlow(steps: [
+                HelpFlowStep(icon: "network", title: "1. Open Club Log Desk", detail: "Select the 'Club Log' tab (Tag 10) in Operator Desk to establish a persistent live stream."),
+                HelpFlowStep(icon: "flame.fill", title: "2. Inspect Band Opportunity", detail: "Review the top banner recommendation scoring all amateur bands by active spot density and needed DXCC entities."),
+                HelpFlowStep(icon: "line.3.horizontal.decrease.circle", title: "3. Filter Mode & Band", detail: "Filter by Digital (FT8/FT4), CW, or Phone/Voice, or type to search specific prefixes or DXpedition callsigns."),
+                HelpFlowStep(icon: "dot.radiowaves.left.and.right", title: "4. One-Click QSY & Log", detail: "Click 'Tune Rig' on any spot to send CAT commands to your transceiver and immediately stage the contact.")
+            ])
+
+            helpSection("Band Opportunity & Recommendation Engine") {
+                HelpDefinition(
+                    icon: "chart.line.uptrend.xyaxis",
+                    title: "Smart Scoring Algorithm",
+                    text: "YAAM evaluates every live spot against your active station's confirmed DXCC matrix: Score = Total Spots + (Needed DXCC * 3.5). This prioritizes bands with high DX value rather than just high raw traffic.",
+                    color: .orange
+                )
+                HelpDefinition(
+                    icon: "antenna.radiowaves.left.and.right",
+                    title: "Dominant Mode Detection",
+                    text: "Identifies whether the activity on a recommended band is predominantly FT8, CW, or SSB, so you can configure your transceiver filters before tuning.",
+                    color: .blue
+                )
+            }
+
+            helpSection("Entity Intelligence & Status Tags") {
+                HelpDefinition(icon: "sparkles", title: "ATNO (All-Time New One)", text: "Highlighted in purple when the spotted entity has never been worked on any band in your Master Log.", color: .purple)
+                HelpDefinition(icon: "rectangle.split.3x1", title: "Needed Band", text: "Highlighted in green when the DXCC entity is confirmed on other bands, but still needed on the spotted band.", color: .green)
+                HelpDefinition(icon: "checkmark.seal.fill", title: "Confirmed Entity", text: "Marked in secondary styling when your station already holds an accepted confirmation for this band.", color: .secondary)
+            }
+
+            helpCallout(
+                icon: "globe",
+                title: "Complementary to DX Cluster",
+                text: "Unlike raw Telnet clusters, Club Log spots are cross-referenced with Club Log's global database of active stations and propagation models, filtering out invalid callsigns and bad spots.",
+                color: .blue
+            )
         }
     }
 
@@ -998,27 +1222,181 @@ struct HelpView: View {
         }
     }
 
+    private var tacticalPilotView: some View {
+        Group {
+            helpHeader(
+                title: "Tactical Pilot & HF Propagation",
+                subtitle: "Point-to-point HF propagation prediction engine based on VOACAP algorithms, SNR forecasting, MUF curves, and tactical band opening advice.",
+                icon: "point.topleft.down.to.point.bottomright.curvepath.fill",
+                color: .teal
+            )
+
+            HelpTacticalPilotMockup()
+
+            HelpFlow(steps: [
+                HelpFlowStep(icon: "target", title: "Target Entity", detail: "Select a callsign, DXCC country, or Maidenhead grid locator."),
+                HelpFlowStep(icon: "globe.americas.fill", title: "Path Geometry", detail: "Calculates great circle short-path and long-path azimuth, distance, and ionospheric bounce midpoints."),
+                HelpFlowStep(icon: "chart.line.uptrend.xyaxis", title: "Solar Raytrace", detail: "Uses real-time SFI, SSN, and geomagnetic Kp to model D, E, F1, and F2 layer densities."),
+                HelpFlowStep(icon: "checkmark.seal.fill", title: "Band Advisor", detail: "Scores all 11 amateur bands by SNR, circuit reliability percentage, and operating window.")
+            ])
+
+            helpSection("Propagation Telemetry & Calculations") {
+                HelpDefinition(icon: "chart.xyaxis.line", title: "Maximum Usable Frequency (MUF)", text: "Determines the highest frequency refracted back to Earth along the path. Frequencies just below MUF (85–90%) experience the lowest absorption and strongest signal levels.", color: .teal)
+                HelpDefinition(icon: "waveform.badge.plus", title: "Signal-to-Noise Ratio (SNR)", text: "Estimates received signal strength in dB relative to ambient noise floor, accounting for transceiver transmitter power and antenna gains.", color: .green)
+                HelpDefinition(icon: "clock.arrow.circlepath", title: "Diurnal Operating Windows", text: "Predicts exact UTC onset and fade times for target corridors, allowing operators to plan schedules for rare DXpeditions.", color: .orange)
+            }
+        }
+    }
+
+    private var hamClockShackView: some View {
+        Group {
+            helpHeader(
+                title: "HamClock & Remote Server",
+                subtitle: "Live shack dashboard with dual UTC/Local dials, real-time solar indices, SDO imagery, DRAP ionospheric absorption, and local network web broadcasting to iPads and tablets.",
+                icon: "deskclock.fill",
+                color: .indigo
+            )
+
+            HelpHamClockMockup()
+
+            HelpFlow(steps: [
+                HelpFlowStep(icon: "clock", title: "UTC Master Time", detail: "Precision clocks with UTC and local timezone dials synchronized to Apple network time."),
+                HelpFlowStep(icon: "sun.max.fill", title: "Solar Indices", detail: "Direct NOAA/SWPC feeds for Solar Flux Index (SFI), Sunspot Number (SSN), A-Index, and Kp index."),
+                HelpFlowStep(icon: "photo.fill", title: "SDO Imagery & DRAP", detail: "NASA Solar Dynamics Observatory extreme ultraviolet images (AIA 304Å) and D-Region absorption maps."),
+                HelpFlowStep(icon: "ipad.and.iphone", title: "Remote Web Server", detail: "Built-in zero-config HTTP server broadcasts live metrics to iPads, phones, or secondary screens on your LAN.")
+            ])
+
+            helpSection("Remote Web Server Setup") {
+                HelpInstruction(number: 1, title: "Enable Server", text: "In Tools > HamClock or Operator Desk, toggle 'Enable Remote Web Server'. YAAM starts a lightweight HTTP daemon on port 8080.")
+                HelpInstruction(number: 2, title: "Connect Second Screen", text: "Open Safari or Chrome on your iPad, tablet, or wall-mounted Raspberry Pi screen, and navigate to the displayed local IP address (e.g., http://192.168.1.55:8080).")
+                HelpInstruction(number: 3, title: "Real-Time Telemetry", text: "The remote dashboard updates automatically via SSE (Server-Sent Events) without page reloads, giving you a full shack console.")
+            }
+        }
+    }
+
+    private var weatherRadarView: some View {
+        Group {
+            helpHeader(
+                title: "Station Weather & Lightning Safety",
+                subtitle: "Real-time NEXRAD weather radar overlay, severe wind gust alerts, and thunderstorm cell tracking to protect towers, beams, and shack transceivers.",
+                icon: "cloud.bolt.rain.fill",
+                color: .blue
+            )
+
+            HelpWeatherRadarMockup()
+
+            HelpFlow(steps: [
+                HelpFlowStep(icon: "location.fill", title: "Station Location", detail: "Automatically centers weather radar around your active station profile's coordinates."),
+                HelpFlowStep(icon: "cloud.rain.fill", title: "Precipitation & Wind", detail: "Live doppler precipitation reflectivity and real-time wind gust monitoring."),
+                HelpFlowStep(icon: "bolt.fill", title: "Lightning Proximity", detail: "Monitors atmospheric electrical discharges within a 100 km radius of your station antennas."),
+                HelpFlowStep(icon: "exclamationmark.shield.fill", title: "Protection Alerts", detail: "Audible and visual alerts trigger when lightning is detected within 30 km or winds exceed 65 km/h.")
+            ])
+
+            helpSection("Equipment Safety Protocols") {
+                HelpDefinition(icon: "shield.lefthalf.filled", title: "Safe Zone (> 30 km)", text: "Normal operation. Rotators and amplifiers safe to use.", color: .green)
+                HelpDefinition(icon: "exclamationmark.triangle.fill", title: "Caution Zone (15–30 km)", text: "Thunderstorm cell approaching. Prepare to park rotators, lower crank-up towers, and power down linear amplifiers.", color: .orange)
+                HelpDefinition(icon: "xmark.octagon.fill", title: "Danger Zone (< 15 km)", text: "IMMEDIATE ACTION: Disconnect coaxial feedlines, ground antenna switches, and disconnect station power to prevent lightning-induced EMP damage.", color: .red)
+            }
+        }
+    }
+
+    private var satellitesView: some View {
+        Group {
+            helpHeader(
+                title: "Satellite & APRS Tracking",
+                subtitle: "Real-time pass predictions for amateur radio satellites (AO-91, ISS, SO-50), Doppler frequency shift compensation, and high-altitude APRS balloon telemetry.",
+                icon: "antenna.radiowaves.left.and.right.circle.fill",
+                color: .cyan
+            )
+
+            HelpSatelliteMockup()
+
+            HelpFlow(steps: [
+                HelpFlowStep(icon: "arrow.triangle.2.circlepath", title: "Orbital Elements", detail: "Fetches and caches fresh Two-Line Element sets (TLEs) from Celestrak and AMSAT."),
+                HelpFlowStep(icon: "clock.badge.checkmark", title: "Pass Countdown", detail: "Accurately predicts Acquisition of Signal (AOS), Loss of Signal (LOS), duration, and maximum elevation."),
+                HelpFlowStep(icon: "waveform.path", title: "Doppler Correction", detail: "Calculates real-time uplink and downlink Doppler frequency shifts as the satellite approaches and recedes."),
+                HelpFlowStep(icon: "balloon.fill", title: "APRS Balloons", detail: "Tracks high-altitude amateur radio weather balloons with altitude, ascent rate, and flight path telemetry.")
+            ])
+
+            helpSection("Operating LEO FM Satellites") {
+                HelpDefinition(icon: "antenna.radiowaves.left.and.right", title: "Cross-Band Repeater", text: "Most amateur satellites use VHF Uplink (e.g. 145.980 MHz) and UHF Downlink (e.g. 435.180 MHz) with a sub-audible CTCSS tone (e.g. 67.0 Hz).", color: .blue)
+                HelpDefinition(icon: "dial.high", title: "UHF Doppler Tuning", text: "Because Doppler shift is four times greater on 70cm than 2m, tune your UHF downlink in 5 kHz steps during the pass (+10 kHz at AOS, nominal at TCA, -10 kHz at LOS).", color: .orange)
+            }
+        }
+    }
+
+    private var clubMembershipView: some View {
+        Group {
+            helpHeader(
+                title: "International Club Memberships",
+                subtitle: "Automatically detect and cross-reference international CW and digital club member numbers (SKCC, CWops, FISTS, LICW, 30MDG, EPC) during QSO logging.",
+                icon: "person.3.sequence.fill",
+                color: .purple
+            )
+
+            HelpClubMembershipMockup()
+
+            HelpFlow(steps: [
+                HelpFlowStep(icon: "arrow.triangle.2.circlepath", title: "1. Update Rosters", detail: "Click 'Update Rosters' to fetch the latest membership rosters from club repositories into local SQLite."),
+                HelpFlowStep(icon: "character.cursor.ibeam", title: "2. Automatic Detection", detail: "As you enter a callsign in Quick Log, Contest, or Digital Roster, YAAM matches all active club memberships in milliseconds."),
+                HelpFlowStep(icon: "tag.fill", title: "3. Review Member Badges", detail: "Discovered club numbers (e.g. CWops #1428, SKCC #9821S) appear alongside operator name and location."),
+                HelpFlowStep(icon: "plus.circle.fill", title: "4. 1-Click Exchange Insert", detail: "Click 'Insert Exchange' or press Command-E to copy member numbers directly into the QSO exchange field.")
+            ])
+
+            helpSection("Supported International Societies") {
+                HelpDefinition(icon: "tuningfork", title: "SKCC (Straight Key Century Club)", text: "Tracks mechanical keying members, endorsements (Centurion, Tribune, Senator), and exact member numbers.", color: .orange)
+                HelpDefinition(icon: "headphones", title: "CWops", text: "Global high-speed CW fraternity members with official roster numbers for CWT weekly sprints.", color: .blue)
+                HelpDefinition(icon: "cable.connector.horizontal", title: "FISTS CW Club", text: "International Morse Preservation Society member and century awards tracking.", color: .green)
+                HelpDefinition(icon: "graduationcap.fill", title: "LICW (Long Island CW Club)", text: "Active training and operating community members worldwide.", color: .teal)
+                HelpDefinition(icon: "wave.3.right", title: "30MDG & EPC Digital Groups", text: "30 Meter Digital Group and European Phase Shift Club (PSK/Digital) member registries.", color: .indigo)
+            }
+
+            helpSection("Offline Performance & Search Desk") {
+                HelpDefinition(
+                    icon: "internaldrive.fill",
+                    title: "Zero-Latency Local SQLite Cache",
+                    text: "Membership rosters (over 38,000 operators) are indexed locally in YAAM's application support directory. Lookups execute in under 2 milliseconds without internet dependency.",
+                    color: .purple
+                )
+                HelpDefinition(
+                    icon: "magnifyingglass",
+                    title: "Dedicated Callsign Lookup",
+                    text: "Use the Callsign Membership Lookup bar in Operator Desk > Clubs (Tag 15) to inspect any operator's complete club affiliations and membership history.",
+                    color: .secondary
+                )
+            }
+
+            helpCallout(
+                icon: "medal.fill",
+                title: "Club Award Milestones",
+                text: "QSOs logged with club numbers automatically populate member tracking in the Awards Center, simplifying applications for SKCC and CWops milestone certificates.",
+                color: .purple
+            )
+        }
+    }
+
     private var dxpeditions: some View {
         Group {
-            helpHeader(title: "DXpedition Watch", subtitle: "Keep announced operations visible, then distinguish a planned operation from a live spot before changing the radio.", icon: "binoculars.fill", color: .purple)
+            helpHeader(title: "DXpedition Watch & DX News Desk", subtitle: "Keep announced operations visible, review full weekly bulletins and articles, and distinguish a planned operation from a live spot before changing the radio.", icon: "binoculars.fill", color: .purple)
             HelpFlow(steps: [
-                HelpFlowStep(icon: "calendar", title: "Load", detail: "Open Operator Desk > Calendar / 6m. YAAM reads the newest DX-World and 425 DX News weekly bulletins alongside their current feeds/calendars and DXPing in parallel."),
-                HelpFlowStep(icon: "arrow.triangle.merge", title: "Cross-check", detail: "Matching callsigns are merged and source labels remain visible. If one service is unavailable, successful sources still update the watch."),
+                HelpFlowStep(icon: "calendar", title: "Load & Parse", detail: "Open Operator Desk > DX News (or Calendar / 6m). YAAM reads the newest DX-World and 425 DX News weekly bulletins alongside their current feeds/calendars and DXPing in parallel."),
+                HelpFlowStep(icon: "tag.fill", title: "Extract Rich Attributes", detail: "Bands, modes (FT8, CW, SSB), QSL managers, IOTA island references, operators, and Maidenhead grids are automatically extracted."),
+                HelpFlowStep(icon: "newspaper.fill", title: "News & Bulletins", detail: "Browse categorized DX articles from DX-World and 425 DX News, or inspect full weekly bulletin text archives with issue search and copy."),
                 HelpFlowStep(icon: "dot.radiowaves.left.and.right", title: "Verify live activity", detail: "A green on-air indicator appears only when the same callsign is currently present in the DX Cluster feed."),
                 HelpFlowStep(icon: "scope", title: "Check need", detail: "YAAM compares the spot with the active station's worked history and labels it as already worked or a good chance to work."),
                 HelpFlowStep(icon: "bell.badge", title: "Notify", detail: "Enable DXpedition spot notifications in Contest Interests to receive a one-time alert when a listed callsign is spotted.")
             ])
             helpSection("Weekly Sources and Provenance") {
-                HelpDefinition(icon: "newspaper.fill", title: "425 DX News", text: "YAAM reads the official operation calendar and bulletin archive together, downloads the newest weekly PDF, and extracts announced callsigns, destinations, and operating windows. The bulletin number and original calendar/PDF links remain available for verification.", color: .orange)
-                HelpDefinition(icon: "doc.text.image", title: "DX-World Weekly", text: "YAAM uses the official DX News feed to locate the newest weekly bulletin, downloads its linked PDF, and extracts announced callsigns, entities, and operating windows. The issue number and original bulletin links remain available for verification.", color: .blue)
+                HelpDefinition(icon: "newspaper.fill", title: "425 DX News", text: "YAAM reads the official operation calendar and bulletin archive together, fetches plain-text and PDF weekly issues, and extracts announced callsigns, destinations, operating windows, IOTA references, and QSL routes. The bulletin number and source links remain available for verification.", color: .orange)
+                HelpDefinition(icon: "doc.text.image", title: "DX-World Weekly", text: "YAAM uses the official DX News feed to locate the newest weekly bulletin, downloads its linked issue, and extracts announced callsigns, entities, operating windows, modes, and bands. The issue number and original bulletin links remain available for verification.", color: .blue)
                 HelpDefinition(icon: "network", title: "DXPing", text: "DXPing remains a complementary schedule source. Agreement between sources improves context, but YAAM preserves every source label instead of presenting a merged claim as certain.", color: .purple)
-                HelpDefinition(icon: "externaldrive.badge.checkmark", title: "Saved fallback", text: "The last successful multi-source list is cached. A temporary website failure does not erase the DXpeditions already available in YAAM.", color: .green)
+                HelpDefinition(icon: "externaldrive.badge.checkmark", title: "Saved fallback", text: "The last successful multi-source list, news articles, and bulletin texts are cached locally in UserDefaults. A temporary website failure does not erase the DXpeditions or news already available in YAAM.", color: .green)
                 HelpDefinition(icon: "checkmark.shield", title: "Verify free-form notices", text: "Weekly magazines contain prose and schedules can change. YAAM normalizes clear callsigns and date windows, while the linked source remains authoritative for frequencies, modes, QSL routes, and late changes.", color: .green)
             }
-            helpSection("How to Read the Watch") {
-                HelpDefinition(icon: "clock", title: "Planned or active window", text: "Dates describe the announcement window. They do not prove that an operator is transmitting now.")
-                HelpDefinition(icon: "dot.radiowaves.left.and.right", title: "On air", text: "This requires current DX Cluster evidence for the exact listed callsign, including band and frequency.", color: .green)
-                HelpDefinition(icon: "checkmark.circle", title: "Worked status", text: "A worked marker comes from the active local log. It is not a confirmation or an award credit.")
+            helpSection("Workspaces and Tools") {
+                HelpDefinition(icon: "newspaper.fill", title: "DX News & Intelligence Desk", text: "Accessible from Operator Desk > DX News (Desk tab 21) or Tools > DX News & Intelligence (Cmd+Shift+N). Includes Quick Filters for Active Now, Upcoming, ATNO / Needed, FT8 / Digital, 6m Band, and IOTA Islands.")
+                HelpDefinition(icon: "doc.plaintext", title: "Weekly Bulletins Reader", text: "Switch between issues of 425 DX News and DX-World Weekly, search full bulletin text, copy passages, or open original source URLs.")
+                HelpDefinition(icon: "antenna.radiowaves.left.and.right", title: "One-Click Rig Tune", text: "When a DXpedition is spotted on the cluster, click 'Tune Rig' to instantly QSY your connected transceiver via CAT or TCI SDR.")
             }
             helpCallout(icon: "antenna.radiowaves.left.and.right", title: "A timely nudge, not a promise", text: "Cluster spots can be old, mistaken, or unavailable. Tune and verify the callsign before logging a QSO.", color: .orange)
         }
@@ -1184,7 +1562,7 @@ struct HelpView: View {
                 HelpDefinition(icon: "doc.on.doc", title: "PDF & Bureau Export", text: "Export all generated cards to a local folder or queue them for physical bureau printout.", color: .indigo)
             }
             helpSection("Service Paths") {
-                HelpDefinition(icon: "checkmark.seal", title: "LoTW through TQSL", text: "YAAM creates ADIF and invokes your installed TrustedQSL command-line tool. Set the station location in the active Station Profile.")
+                HelpDefinition(icon: "checkmark.seal", title: "LoTW through TQSL", text: "YAAM compiles ADIF and invokes your installed TrustedQSL command-line tool. Set the station location in Settings > LoTW or Station Profiles. See the dedicated 'LoTW & TQSL Digital Signing' guide for complete configuration details.")
                 HelpDefinition(icon: "globe.americas", title: "QRZ Logbook", text: "The official INSERT API accepts one QSO per request, so YAAM keeps the queue durable and sends records individually.")
                 HelpDefinition(icon: "envelope.badge", title: "eQSL", text: "Uploads can be batched. Download Inbox matches confirmation ADIF to local QSOs and adds EQSL_QSL_RCVD without replacing existing fields.")
                 HelpDefinition(icon: "person.3", title: "Club Log", text: "Batch upload uses an application password and API key. Download LoTW State imports Club Log's sent, confirmed, and verified LoTW flags. Club Log matches themselves are not counted as independent DXCC confirmation.")
@@ -1196,6 +1574,200 @@ struct HelpView: View {
             }
             helpCallout(icon: "arrow.down.circle", title: "Confirmation downloads", text: "The QSL Hub can pull LoTW and QRZ confirmations, eQSL Inbox ADIF, and Club Log's LoTW synchronization state. Each source is matched to the active station log and merged field by field.", color: .blue)
             helpCallout(icon: "exclamationmark.triangle.fill", title: "Large log safety", text: "A scope above 500 QSOs requires confirmation. Previously sent records and completed jobs are skipped, but verify the chosen station and credentials before continuing.", color: .orange)
+        }
+    }
+
+    private var lotwTqslView: some View {
+        Group {
+            helpHeader(
+                title: "LoTW & TQSL Digital Signing",
+                subtitle: "Comprehensive guide to cryptographic QSO signing with ARRL TrustedQSL (tqsl), Default Station Location configuration, .p12 certificates, sandbox synchronization, and Zero-Click automated cloud uploads.",
+                icon: "signature",
+                color: .green
+            )
+
+            HelpLoTWSigningMockup()
+
+            HelpFlow(steps: [
+                HelpFlowStep(icon: "app.badge.checkmark", title: "1. Define in TQSL", detail: "Open TrustedQSL on your Mac, click 'Station Locations', and note your exact location name (e.g. EP2AES-Home)."),
+                HelpFlowStep(icon: "gearshape.fill", title: "2. Set in YAAM", detail: "In Settings > LoTW, enter your username and the exact Default Station Location matching TQSL."),
+                HelpFlowStep(icon: "arrow.triangle.2.circlepath", title: "3. Sync Storage", detail: "Click 'Sync TQSL Data (~/.tqsl)' so YAAM's App Sandbox has full access to TQSL station_data and keys."),
+                HelpFlowStep(icon: "doc.badge.gearshape.fill", title: "4. Link Certificate", detail: "Choose your .p12 certificate file and save the certificate password in macOS Keychain."),
+                HelpFlowStep(icon: "paperplane.fill", title: "5. Sign & Upload", detail: "Use QSL Hub or enable Zero-Click Cloud Upload for automatic background signing and direct ARRL delivery.")
+            ])
+
+            helpSection("Default Station Location: Crucial Technical Requirement") {
+                HelpDefinition(
+                    icon: "mappin.and.ellipse",
+                    title: "What is a Station Location in TQSL?",
+                    text: "In ARRL Logbook of the World, a digital callsign certificate proves who you are, but the Station Location defines WHERE you operated. Inside the TrustedQSL app, each Station Location couples your callsign with your DXCC entity (e.g. Iran), Maidenhead Grid Locator (e.g. LL25wr), CQ Zone (21), ITU Zone (40), and administrative province or county.",
+                    color: .orange
+                )
+
+                HelpDefinition(
+                    icon: "exclamationmark.triangle.fill",
+                    title: "Strict Exact String Matching (-l parameter)",
+                    text: "When YAAM signs an ADIF log, it executes: tqsl -d -u -x -q -l \"<StationLocation>\" <file>. TQSL looks up this exact string in its internal station_data database. If the string has any spelling difference, capitalization discrepancy (e.g. ep2aes-home vs EP2AES-Home), or trailing whitespace, TQSL will fail immediately with exit code 1: 'Station location not found'.",
+                    color: .red
+                )
+
+                HelpDefinition(
+                    icon: "arrow.triangle.2.circlepath.circle.fill",
+                    title: "Global Default vs Profile-Specific Locations",
+                    text: "The 'Default Station Location' configured in Settings > LoTW acts as the global fallback. If you operate from multiple locations (e.g., Home, Portable, Island, Contest), specify the exact TQSL location name in Settings > Stations > Service Identity for each profile. YAAM automatically chooses the profile's dedicated location whenever it signs contacts.",
+                    color: .blue
+                )
+            }
+
+            helpSection("macOS App Sandbox Synchronization (~/.tqsl)") {
+                HelpDefinition(
+                    icon: "lock.shield",
+                    title: "The Sandbox Isolation Boundary",
+                    text: "Under Apple's App Sandbox security model, YAAM cannot freely browse arbitrary files in your real user home folder (~/.tqsl). Instead, macOS gives the app a private sandbox container at ~/Library/Containers/ASIS.YAAM/Data/.tqsl.",
+                    color: .secondary
+                )
+
+                HelpDefinition(
+                    icon: "arrow.triangle.2.circlepath",
+                    title: "Automated Timestamp-Based Synchronization",
+                    text: "YAAM includes an intelligent synchronization engine (TQSLService.synchronizeTQSLStorage). On launch and before every signing operation, it compares file modification dates between ~/.tqsl and the container, automatically copying new station_data, certificates, and configuration files.",
+                    color: .green
+                )
+
+                HelpDefinition(
+                    icon: "cursorarrow.click.2",
+                    title: "Manual 'Sync TQSL Data' Button",
+                    text: "If you create, rename, or modify a Station Location inside the TrustedQSL desktop application while YAAM is running, click the 'Sync TQSL Data (~/.tqsl)' button in Settings > LoTW to immediately refresh the sandbox cache.",
+                    color: .blue
+                )
+            }
+
+            helpSection("Security, Certificates & Keychain Storage") {
+                HelpDefinition(
+                    icon: "doc.badge.gearshape.fill",
+                    title: "Security-Scoped .p12 Bookmarks",
+                    text: "When you select your LoTW .p12 certificate container, YAAM generates an Apple Security-Scoped Bookmark. This allows persistent, permission-granted access to the certificate across Mac restarts without copying private keys into the logbook database.",
+                    color: .indigo
+                )
+
+                HelpDefinition(
+                    icon: "key.horizontal.fill",
+                    title: "Hardware-Bound Password Vault",
+                    text: "Your certificate passphrase and LoTW account password are encrypted using AES-256-GCM with a hardware key derived from your Mac's unique platform UUID (IOPlatformUUID). They are stored safely in macOS Keychain.",
+                    color: .green
+                )
+            }
+
+            helpSection("Zero-Click Cloud Upload & Two-Way Reconciliation") {
+                HelpDefinition(
+                    icon: "bolt.fill",
+                    title: "Zero-Click Background Daemon",
+                    text: "When Zero-Click LoTW upload is enabled, every QSO logged via Quick Log, native FT8 Station, or WSJT-X is automatically micro-batched, signed with TQSL in the background, and uploaded to ARRL servers without requiring any manual export or button clicks.",
+                    color: .yellow
+                )
+
+                HelpDefinition(
+                    icon: "checkmark.seal.fill",
+                    title: "Confirmation Tracking (LOTW_QSL_SENT & RCVD)",
+                    text: "When ARRL LoTW accepts the signed upload, YAAM updates the local QSO with LOTW_QSL_SENT = Y and the upload date. During Sync QSLs, downloaded confirmations are matched using callsign, band, mode, and LoTW's standard 30-minute UTC window, marking LOTW_QSL_RCVD = Y.",
+                    color: .green
+                )
+            }
+
+            helpCallout(
+                icon: "exclamationmark.octagon.fill",
+                title: "Troubleshooting 'Station location not found'",
+                text: "If you encounter an error during LoTW upload: (1) Open TrustedQSL app on your Mac. (2) Click 'Station Locations' and read the exact name. (3) Open YAAM Settings > LoTW and verify that 'Default Station Location' is typed identically. (4) Click 'Sync TQSL Data (~/.tqsl)' and retry.",
+                color: .orange
+            )
+        }
+    }
+
+    private var todayQSLView: some View {
+        Group {
+            helpHeader(
+                title: "Today's QSL Email Dispatcher",
+                subtitle: "Automated batch delivery of personalized 2-page high-resolution QSL PDF cards with confirmation certificate, email templates, and anti-duplicate safeguards.",
+                icon: "envelope.badge.shield.half.filled",
+                color: .green
+            )
+
+            HelpScreenshotCard(
+                imageName: "help_qsl_dispatcher",
+                title: "Today's Confirmed QSL Dispatcher",
+                caption: "Personalized 2-page PDF cards, live preview, and anti-duplicate safeguards."
+            )
+
+            HelpFlow(steps: [
+                HelpFlowStep(icon: "checkmark.seal.fill", title: "1. Detect Confirmed", detail: "YAAM automatically scans your Master Log for newly confirmed contacts from today."),
+                HelpFlowStep(icon: "envelope.badge", title: "2. Review Contacts", detail: "Operators already emailed are flagged 'Already Sent' and unselected by default to prevent spam."),
+                HelpFlowStep(icon: "doc.richtext", title: "3. Live 2-Page Preview", detail: "Inspect high-resolution front card artwork and reverse-side official confirmation certificate."),
+                HelpFlowStep(icon: "paperplane.fill", title: "4. Batch Dispatch", detail: "Sends via your configured SMTP mail account with full audit logging in activity_audit.log.")
+            ])
+
+            helpSection("Card Architecture & Features") {
+                HelpDefinition(icon: "doc.fill", title: "2-Page Professional PDF", text: "Page 1 renders high-definition station artwork and operator photo; Page 2 renders the official QSO confirmation certificate with callsign, band, mode, RST, grid, and operator signature.", color: .blue)
+                HelpDefinition(icon: "shield.lefthalf.filled", title: "Anti-Duplicate Delivery Guard", text: "Maintains a persistent record of emailed recipients. Any contact previously emailed is visually badged and locked unless explicitly overridden by the operator.", color: .green)
+                HelpDefinition(icon: "flag.fill", title: "Accurate DXCC National Flags", text: "Automatically attaches Unicode national flag emojis for every world DXCC entity in email subjects and bodies.", color: .orange)
+            }
+        }
+    }
+
+    private var qslLabelsView: some View {
+        Group {
+            helpHeader(
+                title: "QSL Card Label Studio",
+                subtitle: "Design, preview, calibrate, and print professional peel-and-stick adhesive labels for postcard QSL cards via Bureau or Direct mail with interactive sheet skip matrix.",
+                icon: "printer.fill",
+                color: .orange
+            )
+
+            HelpQSLLabelStudioMockup()
+
+            HelpFlow(steps: [
+                HelpFlowStep(icon: "doc.text", title: "1. Select Sheet Format", detail: "Choose standard Avery formats (5160 30-up, 5162 14-up, 5163 10-up) or European A4 (L7160 21-up, L7162 16-up)."),
+                HelpFlowStep(icon: "books.vertical.fill", title: "2. Choose QSO Source", detail: "Filter by Recent QSOs, Unconfirmed / Need QSL contacts, or selected contest sessions."),
+                HelpFlowStep(icon: "scissors", title: "3. Interactive Skip Matrix", detail: "Click on any label slots that were previously peeled off a partially used sheet to prevent wasted labels!"),
+                HelpFlowStep(icon: "slider.horizontal.2.square", title: "4. Calibrate Margins", detail: "Fine-tune horizontal/vertical offsets (in millimeters) to ensure flawless alignment with your printer tray."),
+                HelpFlowStep(icon: "printer.fill", title: "5. Print or Export PDF", detail: "Send directly to your macOS system printer or generate a high-resolution print-ready PDF.")
+            ])
+
+            helpSection("Interactive Sheet Skip Matrix") {
+                HelpDefinition(
+                    icon: "hand.tap.fill",
+                    title: "Zero-Waste Label Reuse",
+                    text: "Adhesive label sheets are expensive. YAAM displays an interactive grid of your sheet layout. Simply click any already-used slots: YAAM marks them 'SKIPPED' and begins printing on the first intact blank label.",
+                    color: .orange
+                )
+                HelpDefinition(
+                    icon: "arrow.clockwise",
+                    title: "Persistent Sheet Memory",
+                    text: "The skip matrix remembers remaining blank positions across multiple print runs until you reset the sheet layout.",
+                    color: .blue
+                )
+            }
+
+            helpSection("Printer Calibration & Customization") {
+                HelpDefinition(
+                    icon: "ruler",
+                    title: "Sub-Millimeter Alignment Offsets",
+                    text: "Compensate for hardware paper tray shift with dedicated X and Y offset sliders (±5.0 mm in 0.1 mm increments).",
+                    color: .green
+                )
+                HelpDefinition(
+                    icon: "textformat",
+                    title: "Rich Label Content & Routing Tags",
+                    text: "Labels automatically render station callsign, 2-way QSO confirmation grid, RST, Band, Mode, Satellite name/propagation mode, and routing instructions ('PSE QSL VIA BUREAU' or 'TNX QSL').",
+                    color: .secondary
+                )
+            }
+
+            helpCallout(
+                icon: "checkmark.seal.fill",
+                title: "Print & Bureau Workflow",
+                text: "After printing labels, you can immediately peel and stick them to standard postcard QSL cards for delivery through the national IARU QSL Bureau or direct airmail.",
+                color: .orange
+            )
         }
     }
 
@@ -1423,6 +1995,75 @@ struct HelpView: View {
         }
     }
 
+    private var bandmapView: some View {
+        Group {
+            helpHeader(
+                title: "Spectrum Bandmap & Waterfall",
+                subtitle: "Interactive 3-pane radio spectrum workspace featuring a vertical frequency ruler, live SDR waterfall, DX cluster spots, dual VFO split tracking, and 1-click transceiver QSY.",
+                icon: "waveform.path.ecg.rectangle",
+                color: .mint
+            )
+
+            HelpBandmapMockup()
+
+            HelpFlow(steps: [
+                HelpFlowStep(icon: "square.split.3x1", title: "1. Choose View Mode", detail: "Switch between Studio (3-Pane), Ruler & Spots, SDR Waterfall, or 4-Band Multi-Band Panorama."),
+                HelpFlowStep(icon: "link", title: "2. Connect Rig CAT", detail: "Connect via Hamlib rigctld, FLRig, or TCI SDR for zero-latency bidirectional frequency synchronization."),
+                HelpFlowStep(icon: "waveform.path.ecg", title: "3. Monitor Activity", detail: "Observe RF density on the thermal heatmap ribbon and watch real-time waterfall signal traces."),
+                HelpFlowStep(icon: "hand.tap.fill", title: "4. One-Click QSY & Log", detail: "Click any spot or frequency on the ruler to jump your VFO instantly; double-click to populate Quick Log.")
+            ])
+
+            helpSection("Layout Architecture & Panes") {
+                HelpDefinition(
+                    icon: "ruler.fill",
+                    title: "Left Pane: Vertical Bandmap Ruler",
+                    text: "Precision frequency scale with color-coded subbands for CW, Data/Digital, and Phone. Plotted cluster spots show callsign, mode, signal report, and age-based fade.",
+                    color: .mint
+                )
+                HelpDefinition(
+                    icon: "waveform.path.ecg",
+                    title: "Center Pane: Live SDR Spectrum & Waterfall",
+                    text: "Real-time spectrum analyzer with adjustable FFT zoom (0.5x to 4x), peak hold indicators, and smooth cascading multi-color waterfall gradient.",
+                    color: .blue
+                )
+                HelpDefinition(
+                    icon: "scope",
+                    title: "Right Pane: DX Spot Hunter Table",
+                    text: "Sortable spot feed with freshness tags (Fresh, Active, Aging), New DXCC / ATNO badges, SNR telemetry, and 1-click 'Tune Rig' actions.",
+                    color: .orange
+                )
+            }
+
+            helpSection("Advanced Transceiver & Operating Features") {
+                HelpDefinition(
+                    icon: "antenna.radiowaves.left.and.right",
+                    title: "Dual VFO & Split Frequency Tracking",
+                    text: "Visual markers for VFO A (green) and VFO B (orange) allow you to visualize DX split operations (e.g., listening up 5 kHz) directly on the spectrum ruler.",
+                    color: .yellow
+                )
+                HelpDefinition(
+                    icon: "flame.fill",
+                    title: "Thermal Activity Heatmap Ribbon",
+                    text: "Accumulates RF spot activity over rolling 15-minute windows, highlighting hot pile-up frequencies even before signals appear on your local antenna.",
+                    color: .red
+                )
+                HelpDefinition(
+                    icon: "square.grid.2x2",
+                    title: "Multi-Band Panorama Mode",
+                    text: "Monitors 40m, 20m, 15m, and 10m simultaneously in a 2x2 grid, giving contest operators an instant overview of HF band openings.",
+                    color: .purple
+                )
+            }
+
+            helpCallout(
+                icon: "shield.lefthalf.filled",
+                title: "License Class & IARU Privileges",
+                text: "Select your license class (e.g. US Extra, General, Technician) and IARU Region (1, 2, or 3) to overlay permitted frequency segments directly on the bandmap ruler.",
+                color: .mint
+            )
+        }
+    }
+
     private var cwWinKeyerView: some View {
         Group {
             helpHeader(
@@ -1442,6 +2083,49 @@ struct HelpView: View {
                 HelpDefinition(icon: "waveform", title: "Hardware Timing", text: "WinKeyer generates pristine Morse code directly on the microcontroller, eliminating macOS USB latency jitter.")
                 HelpDefinition(icon: "textformat.abc", title: "Prosigns & Cut Numbers", text: "Supports standard prosigns (AR, SK, KN, BT) and contest cut numbers (e.g. 5NN for 599).")
             }
+        }
+    }
+
+    private var cwAcademyView: some View {
+        Group {
+            helpHeader(
+                title: "CW Academy & Audio Decoder",
+                subtitle: "Interactive Morse code training with the Koch method, Farnsworth timing, real-time Goertzel DSP audio decoder, and comprehensive CW operating reference desk.",
+                icon: "headphones.circle.fill",
+                color: .yellow
+            )
+
+            HelpCWAcademyMockup()
+
+            HelpFlow(steps: [
+                HelpFlowStep(icon: "graduationcap.fill", title: "Select Lesson", detail: "Advance letter-by-letter through the 40-character Koch method sequence."),
+                HelpFlowStep(icon: "speedometer", title: "Farnsworth Timing", detail: "Train ears at 20 WPM character speed with extended spacing to avoid counting dots."),
+                HelpFlowStep(icon: "waveform.badge.magnifyingglass", title: "Echo Trainer", detail: "Key the character back on paddles or keyboard with instant accuracy evaluation."),
+                HelpFlowStep(icon: "waveform.path.ecg", title: "DSP Audio Decoder", detail: "Feed audio from your rig to decode live CW tones with Goertzel peak detection.")
+            ])
+
+            helpSection("The Koch Method & Farnsworth Spacing") {
+                HelpDefinition(icon: "brain.head.profile", title: "Sound-Shape Recognition", text: "Instead of mentally converting dots and dashes, you learn characters directly as acoustic rhythms at full speed (20+ WPM).", color: .yellow)
+                HelpDefinition(icon: "timer", title: "Farnsworth Spacing", text: "Maintains full-speed character sound-shapes while elongating intervals between characters, giving your brain time to register before the next symbol arrives.", color: .orange)
+                HelpDefinition(icon: "repeat", title: "Adaptive Assistant", text: "YAAM monitors your response latency and error rates, automatically re-injecting troublesome characters until 90%+ mastery is achieved.", color: .green)
+            }
+
+            helpSection("Real-Time Goertzel DSP Audio Decoder") {
+                HelpDefinition(icon: "waveform", title: "Goertzel Tone Filter (700 Hz)", text: "High-Q filter isolates CW carrier tones from band noise, providing clean Morse key-up and key-down transitions even in crowded pile-ups.", color: .blue)
+                HelpDefinition(icon: "gauge.with.needle", title: "Automatic WPM Tracking", text: "Adapts to changing sender speeds between 10 and 45 WPM with adaptive thresholding.", color: .green)
+            }
+
+            helpSection("CW Operating Reference Desk") {
+                HelpDefinition(icon: "questionmark.bubble.fill", title: "Standard Q-Codes", text: "Instant lookup for essential Q-codes: QTH (location), QSL (acknowledge), QSY (change frequency), QRM (man-made noise), QRN (atmospheric noise), QSB (fading).", color: .purple)
+                HelpDefinition(icon: "textformat.abc", title: "Common Abbreviations & Prosigns", text: "Standard prosigns (AR, SK, KN, BT, AS) and contest abbreviations (5NN, AGN, TU, BK, 73, WX).", color: .secondary)
+            }
+
+            helpCallout(
+                icon: "lightbulb.fill",
+                title: "Training Tip",
+                text: "Never practice Morse below 18 WPM. Counting dots (dits) and dashes (dahs) creates a mental wall at 10–12 WPM that is very hard to break. Train with Koch at 20 WPM effective 12 WPM for effortless high-speed copying.",
+                color: .yellow
+            )
         }
     }
 
@@ -1698,6 +2382,1057 @@ struct HelpScreenshotCard: View {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .stroke(Color(NSColor.separatorColor).opacity(0.3), lineWidth: 0.8)
         )
+        .padding(.vertical, 6)
+    }
+}
+
+// MARK: - Native Visual UI Mockup Components
+
+struct HelpLoTWSigningMockup: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "signature")
+                    .font(.headline)
+                    .foregroundStyle(.green)
+                Text("ARRL TrustedQSL (tqsl) Engine — Cryptographic ADIF Signer")
+                    .font(.subheadline.weight(.bold))
+                Spacer()
+                HStack(spacing: 4) {
+                    Circle().fill(Color.green).frame(width: 7, height: 7)
+                    Text("CLI Ready")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.green)
+                }
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(Color.green.opacity(0.12), in: Capsule())
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Text("Default Station Location:")
+                        .font(.caption.weight(.medium))
+                        .frame(width: 165, alignment: .leading)
+                    Text("EP2AES-Home")
+                        .font(.system(size: 12, weight: .bold, design: .monospaced))
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 5))
+
+                    HStack(spacing: 3) {
+                        Image(systemName: "checkmark.seal.fill").font(.system(size: 9))
+                        Text("MATCHES TQSL NAME").font(.system(size: 9, weight: .heavy))
+                    }
+                    .padding(.horizontal, 6).padding(.vertical, 3)
+                    .background(Color.orange.opacity(0.2))
+                    .foregroundStyle(Color.orange)
+                    .clipShape(Capsule())
+                }
+
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.orange)
+                    Text("Must exactly match the Station Location name defined in TrustedQSL (case-sensitive). If TQSL has 'EP2AES-Home', entering 'Home' or 'ep2aes-home' causes TQSL exit code 1: 'Station location not found'.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(6)
+                .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+            }
+
+            VStack(spacing: 6) {
+                HStack {
+                    Label("Storage Sync:", systemImage: "arrow.triangle.2.circlepath")
+                        .font(.caption.weight(.medium))
+                        .frame(width: 165, alignment: .leading)
+                    Text("~/.tqsl Synced with Sandbox Container (24 items)")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text("Sync TQSL Data (~/.tqsl)")
+                        .font(.system(size: 9, weight: .bold))
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Color.blue.opacity(0.15))
+                        .foregroundStyle(.blue)
+                        .cornerRadius(4)
+                }
+
+                HStack {
+                    Label("Certificate (.p12):", systemImage: "doc.badge.gearshape.fill")
+                        .font(.caption.weight(.medium))
+                        .frame(width: 165, alignment: .leading)
+                    Text("EP2AES_Cert.p12 (Security Bookmark Active)")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text("Keychain Secured")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.green)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("AUTOMATED EXECUTION PIPELINE:")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.tertiary)
+                Text("tqsl -d -u -x -q -l \"EP2AES-Home\" -p •••••••• ~/Library/Containers/.../upload.adi")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.cyan)
+                    .padding(6)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 5))
+            }
+
+            HStack(spacing: 6) {
+                Image(systemName: "bolt.fill").font(.caption).foregroundStyle(.yellow)
+                Text("Zero-Click Cloud Upload Daemon:")
+                    .font(.caption.weight(.semibold))
+                Text("Auto-signs and submits newly logged QSOs to LoTW in background")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(12)
+        .background(Color(NSColor.controlBackgroundColor).opacity(0.7), in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.green.opacity(0.3), lineWidth: 1))
+        .padding(.vertical, 6)
+    }
+}
+
+struct HelpCWAcademyMockup: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Image(systemName: "headphones.circle.fill")
+                    .font(.headline)
+                    .foregroundStyle(.yellow)
+                Text("CW Academy Morse Tutor & Real-Time DSP Audio Decoder")
+                    .font(.subheadline.weight(.bold))
+                Spacer()
+                Text("Koch Method: Lesson 18/40")
+                    .font(.system(size: 10, weight: .bold))
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(Color.yellow.opacity(0.15))
+                    .foregroundStyle(.orange)
+                    .cornerRadius(4)
+            }
+            Divider()
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("ACTIVE CHARACTERS IN LESSON:")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.tertiary)
+                Text("K  M  R  S  U  A  P  T  L  O  W  I  .  N  J  E  F  0  Y")
+                    .font(.system(size: 13, weight: .heavy, design: .monospaced))
+                    .foregroundStyle(.primary)
+            }
+
+            HStack(spacing: 16) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Character Speed").font(.caption2).foregroundStyle(.secondary)
+                    Text("20 WPM").font(.system(size: 13, weight: .bold, design: .monospaced)).foregroundStyle(.blue)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Effective (Farnsworth)").font(.caption2).foregroundStyle(.secondary)
+                    Text("12 WPM").font(.system(size: 13, weight: .bold, design: .monospaced)).foregroundStyle(.green)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Audio Sidetone").font(.caption2).foregroundStyle(.secondary)
+                    Text("700 Hz (Sine)").font(.system(size: 13, weight: .bold, design: .monospaced)).foregroundStyle(.yellow)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Echo Accuracy").font(.caption2).foregroundStyle(.secondary)
+                    Text("98.4%").font(.system(size: 13, weight: .bold, design: .monospaced)).foregroundStyle(.green)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 3) {
+                HStack {
+                    Text("GOERTZEL DSP AUDIO DECODER:")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.tertiary)
+                    Spacer()
+                    Text("Peak: 700 Hz  |  SNR: +18.4 dB  |  Auto-Track: 21.8 WPM")
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+                HStack(spacing: 6) {
+                    Image(systemName: "waveform.path.ecg").foregroundStyle(.green)
+                    Text("CQ CQ CQ DE EP2AES EP2AES K")
+                        .font(.system(size: 12, weight: .bold, design: .monospaced))
+                        .foregroundStyle(.green)
+                }
+                .padding(6)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 5))
+            }
+        }
+        .padding(12)
+        .background(Color(NSColor.controlBackgroundColor).opacity(0.7), in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.yellow.opacity(0.3), lineWidth: 1))
+        .padding(.vertical, 6)
+    }
+}
+
+struct HelpHamClockMockup: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Image(systemName: "deskclock.fill")
+                    .font(.headline)
+                    .foregroundStyle(.indigo)
+                Text("HamClock Shack Dashboard & Remote Web Server")
+                    .font(.subheadline.weight(.bold))
+                Spacer()
+                Text("LAN Server: 8080 Active")
+                    .font(.system(size: 10, weight: .bold))
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(Color.green.opacity(0.15))
+                    .foregroundStyle(.green)
+                    .cornerRadius(4)
+            }
+            Divider()
+
+            HStack(spacing: 10) {
+                VStack(spacing: 4) {
+                    Text("UTC TIME").font(.system(size: 9, weight: .bold)).foregroundStyle(.tertiary)
+                    Text("16:15:20").font(.system(size: 16, weight: .heavy, design: .monospaced)).foregroundStyle(.blue)
+                    Text("LOCAL 19:45:20").font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(6)
+                .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
+
+                VStack(spacing: 4) {
+                    Text("SOLAR INDICES").font(.system(size: 9, weight: .bold)).foregroundStyle(.tertiary)
+                    HStack(spacing: 6) {
+                        Text("SFI 168").font(.system(size: 11, weight: .bold, design: .monospaced)).foregroundStyle(.orange)
+                        Text("SSN 142").font(.system(size: 11, weight: .bold, design: .monospaced)).foregroundStyle(.yellow)
+                    }
+                    Text("A: 6  |  Kp: 2 (Quiet)").font(.system(size: 10, design: .monospaced)).foregroundStyle(.green)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(6)
+                .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
+
+                VStack(spacing: 4) {
+                    Text("IONOSPHERE").font(.system(size: 9, weight: .bold)).foregroundStyle(.tertiary)
+                    Text("SDO 304Å Live").font(.system(size: 11, weight: .bold)).foregroundStyle(.yellow)
+                    Text("DRAP: 0.2 dB (Normal)").font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(6)
+                .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
+            }
+
+            HStack {
+                Image(systemName: "ipad.and.iphone").foregroundStyle(.indigo)
+                Text("Broadcast to Tablet/iPad:")
+                    .font(.caption.weight(.medium))
+                Text("http://192.168.1.55:8080")
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.cyan)
+                Spacer()
+                Text("Zero Config")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(6)
+            .background(Color.indigo.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+        }
+        .padding(12)
+        .background(Color(NSColor.controlBackgroundColor).opacity(0.7), in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.indigo.opacity(0.3), lineWidth: 1))
+        .padding(.vertical, 6)
+    }
+}
+
+struct HelpTacticalPilotMockup: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Image(systemName: "point.topleft.down.to.point.bottomright.curvepath.fill")
+                    .font(.headline)
+                    .foregroundStyle(.teal)
+                Text("Tactical Pilot HUD & VOACAP-Style Propagation Engine")
+                    .font(.subheadline.weight(.bold))
+                Spacer()
+                Text("Engine: Solar Raytrace")
+                    .font(.system(size: 10, weight: .bold))
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(Color.teal.opacity(0.15))
+                    .foregroundStyle(.teal)
+                    .cornerRadius(4)
+            }
+            Divider()
+
+            HStack {
+                Text("Target:")
+                    .font(.caption.weight(.medium))
+                Text("🇯🇵 Japan (JA) — Tokyo")
+                    .font(.system(size: 12, weight: .bold))
+                Spacer()
+                Text("Bearing: 068° SP  |  Dist: 7,620 km")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack(spacing: 8) {
+                VStack(spacing: 2) {
+                    Text("15m (21 MHz)").font(.caption2.weight(.bold))
+                    Text("SNR +14 dB").font(.system(size: 11, weight: .heavy, design: .monospaced)).foregroundStyle(.green)
+                    Text("92% Rel").font(.system(size: 9)).foregroundStyle(.green)
+                }
+                .padding(6).frame(maxWidth: .infinity)
+                .background(Color.green.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+
+                VStack(spacing: 2) {
+                    Text("20m (14 MHz)").font(.caption2.weight(.bold))
+                    Text("SNR +18 dB").font(.system(size: 11, weight: .heavy, design: .monospaced)).foregroundStyle(.green)
+                    Text("96% Rel").font(.system(size: 9)).foregroundStyle(.green)
+                }
+                .padding(6).frame(maxWidth: .infinity)
+                .background(Color.green.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+
+                VStack(spacing: 2) {
+                    Text("12m (24 MHz)").font(.caption2.weight(.bold))
+                    Text("SNR +09 dB").font(.system(size: 11, weight: .heavy, design: .monospaced)).foregroundStyle(.orange)
+                    Text("78% Rel").font(.system(size: 9)).foregroundStyle(.orange)
+                }
+                .padding(6).frame(maxWidth: .infinity)
+                .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+
+                VStack(spacing: 2) {
+                    Text("10m (28 MHz)").font(.caption2.weight(.bold))
+                    Text("SNR +02 dB").font(.system(size: 11, weight: .heavy, design: .monospaced)).foregroundStyle(.secondary)
+                    Text("45% Rel").font(.system(size: 9)).foregroundStyle(.secondary)
+                }
+                .padding(6).frame(maxWidth: .infinity)
+                .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+            }
+
+            HStack {
+                Image(systemName: "sparkles").foregroundStyle(.yellow)
+                Text("Tactical Advice: Peak opening to East Asia active on 15m/20m until 18:30 UTC.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(12)
+        .background(Color(NSColor.controlBackgroundColor).opacity(0.7), in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.teal.opacity(0.3), lineWidth: 1))
+        .padding(.vertical, 6)
+    }
+}
+
+struct HelpWeatherRadarMockup: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Image(systemName: "cloud.bolt.rain.fill")
+                    .font(.headline)
+                    .foregroundStyle(.blue)
+                Text("Station Weather Safety & Antenna Protection Radar")
+                    .font(.subheadline.weight(.bold))
+                Spacer()
+                HStack(spacing: 4) {
+                    Circle().fill(Color.green).frame(width: 7, height: 7)
+                    Text("🟢 Shack Safe")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.green)
+                }
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(Color.green.opacity(0.12), in: Capsule())
+            }
+            Divider()
+
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Label("Live Wind & Gusts", systemImage: "wind")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.secondary)
+                    Text("14 km/h (Gusts: 22 km/h)")
+                        .font(.system(size: 12, weight: .bold, design: .monospaced))
+                        .foregroundStyle(.green)
+                    Text("Threshold: 65 km/h").font(.system(size: 9)).foregroundStyle(.tertiary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(8).background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Label("Lightning Discharge", systemImage: "bolt.fill")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.secondary)
+                    Text("Closest: 68 km SE")
+                        .font(.system(size: 12, weight: .bold, design: .monospaced))
+                        .foregroundStyle(.green)
+                    Text("Danger Zone: < 30 km").font(.system(size: 9)).foregroundStyle(.tertiary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(8).background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
+            }
+
+            HStack {
+                Image(systemName: "shield.lefthalf.filled").foregroundStyle(.green)
+                Text("Safety Engine: Normal operating conditions. Towers, beams, and rotator safe to operate.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(12)
+        .background(Color(NSColor.controlBackgroundColor).opacity(0.7), in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.blue.opacity(0.3), lineWidth: 1))
+        .padding(.vertical, 6)
+    }
+}
+
+struct HelpSatelliteMockup: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Image(systemName: "antenna.radiowaves.left.and.right.circle.fill")
+                    .font(.headline)
+                    .foregroundStyle(.cyan)
+                Text("Satellite Pass Radar & APRS High-Altitude Balloon")
+                    .font(.subheadline.weight(.bold))
+                Spacer()
+                Text("LEO Tracking Active")
+                    .font(.system(size: 10, weight: .bold))
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(Color.cyan.opacity(0.15))
+                    .foregroundStyle(.cyan)
+                    .cornerRadius(4)
+            }
+            Divider()
+
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("SATELLITE PASS: AO-91 (RadFxSat)").font(.system(size: 10, weight: .heavy)).foregroundStyle(.primary)
+                    HStack(spacing: 8) {
+                        Text("Elev: 44° (Max 68°)").font(.system(size: 11, weight: .bold, design: .monospaced)).foregroundStyle(.blue)
+                        Text("Az: 182° S").font(.system(size: 11, weight: .bold, design: .monospaced)).foregroundStyle(.secondary)
+                    }
+                    Text("Doppler: 435.250 MHz (+2.8 kHz)").font(.system(size: 10, design: .monospaced)).foregroundStyle(.orange)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(8).background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("APRS BALLOON: HAB-EP1").font(.system(size: 10, weight: .heavy)).foregroundStyle(.primary)
+                    HStack(spacing: 8) {
+                        Text("Alt: 31,240 m").font(.system(size: 11, weight: .bold, design: .monospaced)).foregroundStyle(.green)
+                        Text("Ascent: +4.8 m/s").font(.system(size: 11, weight: .bold, design: .monospaced)).foregroundStyle(.secondary)
+                    }
+                    Text("Position: 35.68°N, 51.42°E (Tehran)").font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(8).background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
+            }
+        }
+        .padding(12)
+        .background(Color(NSColor.controlBackgroundColor).opacity(0.7), in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.cyan.opacity(0.3), lineWidth: 1))
+        .padding(.vertical, 6)
+    }
+}
+
+// MARK: - Tactical Rover Mode Mockup
+
+struct HelpRoverModeMockup: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            // Top HUD Status Bar
+            HStack(spacing: 8) {
+                Image(systemName: "shoeprints.fill")
+                    .font(.headline)
+                    .foregroundStyle(.orange)
+                Text("Tactical Rover Engine — Station Grid Projection")
+                    .font(.subheadline.weight(.bold))
+                Spacer()
+                HStack(spacing: 4) {
+                    Circle().fill(Color.orange).frame(width: 7, height: 7)
+                    Text("ACTIVE · 03:42:18")
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .foregroundStyle(.orange)
+                }
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(Color.orange.opacity(0.15), in: Capsule())
+            }
+
+            Divider()
+
+            // Station Relocation Bar
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("HOME STATION").font(.system(size: 9, weight: .bold)).foregroundStyle(.tertiary)
+                    Text("EP2AES · LM35ir")
+                        .font(.system(size: 12, weight: .bold, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+
+                Image(systemName: "arrow.right.circle.fill")
+                    .font(.title3)
+                    .foregroundStyle(.orange)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("PROJECTED ROVER GRID").font(.system(size: 9, weight: .bold)).foregroundStyle(.tertiary)
+                    HStack(spacing: 6) {
+                        Text("LL46")
+                            .font(.system(size: 14, weight: .heavy, design: .monospaced))
+                            .foregroundStyle(.orange)
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(Color.orange.opacity(0.18), in: RoundedRectangle(cornerRadius: 4))
+                        Text("Kish Island (IOTA AS-166)")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.primary)
+                    }
+                }
+
+                Spacer()
+
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("DURATION").font(.system(size: 9, weight: .bold)).foregroundStyle(.tertiary)
+                    Text("Until End of UTC Day")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.blue)
+                }
+            }
+            .padding(8)
+            .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
+
+            // Stepped Compass & Geodesic Telemetry Grid
+            HStack(spacing: 12) {
+                // 4-Way Compass Stepper
+                VStack(spacing: 4) {
+                    Text("4-WAY COMPASS STEPPER").font(.system(size: 8.5, weight: .bold)).foregroundStyle(.tertiary)
+                    
+                    Button(action: {}) {
+                        Image(systemName: "chevron.up")
+                            .font(.system(size: 9, weight: .bold))
+                            .frame(width: 24, height: 18)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(true)
+
+                    HStack(spacing: 8) {
+                        Button(action: {}) {
+                            Image(systemName: "chevron.left")
+                                .font(.system(size: 9, weight: .bold))
+                                .frame(width: 18, height: 18)
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(true)
+
+                        Text("LL46")
+                            .font(.system(size: 11, weight: .heavy, design: .monospaced))
+                            .foregroundStyle(.orange)
+
+                        Button(action: {}) {
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 9, weight: .bold))
+                                .frame(width: 18, height: 18)
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(true)
+                    }
+
+                    Button(action: {}) {
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 9, weight: .bold))
+                            .frame(width: 24, height: 18)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(true)
+                }
+                .padding(6)
+                .background(Color.secondary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6))
+
+                // Telemetry Cards
+                VStack(spacing: 6) {
+                    HStack(spacing: 8) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Distance & Bearing").font(.system(size: 9)).foregroundStyle(.secondary)
+                            Text("1,048 km · 174° S (SSE)")
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .foregroundStyle(.primary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(6).background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Solar Times (Rover QTH)").font(.system(size: 9)).foregroundStyle(.secondary)
+                            Text("Sunrise 02:44 · Sunset 14:18 UTC")
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .foregroundStyle(.yellow)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(6).background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
+                    }
+
+                    HStack(spacing: 6) {
+                        Image(systemName: "checkmark.seal.fill").foregroundStyle(.green).font(.system(size: 10))
+                        Text("Stamp MY_GRIDSQUARE = LL46 in outgoing QSOs")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.green)
+                        Spacer()
+                        Text("Auto-Restores on Expiry")
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(5)
+                    .background(Color.green.opacity(0.08), in: RoundedRectangle(cornerRadius: 5))
+                }
+            }
+        }
+        .padding(12)
+        .background(Color(NSColor.controlBackgroundColor).opacity(0.7), in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.orange.opacity(0.3), lineWidth: 1))
+        .padding(.vertical, 6)
+    }
+}
+
+// MARK: - Spectrum Bandmap Mockup
+
+struct HelpBandmapMockup: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            // Header Bar
+            HStack(spacing: 8) {
+                Image(systemName: "waveform.path.ecg.rectangle")
+                    .font(.headline)
+                    .foregroundStyle(.mint)
+                Text("Spectrum Bandmap & Waterfall Studio — 3-Pane Pro Layout")
+                    .font(.subheadline.weight(.bold))
+                Spacer()
+                HStack(spacing: 6) {
+                    Text("20M (14 MHz)")
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Color.mint.opacity(0.15))
+                        .foregroundStyle(.mint)
+                        .cornerRadius(4)
+                    Text("CAT: IC-7300 Live")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.green)
+                }
+            }
+
+            Divider()
+
+            // 3-Pane Preview Simulation
+            HStack(spacing: 8) {
+                // Left: Vertical Frequency Ruler
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("FREQUENCY RULER").font(.system(size: 8.5, weight: .bold)).foregroundStyle(.tertiary)
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack {
+                            Text("14.074").font(.system(size: 9, weight: .bold, design: .monospaced)).foregroundStyle(.secondary)
+                            Text("FT8").font(.system(size: 8, weight: .heavy)).foregroundStyle(.orange)
+                        }
+                        Text("JA1ABC").font(.system(size: 10, weight: .bold, design: .monospaced)).foregroundStyle(.yellow)
+                        Text("VK2GR").font(.system(size: 10, weight: .bold, design: .monospaced)).foregroundStyle(.cyan)
+                        Divider()
+                        HStack {
+                            Text("14.025").font(.system(size: 9, weight: .bold, design: .monospaced)).foregroundStyle(.secondary)
+                            Text("CW DX").font(.system(size: 8, weight: .heavy)).foregroundStyle(.blue)
+                        }
+                        Text("K1TTT 599").font(.system(size: 10, weight: .bold, design: .monospaced)).foregroundStyle(.green)
+                    }
+                    .padding(6)
+                    .frame(width: 120, alignment: .leading)
+                    .background(Color.black.opacity(0.4), in: RoundedRectangle(cornerRadius: 6))
+                }
+
+                // Center: SDR Spectrum & Waterfall
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("SDR SPECTRUM & WATERFALL").font(.system(size: 8.5, weight: .bold)).foregroundStyle(.tertiary)
+                        Spacer()
+                        Text("VFO A: 14.074.000").font(.system(size: 9, weight: .bold, design: .monospaced)).foregroundStyle(.green)
+                    }
+                    
+                    // Simulated Spectrum graph
+                    ZStack(alignment: .bottom) {
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(Color.black.opacity(0.6))
+                            .frame(height: 70)
+                        
+                        // Signal peaks
+                        HStack(alignment: .bottom, spacing: 3) {
+                            ForEach([12, 18, 15, 25, 48, 55, 30, 16, 20, 38, 62, 28, 14, 22, 35, 18, 12, 24, 40, 15], id: \.self) { val in
+                                RoundedRectangle(cornerRadius: 1)
+                                    .fill(val > 45 ? Color.yellow : (val > 30 ? Color.green : Color.blue.opacity(0.6)))
+                                    .frame(width: 6, height: CGFloat(val))
+                            }
+                        }
+                        .padding(.bottom, 4)
+                    }
+
+                    // Waterfall Simulation bar
+                    HStack(spacing: 0) {
+                        ForEach([Color.purple, Color.blue, Color.cyan, Color.green, Color.yellow, Color.orange, Color.red], id: \.self) { c in
+                            Rectangle().fill(c.opacity(0.7)).frame(height: 12)
+                        }
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 3))
+                }
+
+                // Right: DX Spot Hunter
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("DX SPOT HUNTER").font(.system(size: 8.5, weight: .bold)).foregroundStyle(.tertiary)
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack {
+                            Text("3Y0J").font(.system(size: 10, weight: .heavy)).foregroundStyle(.orange)
+                            Spacer()
+                            Text("ATNO").font(.system(size: 8, weight: .heavy)).foregroundStyle(.purple)
+                        }
+                        Text("14.024 CW · Bouvet").font(.system(size: 8.5)).foregroundStyle(.secondary)
+                        HStack {
+                            Text("DL7XYZ").font(.system(size: 10, weight: .bold)).foregroundStyle(.green)
+                            Spacer()
+                            Text("+14 dB").font(.system(size: 8.5, design: .monospaced)).foregroundStyle(.green)
+                        }
+                        Text("14.074 FT8 · Berlin").font(.system(size: 8.5)).foregroundStyle(.secondary)
+                    }
+                    .padding(6)
+                    .frame(width: 120, alignment: .leading)
+                    .background(Color.black.opacity(0.4), in: RoundedRectangle(cornerRadius: 6))
+                }
+            }
+
+            HStack(spacing: 8) {
+                Image(systemName: "hand.tap.fill").foregroundStyle(.yellow).font(.caption)
+                Text("Double-click any spot on the bandmap to QSY rig and auto-populate Quick Log.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(12)
+        .background(Color(NSColor.controlBackgroundColor).opacity(0.7), in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.mint.opacity(0.3), lineWidth: 1))
+        .padding(.vertical, 6)
+    }
+}
+
+// MARK: - QSL Card Label Studio Mockup
+
+struct HelpQSLLabelStudioMockup: View {
+    private func labelSlot(isSkipped: Bool) -> some View {
+        VStack(spacing: 1) {
+            if isSkipped {
+                Text("SKIPPED")
+                    .font(.system(size: 7, weight: .heavy))
+                    .foregroundStyle(.secondary)
+                Image(systemName: "scissors")
+                    .font(.system(size: 8))
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("TO: W1AW")
+                    .font(.system(size: 7, weight: .bold))
+                    .foregroundStyle(.primary)
+                Text("14.074 FT8")
+                    .font(.system(size: 6.5, design: .monospaced))
+                    .foregroundStyle(.blue)
+                Text("CONFIRMING")
+                    .font(.system(size: 6))
+                    .foregroundStyle(.green)
+            }
+        }
+        .frame(width: 80, height: 32)
+        .background(isSkipped ? Color.secondary.opacity(0.12) : Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 3))
+        .overlay(RoundedRectangle(cornerRadius: 3).stroke(isSkipped ? Color.secondary.opacity(0.3) : Color.accentColor.opacity(0.3), lineWidth: 0.8))
+    }
+
+    @ViewBuilder
+    private var headerView: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "printer.fill")
+                .font(.headline)
+                .foregroundStyle(.orange)
+            Text("QSL Card Label Studio & Interactive Peel-Off Matrix")
+                .font(.subheadline.weight(.bold))
+            Spacer()
+            Text("Avery 5160 (30 Labels/Sheet)")
+                .font(.system(size: 10, weight: .semibold))
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(Color.orange.opacity(0.15))
+                .foregroundStyle(.orange)
+                .cornerRadius(4)
+        }
+    }
+
+    @ViewBuilder
+    private var sheetPreview: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text("SHEET MATRIX PREVIEW (3 × 10)").font(.system(size: 8.5, weight: .bold)).foregroundStyle(.tertiary)
+                Spacer()
+                Text("Click slot to skip used labels").font(.system(size: 8)).foregroundStyle(.secondary)
+            }
+
+            VStack(spacing: 4) {
+                ForEach(0..<3, id: \.self) { row in
+                    HStack(spacing: 4) {
+                        ForEach(0..<3, id: \.self) { col in
+                            labelSlot(isSkipped: row == 0 && col < 2)
+                        }
+                    }
+                }
+            }
+            .padding(6)
+            .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 6))
+        }
+    }
+
+    @ViewBuilder
+    private var calibrationView: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("STUDIO CALIBRATION").font(.system(size: 8.5, weight: .bold)).foregroundStyle(.tertiary)
+            
+            VStack(alignment: .leading, spacing: 3) {
+                HStack {
+                    Text("QSO Source:").font(.system(size: 9)).foregroundStyle(.secondary)
+                    Spacer()
+                    Text("Recent Unconfirmed (24)").font(.system(size: 9, weight: .bold)).foregroundStyle(.orange)
+                }
+                HStack {
+                    Text("Offset X / Y:").font(.system(size: 9)).foregroundStyle(.secondary)
+                    Spacer()
+                    Text("+0.5 mm / -0.2 mm").font(.system(size: 9, design: .monospaced)).foregroundStyle(.cyan)
+                }
+                HStack {
+                    Text("Font & Layout:").font(.system(size: 9)).foregroundStyle(.secondary)
+                    Spacer()
+                    Text("Standard 2-Way QSO").font(.system(size: 9, weight: .semibold)).foregroundStyle(.primary)
+                }
+                HStack {
+                    Text("Manager Tag:").font(.system(size: 9)).foregroundStyle(.secondary)
+                    Spacer()
+                    Text("PSE QSL VIA BUREAU").font(.system(size: 9, weight: .bold)).foregroundStyle(.green)
+                }
+            }
+            .padding(6)
+            .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
+
+            HStack(spacing: 6) {
+                Label("Print Sheet", systemImage: "printer.fill")
+                    .font(.system(size: 9, weight: .bold))
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .background(Color.orange)
+                    .foregroundStyle(.white)
+                    .cornerRadius(4)
+
+                Label("Export PDF", systemImage: "doc.fill")
+                    .font(.system(size: 9, weight: .semibold))
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .background(Color.secondary.opacity(0.12))
+                    .cornerRadius(4)
+            }
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            headerView
+            Divider()
+            HStack(spacing: 12) {
+                sheetPreview
+                calibrationView
+            }
+        }
+        .padding(12)
+        .background(Color(NSColor.controlBackgroundColor).opacity(0.7), in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.orange.opacity(0.3), lineWidth: 1))
+        .padding(.vertical, 6)
+    }
+}
+
+// MARK: - Club Membership Mockup
+
+struct HelpClubMembershipMockup: View {
+    private struct ClubStat: Identifiable {
+        let id: String
+        let count: String
+        let color: Color
+    }
+
+    private let clubs: [ClubStat] = [
+        ClubStat(id: "SKCC", count: "18,420", color: .orange),
+        ClubStat(id: "CWops", count: "3,410", color: .blue),
+        ClubStat(id: "FISTS", count: "15,200", color: .green),
+        ClubStat(id: "LICW", count: "2,190", color: .teal),
+        ClubStat(id: "30MDG", count: "4,850", color: .indigo)
+    ]
+
+    private func clubBadge(_ club: ClubStat) -> some View {
+        VStack(spacing: 2) {
+            Text(club.id).font(.system(size: 10, weight: .heavy)).foregroundStyle(club.color)
+            Text(club.count).font(.system(size: 8.5, design: .monospaced)).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(5)
+        .background(club.color.opacity(0.1), in: RoundedRectangle(cornerRadius: 5))
+    }
+
+    @ViewBuilder
+    private var headerView: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "person.3.sequence.fill")
+                .font(.headline)
+                .foregroundStyle(.purple)
+            Text("International Club Memberships & Roster Auto-Detection")
+                .font(.subheadline.weight(.bold))
+            Spacer()
+            Text("6 Clubs Synced (38,400 Members)")
+                .font(.system(size: 10, weight: .semibold))
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(Color.purple.opacity(0.15))
+                .foregroundStyle(.purple)
+                .cornerRadius(4)
+        }
+    }
+
+    @ViewBuilder
+    private var badgesRow: some View {
+        HStack(spacing: 8) {
+            ForEach(clubs) { club in
+                clubBadge(club)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var lookupCard: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("LOOKUP CALLSIGN:").font(.system(size: 8.5, weight: .bold)).foregroundStyle(.tertiary)
+                Text("K6VVA")
+                    .font(.system(size: 14, weight: .heavy, design: .monospaced))
+                    .foregroundStyle(.primary)
+                Text("Rick · California, USA").font(.system(size: 9)).foregroundStyle(.secondary)
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("DETECTED CLUB AFFILIATIONS:").font(.system(size: 8.5, weight: .bold)).foregroundStyle(.tertiary)
+                HStack(spacing: 6) {
+                    Text("CWops #1428").font(.system(size: 9, weight: .bold)).padding(.horizontal, 5).padding(.vertical, 2).background(Color.blue.opacity(0.15)).cornerRadius(3)
+                    Text("SKCC #9821S (Senator)").font(.system(size: 9, weight: .bold)).padding(.horizontal, 5).padding(.vertical, 2).background(Color.orange.opacity(0.15)).cornerRadius(3)
+                    Text("FISTS #11204").font(.system(size: 9, weight: .bold)).padding(.horizontal, 5).padding(.vertical, 2).background(Color.green.opacity(0.15)).cornerRadius(3)
+                }
+            }
+
+            Spacer()
+
+            HStack(spacing: 4) {
+                Image(systemName: "plus.circle.fill").foregroundStyle(.purple)
+                Text("Insert Exchange").font(.system(size: 9, weight: .bold)).foregroundStyle(.purple)
+            }
+            .padding(6)
+            .background(Color.purple.opacity(0.12), in: RoundedRectangle(cornerRadius: 5))
+        }
+        .padding(8)
+        .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            headerView
+            Divider()
+            badgesRow
+            lookupCard
+        }
+        .padding(12)
+        .background(Color(NSColor.controlBackgroundColor).opacity(0.7), in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.purple.opacity(0.3), lineWidth: 1))
+        .padding(.vertical, 6)
+    }
+}
+
+// MARK: - Club Log Live Spots Mockup
+
+struct HelpClubLogSpotsMockup: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "person.3.fill")
+                    .font(.headline)
+                    .foregroundStyle(.blue)
+                Text("Club Log Live Activity Stream & Band Opportunity Engine")
+                    .font(.subheadline.weight(.bold))
+                Spacer()
+                Text("Live Stream Connected")
+                    .font(.system(size: 10, weight: .semibold))
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(Color.green.opacity(0.15))
+                    .foregroundStyle(.green)
+                    .cornerRadius(4)
+            }
+
+            Divider()
+
+            // Top Recommended Band Card
+            HStack(spacing: 12) {
+                Image(systemName: "flame.fill").font(.title2).foregroundStyle(.orange)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text("TOP RECOMMENDED BAND:")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(.tertiary)
+                        Text("15M (21 MHz)")
+                            .font(.system(size: 12, weight: .heavy, design: .monospaced))
+                            .foregroundStyle(.orange)
+                    }
+                    Text("84 Active Spots · 14 NEEDED DXCC ENTITIES · Dominant Mode: FT8")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.primary)
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 1) {
+                    Text("SCORE").font(.system(size: 8, weight: .bold)).foregroundStyle(.tertiary)
+                    Text("133.0").font(.system(size: 13, weight: .heavy, design: .monospaced)).foregroundStyle(.green)
+                }
+            }
+            .padding(8)
+            .background(Color.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.orange.opacity(0.25), lineWidth: 1))
+
+            // Sample Live Spots Table
+            VStack(spacing: 4) {
+                HStack {
+                    Text("CALLSIGN").font(.system(size: 8, weight: .bold)).frame(width: 70, alignment: .leading)
+                    Text("FREQ & MODE").font(.system(size: 8, weight: .bold)).frame(width: 90, alignment: .leading)
+                    Text("DXCC ENTITY").font(.system(size: 8, weight: .bold)).frame(maxWidth: .infinity, alignment: .leading)
+                    Text("STATUS").font(.system(size: 8, weight: .bold)).frame(width: 80, alignment: .trailing)
+                }
+                .foregroundStyle(.tertiary)
+                .padding(.horizontal, 6)
+
+                VStack(spacing: 3) {
+                    HStack {
+                        Text("3Y0J").font(.system(size: 10, weight: .heavy, design: .monospaced)).foregroundStyle(.orange).frame(width: 70, alignment: .leading)
+                        Text("14.024 CW").font(.system(size: 9, design: .monospaced)).frame(width: 90, alignment: .leading)
+                        Text("Bouvet Island").font(.system(size: 9)).frame(maxWidth: .infinity, alignment: .leading)
+                        Text("ATNO NEW").font(.system(size: 8, weight: .heavy)).foregroundStyle(.purple).frame(width: 80, alignment: .trailing)
+                    }
+                    .padding(4).background(Color.purple.opacity(0.08), in: RoundedRectangle(cornerRadius: 4))
+
+                    HStack {
+                        Text("VK9DX").font(.system(size: 10, weight: .heavy, design: .monospaced)).foregroundStyle(.cyan).frame(width: 70, alignment: .leading)
+                        Text("21.074 FT8").font(.system(size: 9, design: .monospaced)).frame(width: 90, alignment: .leading)
+                        Text("Norfolk Island").font(.system(size: 9)).frame(maxWidth: .infinity, alignment: .leading)
+                        Text("NEEDED BAND").font(.system(size: 8, weight: .bold)).foregroundStyle(.green).frame(width: 80, alignment: .trailing)
+                    }
+                    .padding(4).background(Color.green.opacity(0.08), in: RoundedRectangle(cornerRadius: 4))
+                }
+            }
+        }
+        .padding(12)
+        .background(Color(NSColor.controlBackgroundColor).opacity(0.7), in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.blue.opacity(0.3), lineWidth: 1))
         .padding(.vertical, 6)
     }
 }

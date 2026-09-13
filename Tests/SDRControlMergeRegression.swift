@@ -1,62 +1,13 @@
 import Foundation
-
-struct QSORecordModel: Sendable {
-    let id: UUID
-    var index: Int
-    var fields: [String: String]
-
-    init(index: Int, id: UUID = UUID(), fields: [String: String]) {
-        self.index = index
-        self.id = id
-        self.fields = fields
-    }
-
-    subscript(_ key: String) -> String {
-        fields[key] ?? fields[key.uppercased()] ?? ""
-    }
-
-    var uniqueKey: String {
-        QSOIdentity.exactKey(fields: fields)
-    }
-}
-
-struct MergeSummary: Sendable {
-    let added: Int
-    let updated: Int
-    let skipped: Int
-}
-
-enum ImportReviewAnalyzer {
-    private static let confirmationFields = Set([
-        "QSL_RCVD", "LOTW_QSL_RCVD", "QRZLOG_QSL_RCVD", "EQSL_QSL_RCVD"
-    ])
-
-    static func mergeUpdate(
-        incoming: [String: String],
-        into existing: [String: String]
-    ) -> [String: String] {
-        var merged = existing
-        for (key, value) in incoming {
-            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-            if (merged[key] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-               !trimmed.isEmpty {
-                merged[key] = value
-            } else if confirmationFields.contains(key),
-                      ["Y", "YES", "TRUE", "1", "C", "CONFIRMED", "RECEIVED"].contains(trimmed.uppercased()) {
-                merged[key] = value
-            }
-        }
-        return merged
-    }
-}
+@testable import YAAM
 
 @main
 enum SDRControlMergeRegression {
     static func main() {
         let originalID = UUID()
         let sparse = QSORecordModel(
-            index: 1,
             id: originalID,
+            index: 1,
             fields: exactFields(name: "", email: "", confirmed: false)
         )
         let rich = QSORecordModel(
@@ -191,6 +142,39 @@ enum SDRControlMergeRegression {
             allowRoundedSDRMatches: true
         )
         precondition(differentMinutes.records.count == 2)
+
+        // Test Enrichment & Rank Shielding
+        var enrichedCoarse = roundedSDRFields(call: "EP2AES", time: "183000", frequency: "14.074")
+        enrichedCoarse["RANK_DXCC"] = "#120"
+        enrichedCoarse["RANK_QSO"] = "#34"
+        enrichedCoarse["RANK_BAND"] = "#15"
+        enrichedCoarse["EMAIL"] = "ep2aes@example.com"
+        enrichedCoarse["APP_YAAM_ENRICHED"] = "Y"
+        enrichedCoarse["LOTW_QSL_RCVD"] = "Y"
+        enrichedCoarse["LOTW_QSLRDATE"] = "20260901"
+
+        var rawIncomingSDR = roundedSDRFields(call: "EP2AES", time: "183014", frequency: "14.074123")
+        rawIncomingSDR["RANK_DXCC"] = ""
+        rawIncomingSDR["RANK_QSO"] = ""
+        rawIncomingSDR["RANK_BAND"] = ""
+        rawIncomingSDR["EMAIL"] = ""
+        rawIncomingSDR["APP_YAAM_ENRICHED"] = ""
+        rawIncomingSDR["LOTW_QSL_RCVD"] = "N"
+
+        let enrichedMerged = SDRControlMergeEngine.merge(
+            localRecords: [QSORecordModel(index: 1, fields: enrichedCoarse)],
+            incomingFields: [rawIncomingSDR],
+            allowRoundedSDRMatches: true
+        )
+        precondition(enrichedMerged.records.count == 1)
+        precondition(enrichedMerged.records[0]["RANK_DXCC"] == "#120")
+        precondition(enrichedMerged.records[0]["RANK_QSO"] == "#34")
+        precondition(enrichedMerged.records[0]["RANK_BAND"] == "#15")
+        precondition(enrichedMerged.records[0]["EMAIL"] == "ep2aes@example.com")
+        precondition(enrichedMerged.records[0]["APP_YAAM_ENRICHED"] == "Y")
+        precondition(enrichedMerged.records[0]["LOTW_QSL_RCVD"] == "Y")
+        precondition(enrichedMerged.records[0]["TIME_ON"] == "183014")
+        precondition(enrichedMerged.records[0]["FREQ"] == "14.074123")
 
         print("SDR-Control duplicate merge regression passed.")
     }

@@ -36,10 +36,36 @@ extension AppState {
             .sink { [weak self] events in self?.ingestWSJTXEvents(events) }
             .store(in: &operatorFeatureCancellables)
 
+        wsjtxListener.$liveDecodes
+            .dropFirst()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] decodes in
+                guard let self else { return }
+                let currentBand = self.wsjtxListener.lastStatus?.band ?? "20M"
+                DigitalCallRosterEngine.shared.processDecodes(decodes, activeBand: currentBand)
+                TacticalBandAdvisor.shared.recordDecodes(decodes, onBand: currentBand)
+            }
+            .store(in: &operatorFeatureCancellables)
+
+        dxClusterClient.$spots
+            .dropFirst()
+            .receive(on: RunLoop.main)
+            .sink { spots in
+                TacticalBandAdvisor.shared.recordClusterSpots(spots)
+            }
+            .store(in: &operatorFeatureCancellables)
+
         // Bridge FT8 Station Engine with AppState Logbook
         ft8Engine.logQSOHandler = { [weak self] call, grid, sent, rcvd, band, freq in
             Task { @MainActor in
                 self?.logFT8StationQSO(call: call, grid: grid, sentRST: sent, rcvdRST: rcvd, band: band, freqMHz: freq)
+            }
+        }
+
+        // Bridge Digital Modem Engine (RTTY / PSK) with AppState Logbook
+        digitalModemEngine.logQSOHandler = { [weak self] call, mode, sent, rcvd, freqHz, band in
+            Task { @MainActor in
+                self?.logDigitalModemQSO(call: call, mode: mode, sentRST: sent, rcvdRST: rcvd, freqHz: freqHz, band: band)
             }
         }
 
@@ -126,6 +152,61 @@ extension AppState {
         if !grid.isEmpty {
             fields["GRIDSQUARE"] = grid
         }
+
+        fields = stationTaggedFields(fields)
+        let newRecord = QSORecordModel(index: qsoRecords.count + 1, fields: fields)
+
+        guard !qsoRecords.contains(where: { $0.uniqueKey == newRecord.uniqueKey }) else {
+            return
+        }
+
+        qsoRecords.append(newRecord)
+        persistQuickLog(newRecord)
+        WavelogSyncEngine.shared.autoPushSingleQSO(record: newRecord)
+        if HRDLogClient.shared.autoUploadEnabled {
+            Task { _ = await HRDLogClient.shared.uploadSingleQSO(record: newRecord) }
+        }
+        if HamQTHUploadClient.shared.autoUploadEnabled {
+            Task { _ = await HamQTHUploadClient.shared.uploadSingleQSO(record: newRecord) }
+        }
+        playActivitySound(.success)
+    }
+
+    func logDigitalModemQSO(call: String, mode: String, sentRST: String, rcvdRST: String, freqHz: UInt64, band: String) {
+        let cleanCall = call.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard !cleanCall.isEmpty else { return }
+
+        let now = Date()
+        let dateFormatter = DateFormatter()
+        dateFormatter.locale = Locale(identifier: "en_US_POSIX")
+        dateFormatter.timeZone = TimeZone(secondsFromGMT: 0)
+
+        dateFormatter.dateFormat = "yyyyMMdd"
+        let qsoDate = dateFormatter.string(from: now)
+
+        dateFormatter.dateFormat = "HHmmss"
+        let timeOn = dateFormatter.string(from: now)
+
+        let entity = DXCCDatabase.resolve(callsign: cleanCall)
+        let freqMHz = Double(freqHz) / 1_000_000.0
+
+        var fields: [String: String] = [
+            "CALL": cleanCall,
+            "BAND": band,
+            "MODE": mode,
+            "FREQ": String(format: "%.6f", freqMHz),
+            "QSO_DATE": qsoDate,
+            "TIME_ON": timeOn,
+            "TIME_OFF": timeOn,
+            "RST_SENT": sentRST.isEmpty ? "599" : sentRST,
+            "RST_RCVD": rcvdRST.isEmpty ? "599" : rcvdRST,
+            "COUNTRY": entity.entityName,
+            "CONT": entity.continent,
+            "CQZ": "\(entity.cqZone)",
+            "ITUZ": "\(entity.ituZone)",
+            "COMMENT": "Logged via YAAM Digital Modem (\(mode))",
+            "APP_YAAM_SOURCE": "Digital Modem"
+        ]
 
         fields = stationTaggedFields(fields)
         let newRecord = QSORecordModel(index: qsoRecords.count + 1, fields: fields)
@@ -481,8 +562,8 @@ extension AppState {
         let mode = rawMode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         switch mode {
         case "USB", "LSB", "PHONE": return ("SSB", "")
-        case "FT8", "FT4", "JT65", "JT9", "Q65": return ("MFSK", mode)
-        case "DATA", "DATA-U", "DATA-L", "PKTUSB", "PKTLSB": return ("DIGI", "")
+        case "FT8", "FT4", "JS8", "JT65", "JT9", "Q65": return (mode, mode)
+        case "DATA", "DATA-U", "DATA-L", "PKTUSB", "PKTLSB": return ("FT8", "FT8")
         case "": return ("SSB", "")
         default: return (mode, "")
         }

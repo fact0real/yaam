@@ -24,6 +24,8 @@ public enum MapProjectionMode: String, CaseIterable, Identifiable, Sendable {
     case azimuthal = "Azimuthal Antenna"
     case gridTracker = "GridTracker 2D"
 
+    public static let equirectangular = MapProjectionMode.gridTracker
+
     public var id: String { rawValue }
 
     public var icon: String {
@@ -53,6 +55,11 @@ public struct GridLogSummary: Equatable, Sendable {
 }
 
 public enum MaidenheadGridEngine {
+    /// Returns the center coordinate for a Maidenhead locator, or (0,0) fallback
+    public static func coordinate(for locator: String) -> GeoCoordinate {
+        boundingBox(for: locator)?.center ?? GeoCoordinate(latitude: 0, longitude: 0)
+    }
+
     /// Converts a Maidenhead locator (2, 4, or 6 characters) to its bounding box and center coordinate
     public static func boundingBox(for locator: String) -> MaidenheadBoundingBox? {
         let clean = locator.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()

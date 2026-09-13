@@ -12,7 +12,7 @@ nonisolated enum TableColumnPolicy {
         "LAT", "LON", "LATITUDE", "LONGITUDE", "FREQ_RX", "BAND_RX",
         "LOTW_QSL_RCVD", "LOTW_QSLRDATE", "LOTW_QSL_SENT", "LOTW_QSLSDATE",
         "QRZLOG_QSL_RCVD", "QRZLOG_QSLRDATE", "QSL_RCVD", "QSLRDATE", "QSL_SENT", "QSLSDATE",
-        "QSL_VIA", "QSO_DATE_OFF", "TIME_OFF", "APP_YAAM_ENRICHED"
+        "QSO_DATE_OFF", "TIME_OFF", "APP_YAAM_ENRICHED"
     ]
 
     static func normalized(_ header: String) -> String {
@@ -32,11 +32,11 @@ nonisolated enum TableColumnPolicy {
 
     static func isHiddenByDefault(_ header: String, isMostlyEmpty: Bool) -> Bool {
         let field = normalized(header)
-        if field == "EMAIL" || field == "QRZ_URL" || field.hasPrefix("RANK_") {
+        if field == "EMAIL" || field == "QRZ_URL" || field.hasPrefix("RANK_") || field == "AGING" || field == "APP_VIEW_AGING" {
             return false
         }
         return isDatabaseOnly(field) ||
-            ["COMMENT", "QTH", "TX_PWR", "TX_POWER", "SUBMODE", "IOTA", "STATE", "CQZ", "ITUZ", "DXCC", "CNTY", "DISTANCE", "RST_SENT", "RST_RCVD", "SENT", "RCVD", "BAND_RX", "FREQ_RX"].contains(field) ||
+            ["COMMENT", "QTH", "TX_PWR", "TX_POWER", "SUBMODE", "IOTA", "STATE", "CQZ", "ITUZ", "DXCC", "CNTY", "DISTANCE", "RST_SENT", "RST_RCVD", "SENT", "RCVD", "BAND_RX", "FREQ_RX", "QSL_VIA", "QSL_SENT_VIA", "QSL_RCVD_VIA"].contains(field) ||
             isMostlyEmpty
     }
 

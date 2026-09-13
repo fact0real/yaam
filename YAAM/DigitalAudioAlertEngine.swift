@@ -17,16 +17,34 @@ import SwiftUI
 public final class DigitalAudioAlertEngine: NSObject, ObservableObject, AVSpeechSynthesizerDelegate {
     public static let shared = DigitalAudioAlertEngine()
 
-    // MARK: - User Settings (AppStorage-backed)
-    @AppStorage("audioAlertsEnabled") public var isEnabled: Bool = true
-    @AppStorage("audioAlertNewDXCC") public var alertOnNewDXCC: Bool = true
-    @AppStorage("audioAlertNewBand") public var alertOnNewBand: Bool = true
-    @AppStorage("audioAlertNewGrid") public var alertOnNewGrid: Bool = true
-    @AppStorage("audioAlertDirectedToMe") public var alertOnDirectedToMe: Bool = true
-    @AppStorage("audioAlertChimeFirst") public var playChimeFirst: Bool = true
-    @AppStorage("audioAlertSpeechRate") public var speechRate: Double = 0.52
-    @AppStorage("audioAlertSpeechVolume") public var speechVolume: Double = 1.0
-    @AppStorage("audioAlertVoiceID") public var selectedVoiceID: String = ""
+    // MARK: - User Settings
+    @Published public var isEnabled: Bool {
+        didSet { UserDefaults.standard.set(isEnabled, forKey: "audioAlertsEnabled") }
+    }
+    @Published public var alertOnNewDXCC: Bool {
+        didSet { UserDefaults.standard.set(alertOnNewDXCC, forKey: "audioAlertNewDXCC") }
+    }
+    @Published public var alertOnNewBand: Bool {
+        didSet { UserDefaults.standard.set(alertOnNewBand, forKey: "audioAlertNewBand") }
+    }
+    @Published public var alertOnNewGrid: Bool {
+        didSet { UserDefaults.standard.set(alertOnNewGrid, forKey: "audioAlertNewGrid") }
+    }
+    @Published public var alertOnDirectedToMe: Bool {
+        didSet { UserDefaults.standard.set(alertOnDirectedToMe, forKey: "audioAlertDirectedToMe") }
+    }
+    @Published public var playChimeFirst: Bool {
+        didSet { UserDefaults.standard.set(playChimeFirst, forKey: "audioAlertChimeFirst") }
+    }
+    @Published public var speechRate: Double {
+        didSet { UserDefaults.standard.set(speechRate, forKey: "audioAlertSpeechRate") }
+    }
+    @Published public var speechVolume: Double {
+        didSet { UserDefaults.standard.set(speechVolume, forKey: "audioAlertSpeechVolume") }
+    }
+    @Published public var selectedVoiceID: String {
+        didSet { UserDefaults.standard.set(selectedVoiceID, forKey: "audioAlertVoiceID") }
+    }
 
     // MARK: - Published State
     @Published public private(set) var isSpeaking: Bool = false
@@ -55,6 +73,18 @@ public final class DigitalAudioAlertEngine: NSObject, ObservableObject, AVSpeech
     }
 
     public override init() {
+        self.isEnabled = UserDefaults.standard.object(forKey: "audioAlertsEnabled") as? Bool ?? true
+        self.alertOnNewDXCC = UserDefaults.standard.object(forKey: "audioAlertNewDXCC") as? Bool ?? true
+        self.alertOnNewBand = UserDefaults.standard.object(forKey: "audioAlertNewBand") as? Bool ?? true
+        self.alertOnNewGrid = UserDefaults.standard.object(forKey: "audioAlertNewGrid") as? Bool ?? true
+        self.alertOnDirectedToMe = UserDefaults.standard.object(forKey: "audioAlertDirectedToMe") as? Bool ?? true
+        self.playChimeFirst = UserDefaults.standard.object(forKey: "audioAlertChimeFirst") as? Bool ?? true
+        let rate = UserDefaults.standard.double(forKey: "audioAlertSpeechRate")
+        self.speechRate = rate > 0 ? rate : 0.52
+        let vol = UserDefaults.standard.object(forKey: "audioAlertSpeechVolume") as? Double
+        self.speechVolume = vol ?? 1.0
+        self.selectedVoiceID = UserDefaults.standard.string(forKey: "audioAlertVoiceID") ?? ""
+
         super.init()
         synthesizer.delegate = self
     }
@@ -63,6 +93,74 @@ public final class DigitalAudioAlertEngine: NSObject, ObservableObject, AVSpeech
     public var availableVoices: [AVSpeechSynthesisVoice] {
         AVSpeechSynthesisVoice.speechVoices().filter {
             $0.language.starts(with: "en")
+        }
+    }
+
+    public struct VoiceOption: Identifiable, Hashable, Sendable {
+        public let id: String
+        public let name: String
+        public let language: String
+        public let regionName: String
+        public let flagEmoji: String
+
+        public var displayName: String {
+            "\(flagEmoji) \(name) (\(regionName))"
+        }
+    }
+
+    public var voiceOptions: [VoiceOption] {
+        let voices = AVSpeechSynthesisVoice.speechVoices()
+        let enVoices = voices.filter { $0.language.starts(with: "en") }
+        let targetList = enVoices.isEmpty ? voices : enVoices
+
+        let noveltyNames: Set<String> = [
+            "Bad News", "Bahh", "Bells", "Boing", "Bubbles", "Cellos", "Deranged",
+            "Wobble", "Good News", "Hysterical", "Jester", "Organ", "Trinoids",
+            "Whisper", "Zarvox"
+        ]
+
+        let filtered = targetList.filter { !noveltyNames.contains($0.name) }
+
+        return filtered.map { v in
+            let flag: String
+            let region: String
+            switch v.language {
+            case "en-US":
+                flag = "🇺🇸"
+                region = "United States"
+            case "en-GB":
+                flag = "🇬🇧"
+                region = "United Kingdom"
+            case "en-AU":
+                flag = "🇦🇺"
+                region = "Australia"
+            case "en-CA":
+                flag = "🇨🇦"
+                region = "Canada"
+            case "en-IE":
+                flag = "🇮🇪"
+                region = "Ireland"
+            case "en-IN":
+                flag = "🇮🇳"
+                region = "India"
+            case "en-ZA":
+                flag = "🇿🇦"
+                region = "South Africa"
+            case "en-NZ":
+                flag = "🇳🇿"
+                region = "New Zealand"
+            default:
+                flag = "🌐"
+                let loc = Locale(identifier: v.language)
+                region = loc.localizedString(forIdentifier: v.language) ?? v.language
+            }
+            return VoiceOption(id: v.identifier, name: v.name, language: v.language, regionName: region, flagEmoji: flag)
+        }.sorted { (a, b) -> Bool in
+            if a.name == "Samantha" && b.name != "Samantha" { return true }
+            if b.name == "Samantha" && a.name != "Samantha" { return false }
+            if a.name == "Daniel" && b.name != "Daniel" { return true }
+            if b.name == "Daniel" && a.name != "Daniel" { return false }
+            return a.displayName.localizedCaseInsensitiveCompare(b.displayName) == .orderedAscending
         }
     }
 
@@ -101,7 +199,14 @@ public final class DigitalAudioAlertEngine: NSObject, ObservableObject, AVSpeech
 
     /// Triggers a test voice announcement
     public func testVoiceAlert() {
-        let sample = "YAAM Voice Alert active. New DXCC Fiji, Three Delta Two Romeo Romeo on 20 meters."
+        let voiceName: String
+        if !selectedVoiceID.isEmpty, let v = AVSpeechSynthesisVoice(identifier: selectedVoiceID) {
+            voiceName = v.name
+        } else {
+            voiceName = "Samantha"
+        }
+        let speedMultiplier = String(format: "%.1f", speechRate / 0.5)
+        let sample = "YAAM Voice Alert active. Voice is \(voiceName), speed \(speedMultiplier)x. New DXCC Japan, Juliet Alpha One Alpha Bravo Charlie on 20 meters."
         speakNow(sample)
     }
 

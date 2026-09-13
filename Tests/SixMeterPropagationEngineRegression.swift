@@ -4,6 +4,7 @@
 //
 
 import Foundation
+@testable import YAAM
 
 // MARK: - Mathematical & Azimuth Helpers for Testing
 

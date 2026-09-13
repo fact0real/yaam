@@ -337,7 +337,7 @@ public final class SixMeterPropagationEngine: ObservableObject {
     // MARK: - Auto-Refresh Loop
     private func startAutoRefreshTimer() {
         autoRefreshTask?.cancel()
-        autoRefreshTask = Task { [weak self] in
+        autoRefreshTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
                 guard let self = self else { return }
@@ -359,11 +359,16 @@ public final class SixMeterPropagationEngine: ObservableObject {
         isFetching = true
         statusMessage = "Querying NOAA SWPC, Ionosondes, and PSK Reporter..."
 
-        async let swpcTask: () = fetchNOAASpaceWeather()
-        async let ionosondeTask: () = fetchIonosondeSoundings()
-        async let pskTask: () = fetchPSKReporter6m(stationCallsign: stationCallsign)
+        let currentStations = self.ionosondeStations
+        async let swpcTask = fetchNOAASpaceWeather()
+        async let ionosondeTask = fetchIonosondeSoundings(existingStations: currentStations)
+        async let pskTask = fetchPSKReporter6m(stationCallsign: stationCallsign)
 
-        _ = await (swpcTask, ionosondeTask, pskTask)
+        let (swpc, ionosondes, pskSpots) = await (swpcTask, ionosondeTask, pskTask)
+
+        self.spaceWeather = swpc
+        self.ionosondeStations = ionosondes
+        self.spots = pskSpots
 
         lastUpdated = Date()
         refreshCountdownSeconds = 180
@@ -375,7 +380,7 @@ public final class SixMeterPropagationEngine: ObservableObject {
     }
 
     // MARK: - 1. NOAA SWPC Space Weather Ingestion
-    public func fetchNOAASpaceWeather() async {
+    public func fetchNOAASpaceWeather() async -> NOAASpaceWeatherData {
         var result = NOAASpaceWeatherData()
 
         if let kURL = URL(string: "https://services.swpc.noaa.gov/json/planetary_k_index_1m.json") {
@@ -448,12 +453,12 @@ public final class SixMeterPropagationEngine: ObservableObject {
         }
 
         result.lastUpdated = Date()
-        self.spaceWeather = result
+        return result
     }
 
     // MARK: - 2. GIRO & KC2G Ionosonde Soundings Ingestion
-    public func fetchIonosondeSoundings() async {
-        var updatedStations = self.ionosondeStations
+    public func fetchIonosondeSoundings(existingStations: [IonosondeStation]) async -> [IonosondeStation] {
+        var updatedStations = existingStations
 
         if let kc2gURL = URL(string: "https://prop.kc2g.com/api/stations.json") {
             if let data = await fetchData(from: kc2gURL, timeout: 12) {
@@ -522,12 +527,12 @@ public final class SixMeterPropagationEngine: ObservableObject {
             }
         }
 
-        self.ionosondeStations = updatedStations.sorted { ($0.foEs ?? 0) > ($1.foEs ?? 0) }
+        return updatedStations.sorted { ($0.foEs ?? 0) > ($1.foEs ?? 0) }
     }
 
     // MARK: - 3. PSK Reporter 50 MHz Ingestion
-    public func fetchPSKReporter6m(stationCallsign: String?) async {
-        guard let url = URL(string: "https://retrieve.pskreporter.info/query?flowStartSeconds=-7200&rptlimit=250&freq=50000000-54000000") else { return }
+    public func fetchPSKReporter6m(stationCallsign: String?) async -> [SixMeterSpot] {
+        guard let url = URL(string: "https://retrieve.pskreporter.info/query?flowStartSeconds=-7200&rptlimit=250&freq=50000000-54000000") else { return [] }
 
         var newSpots: [SixMeterSpot] = []
         if let data = await fetchData(from: url, timeout: 15) {
@@ -544,7 +549,7 @@ public final class SixMeterPropagationEngine: ObservableObject {
             }
         }
 
-        self.spots = newSpots.sorted { $0.timestamp > $1.timestamp }
+        return newSpots.sorted { $0.timestamp > $1.timestamp }
     }
 
     // MARK: - 4. Mid-Point Propagation Corridors Computation (Es1 vs Es2 vs F2)

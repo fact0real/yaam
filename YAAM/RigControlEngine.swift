@@ -39,10 +39,18 @@ public final class RigControlEngine: ObservableObject {
     public static let shared = RigControlEngine()
 
     // Configuration
-    @AppStorage("rigDriverType") public var driverType: RigDriverType = .flrig
-    @AppStorage("rigHost") public var host: String = "127.0.0.1"
-    @AppStorage("rigPort") public var port: Int = 12345
-    @AppStorage("rigAutoConnect") public var autoConnect: Bool = true
+    @Published public var driverType: RigDriverType {
+        didSet { UserDefaults.standard.set(driverType.rawValue, forKey: "rigDriverType") }
+    }
+    @Published public var host: String {
+        didSet { UserDefaults.standard.set(host, forKey: "rigHost") }
+    }
+    @Published public var port: Int {
+        didSet { UserDefaults.standard.set(port, forKey: "rigPort") }
+    }
+    @Published public var autoConnect: Bool {
+        didSet { UserDefaults.standard.set(autoConnect, forKey: "rigAutoConnect") }
+    }
 
     // Real-Time Transceiver Telemetry
     @Published public var isConnected: Bool = false
@@ -83,6 +91,13 @@ public final class RigControlEngine: ObservableObject {
     private var tcpConnection: NWConnection?
 
     private init() {
+        let savedDriver = UserDefaults.standard.string(forKey: "rigDriverType") ?? RigDriverType.flrig.rawValue
+        self.driverType = RigDriverType(rawValue: savedDriver) ?? .flrig
+        self.host = UserDefaults.standard.string(forKey: "rigHost") ?? "127.0.0.1"
+        let savedPort = UserDefaults.standard.integer(forKey: "rigPort")
+        self.port = savedPort > 0 ? savedPort : 12345
+        self.autoConnect = UserDefaults.standard.object(forKey: "rigAutoConnect") as? Bool ?? true
+
         if autoConnect && driverType != .disabled {
             connect()
         }

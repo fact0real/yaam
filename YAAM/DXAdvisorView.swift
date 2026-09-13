@@ -86,6 +86,8 @@ struct DXAdvisorView: View {
     @State private var selectedAdvisorTab = 0
     @State private var voacapSearchQuery = ""
     @State private var voacapFilterMode = "All"
+    @State private var solarForecastViewMode = "chart"
+    @State private var calendarToastMessage: String? = nil
 
     @State private var currentDate = Date()
     private let clockTimer = Timer.publish(every: 5.0, on: .main, in: .common).autoconnect()
@@ -116,9 +118,23 @@ struct DXAdvisorView: View {
         return df
     }()
 
+    private static let localDateFormatter: DateFormatter = {
+        let df = DateFormatter()
+        df.dateFormat = "EEE, d MMM yyyy"
+        df.timeZone = .current
+        return df
+    }()
+
     private static let utcTimeFormatter: DateFormatter = {
         let df = DateFormatter()
         df.dateFormat = "HH:mm"
+        df.timeZone = TimeZone(secondsFromGMT: 0)
+        return df
+    }()
+
+    private static let utcDateFormatter: DateFormatter = {
+        let df = DateFormatter()
+        df.dateFormat = "EEE, d MMM"
         df.timeZone = TimeZone(secondsFromGMT: 0)
         return df
     }()
@@ -127,8 +143,16 @@ struct DXAdvisorView: View {
         Self.localTimeFormatter.string(from: currentDate)
     }
 
+    private var localDateString: String {
+        Self.localDateFormatter.string(from: currentDate)
+    }
+
     private var utcTimeString: String {
         Self.utcTimeFormatter.string(from: currentDate)
+    }
+
+    private var utcDateString: String {
+        Self.utcDateFormatter.string(from: currentDate)
     }
 
     private var recommendedBands: [String] {
@@ -413,6 +437,19 @@ struct DXAdvisorView: View {
 
             HStack(spacing: 8) {
                 HStack(spacing: 4) {
+                    Image(systemName: "calendar")
+                        .font(.caption2)
+                        .foregroundColor(.accentColor)
+                    Text(localDateString)
+                        .font(.system(.caption, design: .rounded))
+                        .fontWeight(.bold)
+                }
+
+                Text("•")
+                    .font(.caption2)
+                    .foregroundColor(.secondary.opacity(0.5))
+
+                HStack(spacing: 4) {
                     Image(systemName: "clock.fill")
                         .font(.caption2)
                         .foregroundColor(.accentColor)
@@ -431,7 +468,7 @@ struct DXAdvisorView: View {
             .padding(.vertical, 4)
             .background(Color(NSColor.controlBackgroundColor))
             .cornerRadius(6)
-            .help("Station Local Time: \(localTimeString) | Universal Time (UTC): \(utcTimeString)")
+            .help("Today: \(localDateString) | Local Time: \(localTimeString) | UTC: \(utcDateString) \(utcTimeString)")
         }
         .padding(12)
         .background(Color(NSColor.windowBackgroundColor))
@@ -496,18 +533,115 @@ struct DXAdvisorView: View {
     }
 
     private var solarForecastSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label("27-Day Solar Forecast", systemImage: "chart.xyaxis.line")
-                .font(.headline)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center, spacing: 10) {
+                Label("27-Day Solar Forecast & Propagation Outlook", systemImage: "chart.xyaxis.line")
+                    .font(.headline)
+
+                if let todayPt = appState.propagationSnapshot.solarForecast.first(where: { $0.isToday }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "calendar.badge.clock")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundColor(.accentColor)
+                        Text("Today: \(todayPt.fullDateFormatted)")
+                            .font(.caption)
+                            .fontWeight(.bold)
+                            .foregroundColor(.accentColor)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Color.accentColor.opacity(0.12), in: Capsule())
+                    .overlay(Capsule().stroke(Color.accentColor.opacity(0.3), lineWidth: 1))
+                }
+
+                Spacer()
+
+                Picker("", selection: $solarForecastViewMode) {
+                    Label("Chart", systemImage: "chart.xyaxis.line").tag("chart")
+                    Label("Day-by-Day Table", systemImage: "tablecells").tag("table")
+                    Label("Combined", systemImage: "rectangle.split.1x2").tag("split")
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .frame(width: 320)
+            }
+
+            if let msg = calendarToastMessage {
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(.green)
+                    Text(msg)
+                        .font(.caption)
+                        .foregroundColor(.primary)
+                    Spacer()
+                    Button {
+                        withAnimation { calendarToastMessage = nil }
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Color.green.opacity(0.15), in: RoundedRectangle(cornerRadius: 6))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(Color.green.opacity(0.3), lineWidth: 1)
+                )
+                .transition(.opacity)
+            }
 
             if appState.propagationSnapshot.solarForecast.isEmpty {
                 emptyText("NOAA SWPC 27-day solar forecast is not available yet.")
             } else {
-                SolarFluxForecastChart(points: appState.propagationSnapshot.solarForecast)
-                    .frame(height: 190)
-                    .padding(10)
-                    .background(Color(NSColor.controlBackgroundColor).opacity(0.30))
-                    .cornerRadius(8)
+                let forecast = appState.propagationSnapshot.solarForecast
+                VStack(spacing: 12) {
+                    // Prime Contest & DX Operating Windows
+                    PrimeContestOutlookView(
+                        points: forecast,
+                        onScheduleDay: { pt in
+                            withAnimation {
+                                calendarToastMessage = "Event added to macOS Calendar: \(pt.fullDateFormatted) (SFI \(pt.solarFlux), Kp \(pt.kpIndex))"
+                            }
+                        },
+                        onScheduleWindow: { win in
+                            withAnimation {
+                                calendarToastMessage = "Contest Window added to macOS Calendar: \(win.dateRangeString) (\(win.daysCount) Days)"
+                            }
+                        }
+                    )
+
+                    if solarForecastViewMode == "chart" || solarForecastViewMode == "split" {
+                        SolarFluxForecastChart(
+                            points: forecast,
+                            onScheduleDay: { pt in
+                                withAnimation {
+                                    calendarToastMessage = "Event added to macOS Calendar: \(pt.fullDateFormatted)"
+                                }
+                            }
+                        )
+                        .frame(height: 250)
+                        .padding(12)
+                        .background(Color(NSColor.controlBackgroundColor).opacity(0.30))
+                        .cornerRadius(8)
+                    }
+
+                    if solarForecastViewMode == "table" || solarForecastViewMode == "split" {
+                        SolarForecastDayTable(
+                            points: forecast,
+                            onScheduleDay: { pt in
+                                withAnimation {
+                                    calendarToastMessage = "Event added to macOS Calendar: \(pt.fullDateFormatted)"
+                                }
+                            }
+                        )
+                        .padding(12)
+                        .background(Color(NSColor.controlBackgroundColor).opacity(0.30))
+                        .cornerRadius(8)
+                    }
+                }
             }
         }
     }
@@ -2056,8 +2190,257 @@ struct DXAdvisorView: View {
         ]
 }
 
+// MARK: - Prime Contest & DX Planning Outlook View
+
+private struct PrimeContestOutlookView: View {
+    let points: [SolarForecastPoint]
+    var onScheduleDay: ((SolarForecastPoint) -> Void)? = nil
+    var onScheduleWindow: ((PrimeContestWindow) -> Void)? = nil
+
+    private var primeWindows: [PrimeContestWindow] {
+        PrimeContestWindow.findPrimeWindows(from: points)
+    }
+
+    private var peakDays: [SolarForecastPoint] {
+        points.filter(\.isFavorable).sorted { $0.propagationScore > $1.propagationScore }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            // Header
+            HStack(spacing: 8) {
+                Image(systemName: "trophy.fill")
+                    .foregroundColor(.yellow)
+                    .font(.subheadline)
+
+                Text("Prime Contest & DX Operating Windows")
+                    .font(.subheadline)
+                    .fontWeight(.bold)
+
+                Spacer()
+
+                if !primeWindows.isEmpty {
+                    Text("\(primeWindows.count) Windows Detected")
+                        .font(.caption2)
+                        .fontWeight(.semibold)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Color.green.opacity(0.18), in: Capsule())
+                        .foregroundColor(.green)
+                }
+            }
+
+            if primeWindows.isEmpty && peakDays.isEmpty {
+                HStack(spacing: 6) {
+                    Image(systemName: "info.circle")
+                        .foregroundColor(.secondary)
+                    Text("No high-flux / quiet geomagnetic contest windows detected in this 27-day forecast cycle.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                .padding(8)
+                .background(Color(NSColor.controlBackgroundColor).opacity(0.2), in: RoundedRectangle(cornerRadius: 6))
+            } else if !primeWindows.isEmpty {
+                HStack(spacing: 12) {
+                    ForEach(primeWindows.prefix(3)) { window in
+                        primeWindowCard(window)
+                    }
+                }
+            } else {
+                HStack(spacing: 12) {
+                    ForEach(peakDays.prefix(3)) { day in
+                        singleDayCard(day)
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color(NSColor.controlBackgroundColor).opacity(0.35))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color.green.opacity(0.25), lineWidth: 1)
+                )
+        )
+    }
+
+    private func primeWindowCard(_ window: PrimeContestWindow) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            // Top Row: Date Range & Score Badge
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(window.dateRangeString)
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundColor(.primary)
+
+                        if window.containsToday {
+                            HStack(spacing: 3) {
+                                Circle()
+                                    .fill(Color.green)
+                                    .frame(width: 5, height: 5)
+                                Text("ACTIVE TODAY")
+                                    .font(.system(size: 8, weight: .heavy))
+                                    .foregroundColor(.green)
+                            }
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(Color.green.opacity(0.18), in: Capsule())
+                        }
+                    }
+                    Text("\(window.daysCount) Consecutive Days")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+
+                Spacer()
+
+                VStack(alignment: .trailing, spacing: 2) {
+                    HStack(spacing: 3) {
+                        Image(systemName: "star.fill")
+                            .font(.system(size: 9))
+                            .foregroundColor(.yellow)
+                        Text("\(window.score)/100")
+                            .font(.caption)
+                            .fontWeight(.bold)
+                            .monospacedDigit()
+                    }
+                    Text(window.rating)
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundColor(.green)
+                }
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(Color.green.opacity(0.12), in: RoundedRectangle(cornerRadius: 5))
+            }
+
+            Divider()
+
+            // Metrics Row: SFI, Kp, Ap & Bands
+            HStack(spacing: 12) {
+                metricItem(title: "Avg SFI", value: "\(window.averageSFI)", color: .red)
+                metricItem(title: "Max Kp", value: "\(window.maxKp)", color: .blue)
+                metricItem(title: "Avg Ap", value: "\(window.averageAp)", color: .purple)
+
+                Spacer()
+
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("Prime Bands")
+                        .font(.system(size: 9))
+                        .foregroundColor(.secondary)
+                    Text(window.targetBands)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.accentColor)
+                }
+            }
+
+            Divider()
+
+            // Action Button: Add window to Mac Calendar
+            Button {
+                MacCalendarService.shared.addWindowToCalendar(window: window)
+                onScheduleWindow?(window)
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "calendar.badge.plus")
+                        .font(.system(size: 11))
+                    Text("Schedule Window in Mac Calendar")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 5)
+                .background(Color.green.opacity(0.18), in: RoundedRectangle(cornerRadius: 5))
+                .foregroundColor(.green)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(10)
+        .background(Color(NSColor.controlBackgroundColor).opacity(0.6), in: RoundedRectangle(cornerRadius: 6))
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(window.containsToday ? Color.green.opacity(0.6) : Color.green.opacity(0.35), lineWidth: window.containsToday ? 1.5 : 1)
+        )
+    }
+
+    private func singleDayCard(_ day: SolarForecastPoint) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                HStack(spacing: 6) {
+                    Text(day.fullDateFormatted)
+                        .font(.system(size: 13, weight: .bold))
+                    if day.isToday {
+                        Text("TODAY")
+                            .font(.system(size: 8, weight: .heavy))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 3))
+                    }
+                }
+                Spacer()
+                Text("\(day.propagationScore)/100")
+                    .font(.caption)
+                    .fontWeight(.bold)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.green.opacity(0.15), in: Capsule())
+                    .foregroundColor(.green)
+            }
+
+            HStack(spacing: 10) {
+                metricItem(title: "SFI", value: "\(day.solarFlux)", color: .red)
+                metricItem(title: "Kp", value: "\(day.kpIndex)", color: .blue)
+                metricItem(title: "Ap", value: "\(day.aIndex)", color: .purple)
+                Spacer()
+                Text(day.propagationCondition.bestBands)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(.accentColor)
+            }
+
+            Button {
+                MacCalendarService.shared.addDayToCalendar(point: day)
+                onScheduleDay?(day)
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "calendar.badge.plus")
+                        .font(.system(size: 11))
+                    Text("Add Day to Mac Calendar")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 5)
+                .background(Color.accentColor.opacity(0.15), in: RoundedRectangle(cornerRadius: 5))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(10)
+        .background(Color(NSColor.controlBackgroundColor).opacity(0.6), in: RoundedRectangle(cornerRadius: 6))
+    }
+
+    private func metricItem(title: String, value: String, color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(title)
+                .font(.system(size: 9))
+                .foregroundColor(.secondary)
+            Text(value)
+                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                .foregroundColor(color)
+        }
+    }
+}
+
 private struct SolarFluxForecastChart: View {
     let points: [SolarForecastPoint]
+    var onScheduleDay: ((SolarForecastPoint) -> Void)? = nil
+
+    @State private var showSFI: Bool = true
+    @State private var showKp: Bool = true
+    @State private var showAp: Bool = true
+    @State private var highlightFavorableDays: Bool = true
+    @State private var hoveredIndex: Int? = nil
 
     private var solarRange: ClosedRange<Int> {
         let values = points.map(\.solarFlux)
@@ -2066,98 +2449,437 @@ private struct SolarFluxForecastChart: View {
         return minValue...max(maxValue, minValue + 10)
     }
 
+    private var aIndexRange: ClosedRange<Int> {
+        let values = points.map(\.aIndex)
+        let maxValue = max(30, (values.max() ?? 25) + 5)
+        return 0...maxValue
+    }
+
+    private var avgSFI: Int {
+        guard !points.isEmpty else { return 0 }
+        return points.map(\.solarFlux).reduce(0, +) / points.count
+    }
+
+    private var maxKp: Int {
+        points.map(\.kpIndex).max() ?? 0
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 16) {
-                legend(color: .red, title: "Predicted Solar Flux")
-                legend(color: .blue, title: "Kp-Index Predicted")
+            // Header with Factor Toggles and Hover Inspector
+            HStack(spacing: 12) {
+                legendToggle(isOn: $showSFI, color: .red, title: "Solar Flux (SFI)")
+                legendToggle(isOn: $showKp, color: .blue, title: "Kp-Index (0-9)")
+                legendToggle(isOn: $showAp, color: .purple, title: "A-Index (Ap)")
+                legendToggle(isOn: $highlightFavorableDays, color: .green, title: "Favorable Days")
+
                 Spacer()
-                Text("NOAA SWPC 27-day outlook")
+
+                // Inspector or 27-day summary
+                if let idx = hoveredIndex, idx >= 0, idx < points.count {
+                    let pt = points[idx]
+                    HStack(spacing: 8) {
+                        if pt.isToday {
+                            Text("TODAY")
+                                .font(.system(size: 8, weight: .heavy))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 1)
+                                .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 3))
+                        }
+
+                        Text(pt.fullDateFormatted)
+                            .fontWeight(.bold)
+                            .foregroundStyle(.primary)
+
+                        Divider().frame(height: 12)
+
+                        Text("SFI: \(pt.solarFlux)")
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.red)
+
+                        Text("Kp: \(pt.kpIndex)")
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.blue)
+
+                        Text("Ap: \(pt.aIndex)")
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.purple)
+
+                        Text(pt.propagationCondition.rating)
+                            .font(.caption2)
+                            .fontWeight(.bold)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(pt.propagationCondition.color.opacity(0.2), in: Capsule())
+                            .foregroundStyle(pt.propagationCondition.color)
+
+                        if pt.isFavorable {
+                            HStack(spacing: 3) {
+                                Circle().fill(Color.green).frame(width: 5, height: 5)
+                                Text(pt.isPrime ? "Prime Contest" : "Optimal DX")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundColor(.green)
+                            }
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(Color.green.opacity(0.15), in: Capsule())
+                        }
+
+                        Button {
+                            MacCalendarService.shared.addDayToCalendar(point: pt)
+                            onScheduleDay?(pt)
+                        } label: {
+                            Image(systemName: "calendar.badge.plus")
+                                .font(.system(size: 11))
+                                .foregroundColor(.accentColor)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Add \(pt.fullDateFormatted) to macOS Calendar")
+                    }
                     .font(.caption2)
-                    .foregroundColor(.secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Color(NSColor.controlBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
+                } else if let todayPt = points.first(where: { $0.isToday }) {
+                    HStack(spacing: 8) {
+                        HStack(spacing: 4) {
+                            Circle()
+                                .fill(Color.accentColor)
+                                .frame(width: 6, height: 6)
+                            Text("TODAY: \(todayPt.fullDateFormatted)")
+                                .fontWeight(.bold)
+                                .foregroundColor(.accentColor)
+                        }
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.accentColor.opacity(0.15), in: Capsule())
+
+                        Text("SFI: \(todayPt.solarFlux)")
+                            .fontWeight(.semibold)
+                            .foregroundColor(.red)
+
+                        Text("Kp: \(todayPt.kpIndex)")
+                            .fontWeight(.semibold)
+                            .foregroundColor(.blue)
+
+                        Text("Ap: \(todayPt.aIndex)")
+                            .fontWeight(.semibold)
+                            .foregroundColor(.purple)
+
+                        Text(todayPt.propagationCondition.rating)
+                            .font(.caption2)
+                            .fontWeight(.bold)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(todayPt.propagationCondition.color.opacity(0.18), in: Capsule())
+                            .foregroundColor(todayPt.propagationCondition.color)
+
+                        Divider().frame(height: 12)
+
+                        Text("27-Day Outlook · SFI Avg: \(avgSFI) · Max Kp: \(maxKp)")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                    .font(.caption2)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Color(NSColor.controlBackgroundColor).opacity(0.6), in: RoundedRectangle(cornerRadius: 6))
+                } else {
+                    Text("NOAA SWPC 27-Day Outlook · SFI Avg: \(avgSFI) · Max Kp: \(maxKp)")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
             }
 
             GeometryReader { geometry in
-                let plotWidth = max(1, geometry.size.width - 56)
-                let plotHeight = max(1, geometry.size.height - 34)
+                let todayIndex = points.firstIndex(where: { $0.isToday })
+                let bottomAxisHeight: CGFloat = 38
+                let plotWidth = max(1, geometry.size.width - 70)
+                let plotHeight = max(1, geometry.size.height - bottomAxisHeight)
                 let origin = CGPoint(x: 36, y: plotHeight)
                 let step = points.count > 1 ? plotWidth / CGFloat(points.count - 1) : plotWidth
+
                 let solarMin = CGFloat(solarRange.lowerBound)
                 let solarSpan = CGFloat(max(1, solarRange.upperBound - solarRange.lowerBound))
+                let apSpan = CGFloat(max(1, aIndexRange.upperBound))
 
                 let solarCoordinates = points.enumerated().map { index, point in
                     CGPoint(
                         x: origin.x + CGFloat(index) * step,
-                        y: plotHeight - ((CGFloat(point.solarFlux) - solarMin) / solarSpan) * (plotHeight - 12)
+                        y: plotHeight - ((CGFloat(point.solarFlux) - solarMin) / solarSpan) * (plotHeight - 14)
                     )
                 }
                 let kpCoordinates = points.enumerated().map { index, point in
                     CGPoint(
                         x: origin.x + CGFloat(index) * step,
-                        y: plotHeight - (CGFloat(point.kpIndex) / 9.0) * (plotHeight - 12)
+                        y: plotHeight - (CGFloat(point.kpIndex) / 9.0) * (plotHeight - 14)
+                    )
+                }
+                let apCoordinates = points.enumerated().map { index, point in
+                    CGPoint(
+                        x: origin.x + CGFloat(index) * step,
+                        y: plotHeight - (CGFloat(point.aIndex) / apSpan) * (plotHeight - 14)
                     )
                 }
 
                 ZStack(alignment: .topLeading) {
+                    // Background grid
                     grid(width: geometry.size.width, height: plotHeight, origin: origin)
 
-                    linePath(solarCoordinates)
-                        .stroke(Color.red, style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
-
-                    linePath(kpCoordinates)
-                        .stroke(Color.blue.opacity(0.75), style: StrokeStyle(lineWidth: 2.2, lineCap: .round, lineJoin: .round))
-
-                    ForEach(Array(points.enumerated()), id: \.element.id) { index, point in
-                        Circle()
-                            .fill(Color.red)
-                            .frame(width: 5, height: 5)
-                            .position(solarCoordinates[index])
-                            .help("\(point.dateLabel): SFI \(point.solarFlux), Kp \(point.kpIndex)")
-
-                        Circle()
-                            .fill(Color.blue.opacity(0.75))
-                            .frame(width: 5, height: 5)
-                            .position(kpCoordinates[index])
+                    // Favorable Days Shading (Soft Green Columns)
+                    if highlightFavorableDays {
+                        ForEach(Array(points.enumerated()), id: \.element.id) { index, point in
+                            if point.isFavorable {
+                                let fX = origin.x + CGFloat(index) * step
+                                let colWidth = max(14, step * 0.88)
+                                Rectangle()
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [
+                                                Color.green.opacity(point.isPrime ? 0.22 : 0.12),
+                                                Color.green.opacity(0.04)
+                                            ],
+                                            startPoint: .top,
+                                            endPoint: .bottom
+                                        )
+                                    )
+                                    .frame(width: colWidth, height: plotHeight)
+                                    .position(x: fX, y: plotHeight / 2)
+                            }
+                        }
                     }
 
+                    // Today Column Shading & Vertical Guideline
+                    if let tIdx = todayIndex {
+                        let tX = origin.x + CGFloat(tIdx) * step
+                        let colWidth = max(16, step * 0.92)
+
+                        // Highlight background column for Today
+                        Rectangle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        Color.accentColor.opacity(0.20),
+                                        Color.accentColor.opacity(0.04)
+                                    ],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                            )
+                            .frame(width: colWidth, height: plotHeight)
+                            .position(x: tX, y: plotHeight / 2)
+
+                        // Vertical dashed guideline for Today
+                        Path { path in
+                            path.move(to: CGPoint(x: tX, y: 0))
+                            path.addLine(to: CGPoint(x: tX, y: plotHeight))
+                        }
+                        .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
+
+                        // "TODAY" Badge / Pin at the very top of the column
+                        HStack(spacing: 2) {
+                            Image(systemName: "arrowtriangle.down.fill")
+                                .font(.system(size: 6))
+                            Text("TODAY")
+                                .font(.system(size: 8, weight: .heavy))
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(Color.accentColor, in: Capsule())
+                        .shadow(color: Color.black.opacity(0.25), radius: 2, x: 0, y: 1)
+                        .position(x: tX, y: 10)
+                    }
+
+                    // Vertical Guideline on Hover
+                    if let hIdx = hoveredIndex, hIdx >= 0, hIdx < points.count {
+                        let hX = origin.x + CGFloat(hIdx) * step
+                        Path { path in
+                            path.move(to: CGPoint(x: hX, y: 0))
+                            path.addLine(to: CGPoint(x: hX, y: plotHeight))
+                        }
+                        .stroke(Color.accentColor.opacity(0.6), style: StrokeStyle(lineWidth: 1.5, dash: [4, 4]))
+
+                        // Day highlight background column
+                        Rectangle()
+                            .fill(Color.accentColor.opacity(0.08))
+                            .frame(width: max(12, step), height: plotHeight)
+                            .position(x: hX, y: plotHeight / 2)
+                    }
+
+                    // A-Index Line & Points
+                    if showAp {
+                        linePath(apCoordinates)
+                            .stroke(Color.purple.opacity(0.85), style: StrokeStyle(lineWidth: 2.0, lineCap: .round, lineJoin: .round))
+
+                        ForEach(Array(points.enumerated()), id: \.element.id) { index, point in
+                            Circle()
+                                .fill(Color.purple)
+                                .frame(width: 4, height: 4)
+                                .position(apCoordinates[index])
+                        }
+                    }
+
+                    // Kp-Index Line & Points
+                    if showKp {
+                        linePath(kpCoordinates)
+                            .stroke(Color.blue.opacity(0.85), style: StrokeStyle(lineWidth: 2.2, lineCap: .round, lineJoin: .round))
+
+                        ForEach(Array(points.enumerated()), id: \.element.id) { index, point in
+                            Circle()
+                                .fill(Color.blue.opacity(0.85))
+                                .frame(width: 5, height: 5)
+                                .position(kpCoordinates[index])
+                        }
+                    }
+
+                    // Solar Flux Line & Points
+                    if showSFI {
+                        linePath(solarCoordinates)
+                            .stroke(Color.red, style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
+
+                        ForEach(Array(points.enumerated()), id: \.element.id) { index, point in
+                            if highlightFavorableDays && point.isFavorable {
+                                Circle()
+                                    .stroke(Color.green, lineWidth: point.isPrime ? 2.0 : 1.5)
+                                    .frame(width: 10, height: 10)
+                                    .position(solarCoordinates[index])
+                            }
+
+                            Circle()
+                                .fill(highlightFavorableDays && point.isFavorable ? Color.green : Color.red)
+                                .frame(width: 5, height: 5)
+                                .position(solarCoordinates[index])
+                        }
+                    }
+
+                    // Accent Halo around Today's Points on Curves
+                    if let tIdx = todayIndex {
+                        if showSFI && tIdx < solarCoordinates.count {
+                            Circle()
+                                .stroke(Color.accentColor, lineWidth: 2)
+                                .frame(width: 13, height: 13)
+                                .position(solarCoordinates[tIdx])
+                        }
+                        if showKp && tIdx < kpCoordinates.count {
+                            Circle()
+                                .stroke(Color.accentColor, lineWidth: 1.8)
+                                .frame(width: 11, height: 11)
+                                .position(kpCoordinates[tIdx])
+                        }
+                    }
+
+                    // Left Y-Axis Scale (Solar Flux)
                     Text("\(solarRange.upperBound)")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                        .position(x: 14, y: 8)
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundColor(.red.opacity(0.8))
+                        .position(x: 16, y: 8)
                     Text("\(solarRange.lowerBound)")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                        .position(x: 14, y: plotHeight - 2)
-                    Text("Kp 9")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                        .position(x: geometry.size.width - 18, y: 8)
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundColor(.red.opacity(0.8))
+                        .position(x: 16, y: plotHeight - 2)
 
-                    if let first = points.first {
-                        Text(first.dateLabel)
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                            .position(x: origin.x + 12, y: geometry.size.height - 8)
+                    // Right Y-Axis Scale (Kp 9 & Ap)
+                    VStack(alignment: .trailing, spacing: 1) {
+                        Text("Kp 9")
+                            .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                            .foregroundColor(.blue.opacity(0.9))
+                        if showAp {
+                            Text("Ap \(aIndexRange.upperBound)")
+                                .font(.system(size: 8, design: .monospaced))
+                                .foregroundColor(.purple.opacity(0.9))
+                        }
                     }
-                    if let last = points.last {
-                        Text(last.dateLabel)
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                            .position(x: geometry.size.width - 28, y: geometry.size.height - 8)
+                    .position(x: geometry.size.width - 18, y: 12)
+
+                    // Day-by-Day X-Axis Labels (All 27 Days)
+                    ForEach(Array(points.enumerated()), id: \.element.id) { index, point in
+                        let x = origin.x + CGFloat(index) * step
+                        let isHovered = (hoveredIndex == index)
+                        let showMonthLabel = (index == 0 || point.dayFormatted == "01")
+                        let isFavorable = highlightFavorableDays && point.isFavorable
+                        let isToday = point.isToday
+
+                        VStack(spacing: 1) {
+                            if isToday {
+                                Text("TODAY")
+                                    .font(.system(size: 7, weight: .heavy))
+                                    .foregroundColor(.accentColor)
+                                    .padding(.horizontal, 3)
+                                    .padding(.vertical, 0.5)
+                                    .background(Color.accentColor.opacity(0.18), in: RoundedRectangle(cornerRadius: 2))
+                            } else if showMonthLabel {
+                                Text(point.dateLabel.prefix(3))
+                                    .font(.system(size: 8, weight: .bold))
+                                    .foregroundStyle(Color.accentColor)
+                            } else {
+                                Text("")
+                                    .font(.system(size: 8))
+                            }
+
+                            Text(point.dayFormatted)
+                                .font(.system(size: 9, weight: isToday ? .heavy : (isHovered ? .black : (isFavorable ? .bold : .medium)), design: .monospaced))
+                                .foregroundStyle(
+                                    isToday ? Color.white :
+                                    (isHovered ? Color.white :
+                                    (isFavorable ? Color.green : (index % 2 == 0 ? Color.primary : Color.secondary)))
+                                )
+                                .padding(.horizontal, isToday ? 3 : 2)
+                                .padding(.vertical, isToday ? 1 : 0)
+                                .background(
+                                    isToday ? Color.accentColor :
+                                    (isHovered ? Color.accentColor :
+                                    (isFavorable ? Color.green.opacity(0.18) : Color.clear)),
+                                    in: RoundedRectangle(cornerRadius: 3)
+                                )
+
+                            if isToday {
+                                Circle()
+                                    .fill(Color.accentColor)
+                                    .frame(width: 3.5, height: 3.5)
+                            } else if isFavorable {
+                                Circle()
+                                    .fill(Color.green)
+                                    .frame(width: 3, height: 3)
+                            } else {
+                                Spacer().frame(height: 3)
+                            }
+                        }
+                        .opacity(point.isPast ? 0.60 : 1.0)
+                        .position(x: x, y: plotHeight + 18)
+                    }
+                }
+                .contentShape(Rectangle())
+                .onContinuousHover { phase in
+                    switch phase {
+                    case .active(let location):
+                        let localX = location.x - origin.x
+                        let idx = max(0, min(points.count - 1, Int(round(localX / step))))
+                        hoveredIndex = idx
+                    case .ended:
+                        hoveredIndex = nil
                     }
                 }
             }
         }
     }
 
-    private func legend(color: Color, title: String) -> some View {
-        HStack(spacing: 5) {
-            Rectangle()
-                .fill(color)
-                .frame(width: 24, height: 5)
-            Text(title)
-                .font(.caption)
+    private func legendToggle(isOn: Binding<Bool>, color: Color, title: String) -> some View {
+        Button {
+            isOn.wrappedValue.toggle()
+        } label: {
+            HStack(spacing: 5) {
+                Rectangle()
+                    .fill(isOn.wrappedValue ? color : Color.gray.opacity(0.4))
+                    .frame(width: 18, height: 4)
+                Text(title)
+                    .font(.caption)
+                    .fontWeight(isOn.wrappedValue ? .semibold : .regular)
+                    .foregroundColor(isOn.wrappedValue ? .primary : .secondary)
+            }
         }
+        .buttonStyle(.plain)
     }
 
     private func grid(width: CGFloat, height: CGFloat, origin: CGPoint) -> some View {
@@ -2172,7 +2894,7 @@ private struct SolarFluxForecastChart: View {
                 path.addLine(to: CGPoint(x: width, y: y))
             }
         }
-        .stroke(Color.gray.opacity(0.22), lineWidth: 1)
+        .stroke(Color.gray.opacity(0.20), lineWidth: 1)
     }
 
     private func linePath(_ coordinates: [CGPoint]) -> Path {
@@ -2182,6 +2904,189 @@ private struct SolarFluxForecastChart: View {
             for point in coordinates.dropFirst() {
                 path.addLine(to: point)
             }
+        }
+    }
+}
+
+// MARK: - Day-by-Day Forecast Breakdown Table
+
+private struct SolarForecastDayTable: View {
+    let points: [SolarForecastPoint]
+    var onScheduleDay: ((SolarForecastPoint) -> Void)? = nil
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            // Table Header
+            HStack(spacing: 8) {
+                Text("Date")
+                    .font(.caption)
+                    .fontWeight(.bold)
+                    .frame(width: 130, alignment: .leading)
+
+                Text("Solar Flux (SFI)")
+                    .font(.caption)
+                    .fontWeight(.bold)
+                    .frame(width: 110, alignment: .center)
+
+                Text("Kp-Index")
+                    .font(.caption)
+                    .fontWeight(.bold)
+                    .frame(width: 90, alignment: .center)
+
+                Text("A-Index (Ap)")
+                    .font(.caption)
+                    .fontWeight(.bold)
+                    .frame(width: 80, alignment: .center)
+
+                Text("Geomagnetic State")
+                    .font(.caption)
+                    .fontWeight(.bold)
+                    .frame(width: 140, alignment: .leading)
+
+                Text("HF Condition")
+                    .font(.caption)
+                    .fontWeight(.bold)
+                    .frame(width: 110, alignment: .leading)
+
+                Text("Recommended Best Bands")
+                    .font(.caption)
+                    .fontWeight(.bold)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                Text("Calendar")
+                    .font(.caption)
+                    .fontWeight(.bold)
+                    .frame(width: 60, alignment: .center)
+            }
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Color(NSColor.controlBackgroundColor).opacity(0.4), in: RoundedRectangle(cornerRadius: 6))
+
+            Divider()
+
+            // Scrollable 27-Day Rows
+            ScrollView {
+                LazyVStack(spacing: 2) {
+                    ForEach(Array(points.enumerated()), id: \.element.id) { index, point in
+                        HStack(spacing: 8) {
+                            // Date
+                            HStack(spacing: 4) {
+                                if point.isToday {
+                                    Text("TODAY")
+                                        .font(.system(size: 8, weight: .heavy))
+                                        .foregroundColor(.white)
+                                        .padding(.horizontal, 4)
+                                        .padding(.vertical, 1)
+                                        .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 3))
+                                }
+
+                                Text(point.shortDayName)
+                                    .font(.caption2)
+                                    .foregroundStyle(point.isToday ? Color.accentColor : (point.isFavorable ? Color.green : Color.secondary))
+                                    .fontWeight(point.isToday || point.isFavorable ? .bold : .regular)
+                                    .frame(width: 28, alignment: .leading)
+                                Text(point.dateLabel)
+                                    .font(.caption)
+                                    .fontWeight(point.isToday || point.isFavorable ? .bold : .medium)
+                                    .foregroundStyle(point.isToday ? Color.accentColor : (point.isFavorable ? Color.green : Color.primary))
+                            }
+                            .frame(width: 130, alignment: .leading)
+
+                            // SFI Badge
+                            HStack(spacing: 4) {
+                                Text("\(point.solarFlux)")
+                                    .font(.caption)
+                                    .monospacedDigit()
+                                    .fontWeight(.bold)
+                                Image(systemName: point.solarFlux >= 110 ? "arrow.up.circle.fill" : (point.solarFlux >= 95 ? "circle.fill" : "arrow.down.circle.fill"))
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(sfiColor(point.solarFlux))
+                            }
+                            .frame(width: 110, alignment: .center)
+
+                            // Kp-Index
+                            Text("Kp \(point.kpIndex)")
+                                .font(.caption)
+                                .monospacedDigit()
+                                .fontWeight(.bold)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 2)
+                                .background(point.geomagneticState.color.opacity(0.18), in: Capsule())
+                                .foregroundStyle(point.geomagneticState.color)
+                                .frame(width: 90, alignment: .center)
+
+                            // A-Index
+                            Text("\(point.aIndex)")
+                                .font(.caption)
+                                .monospacedDigit()
+                                .frame(width: 80, alignment: .center)
+
+                            // Geomagnetic State
+                            HStack(spacing: 5) {
+                                Circle()
+                                    .fill(point.geomagneticState.color)
+                                    .frame(width: 6, height: 6)
+                                Text(point.geomagneticState.name)
+                                    .font(.caption)
+                            }
+                            .frame(width: 140, alignment: .leading)
+
+                            // HF Condition
+                            Text(point.propagationCondition.rating)
+                                .font(.caption)
+                                .fontWeight(.semibold)
+                                .foregroundStyle(point.propagationCondition.color)
+                                .frame(width: 110, alignment: .leading)
+
+                            // Recommended Best Bands
+                            Text(point.propagationCondition.bestBands)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+
+                            // Add to Calendar Action
+                            Button {
+                                MacCalendarService.shared.addDayToCalendar(point: point)
+                                onScheduleDay?(point)
+                            } label: {
+                                Image(systemName: "calendar.badge.plus")
+                                    .font(.system(size: 11))
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 3)
+                                    .background(point.isFavorable ? Color.green.opacity(0.18) : Color(NSColor.controlBackgroundColor).opacity(0.5), in: RoundedRectangle(cornerRadius: 4))
+                                    .foregroundColor(point.isFavorable ? .green : .secondary)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Schedule \(point.fullDateFormatted) into macOS Calendar")
+                            .frame(width: 60, alignment: .center)
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(
+                            point.isToday ? Color.accentColor.opacity(0.15) :
+                            (point.isFavorable ? Color.green.opacity(0.08) :
+                            (index % 2 == 0 ? Color.clear : Color(NSColor.controlBackgroundColor).opacity(0.2)))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 4)
+                                .stroke(point.isToday ? Color.accentColor.opacity(0.6) : Color.clear, lineWidth: 1.2)
+                        )
+                        .cornerRadius(4)
+                        .opacity(point.isPast ? 0.70 : 1.0)
+                    }
+                }
+            }
+            .frame(maxHeight: 280)
+        }
+    }
+
+    private func sfiColor(_ sfi: Int) -> Color {
+        switch sfi {
+        case 120...: return .green
+        case 100 ..< 120: return .blue
+        case 85 ..< 100: return .yellow
+        default: return .orange
         }
     }
 }

@@ -10,6 +10,8 @@ struct DXpeditionSourceRegression {
         testDXWorldFeedParsing()
         testDXWorldBulletinParsing()
         testDXWorldBulletinLinkParsing()
+        testNG3KParsing()
+        testGenericRSSParsing()
         print("DXpedition source regression tests passed.")
     }
 
@@ -60,6 +62,15 @@ struct DXpeditionSourceRegression {
         precondition(byCall["J38DX"] != nil)
         precondition(byCall["3Z100PKP"] != nil)
         precondition(byCall["SQ100PKP"] != nil)
+        precondition(byCall["F4GYM/P"]?.modes?.contains("FT8") == true)
+        precondition(byCall["F4GYM/P"]?.modes?.contains("FT4") == true)
+        precondition(byCall["F4GYM/P"]?.iota == "EU-064")
+        precondition(byCall["3B8/SQ9UM"]?.iota == "AF-049")
+        precondition(byCall["3B9/SQ9UM"]?.iota == "AF-017")
+        precondition(byCall["XR0Z"]?.iota == "SA-101")
+        precondition(byCall["XR0Z"]?.operators?.contains(where: { $0.contains("CE3VTZ") }) == true)
+        precondition(byCall["XR0Z"]?.operators?.contains(where: { $0.contains("XQ7IR") }) == true)
+        precondition(byCall["A43KD"]?.grid == "LK77FA")
         precondition(byCall["FT8"] == nil)
         precondition(byCall["AF016"] == nil)
         precondition(byCall["ZS6AJG"] == nil)
@@ -101,6 +112,8 @@ struct DXpeditionSourceRegression {
         precondition(entry.start == "2026 Aug22")
         precondition(entry.end == "2026 Aug31")
         precondition(entry.bulletin == "1842")
+        precondition(entry.iota == "NA-094")
+        precondition(entry.qslInfo?.contains("LoTW") == true)
         precondition(entry.sources == ["425 DX News"])
         precondition(entry.sourceURLs.contains("https://www.425dxn.org/index.php?op=wcal"))
     }
@@ -137,6 +150,8 @@ struct DXpeditionSourceRegression {
         precondition(entry.primarySourceURL?.absoluteString == "https://www.dx-world.net/cy9c-st-paul-island/")
         precondition(parsed.bulletin == "DX-World weekly #181")
         precondition(parsed.bulletinPageURL == "https://www.dx-world.net/dx-world-weekly-bulletin-181/")
+        precondition(!parsed.newsArticles.isEmpty)
+        precondition(parsed.newsArticles.first?.title.contains("CY9C") == true)
     }
 
     private static func testDXWorldBulletinParsing() {
@@ -166,8 +181,10 @@ struct DXpeditionSourceRegression {
         precondition(byCall["A50QO"]?.entity == "BHUTAN")
         precondition(byCall["A50QO"]?.start == "")
         precondition(byCall["A50QO"]?.end == "2026 Aug25")
+        precondition(byCall["A50QO"]?.qslInfo?.contains("LoTW") == true)
         precondition(byCall["C6AUB"]?.start == "2026 Aug22")
         precondition(byCall["C6AUB"]?.end == "2026 Aug31")
+        precondition(byCall["C6AUB"]?.bands?.contains("6m") == true)
         precondition(byCall["OJ0JR"]?.end == "2026 Aug24")
         precondition(byCall["OJ0YL"]?.end == "2026 Aug24")
         precondition(byCall["J38DX"]?.start == "2026 Sep01")
@@ -183,5 +200,56 @@ struct DXpeditionSourceRegression {
         """
         let result = DXpeditionService.dxWorldBulletinPDFURL(in: html, relativeTo: pageURL)
         precondition(result?.absoluteString == "https://www.dx-world.net/wp-content/uploads/2026/08/DX_181.pdf?download=1")
+    }
+
+    private static func testNG3KParsing() {
+        let html = """
+        <tr class="adxoitem" bgcolor="#FFDAB9"><td class="date">2026 Sep01</td><td class="date">2026 Sep19</td><td class="cty">Nepal</td><td><span class="call">9N</span><br><span class="spots"> <a href="http://www.dxwatch.com/dxsd1.php?f=0&amp;t=dx&amp;c=9N/OM0GA">[spots]</a></span></td><td class="qsl">LoTW</td><td class="rep"><a href="http://www.dailydx.com">TDDX</a><br>20260902</td><td class="info">By OM0GA as 9N/OM0GA fm Kirtipur; 40-10m; QSL via Club Log OQRS</td></tr>
+        <tr class="adxoitem" bgcolor="#FFDAB9"><td class="date">2026 Sep04</td><td class="date">2026 Sep11</td><td class="cty">Vietnam</td><td><span class="call"><a href="https://www.qrz.com/db/3W9C">3W9C</a></span><br><span class="spots"><a href="http://www.dxwatch.com/dxsd1.php?f=0&amp;t=dx&amp;c=3W9C">[spots]</a></span></td><td class="qsl">LoTW</td><td class="rep"><a href="http://dx-world.net/">DXW.Net</a><br>20260728</td><td class="info">By SP5APW fm Hon Son I (IOTA AS-128); focus on 6m, some 20 15 10m; 100w; VDA; QSL via Club Log OQRS or SP5APW</td></tr>
+        """
+        let entries = DXpeditionService.parseNG3K(html)
+        let byCall = Dictionary(uniqueKeysWithValues: entries.map { ($0.callsign, $0) })
+
+        precondition(byCall["9N/OM0GA"] != nil, "9N/OM0GA should be parsed from spot link / info")
+        precondition(byCall["9N/OM0GA"]?.entity == "Nepal")
+        precondition(byCall["9N/OM0GA"]?.start == "2026 Sep01")
+        precondition(byCall["9N/OM0GA"]?.end == "2026 Sep19")
+        precondition(byCall["9N/OM0GA"]?.sources.contains("NG3K") == true)
+        precondition(byCall["9N/OM0GA"]?.qslInfo?.contains("LoTW") == true)
+        precondition(byCall["9N/OM0GA"]?.bands?.contains("40m") == true)
+
+        precondition(byCall["3W9C"] != nil, "3W9C should be parsed")
+        precondition(byCall["3W9C"]?.entity == "Vietnam")
+        precondition(byCall["3W9C"]?.iota == "AS-128")
+        precondition(byCall["3W9C"]?.bands?.contains("6m") == true)
+    }
+
+    private static func testGenericRSSParsing() {
+        let xml = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <rss version="2.0">
+          <channel>
+            <item>
+              <title>Amateur Radio Supports Relief Operations</title>
+              <link>http://www.arrl.org/news/view/amateur-radio-supports-relief</link>
+              <pubDate>Mon, 10 Aug 2026 09:52:00 -0500</pubDate>
+              <description>&lt;p&gt;Hams operated on 20m and 40m FT8 to provide emergency communications.&lt;/p&gt;</description>
+            </item>
+            <item>
+              <title>Newsline Report 2549</title>
+              <link>https://www.arnewsline.org/news/2026/9/4/report</link>
+              <pubDate>Fri, 04 Sep 2026 16:41:03 +0000</pubDate>
+              <description>&lt;p&gt;&lt;a href="https://www.arnewsline.org/s/report2549.mp3"&gt;AUDIO&lt;/a&gt;&lt;/p&gt;</description>
+            </item>
+          </channel>
+        </rss>
+        """
+        let articles = DXpeditionService.parseRSSFeed(Data(xml.utf8), defaultSource: "ARRL News", defaultCategory: "ARRL News")
+        precondition(articles.count == 2)
+        precondition(articles[0].source == "ARRL News")
+        precondition(articles[0].title.contains("Relief Operations"))
+        precondition(articles[0].bands.contains("20m"))
+        precondition(articles[0].modes.contains("FT8"))
+        precondition(articles[1].audioURL == "https://www.arnewsline.org/s/report2549.mp3")
     }
 }

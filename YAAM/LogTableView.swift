@@ -7,6 +7,86 @@
 
 import SwiftUI
 
+// MARK: - Log Table Layout & Column Alignment Helpers
+fileprivate enum LogTableLayout {
+    static let compactCenteredColumns: Set<String> = [
+        "TIME", "TIME_ON", "CALL", "QSL", "AGING", "APP_VIEW_AGING",
+        "QSL_VIA", "QSL_SENT_VIA", "ROUTE", "FREQ", "BAND", "BAND_RX",
+        "MODE", "CONT", "RST_SENT", "RST_RCVD", "GRIDSQUARE", "GRID"
+    ]
+
+    static let preferredColumnOrder = [
+        "QSO_DATE", "TIME_ON", "CALL", "QSL", "AGING", "FREQ", "BAND", "MODE",
+        "GRIDSQUARE", "COUNTRY", "NAME", "QTH", "CONT", "DXCC", "CQZ", "ITUZ",
+        "QSL_VIA", ConfirmationCreditColumn.countryBand, ConfirmationCreditColumn.grid
+    ]
+
+    static let preferredColumnIndices: [String: Int] = {
+        var dict: [String: Int] = [:]
+        for (idx, col) in preferredColumnOrder.enumerated() {
+            dict[col] = idx
+        }
+        return dict
+    }()
+
+    static func defaultColumnWidth(for header: String) -> CGFloat {
+        switch header {
+        case "QSL": return 88
+        case "AGING", "APP_VIEW_AGING": return 78
+        case "QSL_VIA", "QSL_SENT_VIA", "QSL_RCVD_VIA", "ROUTE": return 88
+        case "EMAIL": return 50
+        case "APP_YAAM_LAST_EMAIL": return 220
+        case "QRZ_URL", "QRZ": return 74
+        case "RANK_QSO": return 118
+        case "RANK_BAND": return 118
+        case "RANK_DXCC": return 128
+        case ConfirmationCreditColumn.countryBand: return 110
+        case ConfirmationCreditColumn.grid: return 100
+        case "QSO_DATE": return 96
+        case "TIME", "TIME_ON", "TIME_OFF": return 76
+        case "CALL": return 152
+        case "FREQ": return 108
+        case "FREQ_RX": return 114
+        case "BAND": return 72
+        case "BAND_RX": return 76
+        case "MODE": return 74
+        case "SUBMODE": return 80
+        case "CONT": return 104
+        case "RST_SENT", "RST_RCVD": return 68
+        case "NAME": return 155
+        case "QTH": return 135
+        case "COUNTRY": return 150
+        case "GRIDSQUARE", "GRID": return 82
+        case "DXCC": return 66
+        case "CQZ", "ITUZ": return 70
+        case "COMMENT": return 220
+        default: return 90
+        }
+    }
+
+    static func isLeftAlignedColumn(_ header: String) -> Bool {
+        header == "CALL" || header == "NAME" || header == "COUNTRY" || header == "QTH" || header == "COMMENT" || header == "PROP_MODE" || header == "SAT_NAME" || header == "APP_YAAM_LAST_EMAIL"
+    }
+
+    static func isRightAlignedColumn(_ header: String) -> Bool {
+        header == "FREQ" || header == "FREQ_RX" || header == "RST_SENT" || header == "RST_RCVD" || header == "DXCC" || header == "CQZ" || header == "ITUZ"
+    }
+
+    static func isCompactCenteredColumn(_ header: String) -> Bool {
+        !isLeftAlignedColumn(header) && !isRightAlignedColumn(header)
+    }
+
+    static func tableAlignment(for header: String) -> Alignment {
+        if isRightAlignedColumn(header) {
+            return .trailing
+        } else if isLeftAlignedColumn(header) {
+            return .leading
+        } else {
+            return .center
+        }
+    }
+}
+
 // MARK: - High Performance Spreadsheet Table View Component
 struct LogTableView: View {
     @EnvironmentObject var appState: AppState
@@ -23,6 +103,10 @@ struct LogTableView: View {
     @State private var showEQSLCardSheet = false
     @State private var activeTablePopover: ActiveTablePopover? = nil
     @State private var pinnedOffsetX: CGFloat = 0
+    @State private var isRoverControlSheetPresented = false
+    @State private var localSearchText: String = ""
+    @State private var searchDebounceTask: Task<Void, Never>? = nil
+    @State private var displayLimit: Int = 300
 
     private var homeCoordinate: GeoCoordinate? {
         if let profile = appState.activeStationProfile {
@@ -36,27 +120,13 @@ struct LogTableView: View {
         return nil
     }
 
-    private let compactCenteredColumns: Set<String> = [
-        "TIME",
-        "TIME_ON",
-        "CALL",
-        "QSL",
-        "FREQ",
-        "BAND",
-        "BAND_RX",
-        "MODE",
-        "CONT",
-        "RST_SENT",
-        "RST_RCVD",
-        "GRIDSQUARE",
-        "GRID"
-    ]
+    private var compactCenteredColumns: Set<String> {
+        LogTableLayout.compactCenteredColumns
+    }
 
-    private let preferredColumnOrder = [
-        "QSO_DATE", "TIME_ON", "CALL", "QSL", "FREQ", "BAND", "MODE",
-        "GRIDSQUARE", "COUNTRY", "NAME", "QTH", "CONT", "DXCC", "CQZ", "ITUZ",
-        ConfirmationCreditColumn.countryBand, ConfirmationCreditColumn.grid
-    ]
+    private var preferredColumnOrder: [String] {
+        LogTableLayout.preferredColumnOrder
+    }
 
     private var utilityColumnWidth: CGFloat {
         appState.filterCriteria.isActive ? 82 : 48
@@ -64,6 +134,9 @@ struct LogTableView: View {
 
     var body: some View {
         let visibleRecords = appState.filteredRecords
+        let currentDisplayed = displayedHeaders
+        let currentPinned = currentDisplayed.filter { isPinnedColumn($0) }
+        let currentUnpinned = currentDisplayed.filter { !isPinnedColumn($0) }
 
         VStack(spacing: 0) {
             // MARK: - Toolbar & Quick Actions Summary Bar
@@ -132,6 +205,16 @@ struct LogTableView: View {
                                 profile.displayTitle,
                                 systemImage: profile.id == appState.activeStationProfileID ? "checkmark" : "antenna.radiowaves.left.and.right"
                             )
+                        }
+                    }
+                    Divider()
+                    Button {
+                        isRoverControlSheetPresented = true
+                    } label: {
+                        if RoverModeEngine.shared.isRoverActive, let session = RoverModeEngine.shared.activeSession {
+                            Label("Rover Active: \(session.targetGrid) (\(session.formattedRemainingTime))", systemImage: "shoeprints.fill")
+                        } else {
+                            Label("Tactical Rover / Portable Scout...", systemImage: "figure.walk")
                         }
                     }
                     Divider()
@@ -352,17 +435,43 @@ struct LogTableView: View {
                     .menuStyle(.borderlessButton)
                     .help("Search Mode: Quick Any, Exact Callsign, or Multi-word Contact Name")
 
-                    TextField(appState.logSearchMode.placeholder, text: $appState.searchText)
+                    TextField(appState.logSearchMode.placeholder, text: $localSearchText)
                         .textFieldStyle(.plain)
                         .font(.caption)
+                        .disableAutocorrection(true)
+                        .onChange(of: localSearchText) { _, newValue in
+                            let sanitized = EnglishSearchInputFilter.sanitize(newValue)
+                            if sanitized != newValue {
+                                localSearchText = sanitized
+                                return
+                            }
+                            searchDebounceTask?.cancel()
+                            searchDebounceTask = Task { @MainActor in
+                                try? await Task.sleep(nanoseconds: 120_000_000)
+                                if !Task.isCancelled {
+                                    appState.searchText = sanitized
+                                }
+                            }
+                        }
+                        .onSubmit {
+                            searchDebounceTask?.cancel()
+                            let sanitized = EnglishSearchInputFilter.sanitize(localSearchText)
+                            localSearchText = sanitized
+                            appState.searchText = sanitized
+                        }
 
-                    if !appState.searchText.isEmpty {
-                        Button(action: { appState.searchText = "" }) {
+                    if !localSearchText.isEmpty {
+                        Button(action: {
+                            localSearchText = ""
+                            searchDebounceTask?.cancel()
+                            appState.searchText = ""
+                        }) {
                             Image(systemName: "xmark.circle.fill")
                                 .foregroundColor(.secondary)
                                 .font(.caption)
                         }
                         .buttonStyle(.plain)
+                        .help("Clear search")
                     }
                 }
                 .padding(.horizontal, 6)
@@ -580,6 +689,101 @@ struct LogTableView: View {
                     .buttonStyle(.plain)
                     .help(appState.filterCriteria.useSentEmail ? "Showing only QSOs with sent emails. Click to reset." : "Filter log table to show \(emailedCount) QSOs with sent emails")
                 }
+
+                let overdueCount = appState.overduePendingCount
+                if overdueCount > 0 {
+                    Button {
+                        appState.filterCriteria.useOverduePending.toggle()
+                    } label: {
+                        HStack(spacing: 3) {
+                            Image(systemName: "hourglass.bottomhalf.filled")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundColor(.orange)
+                            Text("Overdue >30d (\(overdueCount))")
+                                .font(.system(size: 11, weight: appState.filterCriteria.useOverduePending ? .bold : .medium))
+                                .foregroundColor(appState.filterCriteria.useOverduePending ? .orange : .primary)
+                        }
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6)
+                                .fill(appState.filterCriteria.useOverduePending ? Color.orange.opacity(0.22) : Color.orange.opacity(0.08))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .stroke(appState.filterCriteria.useOverduePending ? Color.orange : Color.orange.opacity(0.3), lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .help(appState.filterCriteria.useOverduePending ? "Showing unconfirmed QSOs pending over 30 days. Click to reset." : "Filter log table to show \(overdueCount) overdue unconfirmed QSOs (>30 days)")
+                }
+
+                let unconfCount = appState.unconfirmedCount
+                if unconfCount > 0 && unconfCount < appState.qsoRecords.count {
+                    Button {
+                        appState.filterCriteria.useUnconfirmedOnly.toggle()
+                    } label: {
+                        HStack(spacing: 3) {
+                            Image(systemName: "circle.dashed")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundColor(appState.filterCriteria.useUnconfirmedOnly ? .primary : .secondary)
+                            Text("Pending (\(unconfCount))")
+                                .font(.system(size: 11, weight: appState.filterCriteria.useUnconfirmedOnly ? .bold : .medium))
+                                .foregroundColor(appState.filterCriteria.useUnconfirmedOnly ? .primary : .secondary)
+                        }
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6)
+                                .fill(appState.filterCriteria.useUnconfirmedOnly ? Color.secondary.opacity(0.22) : Color.secondary.opacity(0.08))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .stroke(appState.filterCriteria.useUnconfirmedOnly ? Color.secondary : Color.secondary.opacity(0.25), lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .help(appState.filterCriteria.useUnconfirmedOnly ? "Showing all unconfirmed contacts. Click to reset." : "Filter to show \(unconfCount) unconfirmed contacts awaiting QSL")
+                }
+
+                let lotwWaitCount = appState.lotwWaitingCount
+                if lotwWaitCount > 0 {
+                    Button {
+                        appState.filterCriteria.useLotwWaiting.toggle()
+                    } label: {
+                        HStack(spacing: 3) {
+                            Image(systemName: "arrow.up.circle.fill")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundColor(appState.filterCriteria.useLotwWaiting ? Color(red: 0.25, green: 0.95, blue: 0.45) : .green)
+                            Text("LoTW Wait (\(lotwWaitCount))")
+                                .font(.system(size: 11, weight: appState.filterCriteria.useLotwWaiting ? .bold : .medium))
+                                .foregroundColor(appState.filterCriteria.useLotwWaiting ? Color(red: 0.25, green: 0.95, blue: 0.45) : .primary)
+                        }
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6)
+                                .fill(appState.filterCriteria.useLotwWaiting ? Color.green.opacity(0.22) : Color.green.opacity(0.08))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .stroke(appState.filterCriteria.useLotwWaiting ? Color.green : Color.green.opacity(0.3), lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .help(appState.filterCriteria.useLotwWaiting ? "Showing contacts sent to LoTW awaiting match. Click to reset." : "Filter log table to show \(lotwWaitCount) contacts sent to LoTW awaiting match")
+                }
+                
+                if appState.isLoading && !appState.qsoRecords.isEmpty {
+                    HStack(spacing: 6) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Syncing...")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.horizontal, 6)
+                }
                 
                 Spacer(minLength: 4)
             }
@@ -593,7 +797,7 @@ struct LogTableView: View {
                 todayConfirmedBanner
             }
 
-            if appState.isLoading {
+            if appState.isLoading && appState.qsoRecords.isEmpty {
                 VStack(spacing: 16) {
                     ProgressView("Processing Log File...")
                         .progressViewStyle(.circular)
@@ -637,11 +841,81 @@ struct LogTableView: View {
 
                         LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
                             Section {
-                                ForEach(visibleRecords) { record in
-                                    rowView(for: record)
+                                let renderedRecords = Array(visibleRecords.prefix(displayLimit))
+                                ForEach(renderedRecords) { record in
+                                    LogRowView(
+                                        record: record,
+                                        isSelected: appState.selectedRecordIDs.contains(record.id),
+                                        isNewlyConfirmed: appState.isNewlyConfirmed(record: record),
+                                        isTodayConfirmed: appState.isTodayConfirmed(record: record),
+                                        ordinal: appState.filteredChronologicalOrdinal(for: record.id),
+                                        sentEmail: appState.emailHistoryByCallsign[record["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()] ?? appState.latestEmailHistory(for: record["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()),
+                                        opportunity: appState.confirmationOpportunityIndex.opportunity(for: record.id),
+                                        pinnedOffsetX: pinnedOffsetX,
+                                        isEditingThisRow: editingCellID == record.id,
+                                        editingHeader: editingCellID == record.id ? editingHeader : nil,
+                                        editingText: $editingText,
+                                        pinnedHeaders: currentPinned,
+                                        unpinnedHeaders: currentUnpinned,
+                                        columnWidths: columnWidths,
+                                        utilityColumnWidth: utilityColumnWidth,
+                                        onToggleSelection: { appState.toggleRecordSelection(record.id) },
+                                        onStartEditing: { header, val in
+                                            startEditing(record: record, header: header, value: val)
+                                        },
+                                        onCommitEditing: { header, val in
+                                            appState.updateCell(recordID: record.id, header: header, newValue: val)
+                                            editingCellID = nil
+                                            editingHeader = nil
+                                        },
+                                        onInspectCallsign: {
+                                            activeTablePopover = .callsign(record)
+                                        },
+                                        onInspectGrid: { ctx in
+                                            activeTablePopover = .grid(ctx)
+                                        },
+                                        onShowSentEmail: { ctx in
+                                            activeTablePopover = .sentEmail(ctx)
+                                        },
+                                        onShowRankLegend: {
+                                            activeTablePopover = .rankLegend
+                                        },
+                                        onShowEQSLCard: {
+                                            selectedEQSLRecord = record
+                                            showEQSLCardSheet = true
+                                        },
+                                        onToggleAgingSort: {
+                                            appState.toggleSort(for: "AGING")
+                                        }
+                                    )
+                                    .equatable()
+                                }
+                                if displayLimit < visibleRecords.count {
+                                    HStack(spacing: 8) {
+                                        Text("Showing \(min(displayLimit, visibleRecords.count).formatted()) of \(visibleRecords.count.formatted()) QSOs")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                        Button("Load Next 500") {
+                                            displayLimit += 500
+                                        }
+                                        .buttonStyle(.bordered)
+                                        .controlSize(.small)
+                                        Button("Show All") {
+                                            displayLimit = visibleRecords.count
+                                        }
+                                        .buttonStyle(.bordered)
+                                        .controlSize(.small)
+                                    }
+                                    .padding(.vertical, 10)
+                                    .frame(maxWidth: .infinity, alignment: .center)
+                                    .onAppear {
+                                        if displayLimit < visibleRecords.count {
+                                            displayLimit += 300
+                                        }
+                                    }
                                 }
                             } header: {
-                                headerRowView
+                                headerRowView(pinnedHeaders: currentPinned, unpinnedHeaders: currentUnpinned)
                                     .background(Color(NSColor.textBackgroundColor))
                             }
                         }
@@ -650,9 +924,13 @@ struct LogTableView: View {
                 .coordinateSpace(name: "logTableScrollSpace")
                 .onPreferenceChange(LogTableScrollOffsetKey.self) { minX in
                     let scrollX = max(0, -minX)
-                    // Only update if difference is more than 3px to avoid re-rendering rows during vertical drags
-                    if abs(pinnedOffsetX - scrollX) >= 3.0 {
-                        pinnedOffsetX = scrollX
+                    let effectiveX: CGFloat = scrollX < 4.0 ? 0.0 : scrollX
+                    if effectiveX == 0.0 {
+                        if pinnedOffsetX != 0.0 {
+                            pinnedOffsetX = 0.0
+                        }
+                    } else if abs(pinnedOffsetX - effectiveX) >= 6.0 {
+                        pinnedOffsetX = effectiveX
                     }
                 }
                 .background(Color(NSColor.textBackgroundColor))
@@ -770,6 +1048,10 @@ struct LogTableView: View {
                 )
             }
         }
+        .sheet(isPresented: $isRoverControlSheetPresented) {
+            RoverModeControlSheet()
+                .environmentObject(appState)
+        }
         .popover(item: $activeTablePopover) { popover in
             switch popover {
             case .sentEmail(let detail):
@@ -792,10 +1074,25 @@ struct LogTableView: View {
                 })
             case .grid(let context):
                 GridInspectionCard(context: context, homeCoordinate: homeCoordinate)
+            case .rankLegend:
+                RankLegendCardView()
             }
         }
         .onAppear {
+            localSearchText = appState.searchText
             restoreColumnVisibility()
+        }
+        .onChange(of: appState.searchText) { _, newQuery in
+            if localSearchText != newQuery {
+                localSearchText = newQuery
+            }
+            displayLimit = 300
+        }
+        .onChange(of: appState.filterCriteria.isActive) { _, _ in
+            displayLimit = 300
+        }
+        .onChange(of: appState.loadedFileURL) { _, _ in
+            displayLimit = 300
         }
         .onChange(of: appState.activeStationProfileID) { _, _ in
             restoreColumnVisibility()
@@ -918,7 +1215,7 @@ struct LogTableView: View {
         )
     }
 
-    private var headerRowView: some View {
+    private func headerRowView(pinnedHeaders: [String], unpinnedHeaders: [String]) -> some View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
                 // Pinned Left Headers (Utility + Date + Time + Call + QSL)
@@ -966,153 +1263,425 @@ struct LogTableView: View {
     private func headerCell(for header: String) -> some View {
         let w = columnWidths[header] ?? defaultColumnWidth(for: header)
         let isDerived = ConfirmationCreditColumn.isDerived(header)
-        let isSorted = !isDerived && appState.sortHeader == header
+        let canSort = !isDerived || header == "AGING" || header == "APP_VIEW_AGING"
+        let isSorted = canSort && appState.sortHeader == header
         let meta = headerMeta(for: header)
+        let isRankHeader = header.hasPrefix("RANK_")
         
-        return HStack(spacing: 0) {
-            HStack(spacing: 3.5) {
-                Image(systemName: meta.icon)
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundColor(isSorted ? .yellow : Color(white: 0.75))
-
-                Text(meta.title)
-                    .font(.system(size: 10.5, weight: isSorted ? .bold : .semibold))
-                    .foregroundColor(isSorted ? .white : Color(white: 0.88))
-                    .lineLimit(1)
-                
-                if isSorted {
-                    Image(systemName: appState.sortAscending ? "arrow.up" : "arrow.down")
-                        .font(.system(size: 8.5, weight: .bold))
-                        .foregroundColor(.yellow)
-                }
-                
-                if !isDerived {
-                    Button(action: { appState.deleteColumn(header: header) }) {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 7.5, weight: .bold))
-                            .foregroundColor(Color(white: 0.55))
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.horizontal, 4)
-            .frame(width: max(0, w - 6), height: 28, alignment: tableAlignment(for: header))
-            .contentShape(Rectangle())
-            .onTapGesture {
-                if !isDerived {
+        return HeaderCellView(
+            header: header,
+            width: w,
+            isDerived: isDerived,
+            isSorted: isSorted,
+            sortAscending: appState.sortAscending,
+            meta: meta,
+            alignment: tableAlignment(for: header),
+            helpText: headerHelp(for: header),
+            onSort: {
+                if canSort {
                     appState.toggleSort(for: header)
                 }
+            },
+            onAutoFit: {
+                autoFitColumnWidth(header)
+            },
+            onDelete: {
+                appState.deleteColumn(header: header)
+            },
+            onSortAscending: {
+                appState.sortHeader = header
+                appState.sortAscending = true
+            },
+            onSortDescending: {
+                appState.sortHeader = header
+                appState.sortAscending = false
+            },
+            onShowRankLegend: isRankHeader ? {
+                activeTablePopover = .rankLegend
+            } : nil,
+            onResizeChange: { translation in
+                if dragStartWidths[header] == nil {
+                    dragStartWidths[header] = columnWidths[header] ?? defaultColumnWidth(for: header)
+                }
+                if let start = dragStartWidths[header] {
+                    columnWidths[header] = max(40, start + translation)
+                }
+            },
+            onResizeEnd: {
+                dragStartWidths[header] = nil
             }
-            
-            Rectangle()
-                .fill(Color(white: 0.22).opacity(0.6))
-                .frame(width: 6, height: 28)
-                .contentShape(Rectangle())
-                .onHover { inside in
-                    if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
-                }
-                .onTapGesture(count: 2) {
-                    autoFitColumnWidth(header)
-                }
-                .gesture(
-                    DragGesture()
-                        .onChanged { value in
-                            if dragStartWidths[header] == nil {
-                                dragStartWidths[header] = columnWidths[header] ?? defaultColumnWidth(for: header)
-                            }
-                            if let start = dragStartWidths[header] {
-                                columnWidths[header] = max(40, start + value.translation.width)
-                            }
-                        }
-                        .onEnded { _ in
-                            dragStartWidths[header] = nil
-                        }
-                )
-        }
-        .frame(width: w, height: 28)
-        .background(isSorted ? Color(white: 0.18) : Color(white: 0.12))
-        .border(Color(white: 0.22).opacity(0.6), width: 0.5)
-        .help(headerHelp(for: header))
-        .contextMenu {
-            if isDerived {
-                Text(headerHelp(for: header))
+        )
+    }
+
+
+    private func autoFitColumnWidth(_ header: String) {
+        let meta = headerMeta(for: header)
+        var maxChars = meta.title.count + 5
+        let sample = appState.filteredRecords.prefix(100)
+        for record in sample {
+            let val = record[header]
+            if header == "QSO_DATE" {
+                maxChars = max(maxChars, formatDate(val).count)
+            } else if header == "TIME_ON" || header == "TIME" || header == "TIME_OFF" {
+                maxChars = max(maxChars, formatTime(val).count)
+            } else if header == "GRIDSQUARE" || header == "GRID" {
+                maxChars = max(maxChars, 4 + 1)
+            } else if header == "CALL" {
+                // Account for callsign chars plus badges (NEW/TODAY, QSL card icon, email icon)
+                maxChars = max(maxChars, val.count + 8)
             } else {
-                Button("Sort Ascending") {
-                    appState.sortHeader = header
-                    appState.sortAscending = true
-                }
-                Button("Sort Descending") {
-                    appState.sortHeader = header
-                    appState.sortAscending = false
-                }
-                Divider()
-                Button("Auto-Fit Width") {
-                    autoFitColumnWidth(header)
-                }
-                Divider()
-                Button("Delete Column '\(header)'") {
-                    appState.deleteColumn(header: header)
-                }
+                maxChars = max(maxChars, val.count)
             }
+        }
+        let computed = CGFloat(maxChars * 8 + 24)
+        columnWidths[header] = max(defaultColumnWidth(for: header), min(computed, 340))
+    }
+
+
+    private func headerHelp(for header: String) -> String {
+        switch header {
+        case "AGING", "APP_VIEW_AGING":
+            return "QSL Wait Time: Days elapsed since QSL request sent (or contact date if unsent). Highlights overdue contacts (>30d amber, >90d red). Click to sort."
+        case "QSL_VIA", "QSL_SENT_VIA", "QSL_RCVD_VIA", "ROUTE":
+            return "QSL Route: Direct (📮), Bureau (🏛️), Electronic (⚡), or Manager callsign."
+        case "RANK_QSO":
+            return "QRZ World QSO Rank: Standing in QRZ Leaderboard by total logged QSOs (Blue). Click to view Ranks Legend."
+        case "RANK_BAND":
+            return "QRZ Band Rank: Standing in QRZ Leaderboard for contacts on this amateur band (Orange). Click to view Ranks Legend."
+        case "RANK_DXCC":
+            return "QRZ DXCC Rank: Standing in QRZ Leaderboard by verified DXCC entities (Green). Click to view Ranks Legend."
+        case "QSL":
+            return "QSL Confirmation Status Matrix (L: LoTW, e: eQSL, Q: QRZ, C: Card).\nGreen ✓ = Confirmed, Amber ↑ = Sent / Pending, Red ✕ = Rejected / Invalid, Gray = Not Sent."
+        case ConfirmationCreditColumn.countryBand:
+            return "Shows whether confirming an unconfirmed QSO adds a new confirmed band for that country."
+        case ConfirmationCreditColumn.grid:
+            return "Shows whether confirming an unconfirmed QSO adds a new four-character Maidenhead grid."
+        case "CONT":
+            return "Continent: Click to sort; drag the right edge to resize."
+        case "EMAIL":
+            return "Email: Interactive 1-click copy & compose. Click to email contact; double-click to edit."
+        case "QRZ_URL", "QRZ":
+            return "QRZ Profile: Click to open QRZ.com profile; drag the right edge to resize."
+        default:
+            return "Click to sort by \(displayTitle(for: header)); drag the right edge to resize."
         }
     }
 
-    private func rowView(for record: QSORecordModel) -> some View {
-        let isSelected = appState.selectedRecordIDs.contains(record.id)
-        let isNewlyConfirmed = appState.isNewlyConfirmed(record: record)
-        let isTodayConfirmed = appState.isTodayConfirmed(record: record)
-        let accentBarColor: Color = {
-            if isSelected {
-                return Color.accentColor // Blue
-            } else if isNewlyConfirmed {
-                return Color.pink // Pink
-            } else if record.isConfirmed {
-                let isLotw = ["Y", "V", "C"].contains(record["LOTW_QSL_RCVD"].uppercased()) || record["APP_LOTW_QSL_RCVD"].uppercased() == "Y"
-                let isEqsl = ["Y", "V", "C"].contains(record["EQSL_QSL_RCVD"].uppercased()) || record["APP_EQSL_QSL_RCVD"].uppercased() == "Y"
-                let isQrz = ["Y", "V", "C"].contains(record["QRZLOG_QSL_RCVD"].uppercased()) ||
-                    ["Y", "V", "C"].contains(record["QRZCOM_QSL_RCVD"].uppercased()) ||
-                    ["Y", "V", "C"].contains(record["QRZ_QSL_RCVD"].uppercased()) ||
-                    record["APP_YAAM_QRZ_CONFIRMED"] == "Y" ||
-                    record["APP_QRZLOG_STATUS"].uppercased() == "C"
-                let isCard = ["Y", "V", "C"].contains(record["QSL_RCVD"].uppercased())
-                
-                if isLotw {
-                    return Color(red: 0.2, green: 0.85, blue: 0.35) // LoTW Green
-                } else if isEqsl {
-                    return Color(red: 0.25, green: 0.65, blue: 1.0) // eQSL Electric Blue
-                } else if isQrz {
-                    return Color(red: 0.95, green: 0.75, blue: 0.2) // QRZ Gold / Amber
-                } else if isCard {
-                    return Color(red: 1.0, green: 0.5, blue: 0.2) // Paper Card Orange
-                } else {
-                    return Color.green
-                }
-            } else {
-                return Color.orange.opacity(0.35) // Unconfirmed muted orange
+    private func startEditing(record: QSORecordModel, header: String, value: String) {
+        editingCellID = record.id
+        editingHeader = header
+        editingText = value
+    }
+
+    private func headerMeta(for header: String) -> LogTableHeaderMeta {
+        switch header {
+        case "QSL":
+            return LogTableHeaderMeta(title: "QSL", icon: "checkmark.seal.fill")
+        case "AGING", "APP_VIEW_AGING":
+            return LogTableHeaderMeta(title: "Wait", icon: "hourglass")
+        case "QSL_VIA", "QSL_SENT_VIA", "QSL_RCVD_VIA", "ROUTE":
+            return LogTableHeaderMeta(title: "Route", icon: "envelope.and.arrow.triangle.branch.fill")
+        case "QSO_DATE":
+            return LogTableHeaderMeta(title: "Date", icon: "calendar")
+        case "TIME_ON", "TIME":
+            return LogTableHeaderMeta(title: "Time", icon: "clock")
+        case "TIME_OFF":
+            return LogTableHeaderMeta(title: "Time Off", icon: "clock.badge.checkmark")
+        case "CALL":
+            return LogTableHeaderMeta(title: "Callsign", icon: "antenna.radiowaves.left.and.right")
+        case "FREQ":
+            return LogTableHeaderMeta(title: "Frequency", icon: "waveform.path")
+        case "FREQ_RX":
+            return LogTableHeaderMeta(title: "RX Frequency", icon: "waveform.path")
+        case "BAND":
+            return LogTableHeaderMeta(title: "Band", icon: "wave.3.left")
+        case "BAND_RX":
+            return LogTableHeaderMeta(title: "RX Band", icon: "wave.3.left")
+        case "MODE":
+            return LogTableHeaderMeta(title: "Mode", icon: "bolt.fill")
+        case "SUBMODE":
+            return LogTableHeaderMeta(title: "Submode", icon: "bolt")
+        case "RST_SENT":
+            return LogTableHeaderMeta(title: "Sent", icon: "arrow.up.circle.fill")
+        case "RST_RCVD":
+            return LogTableHeaderMeta(title: "Rcvd", icon: "arrow.down.circle.fill")
+        case "NAME":
+            return LogTableHeaderMeta(title: "Name", icon: "person.fill")
+        case "QTH":
+            return LogTableHeaderMeta(title: "QTH", icon: "house.fill")
+        case "COUNTRY":
+            return LogTableHeaderMeta(title: "Country", icon: "globe.europe.africa.fill")
+        case "CONT":
+            return LogTableHeaderMeta(title: "Continent", icon: "map.fill")
+        case "GRIDSQUARE", "GRID":
+            return LogTableHeaderMeta(title: "Grid", icon: "square.grid.3x3.fill")
+        case "DXCC":
+            return LogTableHeaderMeta(title: "DXCC", icon: "flag.fill")
+        case "CQZ":
+            return LogTableHeaderMeta(title: "CQ Zone", icon: "circle.grid.cross.fill")
+        case "ITUZ":
+            return LogTableHeaderMeta(title: "ITU Zone", icon: "circle.grid.3x3.fill")
+        case "STATE":
+            return LogTableHeaderMeta(title: "State", icon: "mappin.circle.fill")
+        case "EMAIL":
+            return LogTableHeaderMeta(title: "Email", icon: "envelope.fill")
+        case "QRZ_URL", "QRZ":
+            return LogTableHeaderMeta(title: "QRZ", icon: "safari.fill")
+        case "RANK_QSO":
+            return LogTableHeaderMeta(title: "QSO Rank", icon: "trophy.fill")
+        case "RANK_BAND":
+            return LogTableHeaderMeta(title: "Band Rank", icon: "medal.fill")
+        case "RANK_DXCC":
+            return LogTableHeaderMeta(title: "DXCC Rank", icon: "rosette")
+        case ConfirmationCreditColumn.countryBand:
+            return LogTableHeaderMeta(title: "Band Credit", icon: "sparkles")
+        case ConfirmationCreditColumn.grid:
+            return LogTableHeaderMeta(title: "Grid Credit", icon: "square.grid.3x3.fill")
+        case "APP_YAAM_LAST_EMAIL":
+            return LogTableHeaderMeta(title: "Last Email", icon: "envelope.badge.fill")
+        case "COMMENT":
+            return LogTableHeaderMeta(title: "Comment", icon: "bubble.left.fill")
+        case "PROP_MODE":
+            return LogTableHeaderMeta(title: "Propagation", icon: "rays")
+        case "SAT_NAME":
+            return LogTableHeaderMeta(title: "Satellite", icon: "orbit")
+        default:
+            return LogTableHeaderMeta(title: header, icon: "tag.fill")
+        }
+    }
+
+    private func defaultColumnWidth(for header: String) -> CGFloat {
+        LogTableLayout.defaultColumnWidth(for: header)
+    }
+
+    private func isLeftAlignedColumn(_ header: String) -> Bool {
+        LogTableLayout.isLeftAlignedColumn(header)
+    }
+
+    private func isRightAlignedColumn(_ header: String) -> Bool {
+        LogTableLayout.isRightAlignedColumn(header)
+    }
+
+    private func isCompactCenteredColumn(_ header: String) -> Bool {
+        LogTableLayout.isCompactCenteredColumn(header)
+    }
+
+    private func tableAlignment(for header: String) -> Alignment {
+        LogTableLayout.tableAlignment(for: header)
+    }
+
+    private func displayTitle(for header: String) -> String {
+        headerMeta(for: header).title
+    }
+
+    private var hiddenColumnCount: Int {
+        appState.tableHeaders.filter { isHiddenByDefault($0) && !explicitlyShownColumns.contains($0) }.count
+    }
+
+    private var displayedHeaders: [String] {
+        let visibleStoredHeaders = appState.tableHeaders.filter { header in
+            !isHiddenByDefault(header) || explicitlyShownColumns.contains(header)
+        }
+        var headers = visibleStoredHeaders
+        if !headers.contains("QSL") {
+            headers.append("QSL")
+        }
+        if !headers.contains("AGING") && (explicitlyShownColumns.contains("AGING") || !isHiddenByDefault("AGING")) {
+            headers.append("AGING")
+        }
+        for derived in ConfirmationCreditColumn.headers {
+            if explicitlyShownColumns.contains(derived) && !headers.contains(derived) {
+                headers.append(derived)
             }
-        }()
-        let statusBgColor: Color = {
-            if isSelected {
-                return Color.accentColor.opacity(0.12)
-            } else if isTodayConfirmed {
-                return Color.green.opacity(0.06)
-            } else if isNewlyConfirmed {
-                return Color.pink.opacity(0.045)
-            } else if record.isConfirmed {
-                return Color.green.opacity(0.03)
-            } else {
-                return Color.clear
+        }
+        var uniqueHeaders: [String] = []
+        var seen = Set<String>()
+        for h in headers {
+            let key = h.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            if !seen.contains(key) {
+                seen.insert(key)
+                uniqueHeaders.append(h)
             }
-        }()
+        }
+        return orderedHeaders(uniqueHeaders)
+    }
+
+    private func orderedHeaders(_ headers: [String]) -> [String] {
+        headers.sorted { lhs, rhs in
+            let lhsPriority = columnPriority(lhs)
+            let rhsPriority = columnPriority(rhs)
+
+            if lhsPriority != rhsPriority {
+                return lhsPriority < rhsPriority
+            }
+
+            let lhsPreferred = LogTableLayout.preferredColumnIndices[lhs] ?? Int.max
+            let rhsPreferred = LogTableLayout.preferredColumnIndices[rhs] ?? Int.max
+            if lhsPreferred != rhsPreferred {
+                return lhsPreferred < rhsPreferred
+            }
+
+            return lhs.localizedStandardCompare(rhs) == .orderedAscending
+        }
+    }
+
+    private func columnPriority(_ header: String) -> Int {
+        if header == "GRIDSQUARE" || header == "GRID" {
+            return 7
+        }
+        if let preferredIndex = LogTableLayout.preferredColumnIndices[header] {
+            return preferredIndex >= 7 ? preferredIndex + 1 : preferredIndex
+        }
+
+        if isMostlyEmpty(header) {
+            return 9_000
+        }
+
+        if TableColumnPolicy.isLowPriority(header) {
+            return 10_000
+        }
+
+        return 1_000
+    }
+
+    private func isHiddenByDefault(_ header: String) -> Bool {
+        TableColumnPolicy.isHiddenByDefault(header, isMostlyEmpty: isMostlyEmpty(header))
+    }
+
+    private func isLowValueTrailingColumn(_ header: String) -> Bool {
+        TableColumnPolicy.isLowPriority(header)
+    }
+
+    private var columnVisibilityStorageKey: String {
+        "logTable.explicitlyShownColumns.\(appState.activeStationProfileID?.uuidString ?? "default")"
+    }
+
+    private func restoreColumnVisibility() {
+        let saved = UserDefaults.standard.stringArray(forKey: columnVisibilityStorageKey) ?? []
+        explicitlyShownColumns = Set(saved.filter {
+            appState.tableHeaders.contains($0) && !TableColumnPolicy.isDatabaseOnly($0)
+        })
+    }
+
+    private func persistColumnVisibility() {
+        UserDefaults.standard.set(Array(explicitlyShownColumns).sorted(), forKey: columnVisibilityStorageKey)
+    }
+
+    private func isMostlyEmpty(_ header: String) -> Bool {
+        guard !appState.qsoRecords.isEmpty else { return false }
+        guard LogTableLayout.preferredColumnIndices[header] == nil else { return false }
+        guard !isLowValueTrailingColumn(header) else { return false }
+        guard !TableColumnPolicy.isDatabaseOnly(header) else { return false }
+
+        let sample = appState.qsoRecords.prefix(100)
+        return !sample.contains(where: { !$0[header].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })
+    }
+}
+
+// MARK: - Equatable High-Performance Log Row View
+fileprivate struct LogRowView: View, Equatable {
+    @EnvironmentObject var appState: AppState
+
+    let record: QSORecordModel
+    let isSelected: Bool
+    let isNewlyConfirmed: Bool
+    let isTodayConfirmed: Bool
+    let ordinal: Int?
+    let sentEmail: EmailHistoryEntry?
+    let opportunity: QSOConfirmationOpportunity?
+    let pinnedOffsetX: CGFloat
+    let isEditingThisRow: Bool
+    let editingHeader: String?
+    @Binding var editingText: String
+    let pinnedHeaders: [String]
+    let unpinnedHeaders: [String]
+    let columnWidths: [String: CGFloat]
+    let utilityColumnWidth: CGFloat
+
+    let onToggleSelection: () -> Void
+    let onStartEditing: (String, String) -> Void
+    let onCommitEditing: (String, String) -> Void
+    let onInspectCallsign: () -> Void
+    let onInspectGrid: (GridInspectionContext) -> Void
+    let onShowSentEmail: (SentEmailDetailContext) -> Void
+    let onShowRankLegend: () -> Void
+    let onShowEQSLCard: () -> Void
+    let onToggleAgingSort: () -> Void
+
+    @State private var isHovered: Bool = false
+
+    static func == (lhs: LogRowView, rhs: LogRowView) -> Bool {
+        lhs.record == rhs.record &&
+        lhs.isSelected == rhs.isSelected &&
+        lhs.isNewlyConfirmed == rhs.isNewlyConfirmed &&
+        lhs.isTodayConfirmed == rhs.isTodayConfirmed &&
+        lhs.ordinal == rhs.ordinal &&
+        lhs.pinnedOffsetX == rhs.pinnedOffsetX &&
+        lhs.isEditingThisRow == rhs.isEditingThisRow &&
+        lhs.editingHeader == rhs.editingHeader &&
+        (!lhs.isEditingThisRow || lhs.editingText == rhs.editingText) &&
+        lhs.utilityColumnWidth == rhs.utilityColumnWidth &&
+        lhs.sentEmail == rhs.sentEmail &&
+        lhs.opportunity == rhs.opportunity &&
+        lhs.pinnedHeaders == rhs.pinnedHeaders &&
+        lhs.unpinnedHeaders == rhs.unpinnedHeaders &&
+        lhs.columnWidths == rhs.columnWidths
+    }
+
+    private var accentBarColor: Color {
+        if isSelected {
+            return Color.accentColor
+        } else if isNewlyConfirmed {
+            return Color.pink
+        } else if record.isConfirmed {
+            let isLotw = ["Y", "V", "C"].contains(record["LOTW_QSL_RCVD"].uppercased()) || record["APP_LOTW_QSL_RCVD"].uppercased() == "Y"
+            let isEqsl = ["Y", "V", "C"].contains(record["EQSL_QSL_RCVD"].uppercased()) || record["APP_EQSL_QSL_RCVD"].uppercased() == "Y"
+            let isQrz = ["Y", "V", "C"].contains(record["QRZLOG_QSL_RCVD"].uppercased()) ||
+                ["Y", "V", "C"].contains(record["QRZCOM_QSL_RCVD"].uppercased()) ||
+                ["Y", "V", "C"].contains(record["QRZ_QSL_RCVD"].uppercased()) ||
+                record["APP_YAAM_QRZ_CONFIRMED"] == "Y" ||
+                record["APP_QRZLOG_STATUS"].uppercased() == "C"
+            let isCard = ["Y", "V", "C"].contains(record["QSL_RCVD"].uppercased())
+            
+            if isLotw {
+                return Color(red: 0.2, green: 0.85, blue: 0.35)
+            } else if isEqsl {
+                return Color(red: 0.25, green: 0.65, blue: 1.0)
+            } else if isQrz {
+                return Color(red: 0.95, green: 0.75, blue: 0.2)
+            } else if isCard {
+                return Color(red: 1.0, green: 0.5, blue: 0.2)
+            } else {
+                return Color.green
+            }
+        } else {
+            return Color.orange.opacity(0.35)
+        }
+    }
+
+    private var statusBgColor: Color {
+        if isSelected {
+            return Color.accentColor.opacity(0.12)
+        } else if isHovered {
+            return Color.white.opacity(0.04)
+        } else if isNewlyConfirmed {
+            return Color.pink.opacity(0.045)
+        } else if record.isConfirmed {
+            return Color.green.opacity(0.03)
+        } else {
+            return Color.clear
+        }
+    }
+
+    var body: some View {
         let call = record["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        let sentEmail = appState.emailHistoryByCallsign[call] ?? appState.latestEmailHistory(for: call)
         
-        return HStack(spacing: 0) {
+        HStack(spacing: 0) {
             // Pinned Left Cells (Utility + Date + Time + Call + QSL)
             HStack(spacing: 0) {
-                utilityRowCell(for: record, isSelected: isSelected, accentBarColor: accentBarColor, statusBgColor: statusBgColor)
+                utilityRowCell
                 ForEach(pinnedHeaders, id: \.self) { header in
-                    rowCell(for: record, header: header, isSelected: isSelected, isNewlyConfirmed: isNewlyConfirmed, isTodayConfirmed: isTodayConfirmed, call: call, sentEmail: sentEmail, statusBgColor: statusBgColor)
+                    rowCell(header: header, call: call)
                 }
             }
             .background(Color(NSColor.textBackgroundColor))
@@ -1124,26 +1693,51 @@ struct LogTableView: View {
                     .frame(width: 1),
                 alignment: .trailing
             )
+            .overlay(alignment: .trailing) {
+                if isHovered {
+                    HoverQuickActionBar(
+                        record: record,
+                        call: call,
+                        appState: appState,
+                        onEdit: {
+                            onStartEditing("CALL", record["CALL"])
+                        }
+                    )
+                    .padding(.trailing, 4)
+                    .transition(.opacity.combined(with: .scale(scale: 0.95)))
+                }
+            }
 
             // Scrollable Trailing Cells
             HStack(spacing: 0) {
                 ForEach(unpinnedHeaders, id: \.self) { header in
-                    rowCell(for: record, header: header, isSelected: isSelected, isNewlyConfirmed: isNewlyConfirmed, isTodayConfirmed: isTodayConfirmed, call: call, sentEmail: sentEmail, statusBgColor: statusBgColor)
+                    rowCell(header: header, call: call)
                 }
             }
             .zIndex(1)
         }
         .frame(height: 28)
+        .contentShape(Rectangle())
+        .onHover { hovering in
+            if isHovered != hovering {
+                withAnimation(.easeInOut(duration: 0.12)) {
+                    isHovered = hovering
+                }
+            }
+        }
+        .contextMenu {
+            rowContextMenuContent(call: call)
+        }
     }
 
-    private func utilityRowCell(for record: QSORecordModel, isSelected: Bool, accentBarColor: Color, statusBgColor: Color) -> some View {
+    private var utilityRowCell: some View {
         HStack(spacing: 0) {
             Rectangle()
                 .fill(accentBarColor)
                 .frame(width: 3)
             
             HStack(spacing: 5) {
-                if let ordinal = appState.filteredChronologicalOrdinal(for: record.id) {
+                if let ordinal {
                     Text(ordinal.formatted())
                         .font(.system(size: 9, weight: .semibold, design: .monospaced))
                         .foregroundStyle(.secondary)
@@ -1153,21 +1747,13 @@ struct LogTableView: View {
                         .help("Position by UTC date and time in the current filtered result")
                 }
 
-                Button(action: { appState.toggleRecordSelection(record.id) }) {
+                Button(action: { onToggleSelection() }) {
                     Image(systemName: isSelected ? "checkmark.square.fill" : "square")
                         .font(.system(size: 11))
                         .foregroundColor(isSelected ? .accentColor : .gray)
                 }
                 .buttonStyle(.plain)
                 .help(isSelected ? "Deselect QSO" : "Select QSO")
-
-                Button(action: { appState.deleteRecord(id: record.id) }) {
-                    Image(systemName: "trash.fill")
-                        .font(.system(size: 8))
-                        .foregroundColor(.red.opacity(0.6))
-                }
-                .buttonStyle(.plain)
-                .help("Delete QSO")
             }
             .frame(maxWidth: .infinity, alignment: .center)
         }
@@ -1176,35 +1762,26 @@ struct LogTableView: View {
         .border(Color.gray.opacity(0.15), width: 0.5)
     }
 
-    private func rowCell(
-        for record: QSORecordModel,
-        header: String,
-        isSelected: Bool,
-        isNewlyConfirmed: Bool,
-        isTodayConfirmed: Bool,
-        call: String,
-        sentEmail: EmailHistoryEntry?,
-        statusBgColor: Color
-    ) -> some View {
-        let w = columnWidths[header] ?? defaultColumnWidth(for: header)
+    private func rowCell(header: String, call: String) -> some View {
+        let w = columnWidths[header] ?? LogTableLayout.defaultColumnWidth(for: header)
         let val = record[header]
         let isDerived = ConfirmationCreditColumn.isDerived(header)
         
         return ZStack {
-            if isDerived {
+            if header == "AGING" || header == "APP_VIEW_AGING" {
+                AgingCellView(record: record)
+            } else if isDerived {
                 confirmationCreditCell(
                     header: header,
-                    opportunity: appState.confirmationOpportunityIndex.opportunity(for: record.id)
+                    opportunity: opportunity
                 )
-            } else if editingCellID == record.id && editingHeader == header {
+            } else if isEditingThisRow && editingHeader == header {
                 TextField("", text: $editingText, onCommit: {
-                    appState.updateCell(recordID: record.id, header: header, newValue: editingText)
-                    editingCellID = nil
-                    editingHeader = nil
+                    onCommitEditing(header, editingText)
                 })
                 .textFieldStyle(.plain)
                 .font(.system(size: 11, design: .monospaced))
-                .multilineTextAlignment(isRightAlignedColumn(header) ? .trailing : (isLeftAlignedColumn(header) ? .leading : .center))
+                .multilineTextAlignment(LogTableLayout.isRightAlignedColumn(header) ? .trailing : (LogTableLayout.isLeftAlignedColumn(header) ? .leading : .center))
                 .padding(.horizontal, 4)
                 .background(Color(NSColor.selectedControlColor).opacity(0.3))
             } else if header == "QSL" {
@@ -1219,7 +1796,7 @@ struct LogTableView: View {
                     if header == "CALL" {
                         HStack(spacing: 4) {
                             Button {
-                                activeTablePopover = .callsign(record)
+                                onInspectCallsign()
                             } label: {
                                 Text(val)
                                     .font(.system(size: 11.5, weight: .bold, design: .monospaced))
@@ -1229,21 +1806,7 @@ struct LogTableView: View {
                             .buttonStyle(.plain)
                             .help("Click to inspect callsign \(val) (bearing, distance, country, station stats)")
                             
-                            if isTodayConfirmed {
-                                HStack(spacing: 2) {
-                                    Image(systemName: "checkmark.seal.fill")
-                                        .font(.system(size: 7, weight: .bold))
-                                    Text("TODAY")
-                                        .font(.system(size: 7.5, weight: .heavy, design: .rounded))
-                                }
-                                .padding(.horizontal, 3.5)
-                                .padding(.vertical, 1)
-                                .background(Capsule().fill(Color.green))
-                                .foregroundColor(.white)
-                                .lineLimit(1)
-                                .fixedSize()
-                                .help("Confirmed Today! Right-click or click QSL card icon to send/preview card.")
-                            } else if isNewlyConfirmed {
+                            if isNewlyConfirmed {
                                 HStack(spacing: 2) {
                                     Image(systemName: "sparkles")
                                         .font(.system(size: 7, weight: .bold))
@@ -1257,6 +1820,36 @@ struct LogTableView: View {
                                 .lineLimit(1)
                                 .fixedSize()
                                 .help("Newly Confirmed QSO! Verified via \(record.confirmationSourcesSummary)\(record.latestConfirmationDate.map { " on " + appState.formattedEmailHistoryDate($0) } ?? "")")
+                            } else if let opp = opportunity {
+                                if opp.addsCountryBandCredit {
+                                    HStack(spacing: 2) {
+                                        Image(systemName: "antenna.radiowaves.left.and.right")
+                                            .font(.system(size: 6.5, weight: .bold))
+                                        Text("NEW BAND")
+                                            .font(.system(size: 7.5, weight: .heavy, design: .rounded))
+                                    }
+                                    .padding(.horizontal, 3.5)
+                                    .padding(.vertical, 1)
+                                    .background(Capsule().fill(Color.blue))
+                                    .foregroundColor(.white)
+                                    .lineLimit(1)
+                                    .fixedSize()
+                                    .help("Confirming this contact earns a new DXCC band credit on \(opp.band) for \(opp.country)!")
+                                } else if opp.addsGridCredit {
+                                    HStack(spacing: 2) {
+                                        Image(systemName: "square.grid.2x2.fill")
+                                            .font(.system(size: 6.5, weight: .bold))
+                                        Text("NEW GRID")
+                                            .font(.system(size: 7.5, weight: .heavy, design: .rounded))
+                                    }
+                                    .padding(.horizontal, 3.5)
+                                    .padding(.vertical, 1)
+                                    .background(Capsule().fill(Color.teal))
+                                    .foregroundColor(.white)
+                                    .lineLimit(1)
+                                    .fixedSize()
+                                    .help("Confirming this contact confirms new Maidenhead grid square: \(opp.grid ?? "")!")
+                                }
                             }
 
                             if record.isConfirmed {
@@ -1266,9 +1859,9 @@ struct LogTableView: View {
                                 } label: {
                                     Image(systemName: "photo.badge.checkmark")
                                         .font(.system(size: 8.5))
-                                        .foregroundColor(isTodayConfirmed ? .green : .secondary)
+                                        .foregroundColor(.secondary)
                                         .padding(2.5)
-                                        .background(Circle().fill((isTodayConfirmed ? Color.green : Color.secondary).opacity(0.16)))
+                                        .background(Circle().fill(Color.secondary.opacity(0.16)))
                                 }
                                 .buttonStyle(.plain)
                                 .help("Open QSL Card Composer for \(val) (Preview, Export PDF/PNG, or Email)")
@@ -1276,7 +1869,7 @@ struct LogTableView: View {
 
                             if let sentEmail {
                                 Button {
-                                    activeTablePopover = .sentEmail(SentEmailDetailContext(record: record, entry: sentEmail))
+                                    onShowSentEmail(SentEmailDetailContext(record: record, entry: sentEmail))
                                 } label: {
                                     Image(systemName: "envelope.fill")
                                         .font(.system(size: 8.5))
@@ -1331,53 +1924,28 @@ struct LogTableView: View {
                             .help("Click to open \(call) profile on QRZ.com")
                     }
                     else if header == "EMAIL" {
-                        if let sentEmail {
-                            Button {
-                                activeTablePopover = .sentEmail(SentEmailDetailContext(record: record, entry: sentEmail))
-                            } label: {
-                                HStack(spacing: 3) {
-                                    Image(systemName: "envelope.fill")
-                                        .font(.system(size: 8))
-                                    Text("Sent")
-                                        .font(.system(size: 9, weight: .bold))
-                                }
-                                .padding(.horizontal, 5)
-                                .padding(.vertical, 2)
-                                .background(Capsule().fill(Color.cyan.opacity(0.18)))
-                                .foregroundColor(.cyan)
-                            }
-                            .buttonStyle(.plain)
-                            .help("Sent email: \"\(sentEmail.subject)\" (\(sentEmail.status)). Click to view details.")
-                            .frame(maxWidth: .infinity, alignment: .center)
-                        } else if !val.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            Button {
+                        EmailCellView(
+                            record: record,
+                            email: val,
+                            call: call,
+                            sentEmail: sentEmail,
+                            onOpenComposer: {
                                 appState.openEmailComposer(for: record, email: val)
-                            } label: {
-                                HStack(spacing: 3) {
-                                    Image(systemName: "paperplane.fill")
-                                        .font(.system(size: 8))
-                                    Text("Email")
-                                        .font(.system(size: 9, weight: .semibold))
+                            },
+                            onViewSentEmail: {
+                                if let sentEmail {
+                                    onShowSentEmail(SentEmailDetailContext(record: record, entry: sentEmail))
                                 }
-                                .padding(.horizontal, 5)
-                                .padding(.vertical, 2)
-                                .background(Capsule().fill(Color.blue.opacity(0.15)))
-                                .foregroundColor(.blue)
                             }
-                            .buttonStyle(.plain)
-                            .help("Send email to \(val). Double-click or right-click to edit.")
-                            .frame(maxWidth: .infinity, alignment: .center)
-                        } else {
-                            Text("—")
-                                .font(.system(size: 10, design: .monospaced))
-                                .foregroundColor(.secondary.opacity(0.5))
-                                .frame(maxWidth: .infinity, alignment: .center)
-                        }
+                        )
+                    }
+                    else if header == "QSL_VIA" || header == "QSL_SENT_VIA" || header == "QSL_RCVD_VIA" || header == "ROUTE" {
+                        RouteCellView(value: val)
                     }
                     else if header == "APP_YAAM_LAST_EMAIL" && !val.isEmpty {
                         if let sentEmail {
                             Button {
-                                activeTablePopover = .sentEmail(SentEmailDetailContext(record: record, entry: sentEmail))
+                                onShowSentEmail(SentEmailDetailContext(record: record, entry: sentEmail))
                             } label: {
                                 HStack(spacing: 4) {
                                     Image(systemName: "envelope.fill")
@@ -1403,13 +1971,7 @@ struct LogTableView: View {
                         }
                     }
                     else if header.hasPrefix("RANK_") && !val.isEmpty {
-                        Text(val)
-                            .font(.system(size: 11, weight: .bold, design: .monospaced))
-                            .foregroundColor(header == "RANK_QSO" ? .blue : (header == "RANK_BAND" ? .orange : .green))
-                            .padding(.horizontal, 4)
-                            .background(Color.black.opacity(0.05))
-                            .cornerRadius(4)
-                            .frame(maxWidth: .infinity, alignment: .center)
+                        RankCellView(header: header, val: val, call: call)
                     }
                     else if header == "GRIDSQUARE" || header == "GRID" {
                         let fullGrid = val.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1427,10 +1989,25 @@ struct LogTableView: View {
                                 country: record["COUNTRY"],
                                 record: record,
                                 onInspect: { ctx in
-                                    activeTablePopover = .grid(ctx)
+                                    onInspectGrid(ctx)
                                 }
                             )
                         }
+                    }
+                    else if header == "MODE" {
+                        let submode = record["SUBMODE"].trimmingCharacters(in: .whitespacesAndNewlines)
+                        let displayMode: String = {
+                            if val.uppercased() == "DATA" && !submode.isEmpty {
+                                return submode
+                            }
+                            return val.isEmpty ? "—" : val
+                        }()
+                        Text(displayMode)
+                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                            .foregroundColor(.primary)
+                            .lineLimit(1)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .help(submode.isEmpty || submode == val ? "Mode: \(val)" : "Mode: \(val) / Submode: \(submode)")
                     }
                     else {
                         let isSecondary = ["NAME", "COUNTRY", "CONT", "QTH", "COMMENT"].contains(header)
@@ -1439,83 +2016,38 @@ struct LogTableView: View {
                             .foregroundColor(isSecondary ? Color(white: 0.72) : .primary)
                             .lineLimit(1)
                             .truncationMode(.tail)
-                            .multilineTextAlignment(isRightAlignedColumn(header) ? .trailing : (isLeftAlignedColumn(header) ? .leading : .center))
-                            .frame(maxWidth: .infinity, alignment: isRightAlignedColumn(header) ? .trailing : (isLeftAlignedColumn(header) ? .leading : .center))
+                            .multilineTextAlignment(LogTableLayout.isRightAlignedColumn(header) ? .trailing : (LogTableLayout.isLeftAlignedColumn(header) ? .leading : .center))
+                            .frame(maxWidth: .infinity, alignment: LogTableLayout.isRightAlignedColumn(header) ? .trailing : (LogTableLayout.isLeftAlignedColumn(header) ? .leading : .center))
                     }
                 }
                 .padding(.horizontal, 4)
             }
         }
         .padding(.horizontal, 6)
-        .frame(width: w, height: 28, alignment: tableAlignment(for: header))
+        .frame(width: w, height: 28, alignment: LogTableLayout.tableAlignment(for: header))
         .background(statusBgColor)
         .border(Color.gray.opacity(0.15), width: 0.5)
         .contentShape(Rectangle())
         .onTapGesture(count: 2) {
-            if !isDerived && header != "QRZ_URL" && header != "QRZ" && header != "QSL" && header != "GRIDSQUARE" && header != "GRID" {
-                startEditing(record: record, header: header, value: val)
+            if !isDerived && header != "QRZ_URL" && header != "QRZ" && header != "QSL" && header != "GRIDSQUARE" && header != "GRID" && header != "AGING" && header != "APP_VIEW_AGING" && !header.hasPrefix("RANK_") {
+                onStartEditing(header, val)
             }
         }
         .onTapGesture {
-            if header == "GRIDSQUARE" || header == "GRID" {
-                let fullGrid = val.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !fullGrid.isEmpty {
-                    activeTablePopover = .grid(GridInspectionContext(
-                        record: record,
-                        fullGrid: fullGrid,
-                        call: call,
-                        country: record["COUNTRY"]
-                    ))
-                    return
-                }
-            } else if header == "CALL" {
-                activeTablePopover = .callsign(record)
-                return
-            } else if header == "EMAIL" {
-                if let sentEmail {
-                    activeTablePopover = .sentEmail(SentEmailDetailContext(record: record, entry: sentEmail))
-                    return
-                }
-                let cleanEmail = val.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !cleanEmail.isEmpty {
-                    appState.openEmailComposer(for: record, email: cleanEmail)
-                    return
-                }
-            } else if header == "APP_YAAM_LAST_EMAIL" {
-                if let sentEmail {
-                    activeTablePopover = .sentEmail(SentEmailDetailContext(record: record, entry: sentEmail))
-                    return
-                }
-            } else if header == "QRZ_URL" || header == "QRZ" {
-                let targetUrlStr = val.isEmpty ? "https://www.qrz.com/db/\(call)" : val
-                if let url = URL(string: targetUrlStr), !call.isEmpty {
-                    NSWorkspace.shared.open(url)
-                    return
-                }
+            if header.hasPrefix("RANK_") {
+                onShowRankLegend()
+            } else if header == "AGING" || header == "APP_VIEW_AGING" {
+                onToggleAgingSort()
+            } else {
+                onToggleSelection()
             }
-            appState.toggleRecordSelection(record.id)
-        }
-        .contextMenu {
-            if !isDerived && header != "QRZ_URL" && header != "QRZ" && header != "QSL" && header != "GRIDSQUARE" && header != "GRID" {
-                Button("Edit \(header)") {
-                    startEditing(record: record, header: header, value: val)
-                }
-                Divider()
-            }
-            rowContextMenuContent(for: record, call: call, sentEmail: sentEmail, isSelected: isSelected, isNewlyConfirmed: isNewlyConfirmed)
         }
     }
 
     @ViewBuilder
-    private func rowContextMenuContent(
-        for record: QSORecordModel,
-        call: String,
-        sentEmail: EmailHistoryEntry?,
-        isSelected: Bool,
-        isNewlyConfirmed: Bool
-    ) -> some View {
+    private func rowContextMenuContent(call: String) -> some View {
         Button(isSelected ? "Deselect QSO" : "Select QSO") {
-            appState.toggleRecordSelection(record.id)
+            onToggleSelection()
         }
         
         let emailVal = record["EMAIL"].trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1525,11 +2057,19 @@ struct LogTableView: View {
             } label: {
                 Label("Send Email to \(emailVal)...", systemImage: "paperplane")
             }
+
+            if !record.isConfirmed {
+                Button {
+                    appState.openQSLReminderEmailComposer(for: record)
+                } label: {
+                    Label("Send QSL Reminder Email...", systemImage: "bell.badge")
+                }
+            }
         }
         
         if !call.isEmpty {
             Button {
-                activeTablePopover = .callsign(record)
+                onInspectCallsign()
             } label: {
                 Label("Inspect Callsign '\(call)'...", systemImage: "info.circle")
             }
@@ -1544,7 +2084,7 @@ struct LogTableView: View {
             : record["GRIDSQUARE"].trimmingCharacters(in: .whitespacesAndNewlines)
         if !gridVal.isEmpty {
             Button {
-                activeTablePopover = .grid(GridInspectionContext(
+                onInspectGrid(GridInspectionContext(
                     record: record,
                     fullGrid: gridVal,
                     call: call,
@@ -1559,6 +2099,9 @@ struct LogTableView: View {
             Divider()
             Button("🪄 Enrich Selected (\(appState.selectedRecordIDs.count) Rows)") {
                 appState.enrichSelectedRecords()
+            }
+            Button("🔔 Batch QSL Reminders (\(appState.selectedRecordIDs.count) Rows)...") {
+                appState.openBatchQSLReminderComposerForSelected()
             }
             Button("✉️ Batch Email Selected (\(appState.selectedRecordIDs.count) Rows)...") {
                 appState.openBatchEmailComposerForSelected()
@@ -1585,6 +2128,12 @@ struct LogTableView: View {
                     appState.openQRZRankCongratulationsEmailComposer(for: record)
                 }
                 .disabled(record["EMAIL"].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                Button {
+                    onShowRankLegend()
+                } label: {
+                    Label("Show QRZ Ranks Legend...", systemImage: "questionmark.circle")
+                }
             }
 
             Button("Generate QSL Card") {
@@ -1593,15 +2142,14 @@ struct LogTableView: View {
             }
 
             Button {
-                selectedEQSLRecord = record
-                showEQSLCardSheet = true
+                onShowEQSLCard()
             } label: {
                 Label("View eQSL Graphic Card", systemImage: "photo.badge.checkmark")
             }
 
             if let sentEmail {
                 Button {
-                    activeTablePopover = .sentEmail(SentEmailDetailContext(record: record, entry: sentEmail))
+                    onShowSentEmail(SentEmailDetailContext(record: record, entry: sentEmail))
                 } label: {
                     Label("View Sent Email Details", systemImage: "envelope.badge")
                 }
@@ -1611,7 +2159,7 @@ struct LogTableView: View {
                 Button {
                     appState.unmarkRecordAsNewlyConfirmed(id: record.id)
                 } label: {
-                    Label("Remove New Confirmed Highlight", systemImage: "sparkles.slash")
+                    Label("Unmark as Newly Confirmed", systemImage: "sparkles")
                 }
             } else if record.isConfirmed {
                 Button {
@@ -1619,6 +2167,28 @@ struct LogTableView: View {
                 } label: {
                     Label("Highlight as Newly Confirmed", systemImage: "sparkles")
                 }
+            }
+
+            // MARK: Leaderboard Rivals
+            let normalizedCall = call.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            let isTracked = appState.trackedRankCallsigns
+                .map { $0.uppercased() }.contains(normalizedCall)
+
+            Divider()
+
+            if isTracked {
+                Button {
+                    appState.removeTrackedRankCallsign(call)
+                } label: {
+                    Label("Remove '\(normalizedCall)' from Leaderboard Rivals", systemImage: "person.badge.minus")
+                }
+            } else {
+                Button {
+                    appState.addTrackedRankCallsigns([call])
+                } label: {
+                    Label("Add '\(normalizedCall)' to Leaderboard Rivals", systemImage: "person.badge.plus")
+                }
+                .disabled(appState.trackedRankCallsigns.count >= 8)
             }
         }
         
@@ -1628,253 +2198,268 @@ struct LogTableView: View {
             appState.deleteRecord(id: record.id)
         }
     }
+}
 
-    private func autoFitColumnWidth(_ header: String) {
-        let meta = headerMeta(for: header)
-        var maxChars = meta.title.count + 5
-        let sample = appState.filteredRecords.prefix(100)
-        for record in sample {
-            let val = record[header]
-            if header == "QSO_DATE" {
-                maxChars = max(maxChars, formatDate(val).count)
-            } else if header == "TIME_ON" || header == "TIME" || header == "TIME_OFF" {
-                maxChars = max(maxChars, formatTime(val).count)
-            } else if header == "GRIDSQUARE" || header == "GRID" {
-                maxChars = max(maxChars, 4 + 1)
-            } else if header == "CALL" {
-                // Account for callsign chars plus badges (NEW/TODAY, QSL card icon, email icon)
-                maxChars = max(maxChars, val.count + 8)
-            } else {
-                maxChars = max(maxChars, val.count)
-            }
-        }
-        let computed = CGFloat(maxChars * 8 + 24)
-        columnWidths[header] = max(defaultColumnWidth(for: header), min(computed, 340))
+// MARK: - Log Table Formatting and QSL Helpers
+fileprivate func formatDate(_ rawDate: String) -> String {
+    let trimmed = rawDate.trimmingCharacters(in: .whitespacesAndNewlines)
+    if trimmed.count == 8, trimmed.allSatisfy({ $0.isNumber }) {
+        let year = trimmed.prefix(4)
+        let month = trimmed.dropFirst(4).prefix(2)
+        let day = trimmed.suffix(2)
+        return "\(year)-\(month)-\(day)"
     }
+    return rawDate
+}
 
-    // MARK: - QSL Multi-Status Grid & Typography Helpers
-    private enum QSLChannelState {
-        case confirmed
-        case sent
-        case none
-        
-        var color: Color {
-            switch self {
-            case .confirmed: return Color(red: 0.25, green: 0.95, blue: 0.45) // Neon green
-            case .sent: return Color(red: 1.0, green: 0.65, blue: 0.15) // Vibrant amber
-            case .none: return Color(white: 0.35).opacity(0.35) // Muted dark gray
-            }
-        }
-        
-        var bgOpacity: Double {
-            switch self {
-            case .confirmed: return 0.22
-            case .sent: return 0.18
-            case .none: return 0.04
-            }
-        }
+fileprivate func formatTime(_ rawTime: String) -> String {
+    let trimmed = rawTime.trimmingCharacters(in: .whitespacesAndNewlines)
+    if trimmed.count == 6, trimmed.allSatisfy({ $0.isNumber }) {
+        let h = trimmed.prefix(2)
+        let m = trimmed.dropFirst(2).prefix(2)
+        let s = trimmed.suffix(2)
+        return "\(h):\(m):\(s)"
+    } else if trimmed.count == 4, trimmed.allSatisfy({ $0.isNumber }) {
+        let h = trimmed.prefix(2)
+        let m = trimmed.suffix(2)
+        return "\(h):\(m)"
     }
+    return rawTime
+}
 
-    private func qslChannelStatus(rcvd: String, sent: String, extraConfirmed: Bool = false) -> QSLChannelState {
-        let r = rcvd.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        let s = sent.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        if ["Y", "V", "C"].contains(r) || extraConfirmed {
-            return .confirmed
-        } else if ["Y", "R", "Q"].contains(s) {
-            return .sent
-        } else {
-            return .none
-        }
-    }
-
-    @ViewBuilder
-    private func qslMultiStatusGrid(for record: QSORecordModel) -> some View {
-        let isLotwConf = ["Y", "V", "C"].contains(record["LOTW_QSL_RCVD"].uppercased()) || record["APP_LOTW_QSL_RCVD"].uppercased() == "Y"
-        let lotwStatus = qslChannelStatus(
-            rcvd: record["LOTW_QSL_RCVD"],
-            sent: record["LOTW_QSL_SENT"],
-            extraConfirmed: isLotwConf
-        )
-
-        let isEqslConf = ["Y", "V", "C"].contains(record["EQSL_QSL_RCVD"].uppercased()) || record["APP_EQSL_QSL_RCVD"].uppercased() == "Y"
-        let eqslStatus = qslChannelStatus(
-            rcvd: record["EQSL_QSL_RCVD"],
-            sent: record["EQSL_QSL_SENT"],
-            extraConfirmed: isEqslConf
-        )
-
-        let isQrzConf = ["Y", "V", "C"].contains(record["QRZLOG_QSL_RCVD"].uppercased()) ||
-            ["Y", "V", "C"].contains(record["QRZCOM_QSL_RCVD"].uppercased()) ||
-            ["Y", "V", "C"].contains(record["QRZ_QSL_RCVD"].uppercased()) ||
-            record["APP_YAAM_QRZ_CONFIRMED"] == "Y" ||
-            record["APP_QRZLOG_STATUS"].uppercased() == "C"
-        let qrzSent = record["QRZLOG_QSL_SENT"].isEmpty ? (record["QRZCOM_QSL_SENT"].isEmpty ? record["QRZ_QSL_SENT"] : record["QRZCOM_QSL_SENT"]) : record["QRZLOG_QSL_SENT"]
-        let qrzStatus = qslChannelStatus(
-            rcvd: record["QRZLOG_QSL_RCVD"],
-            sent: qrzSent,
-            extraConfirmed: isQrzConf
-        )
-
-        let isCardConf = ["Y", "V", "C"].contains(record["QSL_RCVD"].uppercased())
-        let cardStatus = qslChannelStatus(
-            rcvd: record["QSL_RCVD"],
-            sent: record["QSL_SENT"],
-            extraConfirmed: isCardConf
-        )
-        
-        HStack(spacing: 3) {
-            qslBadge(label: "L", state: lotwStatus)
-            qslBadge(label: "e", state: eqslStatus)
-            qslBadge(label: "Q", state: qrzStatus)
-            qslBadge(label: "C", state: cardStatus)
-        }
-        .frame(maxWidth: .infinity, alignment: .center)
-        .help(qslTooltip(record: record, lotw: lotwStatus, eqsl: eqslStatus, qrz: qrzStatus, card: cardStatus))
-    }
-
-    private func qslBadge(label: String, state: QSLChannelState) -> some View {
-        Text(label)
-            .font(.system(size: 9.5, weight: .bold, design: .monospaced))
-            .foregroundColor(state.color)
-            .frame(width: 14, height: 16)
-            .background(
-                RoundedRectangle(cornerRadius: 3)
-                    .fill(state.color.opacity(state.bgOpacity))
-            )
-    }
-
-    private func qslTooltip(record: QSORecordModel, lotw: QSLChannelState, eqsl: QSLChannelState, qrz: QSLChannelState, card: QSLChannelState) -> String {
-        func desc(channel: String, state: QSLChannelState) -> String {
-            switch state {
-            case .confirmed: return "\(channel): Confirmed (Rcvd)"
-            case .sent: return "\(channel): Sent / Pending"
-            case .none: return "\(channel): None"
-            }
-        }
-        return [
-            desc(channel: "LoTW", state: lotw),
-            desc(channel: "eQSL", state: eqsl),
-            desc(channel: "QRZ", state: qrz),
-            desc(channel: "Paper Card", state: card)
-        ].joined(separator: "\n")
-    }
-
-    private func formatDate(_ rawDate: String) -> String {
-        let trimmed = rawDate.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.count == 8, trimmed.allSatisfy({ $0.isNumber }) {
-            let year = trimmed.prefix(4)
-            let month = trimmed.dropFirst(4).prefix(2)
-            let day = trimmed.suffix(2)
-            return "\(year)-\(month)-\(day)"
-        }
-        return rawDate
-    }
-
-    private func formatTime(_ rawTime: String) -> String {
-        let trimmed = rawTime.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.count == 6, trimmed.allSatisfy({ $0.isNumber }) {
-            let h = trimmed.prefix(2)
-            let m = trimmed.dropFirst(2).prefix(2)
-            let s = trimmed.suffix(2)
-            return "\(h):\(m):\(s)"
-        } else if trimmed.count == 4, trimmed.allSatisfy({ $0.isNumber }) {
-            let h = trimmed.prefix(2)
-            let m = trimmed.suffix(2)
-            return "\(h):\(m)"
-        }
-        return rawTime
-    }
-
-    @ViewBuilder
-    private func formattedFrequencyView(_ rawFreq: String) -> some View {
-        let trimmed = rawFreq.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let dotIndex = trimmed.firstIndex(of: ".") {
-            let mhz = String(trimmed[..<dotIndex])
-            let decimals = String(trimmed[trimmed.index(after: dotIndex)...])
-            if decimals.count > 3 {
-                let khz = String(decimals.prefix(3))
-                let hz = String(decimals.dropFirst(3))
-                HStack(alignment: .firstTextBaseline, spacing: 0) {
-                    Text("\(mhz).\(khz)")
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(.primary)
-                    Text(hz)
-                        .font(.system(size: 8.5, design: .monospaced))
-                        .foregroundColor(.secondary)
-                }
-                .lineLimit(1)
-            } else {
-                Text(trimmed)
+@ViewBuilder
+fileprivate func formattedFrequencyView(_ rawFreq: String) -> some View {
+    let trimmed = rawFreq.trimmingCharacters(in: .whitespacesAndNewlines)
+    if let dotIndex = trimmed.firstIndex(of: ".") {
+        let mhz = String(trimmed[..<dotIndex])
+        let decimals = String(trimmed[trimmed.index(after: dotIndex)...])
+        if decimals.count > 3 {
+            let khz = String(decimals.prefix(3))
+            let hz = String(decimals.dropFirst(3))
+            HStack(alignment: .firstTextBaseline, spacing: 0) {
+                Text("\(mhz).\(khz)")
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(.primary)
-                    .lineLimit(1)
+                Text(hz)
+                    .font(.system(size: 8.5, design: .monospaced))
+                    .foregroundColor(.secondary)
             }
+            .lineLimit(1)
         } else {
             Text(trimmed)
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundColor(.primary)
                 .lineLimit(1)
         }
+    } else {
+        Text(trimmed)
+            .font(.system(size: 11, design: .monospaced))
+            .foregroundColor(.primary)
+            .lineLimit(1)
     }
+}
 
-    @ViewBuilder
-    private func confirmationCreditCell(
-        header: String,
-        opportunity: QSOConfirmationOpportunity?
-    ) -> some View {
-        if let opportunity {
-            if opportunity.isConfirmed {
-                confirmationCreditBadge(
-                    title: "DONE",
-                    icon: "checkmark.seal.fill",
-                    color: .green,
-                    help: "This QSO is already confirmed."
-                )
-            } else if header == ConfirmationCreditColumn.countryBand {
-                if !opportunity.hasCountryBandData {
-                    confirmationCreditBadge(
-                        title: "N/A",
-                        icon: "questionmark.circle",
-                        color: .secondary,
-                        help: "Country or band data is missing, so YAAM cannot calculate this credit."
-                    )
-                } else if opportunity.addsCountryBandCredit {
-                    confirmationCreditBadge(
-                        title: "NEW",
-                        icon: "sparkles",
-                        color: .blue,
-                        help: "Confirming this QSO adds \(opportunity.band) as a confirmed band for \(opportunity.country)."
-                    )
-                } else {
-                    confirmationCreditBadge(
-                        title: "HAVE",
-                        icon: "checkmark.circle",
-                        color: .secondary,
-                        help: "\(opportunity.country) is already confirmed on \(opportunity.band)."
-                    )
-                }
-            } else if let grid = opportunity.grid {
-                if opportunity.addsGridCredit {
-                    confirmationCreditBadge(
-                        title: "NEW",
-                        icon: "square.grid.3x3.fill",
-                        color: .mint,
-                        help: "Confirming this QSO adds the four-character grid \(grid)."
-                    )
-                } else {
-                    confirmationCreditBadge(
-                        title: "HAVE",
-                        icon: "checkmark.circle",
-                        color: .secondary,
-                        help: "The four-character grid \(grid) is already confirmed."
-                    )
-                }
-            } else {
+fileprivate enum QSLChannelState {
+    case confirmed
+    case sent
+    case rejected
+    case none
+    
+    var color: Color {
+        switch self {
+        case .confirmed: return Color(red: 0.25, green: 0.95, blue: 0.45) // Neon green
+        case .sent: return Color(red: 1.0, green: 0.72, blue: 0.18) // Vibrant amber
+        case .rejected: return Color(red: 1.0, green: 0.35, blue: 0.35) // Neon red
+        case .none: return Color(red: 0.65, green: 0.65, blue: 0.68) // High-contrast silver/gray #A0A0A5
+        }
+    }
+    
+    var bgOpacity: Double {
+        switch self {
+        case .confirmed: return 0.22
+        case .sent: return 0.18
+        case .rejected: return 0.20
+        case .none: return 0.08
+        }
+    }
+}
+
+fileprivate func qslChannelStatus(rcvd: String, sent: String, extraConfirmed: Bool = false) -> QSLChannelState {
+    let r = rcvd.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+    let s = sent.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+    if ["Y", "V", "C"].contains(r) || extraConfirmed {
+        return .confirmed
+    } else if ["R", "I"].contains(r) || s == "I" {
+        return .rejected
+    } else if ["Y", "R", "Q"].contains(s) {
+        return .sent
+    } else {
+        return .none
+    }
+}
+
+fileprivate func qslBadge(label: String, state: QSLChannelState) -> some View {
+    HStack(spacing: 0.5) {
+        Text(label)
+            .font(.system(size: 9, weight: .bold, design: .monospaced))
+            .foregroundColor(state.color)
+        if state == .confirmed {
+            Image(systemName: "checkmark")
+                .font(.system(size: 6, weight: .black))
+                .foregroundColor(state.color)
+        } else if state == .sent {
+            Image(systemName: "arrow.up")
+                .font(.system(size: 5.5, weight: .black))
+                .foregroundColor(state.color)
+        } else if state == .rejected {
+            Image(systemName: "xmark")
+                .font(.system(size: 5.5, weight: .black))
+                .foregroundColor(state.color)
+        }
+    }
+    .frame(width: state == .none ? 15 : 19, height: 16)
+    .background(
+        RoundedRectangle(cornerRadius: 3.5)
+            .fill(state.color.opacity(state.bgOpacity))
+    )
+    .overlay(
+        RoundedRectangle(cornerRadius: 3.5)
+            .stroke(
+                state == .confirmed ? state.color.opacity(0.45) :
+                (state == .sent ? state.color.opacity(0.55) :
+                (state == .rejected ? state.color.opacity(0.6) : Color(white: 0.45).opacity(0.35))),
+                lineWidth: 0.6
+            )
+    )
+}
+
+fileprivate func qslTooltip(
+    record: QSORecordModel,
+    lotw: QSLChannelState,
+    eqsl: QSLChannelState,
+    qrz: QSLChannelState,
+    card: QSLChannelState
+) -> String {
+    func channelDetail(name: String, state: QSLChannelState, sentKey: String, rcvdKey: String) -> String {
+        let stateStr: String = {
+            switch state {
+            case .confirmed: return "Confirmed"
+            case .sent: return "Sent / Pending"
+            case .rejected: return "Rejected / Invalid"
+            case .none: return "Not Sent"
+            }
+        }()
+        let sDate = record[sentKey].trimmingCharacters(in: .whitespacesAndNewlines)
+        let rDate = record[rcvdKey].trimmingCharacters(in: .whitespacesAndNewlines)
+        var dates: [String] = []
+        if !sDate.isEmpty { dates.append("Sent: \(formatDate(sDate))") }
+        if !rDate.isEmpty { dates.append("Rcvd: \(formatDate(rDate))") }
+        let datesStr = dates.isEmpty ? "" : " (\(dates.joined(separator: ", ")))"
+        return "\(name): \(stateStr)\(datesStr)"
+    }
+    return [
+        channelDetail(name: "LoTW", state: lotw, sentKey: "LOTW_QSLSDATE", rcvdKey: "LOTW_QSLRDATE"),
+        channelDetail(name: "eQSL", state: eqsl, sentKey: "EQSL_QSLSDATE", rcvdKey: "EQSL_QSLRDATE"),
+        channelDetail(name: "QRZ", state: qrz, sentKey: "QRZLOG_QSLSDATE", rcvdKey: "QRZLOG_QSLRDATE"),
+        channelDetail(name: "Card", state: card, sentKey: "QSLSDATE", rcvdKey: "QSLRDATE")
+    ].joined(separator: "\n")
+}
+
+@ViewBuilder
+fileprivate func qslMultiStatusGrid(for record: QSORecordModel) -> some View {
+    let isLotwConf = ["Y", "V", "C"].contains(record["LOTW_QSL_RCVD"].uppercased()) || record["APP_LOTW_QSL_RCVD"].uppercased() == "Y"
+    let lotwStatus = qslChannelStatus(
+        rcvd: record["LOTW_QSL_RCVD"],
+        sent: record["LOTW_QSL_SENT"],
+        extraConfirmed: isLotwConf
+    )
+
+    let isEqslConf = ["Y", "V", "C"].contains(record["EQSL_QSL_RCVD"].uppercased()) || record["APP_EQSL_QSL_RCVD"].uppercased() == "Y"
+    let eqslStatus = qslChannelStatus(
+        rcvd: record["EQSL_QSL_RCVD"],
+        sent: record["EQSL_QSL_SENT"],
+        extraConfirmed: isEqslConf
+    )
+
+    let isQrzConf = ["Y", "V", "C"].contains(record["QRZLOG_QSL_RCVD"].uppercased()) ||
+        ["Y", "V", "C"].contains(record["QRZCOM_QSL_RCVD"].uppercased()) ||
+        ["Y", "V", "C"].contains(record["QRZ_QSL_RCVD"].uppercased()) ||
+        record["APP_YAAM_QRZ_CONFIRMED"] == "Y" ||
+        record["APP_QRZLOG_STATUS"].uppercased() == "C"
+    let qrzSent = record["QRZLOG_QSL_SENT"].isEmpty ? (record["QRZCOM_QSL_SENT"].isEmpty ? record["QRZ_QSL_SENT"] : record["QRZCOM_QSL_SENT"]) : record["QRZLOG_QSL_SENT"]
+    let qrzStatus = qslChannelStatus(
+        rcvd: record["QRZLOG_QSL_RCVD"],
+        sent: qrzSent,
+        extraConfirmed: isQrzConf
+    )
+
+    let isCardConf = ["Y", "V", "C"].contains(record["QSL_RCVD"].uppercased())
+    let cardStatus = qslChannelStatus(
+        rcvd: record["QSL_RCVD"],
+        sent: record["QSL_SENT"],
+        extraConfirmed: isCardConf
+    )
+    
+    HStack(spacing: 3) {
+        qslBadge(label: "L", state: lotwStatus)
+        qslBadge(label: "e", state: eqslStatus)
+        qslBadge(label: "Q", state: qrzStatus)
+        qslBadge(label: "C", state: cardStatus)
+    }
+    .frame(maxWidth: .infinity, alignment: .center)
+    .help(qslTooltip(record: record, lotw: lotwStatus, eqsl: eqslStatus, qrz: qrzStatus, card: cardStatus))
+}
+
+@ViewBuilder
+fileprivate func confirmationCreditCell(
+    header: String,
+    opportunity: QSOConfirmationOpportunity?
+) -> some View {
+    if let opportunity {
+        if opportunity.isConfirmed {
+            confirmationCreditBadge(
+                title: "DONE",
+                icon: "checkmark.seal.fill",
+                color: .green,
+                help: "This QSO is already confirmed."
+            )
+        } else if header == ConfirmationCreditColumn.countryBand {
+            if !opportunity.hasCountryBandData {
                 confirmationCreditBadge(
                     title: "N/A",
                     icon: "questionmark.circle",
                     color: .secondary,
-                    help: "No valid grid or coordinates are available for this QSO."
+                    help: "Country or band data is missing, so YAAM cannot calculate this credit."
+                )
+            } else if opportunity.addsCountryBandCredit {
+                confirmationCreditBadge(
+                    title: "NEW",
+                    icon: "sparkles",
+                    color: .blue,
+                    help: "Confirming this QSO adds \(opportunity.band) as a confirmed band for \(opportunity.country)."
+                )
+            } else {
+                confirmationCreditBadge(
+                    title: "HAVE",
+                    icon: "checkmark.circle",
+                    color: .secondary,
+                    help: "\(opportunity.country) is already confirmed on \(opportunity.band)."
+                )
+            }
+        } else if let grid = opportunity.grid {
+            if opportunity.addsGridCredit {
+                confirmationCreditBadge(
+                    title: "NEW",
+                    icon: "square.grid.3x3.fill",
+                    color: .mint,
+                    help: "Confirming this QSO adds the four-character grid \(grid)."
+                )
+            } else {
+                confirmationCreditBadge(
+                    title: "HAVE",
+                    icon: "checkmark.circle",
+                    color: .secondary,
+                    help: "The four-character grid \(grid) is already confirmed."
                 )
             }
         } else {
@@ -1882,286 +2467,35 @@ struct LogTableView: View {
                 title: "N/A",
                 icon: "questionmark.circle",
                 color: .secondary,
-                help: "Confirmation opportunity data is unavailable."
+                help: "No valid grid or coordinates are available for this QSO."
             )
         }
+    } else {
+        confirmationCreditBadge(
+            title: "N/A",
+            icon: "questionmark.circle",
+            color: .secondary,
+            help: "Confirmation opportunity data is unavailable."
+        )
     }
+}
 
-    private func confirmationCreditBadge(
-        title: String,
-        icon: String,
-        color: Color,
-        help: String
-    ) -> some View {
-        Label(title, systemImage: icon)
-            .font(.system(size: 9, weight: .bold))
-            .foregroundStyle(color)
-            .lineLimit(1)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 3)
-            .background(color.opacity(0.12))
-            .clipShape(RoundedRectangle(cornerRadius: 4))
-            .frame(maxWidth: .infinity, alignment: .center)
-            .help(help)
-    }
-
-    private func headerHelp(for header: String) -> String {
-        switch header {
-        case ConfirmationCreditColumn.countryBand:
-            return "Shows whether confirming an unconfirmed QSO adds a new confirmed band for that country."
-        case ConfirmationCreditColumn.grid:
-            return "Shows whether confirming an unconfirmed QSO adds a new four-character Maidenhead grid."
-        default:
-            return "Click to sort by \(displayTitle(for: header)); drag the right edge to resize."
-        }
-    }
-
-    private func startEditing(record: QSORecordModel, header: String, value: String) {
-        editingCellID = record.id
-        editingHeader = header
-        editingText = value
-    }
-
-    private struct HeaderMeta {
-        let title: String
-        let icon: String
-    }
-
-    private func headerMeta(for header: String) -> HeaderMeta {
-        switch header {
-        case "QSL":
-            return HeaderMeta(title: "QSL", icon: "checkmark.seal.fill")
-        case "QSO_DATE":
-            return HeaderMeta(title: "Date", icon: "calendar")
-        case "TIME_ON", "TIME":
-            return HeaderMeta(title: "Time", icon: "clock")
-        case "TIME_OFF":
-            return HeaderMeta(title: "Time Off", icon: "clock.badge.checkmark")
-        case "CALL":
-            return HeaderMeta(title: "Callsign", icon: "antenna.radiowaves.left.and.right")
-        case "FREQ":
-            return HeaderMeta(title: "Frequency", icon: "waveform.path")
-        case "FREQ_RX":
-            return HeaderMeta(title: "RX Frequency", icon: "waveform.path")
-        case "BAND":
-            return HeaderMeta(title: "Band", icon: "wave.3.left")
-        case "BAND_RX":
-            return HeaderMeta(title: "RX Band", icon: "wave.3.left")
-        case "MODE":
-            return HeaderMeta(title: "Mode", icon: "bolt.fill")
-        case "SUBMODE":
-            return HeaderMeta(title: "Submode", icon: "bolt")
-        case "RST_SENT":
-            return HeaderMeta(title: "Sent", icon: "arrow.up.circle.fill")
-        case "RST_RCVD":
-            return HeaderMeta(title: "Rcvd", icon: "arrow.down.circle.fill")
-        case "NAME":
-            return HeaderMeta(title: "Name", icon: "person.fill")
-        case "QTH":
-            return HeaderMeta(title: "QTH", icon: "house.fill")
-        case "COUNTRY":
-            return HeaderMeta(title: "Country", icon: "globe.europe.africa.fill")
-        case "CONT":
-            return HeaderMeta(title: "Continent", icon: "map.fill")
-        case "GRIDSQUARE", "GRID":
-            return HeaderMeta(title: "Grid", icon: "square.grid.3x3.fill")
-        case "DXCC":
-            return HeaderMeta(title: "DXCC", icon: "flag.fill")
-        case "CQZ":
-            return HeaderMeta(title: "CQ Zone", icon: "circle.grid.cross.fill")
-        case "ITUZ":
-            return HeaderMeta(title: "ITU Zone", icon: "circle.grid.3x3.fill")
-        case "STATE":
-            return HeaderMeta(title: "State", icon: "mappin.circle.fill")
-        case "EMAIL":
-            return HeaderMeta(title: "Email", icon: "envelope.fill")
-        case "QRZ_URL", "QRZ":
-            return HeaderMeta(title: "QRZ", icon: "safari.fill")
-        case "RANK_QSO":
-            return HeaderMeta(title: "QSO Rank", icon: "trophy.fill")
-        case "RANK_BAND":
-            return HeaderMeta(title: "Band Rank", icon: "medal.fill")
-        case "RANK_DXCC":
-            return HeaderMeta(title: "DXCC Rank", icon: "rosette")
-        case ConfirmationCreditColumn.countryBand:
-            return HeaderMeta(title: "Band Credit", icon: "sparkles")
-        case ConfirmationCreditColumn.grid:
-            return HeaderMeta(title: "Grid Credit", icon: "square.grid.3x3.fill")
-        case "APP_YAAM_LAST_EMAIL":
-            return HeaderMeta(title: "Last Email", icon: "envelope.badge.fill")
-        case "COMMENT":
-            return HeaderMeta(title: "Comment", icon: "bubble.left.fill")
-        case "PROP_MODE":
-            return HeaderMeta(title: "Propagation", icon: "rays")
-        case "SAT_NAME":
-            return HeaderMeta(title: "Satellite", icon: "orbit")
-        default:
-            return HeaderMeta(title: header, icon: "tag.fill")
-        }
-    }
-
-    private func defaultColumnWidth(for header: String) -> CGFloat {
-        switch header {
-        case "QSL": return 76
-        case "EMAIL": return 76
-        case "APP_YAAM_LAST_EMAIL": return 220
-        case "QRZ_URL", "QRZ": return 48
-        case "RANK_QSO": return 105
-        case "RANK_BAND": return 105
-        case "RANK_DXCC": return 115
-        case ConfirmationCreditColumn.countryBand: return 105
-        case ConfirmationCreditColumn.grid: return 96
-        case "QSO_DATE": return 92
-        case "TIME", "TIME_ON", "TIME_OFF": return 72
-        case "CALL": return 142
-        case "FREQ": return 88
-        case "FREQ_RX": return 94
-        case "BAND": return 64
-        case "BAND_RX": return 68
-        case "MODE", "SUBMODE": return 64
-        case "CONT": return 52
-        case "RST_SENT", "RST_RCVD": return 62
-        case "NAME": return 130
-        case "QTH": return 120
-        case "COUNTRY": return 130
-        case "GRIDSQUARE", "GRID": return 76
-        case "DXCC": return 64
-        case "CQZ", "ITUZ": return 68
-        case "COMMENT": return 180
-        default: return 84
-        }
-    }
-
-    /// Columns that remain left-aligned: Callsign, Name, Country, QTH, Comment, Propagation, and Leaderboard Ranks
-    private func isLeftAlignedColumn(_ header: String) -> Bool {
-        header == "CALL" || header == "NAME" || header == "COUNTRY" || header == "QTH" || header == "COMMENT" || header == "PROP_MODE" || header == "SAT_NAME" || header == "APP_YAAM_LAST_EMAIL"
-    }
-
-    /// Columns that are numbers and right-aligned: Frequency, RST reports, and Zones
-    private func isRightAlignedColumn(_ header: String) -> Bool {
-        header == "FREQ" || header == "FREQ_RX" || header == "RST_SENT" || header == "RST_RCVD" || header == "DXCC" || header == "CQZ" || header == "ITUZ"
-    }
-
-    private func isCompactCenteredColumn(_ header: String) -> Bool {
-        !isLeftAlignedColumn(header) && !isRightAlignedColumn(header)
-    }
-
-    private func tableAlignment(for header: String) -> Alignment {
-        if isRightAlignedColumn(header) {
-            return .trailing
-        } else if isLeftAlignedColumn(header) {
-            return .leading
-        } else {
-            return .center
-        }
-    }
-
-    private func displayTitle(for header: String) -> String {
-        headerMeta(for: header).title
-    }
-
-    private var hiddenColumnCount: Int {
-        appState.tableHeaders.filter { isHiddenByDefault($0) && !explicitlyShownColumns.contains($0) }.count
-    }
-
-    private var displayedHeaders: [String] {
-        let visibleStoredHeaders = appState.tableHeaders.filter { header in
-            !isHiddenByDefault(header) || explicitlyShownColumns.contains(header)
-        }
-        var headers = visibleStoredHeaders
-        if !headers.contains("QSL") {
-            headers.append("QSL")
-        }
-        for derived in ConfirmationCreditColumn.headers {
-            if explicitlyShownColumns.contains(derived) && !headers.contains(derived) {
-                headers.append(derived)
-            }
-        }
-        var uniqueHeaders: [String] = []
-        var seen = Set<String>()
-        for h in headers {
-            let key = h.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-            if !seen.contains(key) {
-                seen.insert(key)
-                uniqueHeaders.append(h)
-            }
-        }
-        return orderedHeaders(uniqueHeaders)
-    }
-
-    private func orderedHeaders(_ headers: [String]) -> [String] {
-        headers.sorted { lhs, rhs in
-            let lhsPriority = columnPriority(lhs)
-            let rhsPriority = columnPriority(rhs)
-
-            if lhsPriority != rhsPriority {
-                return lhsPriority < rhsPriority
-            }
-
-            let lhsPreferred = preferredColumnOrder.firstIndex(of: lhs) ?? Int.max
-            let rhsPreferred = preferredColumnOrder.firstIndex(of: rhs) ?? Int.max
-            if lhsPreferred != rhsPreferred {
-                return lhsPreferred < rhsPreferred
-            }
-
-            return lhs.localizedStandardCompare(rhs) == .orderedAscending
-        }
-    }
-
-    private func columnPriority(_ header: String) -> Int {
-        if header == "GRIDSQUARE" || header == "GRID" {
-            return 7
-        }
-        if let preferredIndex = preferredColumnOrder.firstIndex(of: header) {
-            return preferredIndex >= 7 ? preferredIndex + 1 : preferredIndex
-        }
-
-        if isMostlyEmpty(header) {
-            return 9_000
-        }
-
-        if TableColumnPolicy.isLowPriority(header) {
-            return 10_000
-        }
-
-        return 1_000
-    }
-
-    private func isHiddenByDefault(_ header: String) -> Bool {
-        TableColumnPolicy.isHiddenByDefault(header, isMostlyEmpty: isMostlyEmpty(header))
-    }
-
-    private func isLowValueTrailingColumn(_ header: String) -> Bool {
-        TableColumnPolicy.isLowPriority(header)
-    }
-
-    private var columnVisibilityStorageKey: String {
-        "logTable.explicitlyShownColumns.\(appState.activeStationProfileID?.uuidString ?? "default")"
-    }
-
-    private func restoreColumnVisibility() {
-        let saved = UserDefaults.standard.stringArray(forKey: columnVisibilityStorageKey) ?? []
-        explicitlyShownColumns = Set(saved.filter {
-            appState.tableHeaders.contains($0) && !TableColumnPolicy.isDatabaseOnly($0)
-        })
-    }
-
-    private func persistColumnVisibility() {
-        UserDefaults.standard.set(Array(explicitlyShownColumns).sorted(), forKey: columnVisibilityStorageKey)
-    }
-
-    private func isMostlyEmpty(_ header: String) -> Bool {
-        guard !appState.qsoRecords.isEmpty else { return false }
-        guard !preferredColumnOrder.contains(header) else { return false }
-        guard !isLowValueTrailingColumn(header) else { return false }
-        guard !TableColumnPolicy.isDatabaseOnly(header) else { return false }
-
-        let nonEmptyCount = appState.qsoRecords.prefix(200).reduce(0) { count, record in
-            record[header].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? count : count + 1
-        }
-
-        return nonEmptyCount == 0
-    }
+fileprivate func confirmationCreditBadge(
+    title: String,
+    icon: String,
+    color: Color,
+    help: String
+) -> some View {
+    Label(title, systemImage: icon)
+        .font(.system(size: 9, weight: .bold))
+        .foregroundStyle(color)
+        .lineLimit(1)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
+        .background(color.opacity(0.12))
+        .clipShape(RoundedRectangle(cornerRadius: 4))
+        .frame(maxWidth: .infinity, alignment: .center)
+        .help(help)
 }
 
 // MARK: - Sent Email Detail Context & Popover Card
@@ -2583,12 +2917,14 @@ enum ActiveTablePopover: Identifiable {
     case sentEmail(SentEmailDetailContext)
     case callsign(QSORecordModel)
     case grid(GridInspectionContext)
+    case rankLegend
 
     var id: String {
         switch self {
         case .sentEmail(let c): return "email-\(c.id)"
         case .callsign(let r): return "call-\(r.id)"
         case .grid(let g): return "grid-\(g.id)"
+        case .rankLegend: return "rank-legend"
         }
     }
 }
@@ -2972,6 +3308,605 @@ private struct LogTableScrollOffsetKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = nextValue()
+    }
+}
+
+// MARK: - Header Meta & Modern Header Cell Component
+struct LogTableHeaderMeta {
+    let title: String
+    let icon: String
+}
+
+struct HeaderCellView: View {
+    let header: String
+    let width: CGFloat
+    let isDerived: Bool
+    let isSorted: Bool
+    let sortAscending: Bool
+    let meta: LogTableHeaderMeta
+    let alignment: Alignment
+    let helpText: String
+    let onSort: () -> Void
+    let onAutoFit: () -> Void
+    let onDelete: () -> Void
+    let onSortAscending: () -> Void
+    let onSortDescending: () -> Void
+    let onShowRankLegend: (() -> Void)?
+    let onResizeChange: (CGFloat) -> Void
+    let onResizeEnd: () -> Void
+
+    @State private var isHovered: Bool = false
+
+    var body: some View {
+        HStack(spacing: 0) {
+            HStack(spacing: 3.5) {
+                Image(systemName: meta.icon)
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundColor(isSorted ? .yellow : Color(white: 0.75))
+
+                Text(meta.title)
+                    .font(.system(size: 10.5, weight: isSorted ? .bold : .semibold))
+                    .foregroundColor(isSorted ? .white : Color(white: 0.88))
+                    .lineLimit(1)
+                
+                if isSorted {
+                    Image(systemName: sortAscending ? "arrow.up" : "arrow.down")
+                        .font(.system(size: 8.5, weight: .bold))
+                        .foregroundColor(.yellow)
+                }
+                
+                if !isDerived && isHovered {
+                    Button(action: onDelete) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 7.5, weight: .bold))
+                            .foregroundColor(Color(white: 0.65))
+                    }
+                    .buttonStyle(.plain)
+                    .transition(.opacity)
+                }
+            }
+            .padding(.horizontal, 4)
+            .frame(width: max(0, width - 6), height: 28, alignment: alignment)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                onSort()
+            }
+            
+            Rectangle()
+                .fill(Color(white: 0.22).opacity(0.6))
+                .frame(width: 6, height: 28)
+                .contentShape(Rectangle())
+                .onHover { inside in
+                    if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+                }
+                .onTapGesture(count: 2) {
+                    onAutoFit()
+                }
+                .gesture(
+                    DragGesture()
+                        .onChanged { value in
+                            onResizeChange(value.translation.width)
+                        }
+                        .onEnded { _ in
+                            onResizeEnd()
+                        }
+                )
+        }
+        .frame(width: width, height: 28)
+        .background(isSorted ? Color(white: 0.18) : Color(white: 0.12))
+        .border(Color(white: 0.22).opacity(0.6), width: 0.5)
+        .onHover { hovering in
+            withAnimation(.easeInOut(duration: 0.15)) {
+                isHovered = hovering
+            }
+        }
+        .help(helpText)
+        .contextMenu {
+            if isDerived {
+                Text(helpText)
+            } else {
+                Button("Sort Ascending") {
+                    onSortAscending()
+                }
+                Button("Sort Descending") {
+                    onSortDescending()
+                }
+                Divider()
+                Button("Auto-Fit Width") {
+                    onAutoFit()
+                }
+                if let onShowRankLegend {
+                    Divider()
+                    Button("Show QRZ Ranks Legend...") {
+                        onShowRankLegend()
+                    }
+                }
+                Divider()
+                Button("Delete Column '\(header)'") {
+                    onDelete()
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Email Cell with 50px Smart Interactive Icon & 1-Click Copy
+struct EmailCellView: View {
+    let record: QSORecordModel
+    let email: String
+    let call: String
+    let sentEmail: EmailHistoryEntry?
+    let onOpenComposer: () -> Void
+    let onViewSentEmail: () -> Void
+
+    @State private var isHovered: Bool = false
+    @State private var justCopied: Bool = false
+
+    var body: some View {
+        let clean = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let sentEmail {
+            Button(action: onViewSentEmail) {
+                Image(systemName: "envelope.badge.fill")
+                    .font(.system(size: 11))
+                    .foregroundColor(.cyan)
+                    .frame(width: 22, height: 22)
+                    .background(Circle().fill(Color.cyan.opacity(0.18)))
+            }
+            .buttonStyle(.plain)
+            .help("Email sent to \(call) on \(appStateFormatted(sentEmail.date)): \"\(sentEmail.subject)\" (\(sentEmail.status)). Click to view.")
+            .frame(maxWidth: .infinity, alignment: .center)
+        } else if !clean.isEmpty {
+            HStack(spacing: 2) {
+                if isHovered {
+                    Button {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(clean, forType: .string)
+                        justCopied = true
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                            justCopied = false
+                        }
+                    } label: {
+                        Image(systemName: justCopied ? "checkmark" : "doc.on.doc")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundColor(justCopied ? .green : .secondary)
+                            .frame(width: 17, height: 17)
+                            .background(Circle().fill(Color.secondary.opacity(0.18)))
+                    }
+                    .buttonStyle(.plain)
+                    .help(justCopied ? "Copied to clipboard!" : "Copy email '\(clean)'")
+
+                    Button(action: onOpenComposer) {
+                        Image(systemName: "paperplane.fill")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundColor(.white)
+                            .frame(width: 17, height: 17)
+                            .background(Circle().fill(Color.blue))
+                    }
+                    .buttonStyle(.plain)
+                    .help("Compose email to \(call) (\(clean))")
+                } else {
+                    Button(action: onOpenComposer) {
+                        Image(systemName: "envelope.fill")
+                            .font(.system(size: 10))
+                            .foregroundColor(.blue)
+                            .frame(width: 20, height: 20)
+                            .background(Circle().fill(Color.blue.opacity(0.16)))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .center)
+            .contentShape(Rectangle())
+            .onHover { hovering in
+                withAnimation(.easeInOut(duration: 0.12)) {
+                    isHovered = hovering
+                }
+            }
+            .help("Email: \(clean)\nClick to compose email to \(call). Double-click to edit.")
+        } else {
+            Text("—")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundColor(.secondary.opacity(0.35))
+                .frame(maxWidth: .infinity, alignment: .center)
+        }
+    }
+
+    private func appStateFormatted(_ date: Date) -> String {
+        date.formatted(date: .abbreviated, time: .omitted)
+    }
+}
+
+// MARK: - Aging / Elapsed Time / Wait Cell Component
+struct AgingCellView: View {
+    let record: QSORecordModel
+
+    var body: some View {
+        let isConfirmed = record.isConfirmed
+        let isSent = record.isAnyQSLSent
+        let waitingDays = record.qslWaitingDays ?? record.qsoAgeInDays
+
+        if isConfirmed {
+            HStack(spacing: 2) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 8))
+                    .foregroundColor(.green.opacity(0.85))
+                if let days = waitingDays {
+                    Text(displayAge(days))
+                        .font(.system(size: 9.5, weight: .medium, design: .monospaced))
+                        .foregroundColor(.secondary)
+                }
+            }
+            .padding(.horizontal, 4)
+            .padding(.vertical, 2)
+            .background(Capsule().fill(Color.green.opacity(0.08)))
+            .frame(maxWidth: .infinity, alignment: .center)
+            .help(tooltipText(isConfirmed: true, isSent: isSent, days: waitingDays))
+        } else if let days = waitingDays {
+            let (bg, fg, icon) = style(for: days, isSent: isSent)
+            HStack(spacing: 2) {
+                if let icon {
+                    Image(systemName: icon)
+                        .font(.system(size: 7.5, weight: .bold))
+                }
+                Text(displayAge(days))
+                    .font(.system(size: 9.5, weight: days >= 30 ? .bold : .medium, design: .monospaced))
+            }
+            .padding(.horizontal, 4.5)
+            .padding(.vertical, 2)
+            .background(Capsule().fill(bg))
+            .foregroundColor(fg)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .help(tooltipText(isConfirmed: false, isSent: isSent, days: days))
+        } else {
+            Text("—")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundColor(.secondary.opacity(0.4))
+                .frame(maxWidth: .infinity, alignment: .center)
+        }
+    }
+
+    private func displayAge(_ days: Int) -> String {
+        if days == 0 { return "0d" }
+        if days < 365 { return "\(days)d" }
+        let years = Double(days) / 365.25
+        return String(format: "%.1fy", years)
+    }
+
+    private func style(for days: Int, isSent: Bool) -> (Color, Color, String?) {
+        let defaultIcon = isSent ? "arrow.up" : nil
+        if days < 30 {
+            return (Color.secondary.opacity(0.12), Color.secondary, defaultIcon)
+        } else if days < 90 {
+            return (Color.orange.opacity(0.20), Color.orange, isSent ? "arrow.up" : "clock")
+        } else {
+            return (Color.red.opacity(0.22), Color.red, isSent ? "arrow.up.circle.fill" : "exclamationmark.circle.fill")
+        }
+    }
+
+    private func tooltipText(isConfirmed: Bool, isSent: Bool, days: Int?) -> String {
+        let d = days ?? 0
+        let qsoDate = record["QSO_DATE"]
+        if isConfirmed {
+            return "Confirmed QSO (\(d) days ago)"
+        } else if isSent {
+            let sentDateStr = record.qslSentDate.map { $0.formatted(date: .abbreviated, time: .omitted) } ?? "sent"
+            if d >= 90 {
+                return "Overdue Pending (\(d) days waiting since QSL sent on \(sentDateStr)).\nQSO Date: \(qsoDate). Target: \(record["CALL"]). Right-click to send reminder."
+            } else if d >= 30 {
+                return "Waiting for QSL (\(d) days elapsed since QSL request sent on \(sentDateStr)).\nQSO Date: \(qsoDate)."
+            } else {
+                return "Recently sent QSL (\(d) days waiting since \(sentDateStr)). Awaiting confirmation from \(record["CALL"])."
+            }
+        } else {
+            if d >= 90 {
+                return "QSL not sent yet (\(d) days since QSO on \(qsoDate)).\nConsider sending via LoTW, eQSL, or Direct."
+            } else if d >= 30 {
+                return "Unconfirmed QSO (\(d) days since \(qsoDate)). No QSL sent yet."
+            } else {
+                return "Recent QSO (\(d) days ago). No QSL sent yet."
+            }
+        }
+    }
+}
+
+// MARK: - Hover Quick Actions Bar Component
+struct HoverQuickActionBar: View {
+    let record: QSORecordModel
+    let call: String
+    @ObservedObject var appState: AppState
+    let onEdit: () -> Void
+
+    var body: some View {
+        HStack(spacing: 3) {
+            let emailVal = record["EMAIL"].trimmingCharacters(in: .whitespacesAndNewlines)
+
+            // Email or QSL Reminder
+            Button {
+                if !record.isConfirmed && !emailVal.isEmpty {
+                    appState.openQSLReminderEmailComposer(for: record)
+                } else {
+                    appState.openEmailComposer(for: record, email: emailVal)
+                }
+            } label: {
+                Image(systemName: !record.isConfirmed && !emailVal.isEmpty ? "bell.badge.fill" : "envelope.fill")
+                    .font(.system(size: 8.5))
+                    .foregroundColor(emailVal.isEmpty ? .secondary : .blue)
+                    .frame(width: 18, height: 18)
+                    .background(Circle().fill((emailVal.isEmpty ? Color.secondary : Color.blue).opacity(0.18)))
+            }
+            .buttonStyle(.plain)
+            .help(emailVal.isEmpty ? "Compose email to \(call)" : (!record.isConfirmed ? "Send QSL reminder to \(call)" : "Compose email to \(call)"))
+
+            // QRZ Profile
+            Button {
+                let target = "https://www.qrz.com/db/\(call)"
+                if let url = URL(string: target), !call.isEmpty {
+                    NSWorkspace.shared.open(url)
+                }
+            } label: {
+                Image(systemName: "globe")
+                    .font(.system(size: 8.5))
+                    .foregroundColor(.cyan)
+                    .frame(width: 18, height: 18)
+                    .background(Circle().fill(Color.cyan.opacity(0.18)))
+            }
+            .buttonStyle(.plain)
+            .help("Open \(call) on QRZ.com")
+
+            // QSL Card Composer
+            Button {
+                appState.selectedQSLCardQSO = record
+                appState.showQSLCardComposer = true
+            } label: {
+                Image(systemName: "photo.badge.checkmark")
+                    .font(.system(size: 8.5))
+                    .foregroundColor(.orange)
+                    .frame(width: 18, height: 18)
+                    .background(Circle().fill(Color.orange.opacity(0.18)))
+            }
+            .buttonStyle(.plain)
+            .help("Open QSL Card Composer for \(call)")
+
+            // Edit QSO
+            Button(action: onEdit) {
+                Image(systemName: "pencil")
+                    .font(.system(size: 8.5))
+                    .foregroundColor(.teal)
+                    .frame(width: 18, height: 18)
+                    .background(Circle().fill(Color.teal.opacity(0.18)))
+            }
+            .buttonStyle(.plain)
+            .help("Edit QSO with \(call)")
+
+            // Delete QSO
+            Button {
+                appState.deleteRecord(id: record.id)
+            } label: {
+                Image(systemName: "trash")
+                    .font(.system(size: 8.5))
+                    .foregroundColor(.red.opacity(0.85))
+                    .frame(width: 18, height: 18)
+                    .background(Circle().fill(Color.red.opacity(0.18)))
+            }
+            .buttonStyle(.plain)
+            .help("Delete QSO with \(call)")
+        }
+        .padding(.horizontal, 3.5)
+        .padding(.vertical, 2)
+        .background(
+            Capsule()
+                .fill(Color(NSColor.windowBackgroundColor).opacity(0.96))
+                .shadow(color: Color.black.opacity(0.28), radius: 3, x: 0, y: 1)
+        )
+        .overlay(
+            Capsule()
+                .stroke(Color.white.opacity(0.18), lineWidth: 0.6)
+        )
+    }
+}
+
+// MARK: - QSL Route / Method Cell Component
+struct RouteCellView: View {
+    let value: String
+
+    var body: some View {
+        let clean = value.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if clean.isEmpty {
+            Text("—")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundColor(.secondary.opacity(0.4))
+                .frame(maxWidth: .infinity, alignment: .center)
+        } else if clean == "B" || clean.contains("BURO") || clean.contains("BUREAU") {
+            HStack(spacing: 2.5) {
+                Image(systemName: "building.columns.fill")
+                    .font(.system(size: 7.5))
+                Text("Bureau")
+                    .font(.system(size: 9.5, weight: .semibold))
+            }
+            .foregroundColor(.indigo)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 1.5)
+            .background(Capsule().fill(Color.indigo.opacity(0.12)))
+            .frame(maxWidth: .infinity, alignment: .center)
+            .help("QSL via Bureau (Amateur Radio Bureau Service)")
+        } else if clean == "D" || clean == "DIRECT" {
+            HStack(spacing: 2.5) {
+                Image(systemName: "envelope.fill")
+                    .font(.system(size: 7.5))
+                Text("Direct")
+                    .font(.system(size: 9.5, weight: .semibold))
+            }
+            .foregroundColor(.purple)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 1.5)
+            .background(Capsule().fill(Color.purple.opacity(0.12)))
+            .frame(maxWidth: .infinity, alignment: .center)
+            .help("QSL via Direct Postal Mail")
+        } else if clean == "E" || clean == "ELECTRONIC" {
+            HStack(spacing: 2.5) {
+                Image(systemName: "bolt.fill")
+                    .font(.system(size: 7.5))
+                Text("eQSL")
+                    .font(.system(size: 9.5, weight: .semibold))
+            }
+            .foregroundColor(.teal)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 1.5)
+            .background(Capsule().fill(Color.teal.opacity(0.12)))
+            .frame(maxWidth: .infinity, alignment: .center)
+            .help("QSL via Electronic Service (LoTW / eQSL / QRZ)")
+        } else {
+            HStack(spacing: 2.5) {
+                Image(systemName: "person.crop.circle")
+                    .font(.system(size: 7.5))
+                Text(clean)
+                    .font(.system(size: 9.5, weight: .medium, design: .monospaced))
+            }
+            .foregroundColor(.primary)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .help("QSL Route / Manager: \(value)")
+        }
+    }
+}
+
+// MARK: - Rank Cell View Component
+struct RankCellView: View {
+    let header: String
+    let val: String
+    let call: String
+
+    var body: some View {
+        let (icon, color, label, desc) = rankInfo
+        HStack(spacing: 3) {
+            Image(systemName: icon)
+                .font(.system(size: 8))
+                .foregroundColor(color)
+            Text(val.hasPrefix("#") ? val : "#\(val)")
+                .font(.system(size: 10.5, weight: .bold, design: .monospaced))
+                .foregroundColor(color)
+        }
+        .padding(.horizontal, 5)
+        .padding(.vertical, 2)
+        .background(
+            RoundedRectangle(cornerRadius: 4)
+                .fill(color.opacity(0.12))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 4)
+                .stroke(color.opacity(0.3), lineWidth: 0.8)
+        )
+        .frame(maxWidth: .infinity, alignment: .center)
+        .help("\(label) for \(call): #\(val)\n\(desc)\nClick to view QRZ Ranks Legend.")
+    }
+
+    private var rankInfo: (icon: String, color: Color, label: String, desc: String) {
+        switch header {
+        case "RANK_QSO":
+            return ("trophy.fill", .blue, "QRZ World QSO Rank", "Ranked by total logbook QSO volume (Blue)")
+        case "RANK_BAND":
+            return ("medal.fill", .orange, "QRZ Band Rank", "Ranked by contacts on this band (Orange)")
+        case "RANK_DXCC":
+            return ("rosette", .green, "QRZ DXCC Rank", "Ranked by confirmed DXCC entities (Green)")
+        default:
+            return ("chart.line.uptrend.xyaxis", .secondary, "Leaderboard Rank", "")
+        }
+    }
+}
+
+// MARK: - Rank Legend Popover View
+struct RankLegendCardView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 8) {
+                Image(systemName: "rosette")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundColor(.orange)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("QRZ Leaderboard Ranks Legend")
+                        .font(.headline)
+                    Text("Standing and color coding for enriched amateur stations")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                Spacer()
+                Button(action: { dismiss() }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+            
+            Divider()
+
+            VStack(alignment: .leading, spacing: 12) {
+                legendItem(
+                    icon: "trophy.fill",
+                    color: .blue,
+                    title: "QSO Rank (Blue)",
+                    column: "RANK_QSO",
+                    description: "Global or territorial leaderboard rank based on the all-time total number of confirmed QSOs logged by the station."
+                )
+
+                legendItem(
+                    icon: "medal.fill",
+                    color: .orange,
+                    title: "Band Rank (Orange)",
+                    column: "RANK_BAND",
+                    description: "Leaderboard rank specifically for the amateur band on which the contact occurred (e.g. 20m, 40m, 15m)."
+                )
+
+                legendItem(
+                    icon: "rosette",
+                    color: .green,
+                    title: "DXCC Rank (Green)",
+                    column: "RANK_DXCC",
+                    description: "Leaderboard standing based on the total number of unique DXCC entities (countries/territories) verified and credited to the station."
+                )
+            }
+
+            Divider()
+
+            HStack {
+                Text("Note: Ranks are retrieved via QRZ XML API and cached locally.")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                Spacer()
+                Button("Done") {
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+            }
+        }
+        .padding(16)
+        .frame(width: 440)
+    }
+
+    private func legendItem(icon: String, color: Color, title: String, column: String, description: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 14))
+                .foregroundColor(color)
+                .frame(width: 24, height: 24)
+                .background(RoundedRectangle(cornerRadius: 6).fill(color.opacity(0.15)))
+
+            VStack(alignment: .leading, spacing: 2) {
+                HStack {
+                    Text(title)
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundColor(color)
+                    Text("(\(column))")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(.secondary)
+                }
+                Text(description)
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
     }
 }
 

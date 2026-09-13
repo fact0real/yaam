@@ -4,6 +4,7 @@
 //
 
 import Foundation
+@testable import YAAM
 
 // MARK: - Standalone Replicas of Engine Structs for Regression Testing
 

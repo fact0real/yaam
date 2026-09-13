@@ -22,12 +22,20 @@ public struct AzimuthalAndFlatMapCanvas: View {
     public var showGridLines: Bool
     public var showTrafficArcs: Bool
     public var showCountryLabels: Bool
+    public var showAuroralOval: Bool
+    public var showSatelliteTracks: Bool
+    public var showDRAPLayer: Bool
+    public var showBalloonTracks: Bool
     public var azimuthalRangeKm: Double
     public var stationCallsign: String
     public var onSelectMarker: (Globe3DMarker) -> Void
     public var onSelectGrid: (String) -> Void
 
     @ObservedObject private var rotatorService = RotatorService.shared
+    @ObservedObject private var satEngine = SatelliteTrackingEngine.shared
+    @ObservedObject private var auroraEngine = AuroralOvalEngine.shared
+    @ObservedObject private var drapEngine = DRAPAbsorptionEngine.shared
+    @ObservedObject private var balloonEngine = APRSBalloonTrackingEngine.shared
     @State private var liveDate = Date()
     private let timer = Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()
 
@@ -50,6 +58,10 @@ public struct AzimuthalAndFlatMapCanvas: View {
         showGridLines: Bool = true,
         showTrafficArcs: Bool = true,
         showCountryLabels: Bool = true,
+        showAuroralOval: Bool = true,
+        showSatelliteTracks: Bool = true,
+        showDRAPLayer: Bool = true,
+        showBalloonTracks: Bool = true,
         azimuthalRangeKm: Double = 20015.0,
         stationCallsign: String = "EP2AES",
         onSelectMarker: @escaping (Globe3DMarker) -> Void,
@@ -64,6 +76,10 @@ public struct AzimuthalAndFlatMapCanvas: View {
         self.showGridLines = showGridLines
         self.showTrafficArcs = showTrafficArcs
         self.showCountryLabels = showCountryLabels
+        self.showAuroralOval = showAuroralOval
+        self.showSatelliteTracks = showSatelliteTracks
+        self.showDRAPLayer = showDRAPLayer
+        self.showBalloonTracks = showBalloonTracks
         self.azimuthalRangeKm = azimuthalRangeKm
         self.stationCallsign = stationCallsign
         self.onSelectMarker = onSelectMarker
@@ -98,13 +114,14 @@ public struct AzimuthalAndFlatMapCanvas: View {
                             size: canvasSize,
                             home: homeCoordinate,
                             subSolar: subSolar,
+                            subLunar: subLunar,
                             terminator: terminatorPoints
                         )
                     }
                 }
                 .drawingGroup()
 
-                // Live UTC GMT Clock & Station Profile Watermark
+                // Live UTC GMT Clock & Station Profile Watermark (Bottom-Leading)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(formattedGMT(liveDate))
                         .font(.system(size: 11, weight: .semibold, design: .monospaced))
@@ -116,6 +133,17 @@ public struct AzimuthalAndFlatMapCanvas: View {
                         .foregroundColor(Color.secondary)
                 }
                 .padding(.leading, 18)
+                .padding(.bottom, 14)
+
+                // Station Greyline Telemetry HUD Widget (Bottom-Trailing)
+                VStack {
+                    Spacer()
+                    HStack {
+                        Spacer()
+                        stationGreylineHUD
+                    }
+                }
+                .padding(.trailing, 18)
                 .padding(.bottom, 14)
 
                 // Floating Glassmorphism HUD Controls in Azimuth Mode
@@ -495,6 +523,46 @@ public struct AzimuthalAndFlatMapCanvas: View {
             )
         }
 
+        // 7b. Real-Time NOAA OVATION Auroral Oval Overlay
+        if showAuroralOval {
+            drawAuroralOval(
+                context: context,
+                center: center,
+                mapRadius: mapRadius,
+                toScreen: azimuthalPoint
+            )
+        }
+
+        // 7c. Active Amateur Satellite Ground Track & Footprint
+        if showSatelliteTracks {
+            drawSatelliteTelemetry(
+                context: context,
+                center: center,
+                mapRadius: mapRadius,
+                toScreen: azimuthalPoint
+            )
+        }
+
+        // 7d. NOAA D-RAP Ionospheric Absorption Heatmap
+        if showDRAPLayer {
+            drawDRAPLayer(
+                context: context,
+                center: center,
+                mapRadius: mapRadius,
+                toScreen: azimuthalPoint
+            )
+        }
+
+        // 7e. APRS & High-Altitude Balloon Tracking
+        if showBalloonTracks {
+            drawBalloonTelemetry(
+                context: context,
+                center: center,
+                mapRadius: mapRadius,
+                toScreen: azimuthalPoint
+            )
+        }
+
         // 8. Antenna Beamwidth Cone (From Center Origin to Perimeter)
         drawAntennaBeamwidthCone(
             context: context,
@@ -717,6 +785,21 @@ public struct AzimuthalAndFlatMapCanvas: View {
                 isFresh = false
             }
 
+            // Evaluate Greyline Propagation Duct Alignment
+            let (isGreylineDuct, _) = SolarEphemeris.isPathInGreyline(from: home, to: m.coordinate, at: liveDate)
+
+            // Greyline Duct Wide Amber Glow Behind Ray
+            if isGreylineDuct {
+                var ductGlow = Path()
+                ductGlow.move(to: center)
+                ductGlow.addLine(to: targetPt)
+                context.stroke(
+                    ductGlow,
+                    with: .color(Color(red: 1.0, green: 0.78, blue: 0.22).opacity(alpha * 0.65)),
+                    lineWidth: 4.2
+                )
+            }
+
             // Short Path (SP) Ray - Solid Line
             var spBeam = Path()
             spBeam.move(to: center)
@@ -751,8 +834,17 @@ public struct AzimuthalAndFlatMapCanvas: View {
                 lineWidth: 1.2
             )
 
-            // Pulsing Ring for Fresh (< 60s) Spots
-            if isFresh {
+            // Greyline Duct Pulsing Halo Ring
+            if isGreylineDuct {
+                let ductR: CGFloat = 8.5 + 2.5 * sin(liveDate.timeIntervalSinceReferenceDate * 3.5)
+                let ductRect = CGRect(x: targetPt.x - ductR, y: targetPt.y - ductR, width: ductR * 2, height: ductR * 2)
+                context.stroke(
+                    Path(ellipseIn: ductRect),
+                    with: .color(Color(red: 1.0, green: 0.82, blue: 0.28).opacity(alpha * 0.90)),
+                    lineWidth: 1.6
+                )
+            } else if isFresh {
+                // Pulsing Ring for Fresh (< 60s) Spots
                 let pulseR = 6.0 + 2.5 * sin(liveDate.timeIntervalSinceReferenceDate * 4.0)
                 let pulseRect = CGRect(x: targetPt.x - pulseR, y: targetPt.y - pulseR, width: pulseR * 2, height: pulseR * 2)
                 context.stroke(Path(ellipseIn: pulseRect), with: .color(bandColor.opacity(0.85)), lineWidth: 1.0)
@@ -862,27 +954,35 @@ public struct AzimuthalAndFlatMapCanvas: View {
             with: .color(Color.black.opacity(0.30))
         )
 
-        let badgeBg: Color
-        let badgeStroke: Color
-        let callColor: Color
-        let subColor: Color
+        var badgeBg: Color
+        var badgeStroke: Color
+        var callColor: Color
+        var subColor: Color
 
-        switch currentTheme {
-        case .shackNight:
-            badgeBg = Color(red: 0.08, green: 0.12, blue: 0.18)
-            badgeStroke = Color(red: 0.22, green: 0.74, blue: 0.97)
-            callColor = Color(red: 0.95, green: 0.98, blue: 1.00)
-            subColor = Color(red: 0.65, green: 0.75, blue: 0.85)
-        case .classicLight:
-            badgeBg = Color(red: 0.93, green: 0.96, blue: 1.00)
-            badgeStroke = Color(red: 0.20, green: 0.40, blue: 0.70)
-            callColor = Color(red: 0.05, green: 0.10, blue: 0.25)
-            subColor = Color(red: 0.25, green: 0.35, blue: 0.45)
-        case .nightVision:
-            badgeBg = Color(red: 0.18, green: 0.02, blue: 0.02)
-            badgeStroke = Color(red: 0.90, green: 0.20, blue: 0.20)
-            callColor = Color(red: 1.00, green: 0.80, blue: 0.80)
-            subColor = Color(red: 0.85, green: 0.40, blue: 0.40)
+        let isRover = RoverModeEngine.shared.isRoverActive
+        if isRover {
+            badgeBg = Color(red: 0.14, green: 0.08, blue: 0.02)
+            badgeStroke = Color.orange
+            callColor = Color(red: 1.0, green: 0.75, blue: 0.2)
+            subColor = Color(red: 0.95, green: 0.85, blue: 0.65)
+        } else {
+            switch currentTheme {
+            case .shackNight:
+                badgeBg = Color(red: 0.08, green: 0.12, blue: 0.18)
+                badgeStroke = Color(red: 0.22, green: 0.74, blue: 0.97)
+                callColor = Color(red: 0.95, green: 0.98, blue: 1.00)
+                subColor = Color(red: 0.65, green: 0.75, blue: 0.85)
+            case .classicLight:
+                badgeBg = Color(red: 0.93, green: 0.96, blue: 1.00)
+                badgeStroke = Color(red: 0.20, green: 0.40, blue: 0.70)
+                callColor = Color(red: 0.05, green: 0.10, blue: 0.25)
+                subColor = Color(red: 0.25, green: 0.35, blue: 0.45)
+            case .nightVision:
+                badgeBg = Color(red: 0.18, green: 0.02, blue: 0.02)
+                badgeStroke = Color(red: 0.90, green: 0.20, blue: 0.20)
+                callColor = Color(red: 1.00, green: 0.80, blue: 0.80)
+                subColor = Color(red: 0.85, green: 0.40, blue: 0.40)
+            }
         }
 
         let badgePath = Path(roundedRect: badgeRect, cornerRadius: 5)
@@ -922,9 +1022,9 @@ public struct AzimuthalAndFlatMapCanvas: View {
         )
 
         context.draw(
-            Text("Center Origin")
-                .font(.system(size: 7.5, weight: .regular))
-                .foregroundColor(subColor.opacity(0.8)),
+            Text(isRover ? "⚡️ ROVER ORIGIN" : "Center Origin")
+                .font(.system(size: 7.5, weight: isRover ? .bold : .regular))
+                .foregroundColor(isRover ? Color.orange : subColor.opacity(0.8)),
             at: CGPoint(x: center.x, y: badgeRect.minY + 37),
             anchor: .center
         )
@@ -993,7 +1093,7 @@ public struct AzimuthalAndFlatMapCanvas: View {
         }
     }
 
-    // MARK: - Solar Night Shadow Polygon
+    // MARK: - Solar Night Shadow & Glowing Golden Greyline Ribbon
 
     private func drawAzimuthalSolarNightShadow(
         context: GraphicsContext,
@@ -1002,44 +1102,140 @@ public struct AzimuthalAndFlatMapCanvas: View {
         subSolar: SubSolarPosition,
         toScreen: (Double, Double) -> CGPoint
     ) {
-        let sampleStep = 8.0
-        for lat in stride(from: -85.0, through: 85.0, by: sampleStep) {
-            for lon in stride(from: -180.0, through: 180.0, by: sampleStep) {
-                let coord = GeoCoordinate(latitude: lat, longitude: lon)
-                let sunElev = SolarEphemeris.solarElevation(for: coord, at: liveDate)
-                if sunElev < 0 { // In night / twilight zone
-                    let pt = toScreen(lat, lon)
-                    let dist = hypot(pt.x - center.x, pt.y - center.y)
-                    if dist <= mapRadius {
-                        let cellSize = CGFloat((sampleStep / 180.0) * Double(mapRadius) * 1.5)
-                        // Realistic Civil / Nautical / Astronomical twilight gradation
-                        let alpha: Double
-                        if sunElev >= -6.0 {
-                            alpha = 0.20 // Civil Twilight
-                        } else if sunElev >= -12.0 {
-                            alpha = 0.35 // Nautical Twilight
-                        } else {
-                            alpha = 0.48 // Astronomical Night
-                        }
+        let maxDistKm: Double = max(3000.0, azimuthalRangeKm)
+        let angularSteps = 90 // every 4 degrees
+        let radialSteps = 24  // 24 rings from center to perimeter
 
-                        let shadowColor: Color
-                        switch currentTheme {
-                        case .shackNight:
-                            shadowColor = Color(red: 0.02, green: 0.03, blue: 0.06).opacity(alpha)
-                        case .classicLight:
-                            shadowColor = Color(red: 0.05, green: 0.08, blue: 0.14).opacity(alpha)
-                        case .nightVision:
-                            shadowColor = Color(red: 0.04, green: 0.00, blue: 0.00).opacity(alpha)
-                        }
+        let dAngle = 360.0 / Double(angularSteps)
+        let dRadius = Double(mapRadius) / Double(radialSteps)
 
-                        context.fill(
-                            Path(ellipseIn: CGRect(x: pt.x - cellSize / 2.0, y: pt.y - cellSize / 2.0, width: cellSize, height: cellSize)),
-                            with: .color(shadowColor)
-                        )
+        var nightPath = Path()
+        var nauticalPath = Path()
+        var civilPath = Path()
+
+        let homeLatRad = homeCoordinate.latitude * .pi / 180.0
+        let homeLonRad = homeCoordinate.longitude * .pi / 180.0
+        let sunDecRad = subSolar.latitude * .pi / 180.0
+        let sunLonRad = subSolar.longitude * .pi / 180.0
+
+        for rIdx in 0..<radialSteps {
+            let r0 = Double(rIdx) * dRadius
+            let r1 = Double(rIdx + 1) * dRadius
+            let rMid = (r0 + r1) * 0.5
+            let distKm = (rMid / Double(mapRadius)) * maxDistKm
+            let distRad = distKm / GeodesicMath.earthRadiusKm
+
+            for aIdx in 0..<angularSteps {
+                let az0 = Double(aIdx) * dAngle
+                let az1 = Double(aIdx + 1) * dAngle
+                let azMid = (az0 + az1) * 0.5
+                let azMidRad = azMid * .pi / 180.0
+
+                // Direct geodesic formula to find lat/lon of cell center
+                let sinLat = sin(homeLatRad) * cos(distRad) + cos(homeLatRad) * sin(distRad) * cos(azMidRad)
+                let ptLatRad = asin(max(-1.0, min(1.0, sinLat)))
+                let y = sin(azMidRad) * sin(distRad) * cos(homeLatRad)
+                let x = cos(distRad) - sin(homeLatRad) * sin(ptLatRad)
+                let dLonRad = atan2(y, x)
+                let ptLonRad = homeLonRad + dLonRad
+
+                // Solar elevation
+                let sinAlt = sin(ptLatRad) * sin(sunDecRad) + cos(ptLatRad) * cos(sunDecRad) * cos(ptLonRad - sunLonRad)
+                let altDeg = asin(max(-1.0, min(1.0, sinAlt))) * 180.0 / .pi
+
+                if altDeg < 0.0 {
+                    let ang0Rad = (az0 - 90.0) * .pi / 180.0
+                    let ang1Rad = (az1 - 90.0) * .pi / 180.0
+
+                    let p0 = CGPoint(x: center.x + CGFloat(r0 * cos(ang0Rad)), y: center.y + CGFloat(r0 * sin(ang0Rad)))
+                    let p1 = CGPoint(x: center.x + CGFloat(r0 * cos(ang1Rad)), y: center.y + CGFloat(r0 * sin(ang1Rad)))
+                    let p2 = CGPoint(x: center.x + CGFloat(r1 * cos(ang1Rad)), y: center.y + CGFloat(r1 * sin(ang1Rad)))
+                    let p3 = CGPoint(x: center.x + CGFloat(r1 * cos(ang0Rad)), y: center.y + CGFloat(r1 * sin(ang0Rad)))
+
+                    var quad = Path()
+                    quad.move(to: p0)
+                    quad.addLine(to: p1)
+                    quad.addLine(to: p2)
+                    quad.addLine(to: p3)
+                    quad.closeSubpath()
+
+                    if altDeg >= -6.0 {
+                        civilPath.addPath(quad)
+                    } else if altDeg >= -12.0 {
+                        nauticalPath.addPath(quad)
+                    } else {
+                        nightPath.addPath(quad)
                     }
                 }
             }
         }
+
+        // Fill Night Shadow Tiers
+        let deepNightColor: Color
+        let nauticalColor: Color
+        let civilColor: Color
+
+        switch currentTheme {
+        case .shackNight:
+            deepNightColor = Color(red: 0.02, green: 0.03, blue: 0.08).opacity(0.60)
+            nauticalColor = Color(red: 0.06, green: 0.08, blue: 0.22).opacity(0.42)
+            civilColor = Color(red: 0.28, green: 0.16, blue: 0.06).opacity(0.28)
+        case .classicLight:
+            deepNightColor = Color(red: 0.05, green: 0.08, blue: 0.16).opacity(0.45)
+            nauticalColor = Color(red: 0.10, green: 0.15, blue: 0.28).opacity(0.30)
+            civilColor = Color(red: 0.35, green: 0.25, blue: 0.10).opacity(0.20)
+        case .nightVision:
+            deepNightColor = Color(red: 0.04, green: 0.00, blue: 0.00).opacity(0.65)
+            nauticalColor = Color(red: 0.15, green: 0.02, blue: 0.02).opacity(0.45)
+            civilColor = Color(red: 0.30, green: 0.05, blue: 0.05).opacity(0.30)
+        }
+
+        context.fill(nightPath, with: .color(deepNightColor))
+        context.fill(nauticalPath, with: .color(nauticalColor))
+        context.fill(civilPath, with: .color(civilColor))
+
+        // Draw Glowing Golden / Amber Greyline Ribbon along the Terminator
+        let termCoords = SolarEphemeris.terminatorCoordinates(at: liveDate, stepDegrees: 1.5)
+        var ribbonPath = Path()
+        var ribbonStarted = false
+        var lastPt: CGPoint?
+
+        for coord in termCoords {
+            let pt = toScreen(coord.latitude, coord.longitude)
+            let dist = hypot(pt.x - center.x, pt.y - center.y)
+
+            if dist <= mapRadius + 2.0 {
+                if let lp = lastPt, hypot(pt.x - lp.x, pt.y - lp.y) > mapRadius * 0.4 {
+                    ribbonPath.move(to: pt)
+                } else if !ribbonStarted {
+                    ribbonPath.move(to: pt)
+                    ribbonStarted = true
+                } else {
+                    ribbonPath.addLine(to: pt)
+                }
+                lastPt = pt
+            } else {
+                ribbonStarted = false
+                lastPt = nil
+            }
+        }
+
+        // Twilight Ribbon: Amber outer halo + Gold core + Bright filament center
+        context.stroke(
+            ribbonPath,
+            with: .color(Color(red: 1.0, green: 0.72, blue: 0.18).opacity(0.35)),
+            lineWidth: 7.0
+        )
+        context.stroke(
+            ribbonPath,
+            with: .color(Color(red: 1.0, green: 0.85, blue: 0.32).opacity(0.80)),
+            lineWidth: 2.4
+        )
+        context.stroke(
+            ribbonPath,
+            with: .color(Color(red: 1.0, green: 0.96, blue: 0.70).opacity(0.95)),
+            lineWidth: 1.0
+        )
     }
 
     // MARK: - Equirectangular 2D Map (Flat GridTracker)
@@ -1049,6 +1245,7 @@ public struct AzimuthalAndFlatMapCanvas: View {
         size: CGSize,
         home: GeoCoordinate,
         subSolar: SubSolarPosition,
+        subLunar: SubLunarPosition,
         terminator: [GeoCoordinate]
     ) {
         func toFlatScreen(lat: Double, lon: Double) -> CGPoint {
@@ -1101,29 +1298,710 @@ public struct AzimuthalAndFlatMapCanvas: View {
             }
         }
 
-        // 4. Day / Night Solar Terminator Shadow
+        // 4. Day / Night Solar Terminator Shadow & Glowing Greyline Ribbon
         if showDayNightShadow {
-            for lat in stride(from: -85.0, through: 85.0, by: 10.0) {
-                for lon in stride(from: -180.0, through: 180.0, by: 10.0) {
-                    let coord = GeoCoordinate(latitude: lat, longitude: lon)
-                    let elev = SolarEphemeris.solarElevation(for: coord, at: liveDate)
-                    if elev < 0 {
-                        let pt = toFlatScreen(lat: lat, lon: lon)
-                        let w = size.width / 36.0
-                        let h = size.height / 18.0
-                        let alpha = elev < -6.0 ? 0.40 : 0.20
-                        context.fill(
-                            Path(CGRect(x: pt.x - w / 2, y: pt.y - h / 2, width: w, height: h)),
-                            with: .color(Color(red: 0.05, green: 0.08, blue: 0.15).opacity(alpha))
-                        )
-                    }
-                }
-            }
+            drawFlatSolarNightShadowAndGreyline(
+                context: context,
+                size: size,
+                subSolar: subSolar,
+                toScreen: toFlatScreen
+            )
         }
 
         // 5. Home QTH Indicator
         let homePt = toFlatScreen(lat: home.latitude, lon: home.longitude)
         context.fill(Path(ellipseIn: CGRect(x: homePt.x - 6, y: homePt.y - 6, width: 12, height: 12)), with: .color(Color.green))
         context.stroke(Path(ellipseIn: CGRect(x: homePt.x - 6, y: homePt.y - 6, width: 12, height: 12)), with: .color(Color.white), lineWidth: 2)
+
+        // 6. Auroral Oval Overlay
+        if showAuroralOval {
+            drawFlatAuroralOval(context: context, toScreen: toFlatScreen)
+        }
+
+        // 7. Satellite Tracking
+        if showSatelliteTracks {
+            drawFlatSatelliteTelemetry(context: context, size: size, toScreen: toFlatScreen)
+        }
+
+        // 8. NOAA D-RAP Ionospheric Absorption Layer
+        if showDRAPLayer {
+            drawFlatDRAPLayer(context: context, toScreen: toFlatScreen)
+        }
+
+        // 9. APRS & High-Altitude Balloon Tracking
+        if showBalloonTracks {
+            drawFlatBalloonTelemetry(context: context, toScreen: toFlatScreen)
+        }
+
+        // 10. Great Circle Traffic Rays & Spot Markers
+        if showTrafficArcs {
+            drawFlatTrafficRaysAndMarkers(
+                context: context,
+                size: size,
+                home: home,
+                toScreen: toFlatScreen
+            )
+        }
+
+        // 11. Subsolar (☀️) and Sublunar (🌙) Markers on Flat Map
+        let sunPt = toFlatScreen(lat: subSolar.latitude, lon: subSolar.longitude)
+        context.draw(Text("☀️").font(.system(size: 18)), at: sunPt, anchor: .center)
+
+        let moonPt = toFlatScreen(lat: subLunar.latitude, lon: subLunar.longitude)
+        context.draw(Text("🌙").font(.system(size: 14)), at: moonPt, anchor: .center)
+        context.draw(
+            Text("\(Int(subLunar.phasePercent * 100))%")
+                .font(.system(size: 7.5, weight: .bold, design: .monospaced))
+                .foregroundColor(Color.cyan),
+            at: CGPoint(x: moonPt.x, y: moonPt.y + 10),
+            anchor: .center
+        )
+    }
+
+    // MARK: - Flat Map Vector Greyline & Night Polygon
+
+    private func drawFlatSolarNightShadowAndGreyline(
+        context: GraphicsContext,
+        size: CGSize,
+        subSolar: SubSolarPosition,
+        toScreen: (Double, Double) -> CGPoint
+    ) {
+        let decRad = subSolar.latitude * .pi / 180.0
+        let sunLonRad = subSolar.longitude * .pi / 180.0
+        let isSummerNorth = subSolar.latitude >= 0
+        let step = 1.0
+
+        // 1. Vector Night Polygon
+        var nightPath = Path()
+        let startLat = termLat(lonDeg: -180.0, decRad: decRad, sunLonRad: sunLonRad)
+        nightPath.move(to: toScreen(startLat, -180.0))
+
+        var lonDeg = -180.0
+        while lonDeg <= 180.0 {
+            let lat = termLat(lonDeg: lonDeg, decRad: decRad, sunLonRad: sunLonRad)
+            nightPath.addLine(to: toScreen(lat, lonDeg))
+            lonDeg += step
+        }
+
+        if isSummerNorth {
+            // South pole is in darkness
+            nightPath.addLine(to: CGPoint(x: size.width, y: size.height))
+            nightPath.addLine(to: CGPoint(x: 0, y: size.height))
+        } else {
+            // North pole is in darkness
+            nightPath.addLine(to: CGPoint(x: size.width, y: 0))
+            nightPath.addLine(to: CGPoint(x: 0, y: 0))
+        }
+        nightPath.closeSubpath()
+
+        let flatNightColor: Color
+        switch currentTheme {
+        case .shackNight:
+            flatNightColor = Color(red: 0.02, green: 0.03, blue: 0.08).opacity(0.55)
+        case .classicLight:
+            flatNightColor = Color(red: 0.05, green: 0.08, blue: 0.16).opacity(0.40)
+        case .nightVision:
+            flatNightColor = Color(red: 0.05, green: 0.00, blue: 0.00).opacity(0.60)
+        }
+        context.fill(nightPath, with: .color(flatNightColor))
+
+        // 2. Civil Twilight (-6°) Ribbon Band
+        var civilBand = Path()
+        civilBand.move(to: toScreen(startLat, -180.0))
+
+        lonDeg = -180.0
+        while lonDeg <= 180.0 {
+            let lat = termLat(lonDeg: lonDeg, decRad: decRad, sunLonRad: sunLonRad)
+            civilBand.addLine(to: toScreen(lat, lonDeg))
+            lonDeg += step
+        }
+
+        lonDeg = 180.0
+        while lonDeg >= -180.0 {
+            let lat = twilightLat(elevationDeg: -6.0, lonDeg: lonDeg, decRad: decRad, sunLonRad: sunLonRad)
+            civilBand.addLine(to: toScreen(lat, lonDeg))
+            lonDeg -= step
+        }
+        civilBand.closeSubpath()
+        context.fill(civilBand, with: .color(Color(red: 1.0, green: 0.72, blue: 0.20).opacity(0.18)))
+
+        // 3. Glowing Golden Greyline Terminator Ribbon
+        var ribbonPath = Path()
+        ribbonPath.move(to: toScreen(startLat, -180.0))
+        lonDeg = -180.0 + step
+        while lonDeg <= 180.0 {
+            let lat = termLat(lonDeg: lonDeg, decRad: decRad, sunLonRad: sunLonRad)
+            ribbonPath.addLine(to: toScreen(lat, lonDeg))
+            lonDeg += step
+        }
+
+        // Amber outer glow
+        context.stroke(
+            ribbonPath,
+            with: .color(Color(red: 1.0, green: 0.75, blue: 0.20).opacity(0.35)),
+            lineWidth: 8.0
+        )
+        // Golden core ribbon
+        context.stroke(
+            ribbonPath,
+            with: .color(Color(red: 1.0, green: 0.85, blue: 0.32).opacity(0.85)),
+            lineWidth: 2.4
+        )
+        // Bright filament center
+        context.stroke(
+            ribbonPath,
+            with: .color(Color(red: 1.0, green: 0.96, blue: 0.70).opacity(0.95)),
+            lineWidth: 1.0
+        )
+    }
+
+    private func termLat(lonDeg: Double, decRad: Double, sunLonRad: Double) -> Double {
+        let lonRad = lonDeg * .pi / 180.0
+        let deltaLon = lonRad - sunLonRad
+        if abs(tan(decRad)) < 1e-6 {
+            return cos(deltaLon) > 0 ? -90.0 : 90.0
+        }
+        let termLatRad = atan(-cos(deltaLon) / tan(decRad))
+        return termLatRad * 180.0 / .pi
+    }
+
+    private func twilightLat(elevationDeg: Double, lonDeg: Double, decRad: Double, sunLonRad: Double) -> Double {
+        let lonRad = lonDeg * .pi / 180.0
+        let deltaLon = lonRad - sunLonRad
+        let sinH = sin(elevationDeg * .pi / 180.0)
+        let A = sin(decRad)
+        let B = cos(decRad) * cos(deltaLon)
+        let R = sqrt(A * A + B * B)
+        if R < 1e-6 { return 0.0 }
+        if abs(sinH / R) <= 1.0 {
+            let alpha = atan2(B, A)
+            let phi1 = (asin(sinH / R) - alpha) * 180.0 / .pi
+            var norm1 = phi1
+            while norm1 > 180 { norm1 -= 360 }
+            while norm1 < -180 { norm1 += 360 }
+
+            let phi2 = (.pi - asin(sinH / R) - alpha) * 180.0 / .pi
+            var norm2 = phi2
+            while norm2 > 180 { norm2 -= 360 }
+            while norm2 < -180 { norm2 += 360 }
+
+            let termLatDeg = termLat(lonDeg: lonDeg, decRad: decRad, sunLonRad: sunLonRad)
+
+            let valid1 = abs(norm1) <= 90.0
+            let valid2 = abs(norm2) <= 90.0
+
+            if valid1 && valid2 {
+                return abs(norm1 - termLatDeg) < abs(norm2 - termLatDeg) ? norm1 : norm2
+            } else if valid1 {
+                return norm1
+            } else if valid2 {
+                return norm2
+            } else {
+                return termLatDeg > 0 ? 90.0 : -90.0
+            }
+        } else {
+            return sinH > 0 ? (A >= 0 ? 90.0 : -90.0) : (A >= 0 ? -90.0 : 90.0)
+        }
+    }
+
+    private func drawFlatTrafficRaysAndMarkers(
+        context: GraphicsContext,
+        size: CGSize,
+        home: GeoCoordinate,
+        toScreen: (Double, Double) -> CGPoint
+    ) {
+        let homePt = toScreen(home.latitude, home.longitude)
+
+        for m in markers.prefix(40) {
+            let targetPt = toScreen(m.coordinate.latitude, m.coordinate.longitude)
+            let bandColor = WorldVectorGeography.bandColor(for: m.band)
+            let ageSeconds = max(0, liveDate.timeIntervalSince(m.timestamp))
+
+            let alpha: Double
+            let isFresh: Bool
+            if clusterSpotAging {
+                if ageSeconds < 180 { alpha = 1.0; isFresh = ageSeconds < 60 }
+                else if ageSeconds < 600 { alpha = 0.80; isFresh = false }
+                else if ageSeconds < 1200 { alpha = 0.50; isFresh = false }
+                else { alpha = 0.25; isFresh = false }
+            } else {
+                alpha = 0.85
+                isFresh = false
+            }
+
+            let (isGreylineDuct, _) = SolarEphemeris.isPathInGreyline(from: home, to: m.coordinate, at: liveDate)
+
+            // Great Circle Waypoints on Flat Map
+            let waypoints = GeodesicMath.greatCircleWaypoints(from: home, to: m.coordinate, count: 20)
+            if waypoints.count >= 2 {
+                var rayPath = Path()
+                var started = false
+                var prevLon: Double?
+
+                for wp in waypoints {
+                    if let pl = prevLon, abs(wp.longitude - pl) > 180.0 {
+                        // Anti-meridian crossing discontinuity
+                        started = false
+                    }
+                    let pt = toScreen(wp.latitude, wp.longitude)
+                    if !started {
+                        rayPath.move(to: pt)
+                        started = true
+                    } else {
+                        rayPath.addLine(to: pt)
+                    }
+                    prevLon = wp.longitude
+                }
+
+                if isGreylineDuct {
+                    context.stroke(
+                        rayPath,
+                        with: .color(Color(red: 1.0, green: 0.78, blue: 0.22).opacity(alpha * 0.65)),
+                        lineWidth: 3.5
+                    )
+                }
+
+                context.stroke(
+                    rayPath,
+                    with: .color(bandColor.opacity(alpha * 0.80)),
+                    lineWidth: 1.4
+                )
+            }
+
+            // Spot Target Dot
+            let markerRect = CGRect(x: targetPt.x - 3.5, y: targetPt.y - 3.5, width: 7, height: 7)
+            context.fill(Path(ellipseIn: markerRect), with: .color(bandColor.opacity(alpha)))
+            context.stroke(Path(ellipseIn: markerRect), with: .color(Color.white.opacity(alpha * 0.9)), lineWidth: 1.0)
+
+            if isGreylineDuct {
+                let ductR: CGFloat = 7.5 + 2.0 * sin(liveDate.timeIntervalSinceReferenceDate * 3.5)
+                let ductRect = CGRect(x: targetPt.x - ductR, y: targetPt.y - ductR, width: ductR * 2, height: ductR * 2)
+                context.stroke(Path(ellipseIn: ductRect), with: .color(Color(red: 1.0, green: 0.82, blue: 0.28).opacity(alpha * 0.85)), lineWidth: 1.2)
+            } else if isFresh {
+                let pulseR: CGFloat = 5.5 + 2.0 * sin(liveDate.timeIntervalSinceReferenceDate * 4.0)
+                let pulseRect = CGRect(x: targetPt.x - pulseR, y: targetPt.y - pulseR, width: pulseR * 2, height: pulseR * 2)
+                context.stroke(Path(ellipseIn: pulseRect), with: .color(bandColor.opacity(0.85)), lineWidth: 1.0)
+            }
+        }
+    }
+
+    // MARK: - Station Greyline Telemetry HUD
+
+    private var stationGreylineHUD: some View {
+        let solarStatus = SolarEphemeris.stationSolarStatus(for: homeCoordinate, at: liveDate)
+        let isGreyline = solarStatus.isGreylineActive
+        let ductPercent = Int(solarStatus.lowBandDuctingEfficiency * 100)
+
+        return HStack(spacing: 8) {
+            // Solar State Icon & Pulse Glow
+            ZStack {
+                Circle()
+                    .fill(
+                        isGreyline
+                            ? Color(red: 1.0, green: 0.78, blue: 0.25).opacity(0.25)
+                            : (solarStatus.elevationDeg > 0 ? Color.yellow.opacity(0.20) : Color.indigo.opacity(0.20))
+                    )
+                    .frame(width: 26, height: 26)
+
+                if isGreyline {
+                    Text("🌅")
+                        .font(.system(size: 13))
+                } else if solarStatus.elevationDeg > 0 {
+                    Text("☀️")
+                        .font(.system(size: 13))
+                } else {
+                    Text("🌙")
+                        .font(.system(size: 13))
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 1.5) {
+                HStack(spacing: 5) {
+                    Text(isGreyline ? "GREYLINE ACTIVE" : solarStatus.illumination.rawValue.uppercased())
+                        .font(.system(size: 9.5, weight: .bold, design: .monospaced))
+                        .foregroundColor(isGreyline ? Color(red: 1.0, green: 0.82, blue: 0.30) : (currentTheme == .classicLight ? Color.primary : Color.white))
+
+                    Text(String(format: "%+.1f°", solarStatus.elevationDeg))
+                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                        .foregroundColor(Color.secondary)
+
+                    if isGreyline {
+                        Circle()
+                            .fill(Color(red: 1.0, green: 0.78, blue: 0.22))
+                            .frame(width: 5, height: 5)
+                    }
+                }
+
+                HStack(spacing: 6) {
+                    Text(solarStatus.countdownText)
+                        .font(.system(size: 8.5, weight: .medium, design: .monospaced))
+                        .foregroundColor(Color.secondary)
+
+                    if isGreyline {
+                        Text("•")
+                            .font(.system(size: 7))
+                            .foregroundColor(Color.secondary)
+                        Text("Duct \(ductPercent)% (160/80m)")
+                            .font(.system(size: 8.5, weight: .bold, design: .monospaced))
+                            .foregroundColor(Color(red: 1.0, green: 0.78, blue: 0.25))
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(currentTheme == .classicLight ? Color.white.opacity(0.88) : Color(red: 0.06, green: 0.08, blue: 0.14).opacity(0.85))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(
+                            isGreyline
+                                ? Color(red: 1.0, green: 0.75, blue: 0.25).opacity(0.70)
+                                : (currentTheme == .classicLight ? Color.gray.opacity(0.30) : Color.white.opacity(0.15)),
+                            lineWidth: isGreyline ? 1.2 : 0.8
+                        )
+                )
+                .shadow(
+                    color: isGreyline ? Color(red: 1.0, green: 0.75, blue: 0.20).opacity(0.35) : Color.black.opacity(0.25),
+                    radius: isGreyline ? 6 : 4,
+                    x: 0,
+                    y: 2
+                )
+        )
+    }
+
+    // MARK: - Auroral Oval Drawing
+
+    private func drawAuroralOval(
+        context: GraphicsContext,
+        center: CGPoint,
+        mapRadius: CGFloat,
+        toScreen: (Double, Double) -> CGPoint
+    ) {
+        let b = auroraEngine.boundary
+        let rings = [b.northernOuterRing, b.northernInnerRing, b.southernOuterRing, b.southernInnerRing]
+
+        for ring in rings {
+            guard ring.count >= 2 else { continue }
+            var p = Path()
+            var started = false
+
+            for pt in ring {
+                let screenPt = toScreen(pt.latitude, pt.longitude)
+                let dist = hypot(screenPt.x - center.x, screenPt.y - center.y)
+                if dist <= mapRadius {
+                    if !started {
+                        p.move(to: screenPt)
+                        started = true
+                    } else {
+                        p.addLine(to: screenPt)
+                    }
+                } else {
+                    started = false
+                }
+            }
+
+            let color = auroraEngine.isStormActive
+                ? Color(red: 1.0, green: 0.2, blue: 0.8).opacity(0.65)
+                : Color(red: 0.1, green: 0.95, blue: 0.45).opacity(0.50)
+            context.stroke(p, with: .color(color), lineWidth: auroraEngine.isStormActive ? 2.5 : 1.5)
+        }
+    }
+
+    private func drawFlatAuroralOval(
+        context: GraphicsContext,
+        toScreen: (Double, Double) -> CGPoint
+    ) {
+        let b = auroraEngine.boundary
+        let rings = [b.northernOuterRing, b.northernInnerRing, b.southernOuterRing, b.southernInnerRing]
+
+        for ring in rings {
+            guard ring.count >= 2 else { continue }
+            var p = Path()
+            var started = false
+            for pt in ring {
+                let screenPt = toScreen(pt.latitude, pt.longitude)
+                if !started {
+                    p.move(to: screenPt)
+                    started = true
+                } else {
+                    p.addLine(to: screenPt)
+                }
+            }
+            let color = auroraEngine.isStormActive
+                ? Color(red: 1.0, green: 0.2, blue: 0.8).opacity(0.65)
+                : Color(red: 0.1, green: 0.95, blue: 0.45).opacity(0.50)
+            context.stroke(p, with: .color(color), lineWidth: auroraEngine.isStormActive ? 2.0 : 1.2)
+        }
+    }
+
+    // MARK: - Satellite Orbit & Footprint Drawing
+
+    private func drawSatelliteTelemetry(
+        context: GraphicsContext,
+        center: CGPoint,
+        mapRadius: CGFloat,
+        toScreen: (Double, Double) -> CGPoint
+    ) {
+        guard let sat = satEngine.selectedSatellite,
+              let telem = satEngine.currentTelemetry else { return }
+
+        // 1. Ground Track
+        let waypoints = satEngine.groundTrackWaypoints
+        if waypoints.count >= 2 {
+            var path = Path()
+            var started = false
+            for pt in waypoints {
+                let screenPt = toScreen(pt.latitude, pt.longitude)
+                let dist = hypot(screenPt.x - center.x, screenPt.y - center.y)
+                if dist <= mapRadius {
+                    if !started {
+                        path.move(to: screenPt)
+                        started = true
+                    } else {
+                        path.addLine(to: screenPt)
+                    }
+                } else {
+                    started = false
+                }
+            }
+            context.stroke(
+                path,
+                with: .color(Color(red: 0.2, green: 0.75, blue: 1.0).opacity(0.55)),
+                style: StrokeStyle(lineWidth: 1.5, dash: [4, 4])
+            )
+        }
+
+        // 2. Radio Footprint Circle
+        let footprintCoords = generateFootprintRing(centerCoord: telem.coordinate, radiusKm: telem.footprintRadiusKm)
+        if footprintCoords.count >= 3 {
+            var footPath = Path()
+            var started = false
+            for pt in footprintCoords {
+                let screenPt = toScreen(pt.latitude, pt.longitude)
+                let dist = hypot(screenPt.x - center.x, screenPt.y - center.y)
+                if dist <= mapRadius {
+                    if !started {
+                        footPath.move(to: screenPt)
+                        started = true
+                    } else {
+                        footPath.addLine(to: screenPt)
+                    }
+                } else {
+                    started = false
+                }
+            }
+            let footColor = telem.isLineOfSight
+                ? Color.green.opacity(0.40)
+                : Color.cyan.opacity(0.25)
+            context.stroke(footPath, with: .color(footColor), lineWidth: telem.isLineOfSight ? 2.0 : 1.0)
+        }
+
+        // 3. Sub-Satellite Marker & Label
+        let satPt = toScreen(telem.coordinate.latitude, telem.coordinate.longitude)
+        let satDist = hypot(satPt.x - center.x, satPt.y - center.y)
+        if satDist <= mapRadius {
+            let satDot = Path(ellipseIn: CGRect(x: satPt.x - 5, y: satPt.y - 5, width: 10, height: 10))
+            context.fill(satDot, with: .color(Color.yellow))
+            context.stroke(satDot, with: .color(Color.white), lineWidth: 1.5)
+
+            context.draw(
+                Text("🛰 \(sat.id)")
+                    .font(.system(size: 8.5, weight: .bold, design: .monospaced))
+                    .foregroundColor(Color.yellow),
+                at: CGPoint(x: satPt.x, y: satPt.y - 10),
+                anchor: .center
+            )
+        }
+    }
+
+    private func drawFlatSatelliteTelemetry(
+        context: GraphicsContext,
+        size: CGSize,
+        toScreen: (Double, Double) -> CGPoint
+    ) {
+        guard let sat = satEngine.selectedSatellite,
+              let telem = satEngine.currentTelemetry else { return }
+
+        // Ground track
+        let waypoints = satEngine.groundTrackWaypoints
+        if waypoints.count >= 2 {
+            var path = Path()
+            var started = false
+            for pt in waypoints {
+                let screenPt = toScreen(pt.latitude, pt.longitude)
+                if !started {
+                    path.move(to: screenPt)
+                    started = true
+                } else {
+                    path.addLine(to: screenPt)
+                }
+            }
+            context.stroke(
+                path,
+                with: .color(Color(red: 0.2, green: 0.75, blue: 1.0).opacity(0.55)),
+                style: StrokeStyle(lineWidth: 1.5, dash: [4, 4])
+            )
+        }
+
+        // Sub-satellite marker
+        let satPt = toScreen(telem.coordinate.latitude, telem.coordinate.longitude)
+        let satDot = Path(ellipseIn: CGRect(x: satPt.x - 5, y: satPt.y - 5, width: 10, height: 10))
+        context.fill(satDot, with: .color(Color.yellow))
+        context.stroke(satDot, with: .color(Color.white), lineWidth: 1.5)
+
+        context.draw(
+            Text("🛰 \(sat.id)")
+                .font(.system(size: 8.5, weight: .bold, design: .monospaced))
+                .foregroundColor(Color.yellow),
+            at: CGPoint(x: satPt.x, y: satPt.y - 10),
+            anchor: .center
+        )
+    }
+
+    private func generateFootprintRing(centerCoord: GeoCoordinate, radiusKm: Double) -> [GeoCoordinate] {
+        var ring: [GeoCoordinate] = []
+        let angularDist = radiusKm / GeodesicMath.earthRadiusKm
+        let lat1 = centerCoord.latitude * .pi / 180.0
+        let lon1 = centerCoord.longitude * .pi / 180.0
+
+        for b in stride(from: 0.0, through: 360.0, by: 15.0) {
+            let brng = b * .pi / 180.0
+            let lat2 = asin(sin(lat1) * cos(angularDist) + cos(lat1) * sin(angularDist) * cos(brng))
+            let lon2 = lon1 + atan2(sin(brng) * sin(angularDist) * cos(lat1), cos(angularDist) - sin(lat1) * sin(lat2))
+            ring.append(GeoCoordinate(latitude: lat2 * 180.0 / .pi, longitude: lon2 * 180.0 / .pi))
+        }
+        return ring
+    }
+
+    // MARK: - NOAA D-RAP Ionospheric Absorption Overlay
+
+    private func drawDRAPLayer(
+        context: GraphicsContext,
+        center: CGPoint,
+        mapRadius: CGFloat,
+        toScreen: (Double, Double) -> CGPoint
+    ) {
+        let snap = drapEngine.snapshot
+        guard !snap.affectedPoints.isEmpty else { return }
+
+        for pt in snap.affectedPoints {
+            let screenPt = toScreen(pt.coordinate.latitude, pt.coordinate.longitude)
+            let dist = hypot(screenPt.x - center.x, screenPt.y - center.y)
+            guard dist <= mapRadius else { continue }
+
+            let intensity = min(1.0, pt.absorbedFrequencyMHz / 20.0)
+            let color = Color.red.opacity(0.18 + intensity * 0.25)
+            let disc = Path(ellipseIn: CGRect(x: screenPt.x - 14, y: screenPt.y - 14, width: 28, height: 28))
+            context.fill(disc, with: .color(color))
+        }
+    }
+
+    private func drawFlatDRAPLayer(
+        context: GraphicsContext,
+        toScreen: (Double, Double) -> CGPoint
+    ) {
+        let snap = drapEngine.snapshot
+        guard !snap.affectedPoints.isEmpty else { return }
+
+        for pt in snap.affectedPoints {
+            let screenPt = toScreen(pt.coordinate.latitude, pt.coordinate.longitude)
+            let intensity = min(1.0, pt.absorbedFrequencyMHz / 20.0)
+            let color = Color.red.opacity(0.18 + intensity * 0.25)
+            let disc = Path(ellipseIn: CGRect(x: screenPt.x - 12, y: screenPt.y - 12, width: 24, height: 24))
+            context.fill(disc, with: .color(color))
+        }
+    }
+
+    // MARK: - APRS High-Altitude Balloon Tracking
+
+    private func drawBalloonTelemetry(
+        context: GraphicsContext,
+        center: CGPoint,
+        mapRadius: CGFloat,
+        toScreen: (Double, Double) -> CGPoint
+    ) {
+        for b in balloonEngine.balloons {
+            if b.flightTrail.count >= 2 {
+                var path = Path()
+                var started = false
+                for pt in b.flightTrail {
+                    let screenPt = toScreen(pt.latitude, pt.longitude)
+                    let dist = hypot(screenPt.x - center.x, screenPt.y - center.y)
+                    if dist <= mapRadius {
+                        if !started {
+                            path.move(to: screenPt)
+                            started = true
+                        } else {
+                            path.addLine(to: screenPt)
+                        }
+                    } else {
+                        started = false
+                    }
+                }
+                context.stroke(
+                    path,
+                    with: .color(Color.yellow.opacity(0.65)),
+                    style: StrokeStyle(lineWidth: 1.2, dash: [3, 3])
+                )
+            }
+
+            let bPt = toScreen(b.coordinate.latitude, b.coordinate.longitude)
+            let dist = hypot(bPt.x - center.x, bPt.y - center.y)
+            if dist <= mapRadius {
+                let balloonDisc = Path(ellipseIn: CGRect(x: bPt.x - 4, y: bPt.y - 4, width: 8, height: 8))
+                context.fill(balloonDisc, with: .color(Color.white))
+                context.stroke(balloonDisc, with: .color(Color.orange), lineWidth: 2)
+
+                context.draw(
+                    Text("🎈 \(b.callsign) (\(Int(b.altitudeMeters))m)")
+                        .font(.system(size: 7.5, weight: .bold, design: .monospaced))
+                        .foregroundColor(Color.orange),
+                    at: CGPoint(x: bPt.x, y: bPt.y - 9),
+                    anchor: .center
+                )
+            }
+        }
+    }
+
+    private func drawFlatBalloonTelemetry(
+        context: GraphicsContext,
+        toScreen: (Double, Double) -> CGPoint
+    ) {
+        for b in balloonEngine.balloons {
+            if b.flightTrail.count >= 2 {
+                var path = Path()
+                var started = false
+                for pt in b.flightTrail {
+                    let screenPt = toScreen(pt.latitude, pt.longitude)
+                    if !started {
+                        path.move(to: screenPt)
+                        started = true
+                    } else {
+                        path.addLine(to: screenPt)
+                    }
+                }
+                context.stroke(
+                    path,
+                    with: .color(Color.yellow.opacity(0.65)),
+                    style: StrokeStyle(lineWidth: 1.2, dash: [3, 3])
+                )
+            }
+
+            let bPt = toScreen(b.coordinate.latitude, b.coordinate.longitude)
+            let balloonDisc = Path(ellipseIn: CGRect(x: bPt.x - 4, y: bPt.y - 4, width: 8, height: 8))
+            context.fill(balloonDisc, with: .color(Color.white))
+            context.stroke(balloonDisc, with: .color(Color.orange), lineWidth: 2)
+
+            context.draw(
+                Text("🎈 \(b.callsign) (\(Int(b.altitudeMeters))m)")
+                    .font(.system(size: 7.5, weight: .bold, design: .monospaced))
+                    .foregroundColor(Color.orange),
+                at: CGPoint(x: bPt.x, y: bPt.y - 9),
+                anchor: .center
+            )
+        }
     }
 }
+

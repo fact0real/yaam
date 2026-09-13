@@ -2,8 +2,65 @@
 //  QRZAwardsView.swift
 //  YAAM
 //
+//  Multi-source awards hub — macOS native sidebar layout
+//
 
 import SwiftUI
+
+// MARK: - Award Source
+
+enum AwardSource: String, CaseIterable, Identifiable {
+    case qrz      = "QRZ"
+    case eqsl     = "eQSL"
+    case clublog  = "ClubLog"
+    case combined = "All Sources"
+
+    var id: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .qrz:      return "globe.badge.chevron.backward"
+        case .eqsl:     return "envelope.badge.shield.half.filled.fill"
+        case .clublog:  return "person.3.fill"
+        case .combined: return "star.circle.fill"
+        }
+    }
+
+    var gradient: [Color] {
+        switch self {
+        case .qrz:      return [Color(hue: 0.60, saturation: 0.80, brightness: 0.94),
+                                Color(hue: 0.63, saturation: 0.90, brightness: 0.72)]
+        case .eqsl:     return [Color(hue: 0.38, saturation: 0.76, brightness: 0.88),
+                                Color(hue: 0.43, saturation: 0.90, brightness: 0.60)]
+        case .clublog:  return [Color(hue: 0.07, saturation: 0.86, brightness: 0.98),
+                                Color(hue: 0.04, saturation: 0.92, brightness: 0.74)]
+        case .combined: return [Color(hue: 0.76, saturation: 0.68, brightness: 0.92),
+                                Color(hue: 0.80, saturation: 0.85, brightness: 0.66)]
+        }
+    }
+
+    var accentColor: Color { gradient[0] }
+
+    var subtitle: String {
+        switch self {
+        case .qrz:      return "Fetched live from QRZ.com Logbook"
+        case .eqsl:     return "Computed from eQSL-confirmed QSOs in log"
+        case .clublog:  return "Personal DXCC matrix via Club Log API"
+        case .combined: return "Union of all confirmed QSOs — all services"
+        }
+    }
+
+    var sidebarLabel: String {
+        switch self {
+        case .qrz:      return "QRZ Logbook"
+        case .eqsl:     return "eQSL Awards"
+        case .clublog:  return "Club Log DXCC"
+        case .combined: return "All Sources"
+        }
+    }
+}
+
+// MARK: - Data Models
 
 struct QRZAwardSummary: Identifiable, Codable, Hashable {
     let id: String
@@ -17,13 +74,8 @@ struct QRZAwardSummary: Identifiable, Codable, Hashable {
     let awardType: String
     let ribbonURL: String
 
-    var remainingPercent: Double {
-        max(0, 100 - percentComplete)
-    }
-
-    var progressText: String {
-        progressAvailable ? "\(Int(percentComplete.rounded()))%" : "--"
-    }
+    var remainingPercent: Double { max(0, 100 - percentComplete) }
+    var progressText: String { progressAvailable ? "\(Int(percentComplete.rounded()))%" : "--" }
 }
 
 struct QRZAwardsFetchResult {
@@ -31,639 +83,1055 @@ struct QRZAwardsFetchResult {
     let message: String
 }
 
+// MARK: - Main View
+
 struct QRZAwardsView: View {
     @EnvironmentObject var appState: AppState
+    @State private var selectedSource: AwardSource = .qrz
+    @State private var animateIcon: Bool = false
 
-    private var effectiveQRZAwards: [QRZAwardSummary] {
-        if !appState.qrzAwardSummaries.isEmpty {
-            return appState.qrzAwardSummaries
+    // MARK: Filtered QSO subsets
+
+    private var eqslRecords: [QSORecordModel] {
+        appState.qsoRecords.filter {
+            ["Y","V","C"].contains($0["EQSL_QSL_RCVD"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased())
         }
-        return synthesizeLocalAwards()
+    }
+    private var clublogRecords: [QSORecordModel] {
+        appState.qsoRecords.filter {
+            $0["CLUBLOG_QSO_UPLOAD_STATUS"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == "Y"
+        }
+    }
+    private var allConfirmedRecords: [QSORecordModel] {
+        appState.qsoRecords.filter(\.isConfirmed)
     }
 
-    private var earnedAwards: [QRZAwardSummary] {
-        effectiveQRZAwards.filter(\.earned).sorted { $0.title < $1.title }
+    // MARK: Effective awards
+
+    private var effectiveAwards: [QRZAwardSummary] {
+        switch selectedSource {
+        case .qrz:
+            if !appState.qrzAwardSummaries.isEmpty { return appState.qrzAwardSummaries }
+            return buildLogbookAwards(from: allConfirmedRecords)
+        case .eqsl:
+            return buildEQSLAwards(from: eqslRecords)
+        case .clublog:
+            return appState.clubLogDXCCMatrix?.toAwardSummaries()
+                ?? buildLogbookAwards(from: clublogRecords)
+        case .combined:
+            return buildLogbookAwards(from: allConfirmedRecords)
+        }
     }
 
+    private var earnedAwards:     [QRZAwardSummary] { effectiveAwards.filter(\.earned).sorted { $0.title < $1.title } }
     private var inProgressAwards: [QRZAwardSummary] {
-        effectiveQRZAwards
-            .filter { !$0.earned }
-            .sorted {
-                if $0.progressAvailable != $1.progressAvailable {
-                    return $0.progressAvailable && !$1.progressAvailable
-                }
-                return $0.percentComplete > $1.percentComplete
-            }
+        effectiveAwards.filter { !$0.earned }.sorted { $0.percentComplete > $1.percentComplete }
     }
 
-    private var averageProgress: Double {
-        let analyzed = effectiveQRZAwards.filter(\.progressAvailable)
-        guard !analyzed.isEmpty else { return 0 }
-        let total = analyzed.reduce(0) { $0 + $1.percentComplete }
-        return total / Double(analyzed.count)
-    }
+    // MARK: Body ─ Sidebar + Content
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                header
-                lotwAwardProgress
+        HStack(alignment: .top, spacing: 0) {
 
-                if effectiveQRZAwards.isEmpty {
-                    if appState.isFetchingQRZAwards {
-                        loadingState
-                    } else {
-                        emptyState
-                    }
-                } else {
-                    summaryStrip
+            // ── LEFT SIDEBAR ──────────────────────────────────────
+            sourceSidebar
 
-                    if !earnedAwards.isEmpty {
-                        awardSection(title: "Awarded", icon: "rosette", awards: earnedAwards)
-                    }
+            // ── DIVIDER ───────────────────────────────────────────
+            Divider()
 
-                    if !inProgressAwards.isEmpty {
-                        awardSection(title: "In Progress", icon: "chart.line.uptrend.xyaxis", awards: inProgressAwards)
-                    }
-
-                    if !appState.qrzAwardsStatus.isEmpty {
-                        Label(appState.qrzAwardsStatus, systemImage: "info.circle")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .padding(.vertical, 4)
-                    }
+            // ── RIGHT CONTENT ─────────────────────────────────────
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    contentHeader
+                    statsRow
+                    mainContent
                 }
+                .padding(18)
             }
-            .padding(18)
+            .frame(maxWidth: .infinity)
         }
         .background(Color(NSColor.textBackgroundColor))
         .onAppear {
-            if appState.qrzAwardSummaries.isEmpty && !appState.isFetchingQRZAwards {
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) { animateIcon = true }
+            if selectedSource == .qrz && appState.qrzAwardSummaries.isEmpty && !appState.isFetchingQRZAwards {
                 appState.fetchQRZAwards()
             }
         }
-    }
-
-    private func synthesizeLocalAwards() -> [QRZAwardSummary] {
-        let confirmedRecords = appState.qsoRecords.filter(\.isConfirmed)
-        let dxccSet = Set(confirmedRecords.map { $0["DXCC"] }.filter { !$0.isEmpty })
-        let stateSet = Set(confirmedRecords.map { $0["STATE"].uppercased() }.filter { !$0.isEmpty })
-        let continentSet = Set(confirmedRecords.map { $0["CONT"].uppercased() }.filter { !$0.isEmpty })
-        let gridSet = Set(confirmedRecords.map { ($0["GRIDSQUARE"].isEmpty ? $0["GRID"] : $0["GRIDSQUARE"]).prefix(4).uppercased() }.filter { $0.count == 4 })
-        let sixMeterGrids = Set(confirmedRecords.filter { $0["BAND"].lowercased() == "6m" }.map { ($0["GRIDSQUARE"].isEmpty ? $0["GRID"] : $0["GRIDSQUARE"]).prefix(4).uppercased() }.filter { $0.count == 4 })
-        let wpxPrefixes = Set(confirmedRecords.map { derivePrefix($0["CALL"]) }.filter { !$0.isEmpty })
-
-        var list: [QRZAwardSummary] = []
-
-        // 1. DXCC 100
-        let dxccCount = dxccSet.count
-        let dxccPct = min(100.0, (Double(dxccCount) / 100.0) * 100.0)
-        list.append(QRZAwardSummary(
-            id: "dxcc_100",
-            title: "DX World (DXCC 100)",
-            detail: "\(dxccCount) of 100 confirmed DXCC entities",
-            percentComplete: dxccPct,
-            status: dxccCount >= 100 ? "Awarded" : "\(100 - dxccCount) entities remaining",
-            earned: dxccCount >= 100,
-            progressAvailable: true,
-            achievement: "\(dxccCount) / 100 Entities",
-            awardType: "dxcc",
-            ribbonURL: ""
-        ))
-
-        // 2. Worked All Continents (WAC)
-        let contCount = continentSet.count
-        let contPct = min(100.0, (Double(contCount) / 6.0) * 100.0)
-        list.append(QRZAwardSummary(
-            id: "wac",
-            title: "Worked All Continents (WAC)",
-            detail: "\(contCount) of 6 continents confirmed (AF, AS, EU, NA, OC, SA)",
-            percentComplete: contPct,
-            status: contCount >= 6 ? "Awarded" : "\(6 - contCount) continents remaining",
-            earned: contCount >= 6,
-            progressAvailable: true,
-            achievement: "\(contCount) / 6 Continents",
-            awardType: "continent",
-            ribbonURL: ""
-        ))
-
-        // 3. Worked All States (WAS 50)
-        let stateCount = stateSet.count
-        let statePct = min(100.0, (Double(stateCount) / 50.0) * 100.0)
-        list.append(QRZAwardSummary(
-            id: "was_50",
-            title: "United States (WAS 50)",
-            detail: "\(stateCount) of 50 US states confirmed",
-            percentComplete: statePct,
-            status: stateCount >= 50 ? "Awarded" : "\(50 - stateCount) states remaining",
-            earned: stateCount >= 50,
-            progressAvailable: true,
-            achievement: "\(stateCount) / 50 States",
-            awardType: "was",
-            ribbonURL: ""
-        ))
-
-        // 4. Grid Master / VUCC (100 Maidenhead Grids)
-        let gridCount = gridSet.count
-        let gridPct = min(100.0, (Double(gridCount) / 100.0) * 100.0)
-        list.append(QRZAwardSummary(
-            id: "vucc_grids",
-            title: "Grid Master (100 Grids)",
-            detail: "\(gridCount) of 100 Maidenhead grid squares confirmed",
-            percentComplete: gridPct,
-            status: gridCount >= 100 ? "Awarded" : "\(100 - gridCount) grids remaining",
-            earned: gridCount >= 100,
-            progressAvailable: true,
-            achievement: "\(gridCount) / 100 Grids",
-            awardType: "grid",
-            ribbonURL: ""
-        ))
-
-        // 5. CQ WPX (300 Prefixes)
-        let wpxCount = wpxPrefixes.count
-        let wpxPct = min(100.0, (Double(wpxCount) / 300.0) * 100.0)
-        list.append(QRZAwardSummary(
-            id: "cq_wpx",
-            title: "CQ WPX (Prefix Master)",
-            detail: "\(wpxCount) of 300 unique callsign prefixes confirmed",
-            percentComplete: wpxPct,
-            status: wpxCount >= 300 ? "Awarded" : "\(300 - wpxCount) prefixes remaining",
-            earned: wpxCount >= 300,
-            progressAvailable: true,
-            achievement: "\(wpxCount) / 300 Prefixes",
-            awardType: "wpx",
-            ribbonURL: ""
-        ))
-
-        // 6. 6m Magic Band (50 Grids)
-        let sixMCount = sixMeterGrids.count
-        let sixMPct = min(100.0, (Double(sixMCount) / 50.0) * 100.0)
-        list.append(QRZAwardSummary(
-            id: "six_meter_50",
-            title: "6m Magic Band Explorer",
-            detail: "\(sixMCount) of 50 Maidenhead grids confirmed on 50 MHz",
-            percentComplete: sixMPct,
-            status: sixMCount >= 50 ? "Awarded" : "\(50 - sixMCount) grids remaining",
-            earned: sixMCount >= 50,
-            progressAvailable: true,
-            achievement: "\(sixMCount) / 50 Grids on 6m",
-            awardType: "vhf",
-            ribbonURL: ""
-        ))
-
-        return list
-    }
-
-    private func derivePrefix(_ call: String) -> String {
-        let clean = call.uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !clean.isEmpty else { return "" }
-        if let numIdx = clean.firstIndex(where: { $0.isNumber }) {
-            return String(clean[...numIdx])
+        .onChange(of: selectedSource) { _, newSrc in
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.65)) {
+                animateIcon = false
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) {
+                withAnimation(.spring(response: 0.45, dampingFraction: 0.7)) { animateIcon = true }
+            }
+            if newSrc == .qrz && appState.qrzAwardSummaries.isEmpty && !appState.isFetchingQRZAwards {
+                appState.fetchQRZAwards()
+            }
+            if newSrc == .clublog && appState.clubLogDXCCMatrix == nil && !appState.isFetchingClubLogAwards {
+                appState.fetchClubLogDXCCMatrix()
+            }
         }
-        return String(clean.prefix(3))
     }
 
-    private var header: some View {
-        HStack(spacing: 14) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color.orange.opacity(0.14))
-                Image(systemName: "trophy.fill")
-                    .font(.title2)
-                    .foregroundColor(.orange)
-            }
-            .frame(width: 46, height: 46)
+    // MARK: ── Left Sidebar ───────────────────────────────────────
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Awards")
-                    .font(.title2)
-                    .bold()
-                Text("QRZ achievements, LoTW confirmations, and local award progress")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+    private var sourceSidebar: some View {
+        VStack(alignment: .leading, spacing: 0) {
+
+            // Header
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 10) {
+                    Image(systemName: "trophy.fill")
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundStyle(
+                            LinearGradient(colors: [.yellow, .orange],
+                                           startPoint: .top, endPoint: .bottom)
+                        )
+                    Text("Awards Hub")
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundStyle(.primary)
+                }
+                Text("QRZ, eQSL, ClubLog achievements")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
             }
+            .padding(.horizontal, 14)
+            .padding(.top, 16)
+            .padding(.bottom, 12)
+
+            Divider().padding(.horizontal, 10)
+
+            // Source label
+            Text("DATA SOURCES")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(.secondary)
+                .tracking(1.2)
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+                .padding(.bottom, 6)
+
+            // Source navigation items
+            ForEach(AwardSource.allCases) { source in
+                sidebarNavItem(source)
+            }
+
+            Divider().padding(.horizontal, 10).padding(.top, 10)
+
+            // Status / loading
+            sidebarStatusArea
 
             Spacer()
-
-            if appState.isFetchingQRZAwards {
-                ProgressView()
-                    .controlSize(.small)
-            }
-
-            Button {
-                appState.fetchQRZAwards()
-            } label: {
-                Label("Refresh", systemImage: "arrow.clockwise")
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(appState.isFetchingQRZAwards)
         }
-        .padding(14)
-        .background(Color(NSColor.controlBackgroundColor).opacity(0.62))
-        .cornerRadius(8)
+        .frame(width: 190)
+        .background(Color(NSColor.controlBackgroundColor).opacity(0.45))
     }
 
-    private var summaryStrip: some View {
-        HStack(spacing: 10) {
-            awardMetric("Awarded", "\(earnedAwards.count)", "checkmark.seal.fill", .green)
-            awardMetric(
-                "Analyzed",
-                "\(appState.qrzAwardSummaries.filter(\.progressAvailable).count)/\(appState.qrzAwardSummaries.count)",
-                "square.grid.2x2.fill",
-                .blue
+    private func sidebarNavItem(_ source: AwardSource) -> some View {
+        let isSelected = selectedSource == source
+        let count      = recordCount(for: source)
+
+        return Button {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
+                selectedSource = source
+            }
+        } label: {
+            HStack(spacing: 11) {
+                // Gradient icon tile
+                ZStack {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(
+                            LinearGradient(colors: source.gradient,
+                                           startPoint: .topLeading,
+                                           endPoint: .bottomTrailing)
+                        )
+                        .frame(width: 34, height: 34)
+                        .shadow(color: source.accentColor.opacity(0.30), radius: 4, x: 0, y: 2)
+
+                    Image(systemName: source.icon)
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(.white)
+                }
+
+                // Label + count
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(source.sidebarLabel)
+                        .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
+                        .foregroundStyle(isSelected ? source.accentColor : .primary)
+                        .lineLimit(1)
+                    if count > 0 {
+                        Text(formatCount(count, source: source))
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Spacer()
+
+                // Selection indicator
+                if isSelected {
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(source.accentColor)
+                        .frame(width: 3, height: 20)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(isSelected
+                          ? source.accentColor.opacity(0.10)
+                          : Color.clear)
             )
-            awardMetric("Average", "\(Int(averageProgress.rounded()))%", "gauge.with.dots.needle.50percent", .purple)
-            awardMetric("Closest", closestAwardText, "target", .orange)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .focusable(false).focusEffectDisabled()
+        .padding(.horizontal, 8)
+        .padding(.vertical, 2)
+    }
+
+    @ViewBuilder
+    private var sidebarStatusArea: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            // Fetching indicator
+            if appState.isFetchingQRZAwards || appState.isFetchingClubLogAwards {
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.mini)
+                    Text(appState.isFetchingQRZAwards ? "Fetching QRZ…" : "Fetching ClubLog…")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 14)
+                .padding(.top, 10)
+            }
+
+            // Status string
+            let status = currentStatusText
+            if !status.isEmpty {
+                Text(status)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(3)
+                    .padding(.horizontal, 14)
+                    .padding(.top, appState.isFetchingQRZAwards || appState.isFetchingClubLogAwards ? 4 : 10)
+            }
         }
     }
 
-    private var closestAwardText: String {
-        guard let award = inProgressAwards
-            .filter(\.progressAvailable)
-            .max(by: { $0.percentComplete < $1.percentComplete }) else {
-            return "Complete"
+    private var currentStatusText: String {
+        switch selectedSource {
+        case .qrz:      return appState.qrzAwardsStatus
+        case .clublog:  return appState.clubLogAwardsStatus
+        case .eqsl:     return eqslRecords.isEmpty ? "Sync eQSL inbox in QSL Hub first." : "\(eqslRecords.count) confirmed cards in log"
+        case .combined: return "\(allConfirmedRecords.count) total confirmed QSOs"
         }
-        return "\(Int(award.remainingPercent.rounded()))% left"
     }
 
-    private var lotwAwardProgress: some View {
-        VStack(alignment: .leading, spacing: 12) {
+    private func formatCount(_ count: Int, source: AwardSource) -> String {
+        let unit: String
+        switch source {
+        case .qrz:      unit = count == 1 ? "award" : "awards"
+        case .eqsl:     unit = count == 1 ? "confirmed card" : "confirmed cards"
+        case .clublog:  unit = count == 1 ? "entity" : "entities confirmed"
+        case .combined: unit = count == 1 ? "confirmed QSO" : "confirmed QSOs"
+        }
+        if count >= 1_000_000 { return String(format: "%.1fM \(unit)", Double(count) / 1_000_000) }
+        if count >= 1_000     { return String(format: "%.1fK \(unit)", Double(count) / 1_000) }
+        return "\(count) \(unit)"
+    }
+
+    private func recordCount(for source: AwardSource) -> Int {
+        switch source {
+        case .qrz:      return appState.qrzAwardSummaries.count
+        case .eqsl:     return eqslRecords.count
+        case .clublog:  return appState.clubLogDXCCMatrix?.totalConfirmed ?? 0
+        case .combined: return allConfirmedRecords.count
+        }
+    }
+
+    // MARK: ── Content Header ─────────────────────────────────────
+
+    private var contentHeader: some View {
+        ZStack(alignment: .leading) {
+            // Gradient background
+            LinearGradient(
+                colors: selectedSource.gradient.map { $0.opacity(0.82) },
+                startPoint: .topLeading, endPoint: .bottomTrailing
+            )
+            .cornerRadius(14)
+
+            // Decorative bubbles
             HStack {
-                Label("LoTW Award Progress", systemImage: "checkmark.seal.fill")
-                    .font(.headline)
+                Spacer()
+                ZStack {
+                    Circle().fill(.white.opacity(0.05)).frame(width: 150).offset(x: 30, y: -20)
+                    Circle().fill(.white.opacity(0.04)).frame(width: 90).offset(x: -20, y: 30)
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+
+            HStack(spacing: 16) {
+                // Animated source icon
+                ZStack {
+                    Circle().fill(.white.opacity(0.16)).frame(width: 52, height: 52)
+                    Image(systemName: selectedSource.icon)
+                        .font(.system(size: 22, weight: .bold))
+                        .foregroundStyle(.white)
+                        .scaleEffect(animateIcon ? 1.0 : 0.6)
+                        .opacity(animateIcon ? 1.0 : 0.0)
+                        .animation(.spring(response: 0.45, dampingFraction: 0.65), value: animateIcon)
+                }
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("\(selectedSource.rawValue) Awards")
+                        .font(.system(size: 18, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                    Text(selectedSource.subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.82))
+                        .lineLimit(1)
+                }
+
+                Spacer()
+
+                // Action button
+                actionButton
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 14)
+        }
+        .frame(height: 82)
+        .shadow(color: selectedSource.accentColor.opacity(0.28), radius: 12, x: 0, y: 4)
+        .animation(.easeInOut(duration: 0.30), value: selectedSource)
+    }
+
+    @ViewBuilder
+    private var actionButton: some View {
+        switch selectedSource {
+        case .qrz:
+            actionPill(
+                label: appState.isFetchingQRZAwards ? "Loading…" : "Refresh",
+                icon: "arrow.clockwise",
+                disabled: appState.isFetchingQRZAwards
+            ) { appState.fetchQRZAwards() }
+
+        case .clublog:
+            actionPill(
+                label: appState.isFetchingClubLogAwards ? "Loading…" : "Fetch Matrix",
+                icon: "arrow.down.circle",
+                disabled: appState.isFetchingClubLogAwards
+            ) { appState.fetchClubLogDXCCMatrix() }
+
+        case .eqsl:
+            actionPill(label: "Open eQSL.cc", icon: "safari", disabled: false) {
+                if let url = URL(string: "https://www.eqsl.cc/qslcard/Awards.cfm") {
+                    NSWorkspace.shared.open(url)
+                }
+            }
+
+        case .combined:
+            actionPill(label: "Sync All", icon: "arrow.triangle.2.circlepath", disabled: false) {
+                appState.downloadLoTWAndQRZConfirmations()
+            }
+        }
+    }
+
+    private func actionPill(label: String, icon: String, disabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(label, systemImage: icon)
+                .font(.caption.weight(.semibold))
+                .padding(.horizontal, 13)
+                .padding(.vertical, 7)
+                .background(.white.opacity(0.18), in: Capsule())
+                .foregroundStyle(.white)
+        }
+        .buttonStyle(.plain)
+        .focusable(false).focusEffectDisabled()
+        .disabled(disabled)
+        .opacity(disabled ? 0.6 : 1.0)
+    }
+
+    // MARK: ── Stats Row ──────────────────────────────────────────
+
+    private var statsRow: some View {
+        HStack(spacing: 10) {
+            switch selectedSource {
+            case .qrz, .combined:
+                statCard("Awarded",   value: "\(earnedAwards.count)",              icon: "checkmark.seal.fill", color: .green)
+                statCard("Analyzed",  value: "\(effectiveAwards.count)",           icon: "square.grid.2x2.fill", color: selectedSource.accentColor)
+                statCard("Average",   value: "\(Int(avgProgress.rounded()))%",     icon: "gauge.with.dots.needle.50percent", color: .purple)
+                statCard("Closest",   value: bestProgressText,                     icon: "target", color: .orange)
+
+            case .eqsl:
+                let dxcc = Set(eqslRecords.map { $0["DXCC"] }.filter { !$0.isEmpty }).count
+                statCard("eQSL Cards", value: "\(eqslRecords.count)",   icon: "envelope.badge.shield.half.filled.fill", color: .green)
+                statCard("Countries",  value: "\(dxcc)",                icon: "globe",               color: selectedSource.accentColor)
+                statCard("Awarded",    value: "\(earnedAwards.count)",  icon: "checkmark.seal.fill", color: .yellow)
+                statCard("AGM Level",  value: agmLevelText(eqslRecords.count), icon: "medal.fill", color: .orange)
+
+            case .clublog:
+                if let matrix = appState.clubLogDXCCMatrix {
+                    statCard("Confirmed",  value: "\(matrix.totalConfirmed)", icon: "checkmark.seal.fill",                    color: .green)
+                    statCard("Worked",     value: "\(matrix.totalWorked)",    icon: "antenna.radiowaves.left.and.right",       color: selectedSource.accentColor)
+                    statCard("Continents", value: "\(matrix.continentsConfirmed.count)/6", icon: "globe",                    color: .purple)
+                    statCard("Bands",      value: "\(activeBands(matrix))",   icon: "waveform",                               color: .orange)
+                } else if appState.isFetchingClubLogAwards {
+                    loadingStatCards
+                } else {
+                    placeholderStatCards
+                }
+            }
+        }
+    }
+
+    private var loadingStatCards: some View {
+        ForEach(0..<4, id: \.self) { _ in
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color(NSColor.controlBackgroundColor).opacity(0.4))
+                .frame(height: 78)
+                .overlay(ProgressView().controlSize(.small))
+                .frame(maxWidth: .infinity)
+        }
+    }
+
+    private var placeholderStatCards: some View {
+        ForEach(0..<4, id: \.self) { _ in
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color(NSColor.controlBackgroundColor).opacity(0.30))
+                .frame(height: 78)
+                .overlay(Image(systemName: "ellipsis").foregroundStyle(.secondary))
+                .frame(maxWidth: .infinity)
+        }
+    }
+
+    private func statCard(_ title: String, value: String, icon: String, color: Color) -> some View {
+        HStack(spacing: 10) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(color.opacity(0.12))
+                    .frame(width: 36, height: 36)
+                Image(systemName: icon)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(color)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(value)
+                    .font(.system(.headline, design: .rounded).bold())
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                Text(title)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(NSColor.controlBackgroundColor).opacity(0.55))
+        .cornerRadius(10)
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(color.opacity(0.20)))
+    }
+
+    private var avgProgress: Double {
+        let items = effectiveAwards.filter(\.progressAvailable)
+        guard !items.isEmpty else { return 0 }
+        return items.reduce(0) { $0 + $1.percentComplete } / Double(items.count)
+    }
+    private var bestProgressText: String {
+        guard let top = inProgressAwards.filter(\.progressAvailable).first else { return "All done!" }
+        return "\(Int(top.remainingPercent.rounded()))% left"
+    }
+    private func agmLevelText(_ count: Int) -> String {
+        if count >= 5000 { return "Platinum" }
+        if count >= 1000 { return "Gold" }
+        if count >= 500  { return "Silver" }
+        if count >= 100  { return "Bronze" }
+        return "\(count)/100"
+    }
+    private func activeBands(_ matrix: ClubLogDXCCMatrix) -> Int {
+        Set(matrix.entities.flatMap { $0.confirmedBands }).count
+    }
+
+    // MARK: ── Main Content ───────────────────────────────────────
+
+    @ViewBuilder
+    private var mainContent: some View {
+        switch selectedSource {
+        case .qrz, .combined:
+            standardAwardsContent
+
+        case .eqsl:
+            VStack(alignment: .leading, spacing: 16) {
+                agmTierView
+                lotwProgressPanel
+                standardAwardsContent
+            }
+
+        case .clublog:
+            VStack(alignment: .leading, spacing: 16) {
+                if let matrix = appState.clubLogDXCCMatrix {
+                    clubLogBandMatrix(matrix)
+                } else if appState.isFetchingClubLogAwards {
+                    loadingPanel("Fetching DXCC matrix from Club Log…")
+                } else {
+                    clubLogEmptyState
+                }
+                standardAwardsContent
+            }
+        }
+    }
+
+    // MARK: Standard Awards
+
+    @ViewBuilder
+    private var standardAwardsContent: some View {
+        if effectiveAwards.isEmpty {
+            emptyState
+        } else {
+            if !earnedAwards.isEmpty     { awardSection(title: "🏆 Awarded",     awards: earnedAwards) }
+            if !inProgressAwards.isEmpty { awardSection(title: "📈 In Progress", awards: inProgressAwards) }
+
+            let footer = currentStatusText
+            if !footer.isEmpty && !footer.contains("confirmed") {
+                HStack(spacing: 5) {
+                    Image(systemName: "info.circle").font(.caption2)
+                    Text(footer).font(.caption2)
+                }
+                .foregroundStyle(.secondary)
+                .padding(.top, 2)
+            }
+        }
+    }
+
+    private func awardSection(title: String, awards: [QRZAwardSummary]) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title).font(.headline)
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 260, maximum: 340), spacing: 10)],
+                alignment: .leading, spacing: 10
+            ) {
+                ForEach(awards) { award in
+                    AwardCard(award: award, accentColor: selectedSource.accentColor)
+                }
+            }
+        }
+    }
+
+    // MARK: eQSL AGM Tier
+
+    private var agmTierView: some View {
+        let count  = eqslRecords.count
+        let tiers: [(name: String, min: Int, color: Color, icon: String)] = [
+            ("Bronze",   100,  Color(hue: 0.07, saturation: 0.68, brightness: 0.72), "medal.fill"),
+            ("Silver",   500,  Color(hue: 0.00, saturation: 0.00, brightness: 0.82), "medal.fill"),
+            ("Gold",     1000, Color(hue: 0.13, saturation: 0.88, brightness: 0.98), "medal.fill"),
+            ("Platinum", 5000, Color(hue: 0.55, saturation: 0.32, brightness: 0.90), "crown.fill"),
+        ]
+        let _ = tiers.last { count >= $0.min }
+        let next = tiers.first { count < $0.min }
+
+        return VStack(alignment: .leading, spacing: 12) {
+            Label("eQSL AGM — Authenticard Gold Medal", systemImage: "medal.fill")
+                .font(.headline)
+
+            HStack(spacing: 0) {
+                ForEach(tiers, id: \.name) { tier in
+                    let achieved = count >= tier.min
+                    VStack(spacing: 5) {
+                        ZStack {
+                            Circle()
+                                .fill(achieved ? tier.color.opacity(0.18) : Color(NSColor.controlBackgroundColor).opacity(0.4))
+                                .frame(width: 44, height: 44)
+                            Image(systemName: tier.icon)
+                                .font(.system(size: 20, weight: .bold))
+                                .foregroundStyle(achieved ? tier.color : Color.secondary.opacity(0.28))
+                        }
+                        Text(tier.name)
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(achieved ? tier.color : .secondary)
+                        Text("\(tier.min)+")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                    if tier.name != "Platinum" {
+                        Rectangle()
+                            .fill(count >= tier.min ? Color.green.opacity(0.45) : Color.secondary.opacity(0.18))
+                            .frame(height: 2).frame(maxWidth: .infinity)
+                    }
+                }
+            }
+            .padding(.horizontal, 4)
+
+            if let next {
+                let prev = tiers.last { count >= $0.min }?.min ?? 0
+                let progress = min(1.0, Double(count - prev) / Double(max(1, next.min - prev)))
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("Progress to \(next.name)")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        Text("\(count) / \(next.min)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                    }
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(Color.secondary.opacity(0.14))
+                            Capsule().fill(LinearGradient(colors: [next.color.opacity(0.7), next.color],
+                                                          startPoint: .leading, endPoint: .trailing))
+                            .frame(width: geo.size.width * progress)
+                        }
+                    }
+                    .frame(height: 8)
+                }
+            } else {
+                Label("Platinum achieved! \(count) AG confirmations", systemImage: "crown.fill")
+                    .font(.caption).foregroundStyle(.yellow)
+            }
+        }
+        .padding(16)
+        .background(Color(NSColor.controlBackgroundColor).opacity(0.55))
+        .cornerRadius(12)
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.green.opacity(0.24)))
+    }
+
+    // MARK: LoTW Panel
+
+    private var lotwProgressPanel: some View {
+        let lotwRecs = appState.qsoRecords.filter {
+            ["Y","V","C","CONFIRMED"].contains($0["LOTW_QSL_RCVD"].uppercased())
+        }
+        let dxcc   = Set(lotwRecs.map { $0["DXCC"] }.filter { !$0.isEmpty }).count
+        let states = Set(lotwRecs.map { $0["STATE"].uppercased() }.filter { !$0.isEmpty }).count
+        let grids  = Set(lotwRecs.filter { $0["BAND"].lowercased() == "6m" }.map {
+            ($0["GRIDSQUARE"].isEmpty ? $0["GRID"] : $0["GRIDSQUARE"]).uppercased()
+        }.filter { !$0.isEmpty }).count
+
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("LoTW Progress", systemImage: "checkmark.seal.fill").font(.headline)
                 Spacer()
                 Button {
                     appState.downloadLoTWAndQRZConfirmations()
                 } label: {
-                    Label("Sync LoTW", systemImage: "arrow.clockwise.icloud")
+                    Label("Sync", systemImage: "arrow.clockwise.icloud").font(.caption.weight(.medium))
                 }
-                .disabled(appState.isSyncingAPI || appState.isProcessingQSLQueue)
+                .buttonStyle(.bordered).controlSize(.small)
+                .disabled(appState.isSyncingAPI)
             }
-
             HStack(spacing: 10) {
-                lotwMetric("Confirmed QSOs", lotwConfirmedRecords.count.formatted(), "q.circle.fill", .green)
-                lotwMetric("DXCC entities", "\(lotwDXCCCount)/100", "globe.americas.fill", .blue)
-                lotwMetric("US states", "\(lotwStateCount)/50", "map.fill", .purple)
-                lotwMetric("6m grids", "\(lotwSixMeterGridCount)/100", "square.grid.3x3.fill", .orange)
+                lotwMetric("Confirmed QSOs", "\(lotwRecs.count)", "q.circle.fill",       .green)
+                lotwMetric("DXCC",           "\(dxcc)/100",       "globe.americas.fill",  .blue)
+                lotwMetric("US States",      "\(states)/50",      "map.fill",             .purple)
+                lotwMetric("6m Grids",       "\(grids)",          "square.grid.3x3.fill", .orange)
             }
-
-            Text("LoTW does not expose every award account page through a simple public awards API here, so YAAM calculates practical DXCC/WAS/VUCC-style progress from LoTW-confirmed records already merged into the active station log.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
         }
         .padding(14)
-        .background(Color(NSColor.controlBackgroundColor).opacity(0.56))
-        .cornerRadius(8)
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.green.opacity(0.22)))
-    }
-
-    private var lotwConfirmedRecords: [QSORecordModel] {
-        appState.qsoRecords.filter { record in
-            ["Y", "V", "C", "CONFIRMED"].contains(record["LOTW_QSL_RCVD"].uppercased())
-        }
-    }
-
-    private var lotwDXCCCount: Int {
-        Set(lotwConfirmedRecords.map { $0["DXCC"] }.filter { !$0.isEmpty }).count
-    }
-
-    private var lotwStateCount: Int {
-        Set(lotwConfirmedRecords.map { $0["STATE"].uppercased() }.filter { !$0.isEmpty }).count
-    }
-
-    private var lotwSixMeterGridCount: Int {
-        Set(lotwConfirmedRecords.filter { $0["BAND"].lowercased() == "6m" }.map { ($0["GRIDSQUARE"].isEmpty ? $0["GRID"] : $0["GRIDSQUARE"]).uppercased() }.filter { !$0.isEmpty }).count
+        .background(Color(NSColor.controlBackgroundColor).opacity(0.50))
+        .cornerRadius(12)
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.green.opacity(0.20)))
     }
 
     private func lotwMetric(_ title: String, _ value: String, _ icon: String, _ color: Color) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Image(systemName: icon)
-                .foregroundColor(color)
-            Text(value)
-                .font(.system(.title2, design: .rounded))
-                .bold()
-            Text(title)
-                .font(.caption)
-                .foregroundColor(.secondary)
+        VStack(alignment: .leading, spacing: 6) {
+            Image(systemName: icon).foregroundStyle(color).font(.system(size: 12))
+            Text(value).font(.system(.subheadline, design: .rounded).bold())
+            Text(title).font(.caption2).foregroundStyle(.secondary)
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(NSColor.controlBackgroundColor).opacity(0.46))
+        .padding(10).frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(NSColor.controlBackgroundColor).opacity(0.40))
         .cornerRadius(8)
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(color.opacity(0.24), lineWidth: 1))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(color.opacity(0.20)))
     }
 
-    private func awardMetric(_ title: String, _ value: String, _ icon: String, _ color: Color) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Image(systemName: icon)
-                .foregroundColor(color)
-            Text(value)
-                .font(.system(.title2, design: .rounded))
-                .bold()
-            Text(title)
-                .font(.caption)
-                .foregroundColor(.secondary)
+    // MARK: ClubLog Band Matrix
+
+    private func clubLogBandMatrix(_ matrix: ClubLogDXCCMatrix) -> some View {
+        let bands = ClubLogDXCCMatrix.hfBands.filter {
+            matrix.confirmedCount(band: $0) > 0 || matrix.workedCount(band: $0) > 0
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(NSColor.controlBackgroundColor).opacity(0.46))
-        .cornerRadius(8)
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(color.opacity(0.24), lineWidth: 1))
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("DXCC Band Matrix", systemImage: "chart.bar.xaxis").font(.headline)
+                Spacer()
+                Text("Updated \(matrix.fetchedAt, style: .relative) ago")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            if bands.isEmpty {
+                Text("No band data found. Fetch the matrix first.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        HStack(spacing: 0) {
+                            Text("Band").font(.caption.bold()).frame(width: 52, alignment: .leading).padding(.leading, 6)
+                            ForEach(["Worked", "Confirmed", "Progress"], id: \.self) { col in
+                                Text(col).font(.caption.bold())
+                                    .frame(width: col == "Progress" ? 88 : 74, alignment: .center)
+                            }
+                        }
+                        .padding(.vertical, 6)
+                        .background(Color(NSColor.controlBackgroundColor).opacity(0.70))
+
+                        Divider()
+
+                        ForEach(Array(bands.enumerated()), id: \.element) { idx, band in
+                            let worked    = matrix.workedCount(band: band)
+                            let confirmed = matrix.confirmedCount(band: band)
+                            let pct       = min(1.0, Double(confirmed) / max(1, Double(worked)))
+
+                            HStack(spacing: 0) {
+                                Text(band.uppercased())
+                                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                    .frame(width: 52, alignment: .leading).padding(.leading, 6)
+
+                                Text("\(worked)")
+                                    .font(.system(size: 11, design: .rounded))
+                                    .frame(width: 74, alignment: .center)
+
+                                HStack(spacing: 4) {
+                                    Text("\(confirmed)")
+                                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                                        .foregroundStyle(confirmed >= 100 ? .green : selectedSource.accentColor)
+                                    if confirmed >= 100 {
+                                        Image(systemName: "checkmark.seal.fill")
+                                            .font(.system(size: 9)).foregroundStyle(.green)
+                                    }
+                                }
+                                .frame(width: 74, alignment: .center)
+
+                                GeometryReader { geo in
+                                    ZStack(alignment: .leading) {
+                                        Capsule().fill(Color.secondary.opacity(0.12))
+                                        Capsule()
+                                            .fill(pct > 0.9 ? Color.green.opacity(0.68) : selectedSource.accentColor.opacity(0.65))
+                                            .frame(width: geo.size.width * pct)
+                                    }
+                                }
+                                .frame(width: 68, height: 7).padding(.horizontal, 10)
+                            }
+                            .padding(.vertical, 6)
+                            .background(idx.isMultiple(of: 2)
+                                        ? Color(NSColor.controlBackgroundColor).opacity(0.22)
+                                        : Color.clear)
+                        }
+                    }
+                }
+                .cornerRadius(10)
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.secondary.opacity(0.16)))
+            }
+        }
+        .padding(16)
+        .background(Color(NSColor.controlBackgroundColor).opacity(0.50))
+        .cornerRadius(12)
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(selectedSource.accentColor.opacity(0.24)))
     }
+
+    private var clubLogEmptyState: some View {
+        HStack(spacing: 14) {
+            Image(systemName: "person.3.fill")
+                .font(.system(size: 26))
+                .foregroundStyle(Color.orange.opacity(0.55))
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Club Log DXCC Matrix not loaded")
+                    .font(.headline)
+                Text(appState.clubLogAwardsStatus.isEmpty
+                     ? "Tap \"Fetch Matrix\" to load your DXCC data from Club Log."
+                     : appState.clubLogAwardsStatus)
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button { appState.fetchClubLogDXCCMatrix() } label: {
+                Label("Fetch Matrix", systemImage: "arrow.down.circle.fill")
+            }
+            .buttonStyle(.borderedProminent).tint(.orange)
+        }
+        .padding(16)
+        .background(Color(NSColor.controlBackgroundColor).opacity(0.50))
+        .cornerRadius(12)
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.orange.opacity(0.28)))
+    }
+
+    // MARK: Empty State
 
     private var emptyState: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "trophy.circle")
-                .font(.system(size: 56))
-                .foregroundColor(.orange.opacity(0.6))
-            Text("No online awards loaded yet")
-                .font(.headline)
-            Text(appState.qrzAwardsStatus.isEmpty ? "Use Refresh to sign in with your saved QRZ settings and inspect Logbook Awards." : appState.qrzAwardsStatus)
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 620)
-            Button {
-                appState.fetchQRZAwards()
-            } label: {
-                Label("Load QRZ Awards", systemImage: "arrow.down.circle.fill")
-            }
-            .buttonStyle(.borderedProminent)
-        }
-        .frame(maxWidth: .infinity, minHeight: 320)
-        .background(Color(NSColor.controlBackgroundColor).opacity(0.34))
-        .cornerRadius(8)
-    }
-
-    private var loadingState: some View {
         VStack(spacing: 14) {
-            ProgressView()
-                .controlSize(.large)
-            Text("Analyzing QRZ awards")
+            Image(systemName: selectedSource.icon)
+                .font(.system(size: 46)).foregroundStyle(selectedSource.accentColor.opacity(0.45))
+            Text("No award data for \(selectedSource.rawValue)")
                 .font(.headline)
-            Text("Loading achievements and calculating progress for every award...")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
+            Text(emptySubtitle)
+                .font(.subheadline).foregroundStyle(.secondary)
+                .multilineTextAlignment(.center).frame(maxWidth: 460)
         }
-        .frame(maxWidth: .infinity, minHeight: 320)
-        .background(Color(NSColor.controlBackgroundColor).opacity(0.34))
-        .cornerRadius(8)
+        .frame(maxWidth: .infinity, minHeight: 200)
+        .background(Color(NSColor.controlBackgroundColor).opacity(0.28))
+        .cornerRadius(12)
     }
 
-    private func awardSection(title: String, icon: String, awards: [QRZAwardSummary]) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label(title, systemImage: icon)
-                .font(.headline)
+    private var emptySubtitle: String {
+        switch selectedSource {
+        case .qrz:
+            return appState.qrzAwardsStatus.isEmpty
+            ? "Tap Refresh to fetch your QRZ Logbook Awards."
+            : appState.qrzAwardsStatus
+        case .eqsl:    return "No eQSL confirmations in log. Sync eQSL inbox from QSL Hub first."
+        case .clublog:
+            return appState.clubLogAwardsStatus.isEmpty
+            ? "Configure Club Log credentials in Settings, then tap Fetch Matrix."
+            : appState.clubLogAwardsStatus
+        case .combined: return "No confirmed QSOs found. Sync LoTW, eQSL, or QRZ first."
+        }
+    }
 
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 290), spacing: 12)], alignment: .leading, spacing: 12) {
-                ForEach(awards) { award in
-                    QRZAwardCard(award: award)
-                }
+    private func loadingPanel(_ message: String) -> some View {
+        HStack(spacing: 12) {
+            ProgressView().controlSize(.regular)
+            Text(message).font(.subheadline).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, minHeight: 80)
+        .background(Color(NSColor.controlBackgroundColor).opacity(0.40))
+        .cornerRadius(12)
+    }
+
+    // MARK: ── Award Synthesis ────────────────────────────────────
+
+    private func buildEQSLAwards(from records: [QSORecordModel]) -> [QRZAwardSummary] {
+        var list = [QRZAwardSummary]()
+        guard !records.isEmpty else { return list }
+
+        let total    = records.count
+        let dxccSet  = Set(records.map { $0["DXCC"] }.filter { !$0.isEmpty })
+        let stateSet = Set(records.map { $0["STATE"].uppercased() }.filter { !$0.isEmpty })
+        let contSet  = Set(records.map { $0["CONT"].uppercased() }.filter { !$0.isEmpty })
+        let gridSet  = Set(records.map {
+            ($0["GRIDSQUARE"].isEmpty ? $0["GRID"] : $0["GRIDSQUARE"]).prefix(4).uppercased()
+        }.filter { $0.count == 4 })
+
+        // AGM
+        let agmTarget: Int; let agmName: String; let prevThreshold: Int
+        if total >= 5000      { agmTarget = 5000; agmName = "Platinum"; prevThreshold = 1000 }
+        else if total >= 1000 { agmTarget = 5000; agmName = "Gold";     prevThreshold = 1000 }
+        else if total >= 500  { agmTarget = 1000; agmName = "Silver";   prevThreshold = 500  }
+        else if total >= 100  { agmTarget = 500;  agmName = "Bronze";   prevThreshold = 100  }
+        else                  { agmTarget = 100;  agmName = "Working…"; prevThreshold = 0    }
+        let agmPct = min(100, Double(total - prevThreshold) / Double(agmTarget - prevThreshold) * 100)
+        list.append(QRZAwardSummary(id: "eqsl_agm", title: "AGM \(agmName)", detail: "\(total) AG eQSL cards received",
+            percentComplete: agmPct, status: total >= 5000 ? "Platinum achieved!" : "\(max(0, agmTarget - total)) to next level",
+            earned: total >= 100, progressAvailable: true, achievement: "\(total) Confirmations", awardType: "eqsl", ribbonURL: ""))
+
+        list.append(make("eqsl_dxcc", "DX World via eQSL", dxccSet.count, 100, "dxcc", "\(dxccSet.count) entities confirmed", "Entities"))
+        list.append(make("eqsl_wac",  "All Continents via eQSL", contSet.count, 6, "continent", contSet.sorted().joined(separator: " · "), "Continents"))
+        list.append(make("eqsl_was",  "All US States via eQSL",  stateSet.count, 50, "was", "\(stateSet.count) of 50 states", "States"))
+        list.append(make("eqsl_grid", "Grid Award via eQSL (100)", gridSet.count, 100, "grid", "\(gridSet.count) Maidenhead grids", "Grids"))
+
+        let cwRecs  = records.filter { $0["MODE"].uppercased() == "CW" }
+        let ssbRecs = records.filter { ["SSB","LSB","USB","FM","AM"].contains($0["MODE"].uppercased()) }
+        let digRecs = records.filter { ["FT8","FT4","PSK31","PSK","JS8","WSPR","RTTY","DATA","DIGITAL"].contains($0["MODE"].uppercased()) }
+        if cwRecs.count  > 0 { list.append(make("eqsl_cw",  "CW Award via eQSL",      cwRecs.count,  100, "cw",      "\(cwRecs.count) CW QSOs",      "CW QSOs")) }
+        if ssbRecs.count > 0 { list.append(make("eqsl_ssb", "Phone Award via eQSL",   ssbRecs.count, 100, "phone",   "\(ssbRecs.count) Phone QSOs",  "Phone QSOs")) }
+        if digRecs.count > 0 { list.append(make("eqsl_dig", "Digital Award via eQSL", digRecs.count, 100, "digital", "\(digRecs.count) Digital QSOs","Digital QSOs")) }
+
+        for (band, label, target) in [("160m","160m",50),("80m","80m",100),("40m","40m",100),
+                                       ("20m","20m",100),("15m","15m",100),("10m","10m",100),
+                                       ("6m","6m Magic Band",50),("2m","2m",25)] as [(String,String,Int)] {
+            let recs = records.filter { $0["BAND"].lowercased() == band }
+            if recs.count > 0 {
+                list.append(make("eqsl_band_\(band)", "\(label) Band Award", recs.count, target, "band", "\(recs.count) QSOs on \(label)", "QSOs on \(band)"))
             }
         }
+
+        for (id, title, code, target) in [("eu","Europe Award","EU",25),("as","Asia Award","AS",25),
+                                           ("af","Africa Award","AF",25),("na","North America Award","NA",25),
+                                           ("oc","Oceania Award","OC",15),("sa","South America Award","SA",10)] as [(String,String,String,Int)] {
+            let ents = Set(records.filter { $0["CONT"].uppercased() == code }.map { $0["DXCC"] }.filter { !$0.isEmpty })
+            if !ents.isEmpty {
+                list.append(make("eqsl_cont_\(id)", title, ents.count, target, "geographic", "\(ents.count) \(code) entities", "Entities in \(code)"))
+            }
+        }
+        return list
+    }
+
+    private func make(_ id: String, _ title: String, _ count: Int, _ target: Int, _ type: String,
+                      _ detail: String, _ unit: String) -> QRZAwardSummary {
+        let pct = min(100.0, Double(count) / Double(target) * 100)
+        return QRZAwardSummary(
+            id: id, title: title, detail: detail,
+            percentComplete: pct,
+            status: count >= target ? "✓ Achieved!" : "\(max(0, target - count)) \(unit) remaining",
+            earned: count >= target, progressAvailable: true,
+            achievement: "\(count) / \(target) \(unit)", awardType: type, ribbonURL: "")
+    }
+
+    private func buildLogbookAwards(from records: [QSORecordModel]) -> [QRZAwardSummary] {
+        let dxccSet  = Set(records.map { $0["DXCC"] }.filter { !$0.isEmpty })
+        let stateSet = Set(records.map { $0["STATE"].uppercased() }.filter { !$0.isEmpty })
+        let contSet  = Set(records.map { $0["CONT"].uppercased() }.filter { !$0.isEmpty })
+        let gridSet  = Set(records.map {
+            ($0["GRIDSQUARE"].isEmpty ? $0["GRID"] : $0["GRIDSQUARE"]).prefix(4).uppercased()
+        }.filter { $0.count == 4 })
+        let sixGrids = Set(records.filter { $0["BAND"].lowercased() == "6m" }.map {
+            ($0["GRIDSQUARE"].isEmpty ? $0["GRID"] : $0["GRIDSQUARE"]).prefix(4).uppercased()
+        }.filter { $0.count == 4 })
+        let wpx = Set(records.map { derivePrefix($0["CALL"]) }.filter { !$0.isEmpty })
+        return [
+            make("dxcc_100", "DX World (DXCC 100)",      dxccSet.count,  100, "dxcc",      "\(dxccSet.count) DXCC entities confirmed",   "Entities"),
+            make("wac",      "Worked All Continents",     contSet.count,  6,   "continent", contSet.sorted().joined(separator: " · "),     "Continents"),
+            make("was_50",   "Worked All States (WAS)",   stateSet.count, 50,  "was",       "\(stateSet.count) of 50 US states confirmed", "States"),
+            make("vucc",     "Grid Master (VUCC 100)",    gridSet.count,  100, "grid",      "\(gridSet.count) Maidenhead grids confirmed", "Grids"),
+            make("wpx",      "CQ WPX (300 Prefixes)",     wpx.count,      300, "wpx",       "\(wpx.count) unique prefixes",                "Prefixes"),
+            make("six_50",   "6m Magic Band (50 Grids)",  sixGrids.count, 50,  "vhf",       "\(sixGrids.count) 6m grids confirmed",        "6m Grids"),
+        ]
+    }
+
+    private func derivePrefix(_ call: String) -> String {
+        let c = call.uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !c.isEmpty else { return "" }
+        if let i = c.firstIndex(where: { $0.isNumber }) { return String(c[...i]) }
+        return String(c.prefix(3))
     }
 }
 
-struct QRZAwardCard: View {
-    let award: QRZAwardSummary
+// MARK: - Award Card
 
+struct AwardCard: View {
+    let award: QRZAwardSummary
+    let accentColor: Color
     @Environment(\.colorScheme) private var colorScheme
 
-    private var normalizedProgress: Double {
-        min(max(award.percentComplete, 0), 100)
-    }
+    private var progress:   Double { min(max(award.percentComplete, 0), 100) }
+    private var isComplete: Bool   { award.earned || (award.progressAvailable && progress >= 100) }
 
-    private var isComplete: Bool {
-        award.earned || (award.progressAvailable && normalizedProgress >= 100)
-    }
-
-    private var color: Color {
+    private var tintColor: Color {
         if isComplete { return .green }
-        if !award.progressAvailable { return .secondary }
-
-        let fraction = normalizedProgress / 100
-        let hue = 0.015 + (0.315 * pow(fraction, 1.65))
-        let brightness = colorScheme == .dark ? 0.96 : 0.78
-        return Color(hue: hue, saturation: 0.86, brightness: brightness)
+        guard award.progressAvailable else { return .secondary }
+        let h = 0.015 + 0.315 * pow(progress / 100, 1.65)
+        return Color(hue: h, saturation: 0.84, brightness: colorScheme == .dark ? 0.94 : 0.76)
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 11) {
-            HStack(alignment: .top, spacing: 10) {
-                AwardContinentIcon(award: award, tint: color)
-                .frame(width: 88, height: 44)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(award.title)
-                        .font(.subheadline)
-                        .bold()
-                        .lineLimit(2)
-                    Text(award.status)
-                        .font(.caption)
-                        .foregroundColor(color)
-                        .bold()
-                }
-
-                Spacer(minLength: 0)
-
+        VStack(alignment: .leading, spacing: 0) {
+            // Top colour stripe
+            ZStack(alignment: .topTrailing) {
+                LinearGradient(colors: [tintColor.opacity(0.70), tintColor.opacity(0.35)],
+                               startPoint: .leading, endPoint: .trailing)
+                .frame(height: 5).cornerRadius(2)
                 if isComplete {
-                    ZStack {
-                        Circle()
-                            .fill(Color.green.opacity(0.16))
-                            .frame(width: 40, height: 40)
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 31, weight: .bold))
-                            .foregroundColor(.green)
-                    }
-                    .accessibilityLabel("Completed")
-                    .help("Completed")
+                    Image(systemName: "checkmark.seal.fill")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(.green)
+                        .offset(x: -10, y: 5)
                 }
             }
 
-            HStack(spacing: 0) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Progress")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                    Text(award.progressText)
-                        .font(.system(.headline, design: .rounded))
-                        .foregroundColor(color)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                Divider()
-                    .frame(height: 34)
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Achievement")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                    Text(award.achievement)
-                        .font(.caption)
-                        .bold()
-                        .lineLimit(2)
-                }
-                .padding(.leading, 12)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-
-            if award.progressAvailable {
-                GeometryReader { geometry in
-                    ZStack(alignment: .leading) {
-                        Capsule()
-                            .fill(color.opacity(0.15))
-                        Capsule()
-                            .fill(color)
-                            .frame(width: geometry.size.width * normalizedProgress / 100)
+            VStack(alignment: .leading, spacing: 9) {
+                HStack(alignment: .top, spacing: 9) {
+                    AwardContinentIcon(award: award, tint: tintColor).frame(width: 84, height: 42)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(award.title).font(.subheadline.weight(.bold)).lineLimit(2)
+                        Text(award.status).font(.caption).foregroundStyle(tintColor).bold().lineLimit(1)
                     }
                 }
-                .frame(height: 8)
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("Award progress")
-                .accessibilityValue("\(Int(normalizedProgress.rounded())) percent")
-            }
 
-            Text(award.detail.isEmpty ? award.status : award.detail)
-                .font(.caption2)
-                .foregroundColor(.secondary)
-                .lineLimit(2)
+                HStack(spacing: 0) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Progress").font(.caption2).foregroundStyle(.secondary)
+                        Text(award.progressText)
+                            .font(.system(.headline, design: .rounded)).foregroundStyle(tintColor)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    Divider().frame(height: 30)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Achievement").font(.caption2).foregroundStyle(.secondary)
+                        Text(award.achievement).font(.caption.bold()).lineLimit(2)
+                    }
+                    .padding(.leading, 9).frame(maxWidth: .infinity, alignment: .leading)
+                }
 
-            if !award.awardType.isEmpty {
-                Text(award.awardType)
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-            }
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, minHeight: 205, alignment: .topLeading)
-        .background(
-            ZStack {
-                Color(NSColor.controlBackgroundColor).opacity(0.48)
                 if award.progressAvailable {
-                    color.opacity(isComplete ? 0.035 : 0.025)
+                    GeometryReader { g in
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(tintColor.opacity(0.13))
+                            Capsule().fill(LinearGradient(colors: [tintColor.opacity(0.78), tintColor],
+                                                          startPoint: .leading, endPoint: .trailing))
+                            .frame(width: g.size.width * progress / 100)
+                        }
+                    }
+                    .frame(height: 6)
                 }
+
+                Text(award.detail.isEmpty ? award.status : award.detail)
+                    .font(.caption2).foregroundStyle(.secondary).lineLimit(2)
             }
-        )
-        .cornerRadius(8)
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(color.opacity(isComplete ? 0.48 : 0.34), lineWidth: isComplete ? 1.4 : 1)
-        )
+            .padding(11)
+        }
+        .background(ZStack {
+            Color(NSColor.controlBackgroundColor).opacity(0.55)
+            tintColor.opacity(isComplete ? 0.04 : 0.02)
+        })
+        .cornerRadius(10)
+        .overlay(RoundedRectangle(cornerRadius: 10)
+            .stroke(tintColor.opacity(isComplete ? 0.50 : 0.26),
+                    lineWidth: isComplete ? 1.5 : 1.0))
+        .shadow(color: isComplete ? Color.green.opacity(0.10) : Color.clear, radius: 5)
     }
 }
+
+// MARK: - Continent Icon
 
 private struct AwardContinentIcon: View {
     let award: QRZAwardSummary
     let tint: Color
 
-    private struct Signature {
-        let symbol: String
-        let abbreviation: String
-        let title: String
-        let colors: [Color]
-    }
+    private struct Sig { let symbol: String; let abbr: String; let title: String; let colors: [Color] }
 
-    private var signature: Signature {
-        let title = award.title.trimmingCharacters(in: .whitespacesAndNewlines)
-        let searchable = normalizedSearchText([award.title, award.detail, award.awardType])
-        let tokens = tokenSet(searchable)
-
-        if containsPhrase("NORTH AMERICA", in: searchable) || tokens.contains("NA") {
-            return Signature(symbol: "globe.americas.fill", abbreviation: "NA", title: "North America", colors: [.blue, .teal])
-        }
-        if containsPhrase("SOUTH AMERICA", in: searchable) || tokens.contains("SA") {
-            return Signature(symbol: "globe.americas.fill", abbreviation: "SA", title: "South America", colors: [.green, .yellow])
-        }
-        if containsPhrase("ANTARCTICA", in: searchable) || tokens.contains("AN") {
-            return Signature(symbol: "snowflake", abbreviation: "AN", title: "Antarctica", colors: [.cyan, .blue])
-        }
-        if containsPhrase("AFRICA", in: searchable) || tokens.contains("AF") {
-            return Signature(symbol: "globe.europe.africa.fill", abbreviation: "AF", title: "Africa", colors: [.orange, .green])
-        }
-        if containsPhrase("ASIA", in: searchable) || tokens.contains("AS") {
-            return Signature(symbol: "globe.central.south.asia.fill", abbreviation: "AS", title: "Asia", colors: [.red, .yellow])
-        }
-        if containsPhrase("EUROPE", in: searchable) || tokens.contains("EU") {
-            return Signature(symbol: "globe.europe.africa.fill", abbreviation: "EU", title: "Europe", colors: [.blue, .indigo])
-        }
-        if containsPhrase("OCEANIA", in: searchable) || tokens.contains("OC") {
-            return Signature(symbol: "globe.asia.australia.fill", abbreviation: "OC", title: "Oceania", colors: [.cyan, .green])
-        }
-        if containsPhrase("WORLD CONTINENTS", in: searchable) {
-            return Signature(symbol: "globe", abbreviation: "WC", title: "World Continents", colors: [.green, .yellow])
-        }
-        if containsPhrase("DX WORLD", in: searchable) || containsPhrase("DXCC", in: searchable) {
-            return Signature(symbol: "globe", abbreviation: "DX", title: "DX World", colors: [.purple, .blue])
-        }
-        if containsPhrase("GRID", in: searchable) || containsPhrase("GRID SQUARED", in: searchable) {
-            return Signature(symbol: "square.grid.3x3.fill", abbreviation: "GR", title: "Grid", colors: [.teal, .blue])
-        }
-        if containsPhrase("COUNTIES", in: searchable) || containsPhrase("UNITED STATES", in: searchable) {
-            return Signature(symbol: "map.fill", abbreviation: "US", title: "United States", colors: [.blue, .red])
-        }
-        if containsPhrase("FRIENDSHIP", in: searchable) {
-            return Signature(symbol: "person.2.fill", abbreviation: "FR", title: "Friendship", colors: [.mint, .blue])
-        }
-        if containsPhrase("DAYS OF QRZ", in: searchable) || containsPhrase("YEARS OF QRZ", in: searchable) || title.localizedCaseInsensitiveContains("QRZ") {
-            return Signature(symbol: "calendar.badge.clock", abbreviation: "QRZ", title: "QRZ", colors: [.cyan, .blue])
-        }
-        if containsPhrase("MASTER OF RADIO COMMUNICATION", in: searchable) {
-            return Signature(symbol: "antenna.radiowaves.left.and.right", abbreviation: "MRC", title: "Master of Radio Communication", colors: [.orange, .pink])
-        }
-        return Signature(symbol: "trophy.fill", abbreviation: "AWD", title: "Award", colors: [tint, .yellow])
+    private var sig: Sig {
+        let s = ([award.title, award.detail, award.awardType].joined(separator: " ")).uppercased()
+        let t = Set(s.split(separator: " ").map(String.init))
+        if s.contains("NORTH AMERICA") || t.contains("NA")  { return Sig(symbol: "globe.americas.fill",           abbr: "NA",  title: "N.America",  colors: [.blue,.teal]) }
+        if s.contains("SOUTH AMERICA") || t.contains("SA")  { return Sig(symbol: "globe.americas.fill",           abbr: "SA",  title: "S.America",  colors: [.green,.yellow]) }
+        if s.contains("EUROPE")        || t.contains("EU")  { return Sig(symbol: "globe.europe.africa.fill",      abbr: "EU",  title: "Europe",     colors: [.blue,.indigo]) }
+        if s.contains("AFRICA")        || t.contains("AF")  { return Sig(symbol: "globe.europe.africa.fill",      abbr: "AF",  title: "Africa",     colors: [.orange,.green]) }
+        if s.contains("ASIA")          || t.contains("AS")  { return Sig(symbol: "globe.central.south.asia.fill", abbr: "AS",  title: "Asia",       colors: [.red,.yellow]) }
+        if s.contains("OCEANIA")       || t.contains("OC")  { return Sig(symbol: "globe.asia.australia.fill",     abbr: "OC",  title: "Oceania",    colors: [.cyan,.green]) }
+        if s.contains("DXCC") || s.contains("DX WORLD")     { return Sig(symbol: "globe",                         abbr: "DX",  title: "DX World",   colors: [.purple,.blue]) }
+        if s.contains("GRID") || s.contains("VUCC")         { return Sig(symbol: "square.grid.3x3.fill",          abbr: "GR",  title: "Grid",       colors: [.teal,.blue]) }
+        if s.contains("UNITED STATES") || s.contains("WAS") { return Sig(symbol: "map.fill",                      abbr: "US",  title: "All States", colors: [.blue,.red]) }
+        if s.contains("CONTINENT") || s.contains("WAC")     { return Sig(symbol: "globe",                         abbr: "WC",  title: "Continents", colors: [.green,.yellow]) }
+        if s.contains("PREFIX") || s.contains("WPX")        { return Sig(symbol: "textformat.abc",                abbr: "WPX", title: "Prefix",     colors: [.pink,.purple]) }
+        if s.contains("CW")                                  { return Sig(symbol: "dot.radiowaves.left.and.right", abbr: "CW",  title: "CW",         colors: [.brown,.orange]) }
+        if s.contains("DIGITAL") || s.contains("FT8")       { return Sig(symbol: "waveform",                      abbr: "DIG", title: "Digital",    colors: [.cyan,.blue]) }
+        if s.contains("PHONE") || s.contains("SSB")         { return Sig(symbol: "mic.fill",                      abbr: "SSB", title: "Phone",      colors: [.green,.teal]) }
+        if s.contains("160M")                                { return Sig(symbol: "waveform.badge.magnifyingglass", abbr: "160", title: "160m",      colors: [.red,.orange]) }
+        if s.contains("6M") || s.contains("MAGIC BAND")     { return Sig(symbol: "bolt.badge.clock.fill",          abbr: "6m",  title: "6m Magic",  colors: [.pink,.purple]) }
+        if s.contains("2M")                                  { return Sig(symbol: "antenna.radiowaves.left.and.right", abbr: "2m", title: "2m",     colors: [.cyan,.teal]) }
+        if s.contains("BAND")                                { return Sig(symbol: "waveform",                      abbr: "BND", title: "Band",       colors: [.orange,.yellow]) }
+        if s.contains("AGM") || s.contains("EQSL")          { return Sig(symbol: "envelope.badge.shield.half.filled.fill", abbr: "AGM", title: "eQSL AGM", colors: [.green,.teal]) }
+        return Sig(symbol: "trophy.fill", abbr: "AWD", title: "Award", colors: [tint, .yellow])
     }
 
     var body: some View {
-        let item = signature
-        HStack(spacing: 7) {
+        let item = sig
+        HStack(spacing: 5) {
             ZStack {
-                Circle()
-                    .fill(.white.opacity(0.22))
-                    .frame(width: 31, height: 31)
-                Image(systemName: item.symbol)
-                    .font(.system(size: 18, weight: .bold))
-                    .foregroundStyle(.white)
+                Circle().fill(.white.opacity(0.20)).frame(width: 28, height: 28)
+                Image(systemName: item.symbol).font(.system(size: 14, weight: .bold)).foregroundStyle(.white)
             }
-
             VStack(alignment: .leading, spacing: 0) {
-                Text(item.abbreviation)
-                    .font(.system(size: item.abbreviation.count > 2 ? 14 : 18, weight: .black, design: .rounded))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
+                Text(item.abbr)
+                    .font(.system(size: item.abbr.count > 3 ? 11 : 16, weight: .black, design: .rounded))
+                    .foregroundStyle(.white).lineLimit(1).minimumScaleFactor(0.6)
                 Text(item.title)
-                    .font(.system(size: 7.5, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.86))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.55)
+                    .font(.system(size: 7, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.85)).lineLimit(1).minimumScaleFactor(0.5)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.horizontal, 8)
+        .padding(.horizontal, 6)
         .background(
             RoundedRectangle(cornerRadius: 8)
-                .fill(LinearGradient(colors: item.colors.map { $0.opacity(0.88) }, startPoint: .topLeading, endPoint: .bottomTrailing))
+                .fill(LinearGradient(colors: item.colors.map { $0.opacity(0.88) },
+                                     startPoint: .topLeading, endPoint: .bottomTrailing))
         )
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(.white.opacity(0.22), lineWidth: 1))
-        .accessibilityLabel("\(item.title) award icon, \(item.abbreviation)")
-    }
-
-    private func normalizedSearchText(_ values: [String]) -> String {
-        values
-            .joined(separator: " ")
-            .uppercased()
-            .replacingOccurrences(of: "&", with: " AND ")
-            .replacingOccurrences(of: "[^A-Z0-9]+", with: " ", options: .regularExpression)
-            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private func tokenSet(_ text: String) -> Set<String> {
-        Set(text.split(separator: " ").map(String.init))
-    }
-
-    private func containsPhrase(_ phrase: String, in text: String) -> Bool {
-        let normalizedPhrase = normalizedSearchText([phrase])
-        return " \(text) ".contains(" \(normalizedPhrase) ")
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(.white.opacity(0.18)))
     }
 }

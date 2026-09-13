@@ -54,16 +54,40 @@ nonisolated final class LogbookDatabase: @unchecked Sendable {
     let databaseURL: URL
     let backupDirectoryURL: URL
 
+    static func canonicalDataDirectory(fileManager fm: FileManager = .default) -> URL {
+        let standardAppSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSTemporaryDirectory())
+        let standardDataDir = standardAppSupport.appendingPathComponent("YAAM/Data", isDirectory: true)
+
+        let isSandboxed = ProcessInfo.processInfo.environment["APP_SANDBOX_CONTAINER_ID"] != nil
+            || NSHomeDirectory().contains("/Library/Containers/")
+
+        if isSandboxed {
+            return standardDataDir
+        }
+
+        // Running outside App Sandbox (e.g. CLI, tests, dev binary):
+        // Locate user's container directory which contains the production database.
+        let userHome = fm.homeDirectoryForCurrentUser
+        let bundleID = Bundle.main.bundleIdentifier ?? "ASIS.YAAM"
+        let containerDataDir = userHome
+            .appendingPathComponent("Library/Containers/\(bundleID)/Data/Library/Application Support/YAAM/Data", isDirectory: true)
+        let containerDB = containerDataDir.appendingPathComponent("YAAM.sqlite")
+
+        if fm.fileExists(atPath: containerDB.path) {
+            return containerDataDir
+        }
+
+        return standardDataDir
+    }
+
     init(baseDirectory: URL? = nil) throws {
         let fm = FileManager.default
         let root: URL
         if let baseDirectory {
             root = baseDirectory
         } else {
-            guard let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
-                throw LogbookDatabaseError.unavailable("Application Support is unavailable.")
-            }
-            root = appSupport.appendingPathComponent("YAAM/Data", isDirectory: true)
+            root = Self.canonicalDataDirectory(fileManager: fm)
         }
 
         databaseURL = root.appendingPathComponent("YAAM.sqlite")
@@ -76,7 +100,7 @@ nonisolated final class LogbookDatabase: @unchecked Sendable {
     }
 
     deinit {
-        if let db { sqlite3_close_v2(db) }
+        closeDatabase()
     }
 
     func loadStationProfiles() throws -> [StationProfile] {
@@ -978,6 +1002,28 @@ nonisolated final class LogbookDatabase: @unchecked Sendable {
         sqlite3_wal_checkpoint_v2(db, nil, SQLITE_CHECKPOINT_TRUNCATE, nil, nil)
         sqlite3_close_v2(db)
         self.db = nil
+        mirrorDatabaseIfNeeded()
+    }
+
+    private func mirrorDatabaseIfNeeded() {
+        let fm = FileManager.default
+        let isSandboxed = ProcessInfo.processInfo.environment["APP_SANDBOX_CONTAINER_ID"] != nil
+            || NSHomeDirectory().contains("/Library/Containers/")
+        guard !isSandboxed else { return }
+
+        let userHome = fm.homeDirectoryForCurrentUser
+        let standardDataDir = userHome.appendingPathComponent("Library/Application Support/YAAM/Data", isDirectory: true)
+        let standardDB = standardDataDir.appendingPathComponent("YAAM.sqlite")
+
+        if databaseURL.standardizedFileURL != standardDB.standardizedFileURL {
+            try? fm.createDirectory(at: standardDataDir, withIntermediateDirectories: true)
+            let standardWal = standardDataDir.appendingPathComponent("YAAM.sqlite-wal")
+            let standardShm = standardDataDir.appendingPathComponent("YAAM.sqlite-shm")
+            try? fm.removeItem(at: standardWal)
+            try? fm.removeItem(at: standardShm)
+            try? fm.removeItem(at: standardDB)
+            try? fm.copyItem(at: databaseURL, to: standardDB)
+        }
     }
 
     private func initializeSchema() throws {

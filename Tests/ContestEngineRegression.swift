@@ -4,6 +4,7 @@
 //
 
 import Foundation
+@testable import YAAM
 
 // MARK: - Standalone Contest Types for Regression Testing
 

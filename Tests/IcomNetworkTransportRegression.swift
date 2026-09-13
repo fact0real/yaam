@@ -1,4 +1,5 @@
 import Foundation
+@testable import YAAM
 
 nonisolated enum AmateurBandPlan {
     static func formattedMHz(_ value: Double) -> String {

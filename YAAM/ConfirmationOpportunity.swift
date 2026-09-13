@@ -15,7 +15,7 @@ nonisolated enum ConfirmationCreditColumn {
     }
 }
 
-nonisolated struct QSOConfirmationOpportunity: Sendable {
+nonisolated struct QSOConfirmationOpportunity: Sendable, Equatable {
     let isConfirmed: Bool
     let country: String
     let band: String
@@ -58,6 +58,18 @@ nonisolated struct CountryBandCoverage: Identifiable, Sendable {
     var neededBandCount: Int {
         bands.filter { $0.state == .needed }.count
     }
+
+    var isConfirmed: Bool {
+        confirmedBandCount > 0
+    }
+
+    var isWorked: Bool {
+        confirmedBandCount > 0 || workedUnconfirmedBandCount > 0
+    }
+
+    var totalQSOs: Int {
+        bands.reduce(0) { $0 + $1.qsoCount }
+    }
 }
 
 nonisolated struct ConfirmationOpportunityIndex: Sendable {
@@ -78,7 +90,7 @@ nonisolated struct ConfirmationOpportunityIndex: Sendable {
     private let opportunitiesByRecordID: [UUID: QSOConfirmationOpportunity]
     let countryBandCoverage: [CountryBandCoverage]
 
-    init(records: [QSORecordModel]) {
+    init(records: [QSORecordModel], allKnownEntities: [String]? = nil) {
         var confirmedCountryBands = Set<CountryBandKey>()
         var confirmedGrids = Set<String>()
         var bandCountsByCountry: [String: [String: BandCounts]] = [:]
@@ -138,7 +150,18 @@ nonisolated struct ConfirmationOpportunityIndex: Sendable {
         }
 
         let bandUniverse = Self.orderedBandUniverse(observedBands: observedBands)
-        countryBandCoverage = confirmedCountries
+
+        var allCoveredCountries = Set<String>()
+        if let allKnownEntities {
+            allCoveredCountries.formUnion(allKnownEntities)
+        } else {
+            allCoveredCountries.formUnion(DXCCDatabase.allEntityNames)
+        }
+        allCoveredCountries.formUnion(bandCountsByCountry.keys)
+        allCoveredCountries.formUnion(confirmedCountries)
+
+        countryBandCoverage = allCoveredCountries
+            .filter { !$0.isEmpty && $0 != "Unknown" }
             .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
             .map { country in
                 let countryCounts = bandCountsByCountry[country] ?? [:]
@@ -194,9 +217,17 @@ nonisolated struct ConfirmationOpportunityIndex: Sendable {
             ?? GridLocator.fourCharacterGrid(latitude: record["LATITUDE"], longitude: record["LONGITUDE"])
     }
 
-    private static func normalizedCountry(for record: QSORecordModel) -> String {
-        canonicalCountryName(record["COUNTRY"])
+    static func normalizedCountry(for record: QSORecordModel) -> String {
+        let direct = canonicalCountryName(record["COUNTRY"])
             .trimmingCharacters(in: .whitespacesAndNewlines)
+        if !direct.isEmpty { return direct }
+        let call = record["CALL"].trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !call.isEmpty else { return "" }
+        let resolved = DXCCDatabase.resolve(callsign: call).entityName
+        if resolved != "Unknown" && resolved != "International" {
+            return canonicalCountryName(resolved).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return ""
     }
 
     private static func orderedBandUniverse(observedBands: Set<String>) -> [String] {

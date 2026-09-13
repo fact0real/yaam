@@ -7,7 +7,7 @@ import Foundation
 import UserNotifications
 
 extension AppState {
-    private static let contestCalendarCacheKey = "contestCalendarCache.v1"
+    private static let contestCalendarCacheKey = "contestCalendarCache.v2"
 
     func loadContestCalendarCache() {
         guard
@@ -17,7 +17,7 @@ extension AppState {
             contestCalendarStatus = "Calendar not loaded yet"
             return
         }
-        contestCalendarEntries = cache.entries
+        contestCalendarEntries = cache.entries.filter { !$0.title.lowercased().hasPrefix("submit log") }
         contestCalendarLastUpdated = cache.updatedAt
         contestCalendarStatus = "Showing cached WA7BNM calendar"
     }

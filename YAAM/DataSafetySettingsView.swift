@@ -9,6 +9,8 @@ import SwiftUI
 struct DataSafetySettingsView: View {
     @EnvironmentObject private var appState: AppState
     @State private var backupToRestore: BackupSnapshot?
+    @State private var isBiometricsEnabled: Bool = CredentialVault.isBiometricLockEnabled
+    @State private var biometricTestStatus: String = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -17,6 +19,7 @@ struct DataSafetySettingsView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
+                    credentialSecuritySection
                     restorePoints
                     auditTrail
                 }
@@ -157,6 +160,97 @@ struct DataSafetySettingsView: View {
                     }
                 }
             }
+        }
+    }
+
+    private var credentialSecuritySection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Secure Vault & Biometrics", systemImage: "lock.shield.fill")
+                .font(.headline)
+
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 12) {
+                    Image(systemName: "touchid")
+                        .font(.system(size: 22))
+                        .foregroundStyle(.blue)
+                        .frame(width: 36, height: 36)
+                        .background(.blue.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 6) {
+                            Text("Hardware-Bound AES-256-GCM Vault")
+                                .font(.callout.weight(.semibold))
+                            Image(systemName: "checkmark.seal.fill")
+                                .foregroundStyle(.green)
+                                .font(.caption)
+                        }
+                        Text("Passwords and API secrets are protected by machine hardware UUID and AES-256-GCM encryption.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+
+                    if CredentialVault.isBiometricsAvailable {
+                        Toggle(isOn: $isBiometricsEnabled) {
+                            Text("Unlock with \(CredentialVault.biometryTypeDescription)")
+                                .font(.callout.weight(.medium))
+                        }
+                        .toggleStyle(.switch)
+                        .onChange(of: isBiometricsEnabled) { _, newValue in
+                            CredentialVault.isBiometricLockEnabled = newValue
+                            if newValue {
+                                Task {
+                                    let ok = await CredentialVault.authenticateWithBiometrics()
+                                    if !ok {
+                                        isBiometricsEnabled = false
+                                        CredentialVault.isBiometricLockEnabled = false
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Divider()
+
+                HStack {
+                    HStack(spacing: 6) {
+                        Image(systemName: "shield.lefthalf.filled")
+                            .foregroundStyle(.secondary)
+                            .font(.caption)
+                        Text("Multi-prompt Keychain loops permanently eliminated. Zero password dialogs on recompile.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+
+                    if CredentialVault.isBiometricsAvailable {
+                        Button {
+                            Task {
+                                biometricTestStatus = "Authenticating..."
+                                let success = await CredentialVault.authenticateWithBiometrics(reason: "Testing Touch ID sensor functionality for YAAM")
+                                biometricTestStatus = success ? "Verified successfully" : "Authentication failed or cancelled"
+                            }
+                        } label: {
+                            Label("Test \(CredentialVault.biometryTypeDescription)", systemImage: "touchid")
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                }
+
+                if !biometricTestStatus.isEmpty {
+                    Text(biometricTestStatus)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(biometricTestStatus.contains("successfully") ? .green : .orange)
+                        .transition(.opacity)
+                }
+            }
+            .padding(14)
+            .background(Color(NSColor.controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.secondary.opacity(0.15), lineWidth: 1))
         }
     }
 }

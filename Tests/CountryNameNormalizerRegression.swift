@@ -1,4 +1,5 @@
 import Foundation
+@testable import YAAM
 
 @main
 struct CountryNameNormalizerRegression {
@@ -22,8 +23,14 @@ struct CountryNameNormalizerRegression {
         assertAliases("South Korea", ["Republic Of Korea", "Korea, Republic of", "ROK"])
         assertAliases("Slovakia", ["Slovak Republic", "SLOVAKIA"])
         assertAliases("Vietnam", ["Viet Nam", "VIETNAM"])
-        assertAliases("Kosovo", ["Republic Of Kosovo", "Kosovo"])
+        assertAliases("Kosovo", [
+            "Republic Of Kosovo", "Kosovo", "Kosova", "Republic of Kosova",
+            "Republic of Kosovë", "Kosovë", "Z6", "Z60", "Z61"
+        ])
         assertAliases("Fiji", ["Fiji Islands", "FIJI"])
+        assertAliases("United States", [
+            "United States", "USA", "United States of America", "U.S.A.", "U.S.", "US", "America"
+        ])
         assertAliases("Republic of the Congo", ["Congo (Republic of the)", "Republic of Congo"])
         assertAliases("Democratic Republic of the Congo", ["DR Congo", "Zaire"])
 

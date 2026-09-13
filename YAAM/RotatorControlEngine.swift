@@ -54,11 +54,21 @@ public final class RotatorControlEngine: ObservableObject {
     public static let shared = RotatorControlEngine()
     
     // User Configurations
-    @AppStorage("rotatorEnabled") public var isEnabled: Bool = true
-    @AppStorage("rotatorHost") public var host: String = "127.0.0.1"
-    @AppStorage("rotatorPort") public var port: Int = 4533
-    @AppStorage("rotatorModel") public var rotatorModel: String = "Hamlib rotctld"
-    @AppStorage("rotatorToleranceDegrees") public var toleranceDegrees: Double = 1.5
+    @Published public var isEnabled: Bool {
+        didSet { UserDefaults.standard.set(isEnabled, forKey: "rotatorEnabled") }
+    }
+    @Published public var host: String {
+        didSet { UserDefaults.standard.set(host, forKey: "rotatorHost") }
+    }
+    @Published public var port: Int {
+        didSet { UserDefaults.standard.set(port, forKey: "rotatorPort") }
+    }
+    @Published public var rotatorModel: String {
+        didSet { UserDefaults.standard.set(rotatorModel, forKey: "rotatorModel") }
+    }
+    @Published public var toleranceDegrees: Double {
+        didSet { UserDefaults.standard.set(toleranceDegrees, forKey: "rotatorToleranceDegrees") }
+    }
     
     // Live Published State
     @Published public var isConnected: Bool = false
@@ -74,6 +84,14 @@ public final class RotatorControlEngine: ObservableObject {
     private var receiveBuffer = Data()
     
     private init() {
+        self.isEnabled = UserDefaults.standard.object(forKey: "rotatorEnabled") as? Bool ?? true
+        self.host = UserDefaults.standard.string(forKey: "rotatorHost") ?? "127.0.0.1"
+        let savedPort = UserDefaults.standard.integer(forKey: "rotatorPort")
+        self.port = savedPort > 0 ? savedPort : 4533
+        self.rotatorModel = UserDefaults.standard.string(forKey: "rotatorModel") ?? "Hamlib rotctld"
+        let savedTol = UserDefaults.standard.double(forKey: "rotatorToleranceDegrees")
+        self.toleranceDegrees = savedTol > 0 ? savedTol : 1.5
+
         if isEnabled {
             connect()
         }

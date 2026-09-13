@@ -483,6 +483,179 @@ struct SolarForecastPoint: Identifiable {
     let solarFlux: Int
     let aIndex: Int
     let kpIndex: Int
+
+    var dayFormatted: String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "dd"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        return formatter.string(from: date)
+    }
+
+    var shortDayName: String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEE"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        return formatter.string(from: date)
+    }
+
+    var fullDateFormatted: String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEE, MMM dd"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        return formatter.string(from: date)
+    }
+
+    var geomagneticState: (name: String, color: Color) {
+        switch kpIndex {
+        case 0...1: return ("Quiet", .green)
+        case 2...3: return ("Unsettled", .yellow)
+        case 4: return ("Active", .orange)
+        case 5: return ("Minor Storm (G1)", .red)
+        case 6: return ("Moderate Storm (G2)", .purple)
+        default: return ("Strong Storm (G3+)", .purple)
+        }
+    }
+
+    var propagationCondition: (rating: String, color: Color, bestBands: String) {
+        if kpIndex >= 5 {
+            return ("Poor (Storm)", .red, "80m, 40m")
+        } else if kpIndex == 4 {
+            return ("Fair / Unsettled", .orange, "40m, 30m, 20m")
+        } else if solarFlux >= 130 {
+            return ("Excellent", .green, "20m, 17m, 15m, 12m, 10m")
+        } else if solarFlux >= 105 {
+            return ("Good", .green, "20m, 17m, 15m")
+        } else if solarFlux >= 85 {
+            return ("Fair", .yellow, "30m, 20m, 17m")
+        } else {
+            return ("Fair to Poor", .orange, "40m, 30m")
+        }
+    }
+
+    var isFavorable: Bool {
+        (kpIndex <= 2 && solarFlux >= 105) || (kpIndex <= 3 && solarFlux >= 130)
+    }
+
+    var isPrime: Bool {
+        kpIndex <= 2 && solarFlux >= 125
+    }
+
+    var isToday: Bool {
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = TimeZone(secondsFromGMT: 0)!
+        if utc.isDate(date, inSameDayAs: Date()) {
+            return true
+        }
+        let local = Calendar.current
+        let pointComp = utc.dateComponents([.year, .month, .day], from: date)
+        let localComp = local.dateComponents([.year, .month, .day], from: Date())
+        return pointComp.year == localComp.year &&
+               pointComp.month == localComp.month &&
+               pointComp.day == localComp.day
+    }
+
+    var isPast: Bool {
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = TimeZone(secondsFromGMT: 0)!
+        let nowUtc = Date()
+        let todayStart = utc.startOfDay(for: nowUtc)
+        let pointStart = utc.startOfDay(for: date)
+        return pointStart < todayStart && !isToday
+    }
+
+    var propagationScore: Int {
+        let sfiRatio = min(max(Double(solarFlux - 70) / 90.0, 0.0), 1.0)
+        let sfiPts = sfiRatio * 60.0
+        let kpPts: Double
+        switch kpIndex {
+        case 0...1: kpPts = 40.0
+        case 2: kpPts = 32.0
+        case 3: kpPts = 20.0
+        case 4: kpPts = 8.0
+        default: kpPts = 0.0
+        }
+        return max(0, min(100, Int(round(sfiPts + kpPts))))
+    }
+}
+
+// MARK: - Prime Contest & DX Planning Window Model
+
+struct PrimeContestWindow: Identifiable, Sendable {
+    var id: String { "\(startDateLabel)-\(endDateLabel)" }
+    let points: [SolarForecastPoint]
+
+    var containsToday: Bool {
+        points.contains { $0.isToday }
+    }
+
+    var startDateLabel: String { points.first?.fullDateFormatted ?? "" }
+    var endDateLabel: String { points.last?.fullDateFormatted ?? "" }
+    var dateRangeString: String {
+        guard let first = points.first, let last = points.last else { return "" }
+        if first.dateLabel == last.dateLabel {
+            return first.fullDateFormatted
+        }
+        return "\(first.shortDayName) \(first.dayFormatted) – \(last.shortDayName) \(last.dayFormatted)"
+    }
+    var daysCount: Int { points.count }
+    var averageSFI: Int {
+        guard !points.isEmpty else { return 0 }
+        return points.map(\.solarFlux).reduce(0, +) / points.count
+    }
+    var maxKp: Int {
+        points.map(\.kpIndex).max() ?? 0
+    }
+    var averageAp: Int {
+        guard !points.isEmpty else { return 0 }
+        return points.map(\.aIndex).reduce(0, +) / points.count
+    }
+    var score: Int {
+        guard !points.isEmpty else { return 0 }
+        return points.map(\.propagationScore).reduce(0, +) / points.count
+    }
+    var rating: String {
+        if score >= 85 { return "Prime Contest Window" }
+        if score >= 70 { return "Excellent DX Window" }
+        return "Good Propagation Window"
+    }
+    var targetBands: String {
+        if averageSFI >= 135 {
+            return "10m, 12m, 15m, 17m, 20m"
+        } else if averageSFI >= 115 {
+            return "15m, 17m, 20m"
+        } else {
+            return "20m, 30m, 40m"
+        }
+    }
+
+    static func findPrimeWindows(from points: [SolarForecastPoint]) -> [PrimeContestWindow] {
+        var windows: [PrimeContestWindow] = []
+        var currentCluster: [SolarForecastPoint] = []
+
+        for p in points {
+            if p.isFavorable {
+                currentCluster.append(p)
+            } else {
+                if !currentCluster.isEmpty {
+                    windows.append(PrimeContestWindow(points: currentCluster))
+                    currentCluster = []
+                }
+            }
+        }
+        if !currentCluster.isEmpty {
+            windows.append(PrimeContestWindow(points: currentCluster))
+        }
+
+        return windows.sorted {
+            if $0.score != $1.score {
+                return $0.score > $1.score
+            }
+            return $0.daysCount > $1.daysCount
+        }
+    }
 }
 
 // MARK: - Country Statistics Model
@@ -542,9 +715,12 @@ struct FilterCriteria {
     var useNewlyConfirmed: Bool = false
     var useSentEmail: Bool = false
     var useTodayConfirmed: Bool = false
+    var useOverduePending: Bool = false
+    var useUnconfirmedOnly: Bool = false
+    var useLotwWaiting: Bool = false
     
     var isActive: Bool {
-        useDate || useBand || useMode || useCallsign || useOperator || useZone || useCountry || useQSLSent || useQSLRcvd || useConfirmation || useContinent || useNewlyConfirmed || useSentEmail || useTodayConfirmed
+        useDate || useBand || useMode || useCallsign || useOperator || useZone || useCountry || useQSLSent || useQSLRcvd || useConfirmation || useContinent || useNewlyConfirmed || useSentEmail || useTodayConfirmed || useOverduePending || useUnconfirmedOnly || useLotwWaiting
     }
     
     mutating func reset() {
@@ -553,16 +729,30 @@ struct FilterCriteria {
 }
 
 // MARK: - Enhanced QSO Record Model (With Composite Unique Key)
-nonisolated struct QSORecordModel: Identifiable, Sendable {
+nonisolated struct QSORecordModel: Identifiable, Sendable, Equatable {
     let id: UUID
     var index: Int
     var fields: [String: String]
     private(set) var searchDocument: LogSearchDocument
 
-    init(id: UUID = UUID(), index: Int, fields: [String: String]) {
+    static func == (lhs: QSORecordModel, rhs: QSORecordModel) -> Bool {
+        lhs.id == rhs.id && lhs.index == rhs.index && lhs.fields == rhs.fields
+    }
+
+    init(id: UUID = UUID(), index: Int = 0, fields: [String: String]) {
         self.id = id
         self.index = index
-        let normalized = CountryNameNormalizer.normalizedFields(fields).fields
+        var normalized = CountryNameNormalizer.normalizedFields(fields).fields
+        let currentMode = normalized["MODE"] ?? ""
+        let currentSubmode = normalized["SUBMODE"] ?? ""
+        let freq = Double(normalized["FREQ"] ?? "")
+        let effective = AmateurBandPlan.effectiveADIFMode(mode: currentMode, submode: currentSubmode, frequencyMHz: freq)
+        if !effective.isEmpty && (currentMode.isEmpty || currentMode.uppercased() == "DATA" || currentMode.uppercased() == "DIGI" || currentMode.uppercased() == "MFSK") {
+            normalized["MODE"] = effective
+            if normalized["SUBMODE"] == nil || normalized["SUBMODE"]?.isEmpty == true {
+                normalized["SUBMODE"] = effective
+            }
+        }
         self.fields = normalized
         self.searchDocument = Self.makeSearchDocument(fields: normalized)
     }
@@ -580,12 +770,90 @@ nonisolated struct QSORecordModel: Identifiable, Sendable {
         )
     }
     
+    private static let gmtCalendar: Calendar = {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(secondsFromGMT: 0)!
+        return cal
+    }()
+
+    private static func isConfirmedChar(_ c: Character) -> Bool {
+        c == "Y" || c == "y" || c == "V" || c == "v" || c == "C" || c == "c"
+    }
+
+    private static func isConfirmedValue(_ raw: String?) -> Bool {
+        guard let s = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty else { return false }
+        if s.count == 1 { return isConfirmedChar(s.first!) }
+        let u = s.uppercased()
+        return u == "CONFIRMED" || u == "VERIFIED"
+    }
+
     var isConfirmed: Bool {
-        let confirmationValues = [
-            "LOTW_QSL_RCVD", "QRZLOG_QSL_RCVD", "QRZCOM_QSL_RCVD",
-            "APP_QRZLOG_STATUS", "EQSL_QSL_RCVD", "QSL_RCVD"
-        ].map { fields[$0]?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? "" }
-        return confirmationValues.contains { ["Y", "V", "C", "CONFIRMED", "VERIFIED"].contains($0) }
+        if Self.isConfirmedValue(fields["LOTW_QSL_RCVD"]) { return true }
+        if Self.isConfirmedValue(fields["QRZLOG_QSL_RCVD"]) { return true }
+        if Self.isConfirmedValue(fields["QRZCOM_QSL_RCVD"]) { return true }
+        if Self.isConfirmedValue(fields["APP_QRZLOG_STATUS"]) { return true }
+        if Self.isConfirmedValue(fields["EQSL_QSL_RCVD"]) { return true }
+        if Self.isConfirmedValue(fields["QSL_RCVD"]) { return true }
+        return false
+    }
+
+    var isLotwConfirmed: Bool {
+        if Self.isConfirmedValue(fields["LOTW_QSL_RCVD"]) { return true }
+        if let appVal = fields["APP_LOTW_QSL_RCVD"], appVal == "Y" || appVal == "y" { return true }
+        return false
+    }
+
+    private static func isSentChar(_ c: Character) -> Bool {
+        c == "Y" || c == "y" || c == "R" || c == "r" || c == "Q" || c == "q"
+    }
+
+    var isLotwSent: Bool {
+        if let v = fields["LOTW_QSL_SENT"]?.trimmingCharacters(in: .whitespacesAndNewlines), !v.isEmpty {
+            if v.count == 1 && Self.isSentChar(v.first!) { return true }
+        }
+        return fields["LOTW_QSLSDATE"]?.isEmpty == false
+    }
+
+    var qslSentDate: Date? {
+        let sentKeys = ["LOTW_QSLSDATE", "QRZLOG_QSLSDATE", "QRZCOM_QSLSDATE", "EQSL_QSLSDATE", "QSLSDATE", "APP_LOTW_QSLSDATE"]
+        for key in sentKeys {
+            if let val = fields[key], !val.isEmpty, let d = Self.parseADIFDate(val) {
+                return d
+            }
+        }
+        return nil
+    }
+
+    var isAnyQSLSent: Bool {
+        let sentKeys = ["LOTW_QSL_SENT", "QRZLOG_QSL_SENT", "QRZCOM_QSL_SENT", "EQSL_QSL_SENT", "QSL_SENT"]
+        for key in sentKeys {
+            if let val = fields[key]?.trimmingCharacters(in: .whitespacesAndNewlines), !val.isEmpty {
+                if val.count == 1 && Self.isSentChar(val.first!) { return true }
+            }
+        }
+        if fields["LOTW_QSLSDATE"]?.isEmpty == false ||
+           fields["QRZLOG_QSLSDATE"]?.isEmpty == false ||
+           fields["EQSL_QSLSDATE"]?.isEmpty == false ||
+           fields["QSLSDATE"]?.isEmpty == false {
+            return true
+        }
+        return false
+    }
+
+    /// Days waiting for QSL confirmation.
+    /// If a QSL request was sent, measures days since the request was sent (Days Waiting).
+    /// If no request was sent yet, measures days since the contact date (QSO Age).
+    var qslWaitingDays: Int? {
+        let now = Date()
+        if let sentDate = qslSentDate {
+            let diff = now.timeIntervalSince(sentDate)
+            return max(0, Int(diff / 86400.0))
+        }
+        if let qso = qsoDate {
+            let diff = now.timeIntervalSince(qso)
+            return max(0, Int(diff / 86400.0))
+        }
+        return nil
     }
 
     static func parseADIFDate(_ raw: String) -> Date? {
@@ -593,12 +861,20 @@ nonisolated struct QSORecordModel: Identifiable, Sendable {
         let digits = clean.filter(\.isNumber)
         guard digits.count >= 8 else { return nil }
         var components = DateComponents()
-        components.calendar = Calendar(identifier: .gregorian)
-        components.timeZone = TimeZone(secondsFromGMT: 0)
         components.year = Int(digits.prefix(4))
         components.month = Int(digits.dropFirst(4).prefix(2))
         components.day = Int(digits.dropFirst(6).prefix(2))
-        return components.date
+        return gmtCalendar.date(from: components)
+    }
+
+    var qsoDate: Date? {
+        Self.parseADIFDate(fields["QSO_DATE"] ?? "")
+    }
+
+    var qsoAgeInDays: Int? {
+        guard let date = qsoDate else { return nil }
+        let diff = Date().timeIntervalSince(date)
+        return max(0, Int(diff / 86400.0))
     }
 
     var latestConfirmationDate: Date? {
@@ -650,6 +926,10 @@ nonisolated struct QSORecordModel: Identifiable, Sendable {
         return sources.isEmpty ? "Confirmed" : sources.joined(separator: ", ")
     }
     
+    var call: String { fields["CALL"] ?? "" }
+    var band: String { fields["BAND"] ?? "" }
+    var mode: String { fields["MODE"] ?? "" }
+
     // SMART DEDUPLICATION KEY: Call + Date + Time + Band + Mode
     var uniqueKey: String {
         QSOIdentity.exactKey(fields: fields)
@@ -668,7 +948,15 @@ nonisolated struct QSORecordModel: Identifiable, Sendable {
 
     public func toADIFRecordString() -> String {
         var adif = ""
-        for (k, val) in fields {
+        var exportFields = fields
+        let currentMode = exportFields["MODE"] ?? ""
+        let currentSubmode = exportFields["SUBMODE"] ?? ""
+        let freq = Double(exportFields["FREQ"] ?? "")
+        let effective = AmateurBandPlan.effectiveADIFMode(mode: currentMode, submode: currentSubmode, frequencyMHz: freq)
+        if !effective.isEmpty {
+            exportFields["MODE"] = effective
+        }
+        for (k, val) in exportFields {
             let clean = val.trimmingCharacters(in: .whitespacesAndNewlines)
             if !clean.isEmpty {
                 adif += "<\(k):\(clean.utf8.count)>\(clean) "
@@ -1565,9 +1853,12 @@ class AppState: NSObject, ObservableObject {
     @Published var contestCalendarLastUpdated: Date?
     @Published var isFetchingContestCalendar: Bool = false
     @Published var dxpeditionEntries: [DXpeditionEntry] = []
+    @Published var dxNewsArticles: [DXNewsArticle] = []
+    @Published var dxBulletins: [DXBulletin] = []
     @Published var dxpeditionStatus: String = "DXpedition watch not loaded yet"
     @Published var dxpeditionLastUpdated: Date?
     @Published var isFetchingDXpeditions: Bool = false
+    @Published var showFeedbackSheet: Bool = false
     
     // Row Selection State
     @Published var selectedRecordIDs: Set<UUID> = []
@@ -1654,6 +1945,9 @@ class AppState: NSObject, ObservableObject {
     @Published var isFetchingQRZAwards: Bool = false
     @Published var qrzAwardsStatus: String = ""
     @Published var qrzAwardsLastUpdated: Date? = nil
+    @Published var clubLogDXCCMatrix: ClubLogDXCCMatrix? = nil
+    @Published var isFetchingClubLogAwards: Bool = false
+    @Published var clubLogAwardsStatus: String = ""
     @Published var qrzIncomingRequests: [QRZIncomingConfirmation] = []
     @Published var isFetchingQRZIncoming = false
     @Published var isRejectingQRZIncoming = false
@@ -1719,7 +2013,9 @@ class AppState: NSObject, ObservableObject {
     var loadedWorkspaceProfileID: UUID?
 
     // Operator Desk
-    @Published var operatorDeskSection = min(9, max(0, UserDefaults.standard.integer(forKey: "operatorDeskSection")))
+    @Published var operatorDeskSection = min(30, max(0, UserDefaults.standard.integer(forKey: "operatorDeskSection")))
+    @Published var cwWorkstationSection: Int = 0
+    let cwESM = CWESMEngine.shared
     @Published var quickLogDraft = QuickLogDraft()
     @Published var quickLogLookup: CallsignLookupResult?
     @Published var quickLogAssessment = QuickLogAssessment()
@@ -1747,10 +2043,11 @@ class AppState: NSObject, ObservableObject {
     let cloudFileCoordinator = CloudFileCoordinator()
     let mobileCompanionServer = MobileCompanionServer()
     let dxClusterClient = DXClusterClient()
-    let rigControlClient = RigControlClient()
+    let rigControlClient = RigControlClient.shared
     let wsjtxListener = WSJTXListener()
     let icomNetworkRadio = IcomNetworkRadio()
     let ft8Engine = FT8EngineService()
+    let digitalModemEngine = DigitalModemEngine.shared
     var operatorFeatureCancellables: Set<AnyCancellable> = []
     var cloudSyncTimer: Timer?
 
@@ -1772,6 +2069,10 @@ class AppState: NSObject, ObservableObject {
     private var cachedTodayConfirmedRecords: [QSORecordModel]?
     private var cachedTodayConfirmedRevision = -1
     private var cachedTodayConfirmedDay = ""
+    @Published public private(set) var cachedStatisticsSnapshot: StatisticsSnapshot?
+    public private(set) var cachedStatisticsRevision = -1
+    private var cachedStatisticsRankFingerprint = ""
+    private var inFlightStatisticsTask: Task<StatisticsSnapshot, Never>?
 
     @Published var tableHeaders: [String] = []
     @Published var qsoRecords: [QSORecordModel] = [] {
@@ -1782,6 +2083,12 @@ class AppState: NSObject, ObservableObject {
             availableCountriesCache = nil
             confirmationOpportunityIndexCache = nil
             cachedTodayConfirmedRecords = nil
+            cachedStatisticsSnapshot = nil
+            cachedStatisticsRevision = -1
+            cachedStatisticsRankFingerprint = ""
+            inFlightStatisticsTask?.cancel()
+            inFlightStatisticsTask = nil
+            warmStatisticsCacheIfNeeded()
         }
     }
     @Published var recentLogFiles: [URL] = []
@@ -1835,6 +2142,11 @@ class AppState: NSObject, ObservableObject {
         DispatchQueue.main.async {
             CredentialVault.prewarm()
             CredentialVault.migrateLegacyCredentials()
+            if CredentialVault.isBiometricLockEnabled {
+                Task {
+                    _ = await CredentialVault.authenticateWithBiometrics()
+                }
+            }
             self.restoreSavedClubLogSessionCookies()
         }
     }
@@ -1869,9 +2181,61 @@ class AppState: NSObject, ObservableObject {
         }
     }
 
+    func warmStatisticsCacheIfNeeded() {
+        guard !qsoRecords.isEmpty else { return }
+        Task(priority: .utility) { [weak self] in
+            _ = await self?.getOrComputeStatisticsSnapshot(force: false)
+        }
+    }
+
+    public func getOrComputeStatisticsSnapshot(force: Bool = false) async -> StatisticsSnapshot {
+        let currentRevision = qsoRecordsRevision
+        let rank = ownerRankData
+        let rankFingerprint = "\(rank?.callsign ?? "")-\(rank?.rank_qso ?? "")-\(rank?.rank_countries ?? "")"
+
+        if !force,
+           let cached = cachedStatisticsSnapshot,
+           cachedStatisticsRevision == currentRevision,
+           cachedStatisticsRankFingerprint == rankFingerprint {
+            return cached
+        }
+
+        if !force, let inFlight = inFlightStatisticsTask {
+            return await inFlight.value
+        }
+
+        let records = qsoRecords
+        let emailHist = emailHistory
+        let task = Task.detached(priority: .userInitiated) {
+            StatisticsSnapshot.make(
+                records: records,
+                ownerRankData: rank,
+                emailHistory: emailHist
+            )
+        }
+        inFlightStatisticsTask = task
+
+        let snapshot = await task.value
+
+        await MainActor.run {
+            if !Task.isCancelled {
+                self.cachedStatisticsSnapshot = snapshot
+                self.cachedStatisticsRevision = currentRevision
+                self.cachedStatisticsRankFingerprint = rankFingerprint
+            }
+            if self.inFlightStatisticsTask == task {
+                self.inFlightStatisticsTask = nil
+            }
+        }
+        return snapshot
+    }
+
     var availableCountries: [String] {
         if let availableCountriesCache { return availableCountriesCache }
-        let countries = Set(qsoRecords.compactMap { $0["COUNTRY"].isEmpty ? nil : $0["COUNTRY"] })
+        let countries = Set(qsoRecords.compactMap { record -> String? in
+            let c = ConfirmationOpportunityIndex.normalizedCountry(for: record)
+            return c.isEmpty ? nil : c
+        })
         let result = Array(countries).sorted()
         availableCountriesCache = result
         return result
@@ -2086,19 +2450,29 @@ class AppState: NSObject, ObservableObject {
                 if filterCriteria.useTodayConfirmed {
                     if !self.isTodayConfirmed(record: record) { return false }
                 }
+                if filterCriteria.useOverduePending {
+                    if record.isConfirmed { return false }
+                    let days = record.qsoAgeInDays ?? 0
+                    if days < 30 { return false }
+                }
+                if filterCriteria.useUnconfirmedOnly {
+                    if record.isConfirmed { return false }
+                }
                 if filterCriteria.useSentEmail {
                     let call = record["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
                     if self.emailHistoryByCallsign[call] == nil { return false }
+                }
+                if filterCriteria.useLotwWaiting {
+                    if record.isLotwConfirmed || !record.isLotwSent { return false }
                 }
                 return true
             }
         }
         
         if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            let mode = logSearchMode
-            let text = searchText
+            let preparedQuery = PreparedLogSearchQuery(query: searchText, mode: logSearchMode)
             records = records.filter { record in
-                LogSearchEngine.matches(record.searchDocument, query: text, mode: mode)
+                preparedQuery.matches(record.searchDocument)
             }
         }
 
@@ -2117,11 +2491,16 @@ class AppState: NSObject, ObservableObject {
         }
         
         if let sortKey = sortHeader {
-            records.sort { r1, r2 in
+            records.sort { (r1: QSORecordModel, r2: QSORecordModel) -> Bool in
                 let v1 = r1[sortKey].trimmingCharacters(in: .whitespaces)
                 let v2 = r2[sortKey].trimmingCharacters(in: .whitespaces)
 
-                if sortKey == "QSO_DATE" {
+                if sortKey == "AGING" || sortKey == "APP_VIEW_AGING" {
+                    let a1 = r1.qslWaitingDays ?? -1
+                    let a2 = r2.qslWaitingDays ?? -1
+                    guard a1 != a2 else { return false }
+                    return sortAscending ? a1 < a2 : a1 > a2
+                } else if sortKey == "QSO_DATE" {
                     let t1 = r1["TIME_ON"].trimmingCharacters(in: .whitespaces)
                     let t2 = r2["TIME_ON"].trimmingCharacters(in: .whitespaces)
                     let first = "\(v1)\(t1)"
@@ -2236,6 +2615,66 @@ class AppState: NSObject, ObservableObject {
         showEmailComposer = true
     }
 
+    var overduePendingCount: Int {
+        qsoRecords.reduce(0) { count, record in
+            if !record.isConfirmed, let days = record.qsoAgeInDays, days >= 30 {
+                return count + 1
+            }
+            return count
+        }
+    }
+
+    var lotwWaitingCount: Int {
+        qsoRecords.reduce(0) { count, record in
+            if !record.isLotwConfirmed && record.isLotwSent {
+                return count + 1
+            }
+            return count
+        }
+    }
+
+    var unconfirmedCount: Int {
+        qsoRecords.reduce(0) { count, record in
+            record.isConfirmed ? count : count + 1
+        }
+    }
+
+    func openQSLReminderEmailComposer(for record: QSORecordModel) {
+        let cleanEmail = record["EMAIL"].trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanEmail.isEmpty else {
+            alertTitle = "No Email Address"
+            alertMessage = "No email address found for \(record["CALL"]). Please enrich with QRZ first."
+            showAlert = true
+            return
+        }
+        selectedEmailCallsign = record["CALL"]
+        selectedEmailAddress = cleanEmail
+        selectedEmailQSO = record
+        selectedEmailTemplate = "LoTW/QRZ Confirmation"
+        selectedEmailUnconfirmedQSOs = [record]
+        showEmailComposer = true
+    }
+
+    func openBatchQSLReminderComposerForSelected() {
+        let selectedRecords = qsoRecords.filter { selectedRecordIDs.contains($0.id) }
+        guard !selectedRecords.isEmpty else { return }
+
+        let validWithEmail = selectedRecords.filter { !$0["EMAIL"].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        if validWithEmail.isEmpty {
+            alertTitle = "No Email Addresses Found"
+            alertMessage = "None of the selected QSOs have an email address recorded. Enrich selected contacts with QRZ first."
+            showAlert = true
+            return
+        }
+
+        selectedEmailCallsign = validWithEmail.first?["CALL"] ?? ""
+        selectedEmailAddress = validWithEmail.first?["EMAIL"] ?? ""
+        selectedEmailQSO = validWithEmail.first
+        selectedEmailTemplate = "LoTW/QRZ Confirmation"
+        selectedEmailUnconfirmedQSOs = validWithEmail
+        showEmailComposer = true
+    }
+
     func toggleSort(for header: String) {
         if sortHeader == header {
             if sortAscending {
@@ -2345,6 +2784,56 @@ class AppState: NSObject, ObservableObject {
         if let data = UserDefaults.standard.data(forKey: "cachedQRZAwards"),
            let cached = try? JSONDecoder().decode([QRZAwardSummary].self, from: data) {
             self.qrzAwardSummaries = cached
+        }
+    }
+
+    // MARK: Club Log DXCC Matrix
+
+    func fetchClubLogDXCCMatrix() {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in self?.fetchClubLogDXCCMatrix() }
+            return
+        }
+        guard !isFetchingClubLogAwards else { return }
+
+        let defaults  = UserDefaults.standard
+        let callsign  = defaults.string(forKey: "clubLogCallsign") ?? currentStationCallsign
+        let email     = defaults.string(forKey: "clubLogEmail") ?? ""
+        let apiKey    = CredentialVault.value(for: .clubLogAPIKey)
+        let password  = CredentialVault.value(for: .clubLogPassword)
+
+        guard !callsign.isEmpty, !apiKey.isEmpty else {
+            clubLogAwardsStatus = "Configure ClubLog API key in Settings → Integrations → Club Log."
+            return
+        }
+
+        // Show cached data immediately if available
+        Task { @MainActor in
+            if let cached = await ClubLogAwardsService.shared.loadCachedMatrix() {
+                if self.clubLogDXCCMatrix == nil {
+                    self.clubLogDXCCMatrix = cached
+                    let age = Int(-cached.fetchedAt.timeIntervalSinceNow / 60)
+                    self.clubLogAwardsStatus = "Cached — \(cached.totalConfirmed) confirmed (\(age)m ago)"
+                }
+            }
+        }
+
+        isFetchingClubLogAwards = true
+        clubLogAwardsStatus = "Fetching DXCC matrix from Club Log…"
+
+        Task { @MainActor in
+            do {
+                let matrix = try await ClubLogAwardsService.shared.fetchDXCCMatrix(
+                    callsign: callsign, apiKey: apiKey, email: email, password: password
+                )
+                self.clubLogDXCCMatrix = matrix
+                self.clubLogAwardsStatus = "✓ \(matrix.totalConfirmed) confirmed, \(matrix.totalWorked) worked"
+                self.appendLog("ClubLog Awards: \(matrix.totalConfirmed) entities confirmed on DXCC matrix")
+            } catch {
+                self.clubLogAwardsStatus = error.localizedDescription
+                self.appendLog("ClubLog Awards error: \(error.localizedDescription)")
+            }
+            self.isFetchingClubLogAwards = false
         }
     }
     
@@ -3382,7 +3871,9 @@ class AppState: NSObject, ObservableObject {
         allowPermissionPrompt: Bool = true,
         completion: ((Result<MergeSummary, Error>) -> Void)? = nil
     ) {
-        isLoading = true
+        if qsoRecords.isEmpty {
+            isLoading = true
+        }
         let url = source.url
         appendLog("Reading SDR-Control logbook: \(url.path)")
 
@@ -3546,7 +4037,9 @@ class AppState: NSObject, ObservableObject {
         from url: URL,
         completion: ((Result<MergeSummary, Error>) -> Void)? = nil
     ) {
-        isLoading = true
+        if qsoRecords.isEmpty {
+            isLoading = true
+        }
         appendLog("Analyzing & Merging '\(url.lastPathComponent)' into Master Logbook...")
         archiveLogToDatabase(originalURL: url)
 
@@ -4144,7 +4637,9 @@ class AppState: NSObject, ObservableObject {
         let lotwUser = UserDefaults.standard.string(forKey: "lotwUsername")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let lotwPass = CredentialVault.value(for: .lotwPassword)
         
-        isLoading = true
+        if qsoRecords.isEmpty {
+            isLoading = true
+        }
         appendLog("☁️ Connecting to ARRL LoTW servers for Full Historical Cloud Download...")
         
         guard let encodedUser = lotwUser.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
@@ -4481,7 +4976,7 @@ class AppState: NSObject, ObservableObject {
             var consecutiveTransientFailures = 0
             var stoppingFailure: QRZRankFetchFailure?
             var workingRecords = self.qsoRecords
-            var publishedRecords = workingRecords
+            let publishedRecords = workingRecords
             var hasUnsavedChanges = false
 
             for (offset, callsign) in callsigns.enumerated() {
@@ -5467,16 +5962,31 @@ class AppState: NSObject, ObservableObject {
             .trimmingCharacters(in: separators.union(CharacterSet(charactersIn: ".,;:")))
     }
 
+    var isSMTPConfigured: Bool {
+        let rawHost = UserDefaults.standard.string(forKey: "smtpHost")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let host = rawHost.isEmpty ? "smtp.gmail.com" : rawHost
+        let user = UserDefaults.standard.string(forKey: "smtpUser")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let rawPass = CredentialVault.value(for: .smtpPassword)
+        let pass = rawPass.replacingOccurrences(of: " ", with: "")
+        return !host.isEmpty && !user.isEmpty && !pass.isEmpty
+    }
+
+    var configuredSMTPEmail: String {
+        UserDefaults.standard.string(forKey: "smtpUser")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
     func sendEmail(
         to recipient: String,
         subject: String,
         body: String,
         attachmentData: Data? = nil,
         attachmentName: String? = nil,
+        replyTo: String? = nil,
+        callsign: String? = nil,
         playSound: Bool = true,
         completion: @escaping (Bool, String) -> Void
     ) {
-        let targetCallsign = selectedEmailCallsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let targetCallsign = (callsign ?? selectedEmailCallsign).trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         
         let rawHost = UserDefaults.standard.string(forKey: "smtpHost")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let host = rawHost.isEmpty ? "smtp.gmail.com" : rawHost
@@ -5501,6 +6011,8 @@ class AppState: NSObject, ObservableObject {
             dateFormatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss Z"
             let dateStr = dateFormatter.string(from: Date())
             let messageID = "<\(UUID().uuidString)@\(host)>"
+            let cleanReplyTo = replyTo?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let replyToHeader = cleanReplyTo.isEmpty ? "" : "Reply-To: \(cleanReplyTo)\n"
             
             var emailContentData = Data()
             
@@ -5510,7 +6022,7 @@ class AppState: NSObject, ObservableObject {
                 let headers = """
                 From: \(user)
                 To: \(recipient)
-                Subject: \(subject)
+                \(replyToHeader)Subject: \(subject)
                 Date: \(dateStr)
                 Message-ID: \(messageID)
                 MIME-Version: 1.0
@@ -5553,7 +6065,7 @@ class AppState: NSObject, ObservableObject {
                 let emailContent = """
                 From: \(user)
                 To: \(recipient)
-                Subject: \(subject)
+                \(replyToHeader)Subject: \(subject)
                 Date: \(dateStr)
                 Message-ID: \(messageID)
                 Content-Type: text/plain; charset=UTF-8
@@ -5618,22 +6130,22 @@ class AppState: NSObject, ObservableObject {
                     DispatchQueue.main.async {
                         self.recordEmailHistory(callsign: targetCallsign, email: recipient, subject: subject, status: "Sent")
                         if playSound { self.playActivitySound(.success) }
+                        completion(true, "Email successfully sent to \(recipient)!")
                     }
-                    completion(true, "Email successfully sent to \(recipient)!")
                 } else {
                     DispatchQueue.main.async {
                         self.recordEmailHistory(callsign: targetCallsign, email: recipient, subject: subject, status: "Failed")
                         if playSound { self.playActivitySound(.failure) }
+                        completion(false, "ERROR \(process.terminationStatus):\n\n" + outputLog)
                     }
-                    completion(false, "ERROR \(process.terminationStatus):\n\n" + outputLog)
                 }
             } catch {
                 try? FileManager.default.removeItem(at: tempEmailURL)
                 DispatchQueue.main.async {
                     self.recordEmailHistory(callsign: targetCallsign, email: recipient, subject: subject, status: "Failed")
                     if playSound { self.playActivitySound(.failure) }
+                    completion(false, "Process Failed: \(error.localizedDescription)")
                 }
-                completion(false, "Process Failed: \(error.localizedDescription)")
             }
         }
     }
@@ -5908,14 +6420,16 @@ class AppState: NSObject, ObservableObject {
                         attachmentName: attachmentName,
                         playSound: false
                     ) { success, _ in
-                        if success {
-                            sentCount += 1
-                            self.markRecordAsQSLSent(id: record.id, via: "E")
-                        } else {
-                            failedCount += 1
+                        DispatchQueue.main.async {
+                            if success {
+                                sentCount += 1
+                                self.markRecordAsQSLSent(id: record.id, via: "E")
+                            } else {
+                                failedCount += 1
+                            }
+                            self.batchMailStatus = "Sending QSL cards \(sentCount + failedCount)/\(selectedRecords.count)"
+                            semaphore.signal()
                         }
-                        self.batchMailStatus = "Sending QSL cards \(sentCount + failedCount)/\(selectedRecords.count)"
-                        semaphore.signal()
                     }
                 }
 
@@ -5951,13 +6465,15 @@ class AppState: NSObject, ObservableObject {
 
                     let message = self.friendlyRecentConfirmationReminderMessage(for: recipient)
                     self.sendEmail(to: recipient.email, subject: message.subject, body: message.body, playSound: false) { success, _ in
-                        if success {
-                            sentCount += 1
-                        } else {
-                            failedCount += 1
+                        DispatchQueue.main.async {
+                            if success {
+                                sentCount += 1
+                            } else {
+                                failedCount += 1
+                            }
+                            self.batchMailStatus = "Sending reminders \(sentCount + failedCount)/\(selectedRecipients.count)"
+                            semaphore.signal()
                         }
-                        self.batchMailStatus = "Sending reminders \(sentCount + failedCount)/\(selectedRecipients.count)"
-                        semaphore.signal()
                     }
                 }
 
@@ -6348,6 +6864,13 @@ class AppState: NSObject, ObservableObject {
     }
 
     func recordEmailHistory(callsign: String, email: String, subject: String, status: String) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in
+                self?.recordEmailHistory(callsign: callsign, email: email, subject: subject, status: status)
+            }
+            return
+        }
+
         let entry = EmailHistoryEntry(
             id: UUID(),
             date: Date(),

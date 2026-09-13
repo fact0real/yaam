@@ -242,6 +242,11 @@ public final class BandmapEngine: ObservableObject {
         let status = classifyStatus(callsign: cleanCall, band: resolvedBand, mode: mode, logRecords: logRecords)
         let prefix = Self.extractPrefix(for: cleanCall)
 
+        // If this is a live spot, clear initial demo spots
+        if source != "Demo" && spots.contains(where: { $0.source == "Demo" }) {
+            spots.removeAll { $0.source == "Demo" }
+        }
+
         // Replace existing spot for same call on same band or add new
         spots.removeAll { $0.callsign == cleanCall && $0.band == resolvedBand }
 
@@ -482,15 +487,15 @@ public final class BandmapEngine: ObservableObject {
 
     private func populateDefaultSpots() {
         spots = [
-            BandmapSpot(callsign: "3Y0J", frequencyKHz: 14025.0, band: "20M", mode: "CW", status: .newDXCC, comment: "Bouvet Island DXpedition UP 2", source: "DX Cluster", snr: -4),
-            BandmapSpot(callsign: "W1AW", frequencyKHz: 14074.0, band: "20M", mode: "FT8", status: .worked, comment: "ARRL HQ Station -08", source: "WSJT-X", snr: -8),
-            BandmapSpot(callsign: "JA1ZLO", frequencyKHz: 14018.5, band: "20M", mode: "CW", status: .newBand, comment: "Tokyo Univ 599", source: "DX Cluster", snr: 5),
-            BandmapSpot(callsign: "DP0GVN", frequencyKHz: 14195.0, band: "20M", mode: "USB", status: .newDXCC, comment: "Neumayer Station III Antarctica", source: "DX Advisor", snr: -12),
-            BandmapSpot(callsign: "DL2026HAM", frequencyKHz: 14240.0, band: "20M", mode: "USB", status: .unconfirmed, comment: "Special Event Station Friedrichshafen", source: "DX Cluster", snr: 10),
-            BandmapSpot(callsign: "VK9XY", frequencyKHz: 7015.0, band: "40M", mode: "CW", status: .newDXCC, comment: "Christmas Island UP 1.5", source: "DX Cluster", snr: -6),
-            BandmapSpot(callsign: "ZL7/K6VVA", frequencyKHz: 21028.0, band: "15M", mode: "CW", status: .newDXCC, comment: "Chatham Island", source: "DX Cluster", snr: 2),
-            BandmapSpot(callsign: "FR4NT", frequencyKHz: 28020.0, band: "10M", mode: "CW", status: .newDXCC, comment: "Reunion Island", source: "DX Cluster", snr: -10),
-            BandmapSpot(callsign: "KH6/W6JKV", frequencyKHz: 50110.0, band: "6M", mode: "CW", status: .newDXCC, comment: "Hawaii Island 50MHz DX Window", source: "DX Cluster", snr: -3)
+            BandmapSpot(callsign: "3Y0J", frequencyKHz: 14025.0, band: "20M", mode: "CW", status: .newDXCC, comment: "Bouvet Island DXpedition UP 2", source: "Demo", snr: -4),
+            BandmapSpot(callsign: "W1AW", frequencyKHz: 14074.0, band: "20M", mode: "FT8", status: .worked, comment: "ARRL HQ Station -08", source: "Demo", snr: -8),
+            BandmapSpot(callsign: "JA1ZLO", frequencyKHz: 14018.5, band: "20M", mode: "CW", status: .newBand, comment: "Tokyo Univ 599", source: "Demo", snr: 5),
+            BandmapSpot(callsign: "DP0GVN", frequencyKHz: 14195.0, band: "20M", mode: "USB", status: .newDXCC, comment: "Neumayer Station III Antarctica", source: "Demo", snr: -12),
+            BandmapSpot(callsign: "DL2026HAM", frequencyKHz: 14240.0, band: "20M", mode: "USB", status: .unconfirmed, comment: "Special Event Station Friedrichshafen", source: "Demo", snr: 10),
+            BandmapSpot(callsign: "VK9XY", frequencyKHz: 7015.0, band: "40M", mode: "CW", status: .newDXCC, comment: "Christmas Island UP 1.5", source: "Demo", snr: -6),
+            BandmapSpot(callsign: "ZL7/K6VVA", frequencyKHz: 21028.0, band: "15M", mode: "CW", status: .newDXCC, comment: "Chatham Island", source: "Demo", snr: 2),
+            BandmapSpot(callsign: "FR4NT", frequencyKHz: 28020.0, band: "10M", mode: "CW", status: .newDXCC, comment: "Reunion Island", source: "Demo", snr: -10),
+            BandmapSpot(callsign: "KH6/W6JKV", frequencyKHz: 50110.0, band: "6M", mode: "CW", status: .newDXCC, comment: "Hawaii Island 50MHz DX Window", source: "Demo", snr: -3)
         ]
     }
 }

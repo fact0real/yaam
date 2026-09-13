@@ -229,10 +229,12 @@ extension AppState {
         quickLogLookup = nil
         quickLogAssessment = QuickLogAssessment()
         quickLogStatus = "Saved \(record["CALL"])"
+        CWESMEngine.shared.resetForNewQSO()
         enqueueAutomaticQSL(for: record)
         ZeroClickCloudUploadDaemon.shared.dispatch(
             record: record,
             stationID: activeStationProfileID?.uuidString,
+            stationLocation: activeStationProfile?.lotwStationLocation,
             qrzKeyOverride: activeQRZAPIKey
         )
         WavelogSyncEngine.shared.autoPushSingleQSO(record: record)

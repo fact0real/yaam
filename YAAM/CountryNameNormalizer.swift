@@ -28,8 +28,8 @@ nonisolated enum CountryNameNormalizer {
             "Rodrigez Island", "Rodrigez Is.", "Rodrigez Is"
         ]),
         ("Balearic Islands", ["Balearic Is.", "Balearic Is", "Balearic Island"]),
-        ("USA", [
-            "United States", "United States of America", "U.S.A.", "U.S.",
+        ("United States", [
+            "USA", "United States of America", "U.S.A.", "U.S.",
             "US", "America"
         ]),
         ("South Korea", [
@@ -40,7 +40,10 @@ nonisolated enum CountryNameNormalizer {
             "Democratic People's Republic of Korea", "Korea, D.P.R. of",
             "Korea DPR", "DPRK"
         ]),
-        ("Kosovo", ["Republic of Kosovo"]),
+        ("Kosovo", [
+            "Republic of Kosovo", "Kosova", "Republic of Kosova",
+            "Republic of Kosovë", "Kosovë", "Z6", "Z60", "Z61"
+        ]),
         ("Slovakia", ["Slovak Republic", "Republic of Slovakia"]),
         ("Vietnam", ["Viet Nam", "Socialist Republic of Vietnam"]),
         ("Fiji", ["Fiji Islands", "Republic of Fiji"]),
@@ -134,6 +137,30 @@ nonisolated enum CountryNameNormalizer {
     /// Stable key for grouping, filtering, and lookups after alias resolution.
     static func canonicalKey(_ rawValue: String) -> String {
         rawComparisonKey(canonicalName(rawValue))
+    }
+
+    /// All known aliases for a country (including canonical name)
+    static func aliases(for country: String) -> [String] {
+        let canonical = canonicalName(country)
+        guard let group = aliasGroups.first(where: { $0.canonical == canonical }) else {
+            return [country]
+        }
+        return [group.canonical] + group.aliases
+    }
+
+    /// Returns true if either the country name or any of its known aliases/variants match the search query
+    static func matchesSearch(country: String, query: String) -> Bool {
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedQuery.isEmpty else { return true }
+        if country.localizedCaseInsensitiveContains(trimmedQuery) {
+            return true
+        }
+        for alias in aliases(for: country) {
+            if alias.localizedCaseInsensitiveContains(trimmedQuery) {
+                return true
+            }
+        }
+        return false
     }
 
     static func normalizedFields(_ fields: [String: String]) -> (fields: [String: String], changed: Bool) {

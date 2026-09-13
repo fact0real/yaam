@@ -43,11 +43,15 @@ struct ContentView: View {
     
     var body: some View {
         VStack(spacing: 0) {
-            // MARK: - Top Global Tab Navigation Selector
-            HStack {
-                Spacer()
+            // MARK: - Top Global Tab Navigation Selector & Station Weather Radar HUD
+            ZStack {
                 TopNavigationTabBar(selectedTab: $appState.selectedTab)
-                Spacer()
+
+                HStack(spacing: 8) {
+                    Spacer()
+                    RoverModePillView()
+                    StationWeatherPillView()
+                }
             }
             .padding(.vertical, 8)
             .padding(.horizontal, 12)
@@ -547,6 +551,10 @@ struct ContentView: View {
             LogAssistantView()
                 .environmentObject(appState)
         }
+        .sheet(isPresented: $appState.showFeedbackSheet) {
+            FeedbackView()
+                .environmentObject(appState)
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
             if appState.isMasterMode {
                 try? appState.persistCurrentWorkspace(reason: "Application exit")
@@ -566,6 +574,7 @@ struct ContentView: View {
         } message: {
             Text(appState.alertMessage)
         }
+        .background(MainWindowFrameConfigurator().frame(width: 0, height: 0))
     }
 
     // MARK: - Helper Functions
@@ -1281,6 +1290,45 @@ private struct TabButton: View {
         .animation(.easeInOut(duration: 0.12), value: isHovered)
         .onHover { hovering in
             isHovered = hovering
+        }
+    }
+}
+
+// MARK: - Main Window Screen Adaptation Configurator
+struct MainWindowFrameConfigurator: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        DispatchQueue.main.async {
+            configure(view.window)
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async {
+            configure(nsView.window)
+        }
+    }
+
+    private func configure(_ window: NSWindow?) {
+        guard let window, !window.isSheet, !(window is NSPanel), window.styleMask.contains(.titled) else { return }
+
+        let screen = window.screen ?? NSScreen.main ?? NSScreen.screens.first
+        guard let screenFrame = screen?.visibleFrame else { return }
+
+        let targetWidth = min(screenFrame.width - 40, max(1560, screenFrame.width * 0.94))
+        let targetHeight = min(screenFrame.height - 40, max(880, screenFrame.height * 0.90))
+
+        window.contentMinSize = NSSize(width: 1000, height: 600)
+
+        let adaptationKey = "hasAdaptedMainWindowToScreenWidth_v4"
+        if !UserDefaults.standard.bool(forKey: adaptationKey) || window.frame.width < targetWidth - 60 {
+            UserDefaults.standard.set(true, forKey: adaptationKey)
+            var newFrame = window.frame
+            newFrame.size.width = targetWidth
+            newFrame.size.height = max(newFrame.size.height, targetHeight)
+            window.setFrame(newFrame, display: true, animate: false)
+            window.center()
         }
     }
 }

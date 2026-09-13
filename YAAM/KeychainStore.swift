@@ -61,6 +61,16 @@ nonisolated enum KeychainStore {
             vaultDirectoryURL.appendingPathComponent(".vault_salt")
         }
 
+        private static let legacyMigrationFlagKey = "ASIS.YAAM.LegacyKeychainMigrationFinished_v2"
+
+        private func isLegacyMigrationFinished() -> Bool {
+            UserDefaults.standard.bool(forKey: Self.legacyMigrationFlagKey)
+        }
+
+        private func markLegacyMigrationFinished() {
+            UserDefaults.standard.set(true, forKey: Self.legacyMigrationFlagKey)
+        }
+
         func prewarm() {
             lock.lock()
             defer { lock.unlock() }
@@ -71,7 +81,16 @@ nonisolated enum KeychainStore {
             lock.lock()
             defer { lock.unlock() }
             ensureLoaded()
-            return memoryVault[account]
+            if let inMemory = memoryVault[account] {
+                return inMemory
+            }
+            if !isLegacyMigrationFinished(), let legacyData = queryLegacyKeychain(account: account) {
+                memoryVault[account] = legacyData
+                _ = persistVault()
+                deleteLegacyKeychainItem(account: account)
+                return legacyData
+            }
+            return nil
         }
 
         func set(_ data: Data, for account: String) -> Bool {
@@ -79,6 +98,7 @@ nonisolated enum KeychainStore {
             defer { lock.unlock() }
             ensureLoaded()
             memoryVault[account] = data
+            deleteLegacyKeychainItem(account: account)
             return persistVault()
         }
 
@@ -86,6 +106,7 @@ nonisolated enum KeychainStore {
             lock.lock()
             defer { lock.unlock() }
             ensureLoaded()
+            deleteLegacyKeychainItem(account: account)
             guard memoryVault[account] != nil else { return true }
             memoryVault.removeValue(forKey: account)
             return persistVault()
@@ -108,12 +129,18 @@ nonisolated enum KeychainStore {
                    let dictionary = try? JSONDecoder().decode([String: Data].self, from: decryptedData) {
                     self.memoryVault = dictionary
                     migrateFromUserDefaultsSilently()
+                    if !isLegacyMigrationFinished() {
+                        migrateFromLegacyKeychainSilently()
+                    }
                     return
                 }
             }
 
             // 3. Fallback migrations if fresh or empty
             migrateFromUserDefaultsSilently()
+            if !isLegacyMigrationFinished() {
+                migrateFromLegacyKeychainSilently()
+            }
         }
 
         private func persistVault() -> Bool {
@@ -211,38 +238,221 @@ nonisolated enum KeychainStore {
                 _ = persistVault()
             }
         }
+
+        private func queryLegacyKeychain(account: String) -> Data? {
+            let services = [Bundle.main.bundleIdentifier, "ASIS.YAAM"].compactMap { $0 }
+            for service in Set(services) {
+                let query: [String: Any] = [
+                    kSecClass as String: kSecClassGenericPassword,
+                    kSecAttrService as String: service,
+                    kSecAttrAccount as String: account,
+                    kSecReturnData as String: true,
+                    kSecMatchLimit as String: kSecMatchLimitOne
+                ]
+                var result: CFTypeRef?
+                let status = SecItemCopyMatching(query as CFDictionary, &result)
+                if status == errSecSuccess, let data = result as? Data, !data.isEmpty {
+                    return data
+                }
+            }
+            return nil
+        }
+
+        private func deleteLegacyKeychainItem(account: String) {
+            let services = [Bundle.main.bundleIdentifier, "ASIS.YAAM"].compactMap { $0 }
+            for service in Set(services) {
+                let query: [String: Any] = [
+                    kSecClass as String: kSecClassGenericPassword,
+                    kSecAttrService as String: service,
+                    kSecAttrAccount as String: account
+                ]
+                SecItemDelete(query as CFDictionary)
+            }
+        }
+
+        private func migrateFromLegacyKeychainSilently() {
+            guard !isLegacyMigrationFinished() else { return }
+            markLegacyMigrationFinished()
+
+            let services = [Bundle.main.bundleIdentifier, "ASIS.YAAM"].compactMap { $0 }
+            var foundAny = false
+            var migratedAccounts: [String] = []
+
+            for service in Set(services) {
+                let query: [String: Any] = [
+                    kSecClass as String: kSecClassGenericPassword,
+                    kSecAttrService as String: service,
+                    kSecReturnAttributes as String: true,
+                    kSecReturnData as String: true,
+                    kSecMatchLimit as String: kSecMatchLimitAll
+                ]
+                var result: CFTypeRef?
+                let status = SecItemCopyMatching(query as CFDictionary, &result)
+                if status == errSecSuccess {
+                    let items: [[String: Any]]
+                    if let array = result as? [[String: Any]] {
+                        items = array
+                    } else if let dict = result as? [String: Any] {
+                        items = [dict]
+                    } else {
+                        items = []
+                    }
+
+                    for item in items {
+                        if let account = item[kSecAttrAccount as String] as? String,
+                           let data = item[kSecValueData as String] as? Data,
+                           !account.isEmpty,
+                           !data.isEmpty,
+                           account != "ASIS.YAAM.MasterVaultKey" {
+                            if memoryVault[account] == nil {
+                                memoryVault[account] = data
+                                foundAny = true
+                            }
+                            migratedAccounts.append(account)
+                        }
+                    }
+                }
+            }
+
+            for cred in SecureCredential.allCases {
+                if memoryVault[cred.rawValue] == nil,
+                   let data = queryLegacyKeychain(account: cred.rawValue) {
+                    memoryVault[cred.rawValue] = data
+                    foundAny = true
+                    migratedAccounts.append(cred.rawValue)
+                }
+            }
+
+            if foundAny {
+                _ = persistVault()
+            }
+
+            for account in Set(migratedAccounts) {
+                deleteLegacyKeychainItem(account: account)
+            }
+        }
     }
 
     private static let vault = VaultManager()
 
-    // MARK: - Public API (Zero-Prompt In-Memory Access)
+    // MARK: - Biometric & Touch ID Capabilities
 
-    public static func prewarm() {
-        vault.prewarm()
+    public static var isBiometricsAvailable: Bool {
+        let context = LAContext()
+        var error: NSError?
+        return context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error)
     }
 
-    public static func authenticateWithBiometrics(reason: String = "Unlock YAAM Radio Credentials") async -> Bool {
+    public static var isDevicePasscodeAvailable: Bool {
+        let context = LAContext()
+        var error: NSError?
+        return context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error)
+    }
+
+    public static var biometryTypeDescription: String {
         let context = LAContext()
         var error: NSError?
         if context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) {
+            switch context.biometryType {
+            case .touchID:
+                return "Touch ID"
+            case .faceID:
+                return "Face ID"
+            case .opticID:
+                return "Optic ID"
+            case .none:
+                return "None"
+            @unknown default:
+                return "Touch ID"
+            }
+        } else if context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) {
+            return "Mac Password"
+        }
+        return "None"
+    }
+
+    private static let biometricLockPreferenceKey = "yaam.security.requireBiometrics"
+
+    public static var isBiometricLockEnabled: Bool {
+        get {
+            UserDefaults.standard.bool(forKey: biometricLockPreferenceKey)
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: biometricLockPreferenceKey)
+        }
+    }
+
+    private static let sessionLock = NSLock()
+    private static var _isVaultSessionUnlocked: Bool = false
+
+    public static var isVaultSessionUnlocked: Bool {
+        sessionLock.lock()
+        defer { sessionLock.unlock() }
+        if !isBiometricLockEnabled {
+            return true
+        }
+        return _isVaultSessionUnlocked
+    }
+
+    public static func markSessionUnlocked() {
+        sessionLock.lock()
+        _isVaultSessionUnlocked = true
+        sessionLock.unlock()
+    }
+
+    public static func lockSession() {
+        sessionLock.lock()
+        _isVaultSessionUnlocked = false
+        sessionLock.unlock()
+    }
+
+    @discardableResult
+    public static func authenticateWithBiometrics(
+        reason: String = "Scan your fingerprint to securely unlock YAAM radio credentials"
+    ) async -> Bool {
+        let context = LAContext()
+        context.localizedCancelTitle = "Cancel"
+        var error: NSError?
+
+        if context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) {
             do {
-                let success = try await context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: reason)
-                if success { vault.prewarm() }
+                let success = try await context.evaluatePolicy(
+                    .deviceOwnerAuthenticationWithBiometrics,
+                    localizedReason: reason
+                )
+                if success {
+                    markSessionUnlocked()
+                    vault.prewarm()
+                }
                 return success
             } catch {
                 return false
             }
         } else if context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) {
             do {
-                let success = try await context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason)
-                if success { vault.prewarm() }
+                let success = try await context.evaluatePolicy(
+                    .deviceOwnerAuthentication,
+                    localizedReason: reason
+                )
+                if success {
+                    markSessionUnlocked()
+                    vault.prewarm()
+                }
                 return success
             } catch {
                 return false
             }
         }
+
+        markSessionUnlocked()
         vault.prewarm()
         return true
+    }
+
+    // MARK: - Public API (Zero-Prompt In-Memory Access)
+
+    public static func prewarm() {
+        vault.prewarm()
     }
 
     public static func data(for account: String) -> Data? {
@@ -283,6 +493,34 @@ nonisolated enum CredentialVault {
 
     static func migrateLegacyCredentials() {
         KeychainStore.prewarm()
+    }
+
+    static var isBiometricsAvailable: Bool {
+        KeychainStore.isBiometricsAvailable
+    }
+
+    static var isDevicePasscodeAvailable: Bool {
+        KeychainStore.isDevicePasscodeAvailable
+    }
+
+    static var biometryTypeDescription: String {
+        KeychainStore.biometryTypeDescription
+    }
+
+    static var isBiometricLockEnabled: Bool {
+        get { KeychainStore.isBiometricLockEnabled }
+        set { KeychainStore.isBiometricLockEnabled = newValue }
+    }
+
+    static var isVaultSessionUnlocked: Bool {
+        KeychainStore.isVaultSessionUnlocked
+    }
+
+    @discardableResult
+    static func authenticateWithBiometrics(
+        reason: String = "Scan your fingerprint to securely unlock YAAM radio credentials"
+    ) async -> Bool {
+        await KeychainStore.authenticateWithBiometrics(reason: reason)
     }
 
     static func value(for credential: SecureCredential) -> String {
@@ -371,11 +609,18 @@ nonisolated enum CredentialVault {
     }
 
     static func hasStoredValueHint(for credential: SecureCredential) -> Bool {
-        UserDefaults.standard.bool(forKey: presenceKey(account: credential.rawValue))
+        if UserDefaults.standard.bool(forKey: presenceKey(account: credential.rawValue)) {
+            return true
+        }
+        return !KeychainStore.string(for: credential.rawValue).isEmpty
     }
 
     static func hasStationQRZAPIKeyHint(profileID: UUID) -> Bool {
-        UserDefaults.standard.bool(forKey: presenceKey(account: stationQRZAccount(profileID: profileID)))
+        let account = stationQRZAccount(profileID: profileID)
+        if UserDefaults.standard.bool(forKey: presenceKey(account: account)) {
+            return true
+        }
+        return !KeychainStore.string(for: account).isEmpty
     }
 
     private static func stationQRZAccount(profileID: UUID) -> String {

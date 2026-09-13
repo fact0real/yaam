@@ -4,6 +4,7 @@
 //
 
 import Foundation
+@testable import YAAM
 
 func frequencyToBandTest(_ freqHz: Int) -> String {
     let mhz = Double(freqHz) / 1_000_000.0

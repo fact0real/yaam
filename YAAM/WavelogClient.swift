@@ -312,7 +312,18 @@ public final class WavelogClient: Sendable {
 
     private func formatSingleADIF(_ record: QSORecordModel) -> String {
         var adif = ""
-        for (key, val) in record.fields {
+        var normalizedFields = record.fields
+        let currentMode = normalizedFields["MODE"] ?? ""
+        let currentSubmode = normalizedFields["SUBMODE"] ?? ""
+        let freq = Double(normalizedFields["FREQ"] ?? "")
+        let effective = AmateurBandPlan.effectiveADIFMode(mode: currentMode, submode: currentSubmode, frequencyMHz: freq)
+        if !effective.isEmpty {
+            normalizedFields["MODE"] = effective
+            if effective == "FT8" || effective == "FT4" || effective == "JS8" {
+                normalizedFields["SUBMODE"] = effective
+            }
+        }
+        for (key, val) in normalizedFields {
             let cleanVal = val.trimmingCharacters(in: .whitespacesAndNewlines)
             if !cleanVal.isEmpty {
                 adif += "<\(key):\(cleanVal.utf8.count)>\(cleanVal) "
