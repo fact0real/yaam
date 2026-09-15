@@ -14,6 +14,7 @@ enum YAAMWindowID {
     static let help = "help-window"
     static let feedback = "feedback-window"
     static let hamClock = "hamclock-kiosk-window"
+    static let transceiverEmulator = "transceiver-emulator-window"
 }
 
 // MARK: - Main Application Entry Point & Global Menu Commands
@@ -253,6 +254,18 @@ struct YAAMApp: App {
 
                 Divider()
 
+                Button("Network Transceiver Emulator (IC-705 LAN)") {
+                    appState.selectedTab = 5
+                    appState.operatorDeskSection = 24
+                }
+                .keyboardShortcut("e", modifiers: [.command, .option])
+
+                Button("Open Transceiver Emulator in Separate Window...") {
+                    openWindow(id: YAAMWindowID.transceiverEmulator)
+                }
+
+                Divider()
+
                 Button("Log Statistics") {
                     appState.selectedTab = 6
                 }
@@ -395,6 +408,22 @@ struct YAAMApp: App {
                 )
         }
         .defaultSize(width: 1440, height: 900)
+        .windowResizability(.contentMinSize)
+
+        // MARK: - Network Transceiver Emulator Standalone Window Scene
+        Window("Network Transceiver Emulator", id: YAAMWindowID.transceiverEmulator) {
+            NetworkTransceiverEmulatorView(emulator: appState.transceiverEmulator)
+                .environmentObject(appState)
+                .frame(
+                    minWidth: 1000,
+                    idealWidth: 1250,
+                    maxWidth: .infinity,
+                    minHeight: 650,
+                    idealHeight: 850,
+                    maxHeight: .infinity
+                )
+        }
+        .defaultSize(width: 1250, height: 850)
         .windowResizability(.contentMinSize)
     }
 }

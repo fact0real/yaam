@@ -140,6 +140,66 @@ enum QRZRankAPIContractRegression {
         precondition(details?.code == "invalid_token")
         precondition(details?.message == "Token is invalid")
 
+        // Test decodeCountries with standard and legacy backend keys (e.g. Morocco)
+        let countriesData = Data(
+            """
+            {
+              "countries": [
+                { "country_iso": "ma", "country_name": "Morocco", "operator_count": 255 },
+                { "iso": "ir", "name": "Iran", "station_count": 520 }
+              ]
+            }
+            """.utf8
+        )
+        let decodedCountries = try QRZRankAPIContract.decodeCountries(countriesData)
+        precondition(decodedCountries.count == 2)
+        precondition(decodedCountries[0].iso == "ma")
+        precondition(decodedCountries[0].name == "Morocco")
+        precondition(decodedCountries[0].stationCount == 255)
+        precondition(decodedCountries[1].iso == "ir")
+        precondition(decodedCountries[1].name == "Iran")
+        precondition(decodedCountries[1].stationCount == 520)
+
+        // Test decodeCountryLeaderboard for Morocco Top 10
+        let moroccoLeaderboardData = Data(
+            """
+            {
+              "country_iso": "ma",
+              "country_name": "Morocco",
+              "category": "qso",
+              "total_stations": 255,
+              "leaderboard": [
+                {
+                  "rank": 1,
+                  "callsign": "CN8AM",
+                  "score": 55219,
+                  "score_qso": 55219,
+                  "score_countries": 194,
+                  "score_band": 973,
+                  "rank_qso": 1043,
+                  "country_name": "Morocco",
+                  "country_iso": "ma"
+                },
+                {
+                  "rank": 2,
+                  "callsign": "CN8NS",
+                  "score": 52408,
+                  "score_qso": 52408,
+                  "country_name": "Morocco",
+                  "country_iso": "ma"
+                }
+              ]
+            }
+            """.utf8
+        )
+        let moroccoResp = try QRZRankAPIContract.decodeCountryLeaderboard(moroccoLeaderboardData)
+        precondition(moroccoResp.countryIso == "ma")
+        precondition(moroccoResp.countryName == "Morocco")
+        precondition(moroccoResp.leaderboard.count == 2)
+        precondition(moroccoResp.leaderboard[0].callsign == "CN8AM")
+        precondition(moroccoResp.leaderboard[0].score == 55219)
+        precondition(moroccoResp.leaderboard[0].scoreCountries == 194)
+
         print("QRZ Rank API contract regression passed.")
     }
 }

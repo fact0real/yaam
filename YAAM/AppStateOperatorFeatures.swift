@@ -130,7 +130,8 @@ extension AppState {
         let optionalFields: [(String, String)] = [
             ("SUBMODE", draft.submode), ("NAME", draft.name), ("QTH", draft.qth),
             ("GRIDSQUARE", draft.grid), ("COUNTRY", draft.country), ("DXCC", draft.dxcc),
-            ("CQZ", draft.cqZone), ("ITUZ", draft.ituZone), ("COMMENT", draft.comment)
+            ("CQZ", draft.cqZone), ("ITUZ", draft.ituZone), ("COMMENT", draft.comment),
+            ("STATE", draft.state), ("CNTY", draft.county), ("QSL_VIA", draft.qslVia)
         ]
         for (key, value) in optionalFields {
             let clean = value.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -321,6 +322,12 @@ extension AppState {
         if quickLogDraft.dxcc.isEmpty { quickLogDraft.dxcc = result.dxcc }
         if quickLogDraft.cqZone.isEmpty { quickLogDraft.cqZone = result.cqZone }
         if quickLogDraft.ituZone.isEmpty { quickLogDraft.ituZone = result.ituZone }
+        if quickLogDraft.state.isEmpty { quickLogDraft.state = result.state }
+        if quickLogDraft.county.isEmpty { quickLogDraft.county = result.county }
+        if quickLogDraft.qslVia.isEmpty { quickLogDraft.qslVia = result.qslManager }
+        if quickLogDraft.contactedIOTAReference.isEmpty && !result.iota.isEmpty {
+            quickLogDraft.contactedIOTAReference = result.iota
+        }
     }
 
     private func operatorQSODate(_ record: QSORecordModel) -> Date? {

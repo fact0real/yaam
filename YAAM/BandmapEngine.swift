@@ -196,6 +196,7 @@ public final class BandmapEngine: ObservableObject {
     @Published public var vfoAKHz: Double = 14074.0
     @Published public var vfoBKHz: Double = 14074.0
     @Published public var isSplitActive: Bool = false
+    @Published public var activeSniperSolution: PileupSniperSolution?
 
     public var splitOffsetKHz: Double {
         vfoBKHz - vfoAKHz
@@ -205,6 +206,17 @@ public final class BandmapEngine: ObservableObject {
         isSplitActive = active
         if active {
             vfoBKHz = vfoAKHz + offsetKHz
+        }
+    }
+
+    public func applySniperSolution(_ solution: PileupSniperSolution) {
+        activeSniperSolution = solution
+        if solution.isSplit {
+            isSplitActive = true
+            vfoBKHz = solution.recommendedTxKHz
+        } else {
+            isSplitActive = false
+            vfoBKHz = vfoAKHz
         }
     }
 

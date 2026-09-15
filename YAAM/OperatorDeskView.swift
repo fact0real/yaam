@@ -78,6 +78,8 @@ struct OperatorDeskView: View {
             return AnyView(HamClockShackView(isEmbedded: true))
         case 23:
             return AnyView(DigitalMasterStationView())
+        case 24:
+            return AnyView(NetworkTransceiverEmulatorView(emulator: appState.transceiverEmulator))
         default:
             return AnyView(QuickLogPanel())
         }
@@ -98,6 +100,7 @@ struct OperatorDeskView: View {
             DeskTabItem(tag: 12, title: "Globe & Grids", icon: "globe.americas.fill"),
             DeskTabItem(tag: 13, title: "Bandmap", icon: "waveform.path.ecg.rectangle"),
             DeskTabItem(tag: 23, title: "Digital Suite", icon: "teletype"),
+            DeskTabItem(tag: 24, title: "Transceiver Emulator", icon: "server.rack"),
             DeskTabItem(tag: 14, title: "CW Keyer", icon: "tuningfork"),
             DeskTabItem(tag: 18, title: "WinKeyer", icon: "cable.connector.horizontal"),
             DeskTabItem(tag: 17, title: "ON4KST Chat", icon: "bubble.left.and.bubble.right.fill"),
@@ -338,6 +341,8 @@ struct OperatorDeskView: View {
             (true, "\(ClubMembershipEngine.shared.totalMembersIndexed) club members indexed")
         case 23:
             (appState.digitalModemEngine.isListening, appState.digitalModemEngine.isListening ? "Digital Suite Active" : "Digital Suite Standby")
+        case 24:
+            (appState.transceiverEmulator.isServerRunning, appState.transceiverEmulator.isServerRunning ? "Transceiver Emulator Online" : "Transceiver Emulator Standby")
         default:
             (appState.dxClusterClient.state.isConnected, appState.dxClusterClient.state.title)
         }
@@ -603,6 +608,8 @@ private struct QuickLogPanel: View {
     @State private var duplicateWasAcknowledged = false
     @State private var showPortableFields = false
     @State private var showContestFields = false
+    @State private var showContestBandmapHUD = false
+    @State private var showContestRateMatrixHUD = false
     @State private var recentLimit: Int = 10
     @State private var recentSearchText: String = ""
     @State private var recordToDelete: QSORecordModel? = nil
@@ -751,6 +758,9 @@ private struct QuickLogPanel: View {
             if newValue.hasSuffix(" ") {
                 let clean = newValue.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
                 appState.quickLogDraft.callsign = clean
+                if let hist = CallHistoryLookupEngine.shared.lookup(callsign: clean) {
+                    prefillCallHistory(hist)
+                }
                 if appState.isValidOperatorCallsign(clean) {
                     updateCallIntelligence()
                     Task { @MainActor in
@@ -814,6 +824,25 @@ private struct QuickLogPanel: View {
     private var entryFields: some View {
         VStack(alignment: .leading, spacing: 14) {
             quickEntryHeader
+
+            if showContestRateMatrixHUD {
+                ContestRateMatrixHUDView(activeBand: appState.quickLogDraft.band)
+                    .transition(.asymmetric(insertion: .opacity.combined(with: .move(edge: .top)), removal: .opacity))
+            }
+
+            if showContestBandmapHUD {
+                ContestBandmapHUDView(
+                    activeBand: appState.quickLogDraft.band,
+                    activeMode: appState.quickLogDraft.mode,
+                    currentVFOFrequencyMHz: Double(appState.quickLogDraft.frequencyMHz) ?? 14.025
+                ) { spot in
+                    if let hist = CallHistoryLookupEngine.shared.lookup(callsign: spot.callsign) {
+                        prefillCallHistory(hist)
+                    }
+                }
+                .transition(.asymmetric(insertion: .opacity.combined(with: .move(edge: .top)), removal: .opacity))
+            }
+
             Divider()
             operatingFields
             contestFields
@@ -924,32 +953,58 @@ private struct QuickLogPanel: View {
                         }
                     }
 
-                    // Super Check Partial (Master.scp) Matches
-                    let scpMatches = SuperCheckPartialEngine.shared.findMatches(for: appState.quickLogDraft.callsign, maxResults: 5)
-                    if !scpMatches.isEmpty && !appState.quickLogDraft.callsign.isEmpty {
-                        HStack(spacing: 5) {
-                            Image(systemName: "checkmark.shield")
-                                .font(.system(size: 9))
-                                .foregroundColor(.blue)
-                            Text("SCP:")
-                                .font(.system(size: 9, weight: .bold))
-                                .foregroundColor(.secondary)
-
-                            ForEach(scpMatches) { match in
-                                Button {
-                                    appState.quickLogDraft.callsign = match.callsign
-                                } label: {
-                                    Text(match.callsign)
-                                        .font(.system(size: 10, weight: match.isExact ? .bold : .medium, design: .monospaced))
-                                        .padding(.horizontal, 5)
-                                        .padding(.vertical, 1.5)
-                                        .background(match.isExact ? Color.green.opacity(0.18) : Color.blue.opacity(0.12), in: RoundedRectangle(cornerRadius: 3))
-                                        .foregroundColor(match.isExact ? .green : .blue)
-                                }
-                                .buttonStyle(.plain)
-                                .help("Click to select \(match.callsign)")
-                            }
+                    // Super Check Partial (SCP) Live Contest Autocomplete HUD
+                    SuperCheckPartialHUDView(
+                        targetCallsign: $appState.quickLogDraft.callsign,
+                        activeBand: appState.quickLogDraft.band,
+                        activeMode: appState.quickLogDraft.mode,
+                        qsoRecords: appState.qsoRecords
+                    ) { selectedCall in
+                        appState.quickLogDraft.callsign = selectedCall
+                        if let hist = CallHistoryLookupEngine.shared.lookup(callsign: selectedCall) {
+                            prefillCallHistory(hist)
                         }
+                        moveAfterCallsign()
+                    }
+
+                    // Call History Predictive Exchange Pre-fill Banner
+                    let cleanCall = appState.quickLogDraft.callsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+                    if cleanCall.count >= 2, let hist = CallHistoryLookupEngine.shared.lookup(callsign: cleanCall) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "book.pages.fill")
+                                .font(.system(size: 8.5))
+                                .foregroundColor(.indigo)
+                            Text("HIST:")
+                                .font(.system(size: 8, weight: .bold, design: .monospaced))
+                                .foregroundColor(.secondary)
+                            Text(hist.previewSummary)
+                                .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
+                                .foregroundColor(.primary)
+
+                            Spacer()
+
+                            Button {
+                                prefillCallHistory(hist)
+                            } label: {
+                                HStack(spacing: 3) {
+                                    Image(systemName: "arrow.down.doc.fill")
+                                        .font(.system(size: 7))
+                                    Text("Pre-Fill (␣)")
+                                        .font(.system(size: 8, weight: .bold))
+                                }
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.indigo.opacity(0.18), in: RoundedRectangle(cornerRadius: 3))
+                                .foregroundColor(.indigo)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Click or press Spacebar to pre-fill Name, State, Zone, and Exchange from contest history")
+                        }
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(Color(NSColor.controlBackgroundColor).opacity(0.85))
+                        .cornerRadius(5)
+                        .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.indigo.opacity(0.3), lineWidth: 0.8))
                     }
                 }
 
@@ -1073,6 +1128,28 @@ private struct QuickLogPanel: View {
                 Label("Transceiver & Signal Parameters", systemImage: "antenna.radiowaves.left.and.right")
                     .font(.subheadline.weight(.semibold))
                 Spacer()
+
+                if let sniper = CallIntelligenceEngine.shared.activeReport?.pileupSniper, sniper.isSplit {
+                    Button {
+                        BandmapEngine.shared.applySniperSolution(sniper)
+                        let hz = UInt64(sniper.recommendedTxKHz * 1000.0)
+                        appState.rigControlClient.setFrequencyHz(hz)
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "scope")
+                                .font(.system(size: 9, weight: .bold))
+                            Text("SPLIT \(sniper.offsetSignFormatted)")
+                                .font(.system(size: 8.5, weight: .black, design: .monospaced))
+                        }
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2.5)
+                        .background(Color.yellow.opacity(0.18), in: Capsule())
+                        .overlay(Capsule().stroke(Color.yellow.opacity(0.5), lineWidth: 1))
+                        .foregroundStyle(Color.yellow)
+                    }
+                    .buttonStyle(.plain)
+                    .help("DX is operating SPLIT. Click to arm VFO-B to Sniper target \(sniper.frequencyFormattedMHz)")
+                }
             }
 
             HStack(alignment: .top, spacing: 10) {
@@ -1983,6 +2060,60 @@ private struct QuickLogPanel: View {
                 Spacer()
             }
 
+            // Paddle Break-in indicator
+            if CWKeyerService.shared.isPaddleBreakInActive {
+                HStack(spacing: 4) {
+                    Image(systemName: "hand.raised.fill")
+                        .font(.system(size: 8))
+                    Text("⚡ PADDLE BREAK-IN")
+                        .font(.system(size: 8.5, weight: .black, design: .monospaced))
+                }
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2.5)
+                .background(Color.red, in: RoundedRectangle(cornerRadius: 4))
+                .foregroundColor(.white)
+            }
+
+            // Bandmap HUD Toggle
+            Button {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
+                    showContestBandmapHUD.toggle()
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "waveform.path.ecg.rectangle")
+                        .font(.system(size: 9))
+                    Text("Bandmap")
+                        .font(.system(size: 9.5, weight: .bold))
+                }
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2.5)
+                .background(showContestBandmapHUD ? Color.orange.opacity(0.2) : Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 5))
+                .foregroundColor(showContestBandmapHUD ? .orange : .secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Toggle Contest Bandmap vertical frequency ruler")
+
+            // Rate Matrix HUD Toggle
+            Button {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
+                    showContestRateMatrixHUD.toggle()
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "gauge.with.needle.fill")
+                        .font(.system(size: 9))
+                    Text("Rate Matrix")
+                        .font(.system(size: 9.5, weight: .bold))
+                }
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2.5)
+                .background(showContestRateMatrixHUD ? Color.purple.opacity(0.2) : Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 5))
+                .foregroundColor(showContestRateMatrixHUD ? .purple : .secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Toggle Contest Rate Speedometer & Multiplier 2D Matrix")
+
             // Hidden Ctrl+M shortcut
             Button("") {
                 esm.isEnabled.toggle()
@@ -2066,11 +2197,37 @@ private struct QuickLogPanel: View {
         save()
     }
 
+    private func prefillCallHistory(_ hist: CallHistoryRecord) {
+        if !hist.name.isEmpty && appState.quickLogDraft.name.isEmpty {
+            appState.quickLogDraft.name = hist.name
+        }
+        if !hist.state.isEmpty && appState.quickLogDraft.state.isEmpty {
+            appState.quickLogDraft.state = hist.state
+        }
+        if !hist.arrlSection.isEmpty && appState.quickLogDraft.arrlSection.isEmpty {
+            appState.quickLogDraft.arrlSection = hist.arrlSection
+        }
+        if appState.quickLogDraft.receivedExchange.isEmpty {
+            if !hist.userExchange.isEmpty {
+                appState.quickLogDraft.receivedExchange = hist.userExchange
+            } else if let z = hist.cqZone, z > 0 {
+                appState.quickLogDraft.receivedExchange = z < 10 ? "0\(z)" : "\(z)"
+            } else if !hist.state.isEmpty {
+                appState.quickLogDraft.receivedExchange = hist.state
+            }
+        }
+        if !hist.gridSquare.isEmpty && appState.quickLogDraft.grid.isEmpty {
+            appState.quickLogDraft.grid = hist.gridSquare
+        }
+    }
+
     private func save() {
         do {
             _ = try appState.saveQuickLog()
             duplicateWasAcknowledged = false
             updateCallIntelligence()
+            CallHistoryLookupEngine.shared.learnFromLogbook(records: appState.qsoRecords)
+            ContestRateMatrixEngine.shared.recalculate(qsoRecords: appState.qsoRecords)
             esm.resetForNewQSO()
             focusedField = .callsign
         } catch {

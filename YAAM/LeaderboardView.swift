@@ -146,19 +146,55 @@ struct LeaderboardView: View {
                 Divider()
             }
             
-            // 2. Main Content
-            if appState.isFetchingRank {
-                VStack(spacing: 20) {
-                    ProgressView().scaleEffect(1.4)
-                    Text("Fetching global rankings & analyzing scores...")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
+            // 2. View Mode Segmented Picker
+            HStack(spacing: 16) {
+                Picker("Leaderboard Mode", selection: $appState.nationalLeaderboardTab) {
+                    ForEach(NationalLeaderboardTab.allCases) { tab in
+                        Label(tab.rawValue, systemImage: tab.icon).tag(tab)
+                    }
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color(NSColor.textBackgroundColor))
-                
-            } else if !appState.qrzComparisonRankData.isEmpty {
-                let owner = appState.ownerRankData
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 560)
+
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(Color(NSColor.controlBackgroundColor).opacity(0.6))
+
+            Divider()
+
+            switch appState.nationalLeaderboardTab {
+            case .headToHead:
+                headToHeadView
+            case .national:
+                NationalLeaderboardContainerView()
+            case .roadmap:
+                RankRoadmapContainerView()
+            }
+        }
+        .onAppear {
+            if !parsedLeaderboardTargets.isEmpty && appState.qrzComparisonRankData.isEmpty && appState.qrzRankData == nil {
+                appState.fetchQRZLeaderboardComparisons(for: parsedLeaderboardTargets)
+            }
+            appState.refreshTrackedRankHistoryIfNeeded()
+        }
+    }
+
+    @ViewBuilder
+    private var headToHeadView: some View {
+        if appState.isFetchingRank {
+            VStack(spacing: 20) {
+                ProgressView().scaleEffect(1.4)
+                Text("Fetching global rankings & analyzing scores...")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color(NSColor.textBackgroundColor))
+            
+        } else if !appState.qrzComparisonRankData.isEmpty {
+            let owner = appState.ownerRankData
 
                 ScrollView {
                     LazyVStack(spacing: 18) {
@@ -364,13 +400,6 @@ struct LeaderboardView: View {
                 .background(Color(NSColor.textBackgroundColor))
             }
         }
-        .onAppear {
-            if !parsedLeaderboardTargets.isEmpty && appState.qrzComparisonRankData.isEmpty && appState.qrzRankData == nil {
-                appState.fetchQRZLeaderboardComparisons(for: parsedLeaderboardTargets)
-            }
-            appState.refreshTrackedRankHistoryIfNeeded()
-        }
-    }
 
     private var rankServiceNeedsConfiguration: Bool {
         let status = appState.rankServiceStatus.lowercased()

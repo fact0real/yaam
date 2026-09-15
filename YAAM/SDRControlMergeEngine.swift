@@ -9,6 +9,19 @@ nonisolated struct SDRControlMergeResult: Sendable {
     let records: [QSORecordModel]
     let summary: MergeSummary
     let removedDuplicates: Int
+    let addedRecords: [QSORecordModel]
+
+    init(
+        records: [QSORecordModel],
+        summary: MergeSummary,
+        removedDuplicates: Int,
+        addedRecords: [QSORecordModel] = []
+    ) {
+        self.records = records
+        self.summary = summary
+        self.removedDuplicates = removedDuplicates
+        self.addedRecords = addedRecords
+    }
 }
 
 /// Performs the potentially expensive SDR-Control merge without publishing an
@@ -22,6 +35,7 @@ nonisolated enum SDRControlMergeEngine {
     ) -> SDRControlMergeResult {
         var records: [QSORecordModel] = []
         records.reserveCapacity(localRecords.count + incomingFields.count)
+        var newlyAddedRecords: [QSORecordModel] = []
         var indexByUniqueKey: [String: Int] = [:]
         indexByUniqueKey.reserveCapacity(localRecords.count + incomingFields.count)
         var indexBySDRID: [String: Int] = [:]
@@ -122,6 +136,7 @@ nonisolated enum SDRControlMergeEngine {
 
             let index = records.count
             records.append(incoming)
+            newlyAddedRecords.append(incoming)
             register(
                 incoming.fields,
                 at: index,
@@ -140,7 +155,8 @@ nonisolated enum SDRControlMergeEngine {
         return SDRControlMergeResult(
             records: records,
             summary: MergeSummary(added: added, updated: updated, skipped: skipped),
-            removedDuplicates: removedDuplicates
+            removedDuplicates: removedDuplicates,
+            addedRecords: newlyAddedRecords
         )
     }
 

@@ -6,7 +6,7 @@
 import SwiftUI
 
 private enum HelpTopic: String, CaseIterable, Identifiable {
-    case start, stations, logTable, quickLog, roverMode, convertExport, globeGrids, bandmap, cwWinKeyer, cwAcademy, competitors, tciSdr, dxCluster, clubLogSpots, on4kst, radioBridge, contest, digitalContest, digitalRoster, contestCalendar, dxpeditions, magicBand, tacticalPilot, hamClockShack, weatherRadar, satellites, clubMembership, syncCenter, lotwTqsl, qslHub, qslLabels, todayQSL, confirmations, statistics, qrzIncoming, logAssistant, awards, portable, connectivity, importReview, dataSafety, credentials, workflows, faq
+    case start, stations, logTable, quickLog, callIntelligence, roverMode, convertExport, globeGrids, greylineOverlay, bandmap, pileupSniper, cwWinKeyer, cwAcademy, competitors, tciSdr, dxCluster, clubLogSpots, on4kst, radioBridge, nteEmulator, contest, digitalContest, digitalRoster, contestCalendar, dxpeditions, magicBand, tacticalPilot, hamClockShack, weatherRadar, satellites, clubMembership, syncCenter, lotwTqsl, qslHub, qslLabels, todayQSL, confirmations, statistics, qrzIncoming, logAssistant, awards, portable, connectivity, importReview, dataSafety, credentials, workflows, faq
     var id: String { rawValue }
 
     var title: String {
@@ -15,10 +15,13 @@ private enum HelpTopic: String, CaseIterable, Identifiable {
         case .stations: return "Station Profiles"
         case .logTable: return "Log Table & Filters"
         case .quickLog: return "Quick Log"
+        case .callIntelligence: return "Call Intelligence Panel (CIP)"
         case .roverMode: return "Tactical Rover Mode"
         case .convertExport: return "Convert & Export"
         case .globeGrids: return "3D Globe & GridTracker"
+        case .greylineOverlay: return "Live Greyline & Solar Ducting"
         case .bandmap: return "Spectrum Bandmap & Waterfall"
+        case .pileupSniper: return "Pileup Sniper & Split QSX"
         case .cwWinKeyer: return "CW Keyer & WinKeyer"
         case .cwAcademy: return "CW Academy & Audio Decoder"
         case .competitors: return "Competitor Tracking"
@@ -27,6 +30,7 @@ private enum HelpTopic: String, CaseIterable, Identifiable {
         case .clubLogSpots: return "Club Log Live Spots"
         case .on4kst: return "ON4KST Chat & Microwave"
         case .radioBridge: return "Radio, Icom & FT8"
+        case .nteEmulator: return "Network Transceiver Emulator (NTE)"
         case .contest: return "Contest Workspace"
         case .digitalContest: return "Digital Contest Suite (FT8/FT4)"
         case .digitalRoster: return "Digital Call Roster & Voice Alerts"
@@ -64,10 +68,13 @@ private enum HelpTopic: String, CaseIterable, Identifiable {
         case .stations: return "antenna.radiowaves.left.and.right"
         case .logTable: return "tablecells"
         case .quickLog: return "plus.circle.fill"
+        case .callIntelligence: return "brain.head.profile"
         case .roverMode: return "shoeprints.fill"
         case .convertExport: return "square.and.arrow.up.circle.fill"
         case .globeGrids: return "globe.americas.fill"
+        case .greylineOverlay: return "sun.horizon.fill"
         case .bandmap: return "waveform.path.ecg.rectangle"
+        case .pileupSniper: return "scope"
         case .cwWinKeyer: return "cable.connector.horizontal"
         case .cwAcademy: return "headphones.circle.fill"
         case .competitors: return "chart.line.uptrend.xyaxis"
@@ -76,6 +83,7 @@ private enum HelpTopic: String, CaseIterable, Identifiable {
         case .clubLogSpots: return "person.3.fill"
         case .on4kst: return "bubble.left.and.bubble.right.fill"
         case .radioBridge: return "wave.3.right.circle"
+        case .nteEmulator: return "server.rack"
         case .contest: return "flag.checkered"
         case .digitalContest: return "trophy.fill"
         case .digitalRoster: return "waveform.and.person.filled"
@@ -109,14 +117,22 @@ private enum HelpTopic: String, CaseIterable, Identifiable {
 
     var searchTerms: String {
         switch self {
+        case .callIntelligence:
+            return "\(title) call intelligence panel cip scp super check partial lotw qrz club memberships cwops skcc licw fists sunrise sunset great circle beam heading propagation muf pileup sniper dxcc entity zone af as eu na sa oc"
+        case .pileupSniper:
+            return "\(title) pileup sniper split qsx frequency hunter vfo-b arming dx comment parser stepping up stepping down sweet spot cluster wide spread simplex bandmap quicklog reticle cat"
+        case .greylineOverlay:
+            return "\(title) live greyline grayline solar terminator civil twilight nautical twilight low-band ducting 160m 80m 40m 30m countdown sunrise sunset azimuthal flat map vector shading station solar status"
         case .roverMode:
             return "\(title) rover tactical grid square scout pota sota stepped compass north south east west duration timer auto restore home qth session telemetry qso stamping"
         case .bandmap:
-            return "\(title) bandmap spectrum waterfall sdr 3-pane ruler vfo split qsy cat flrig tci hamlib spot hunter panadapter heatmap iaru privileges"
+            return "\(title) bandmap spectrum waterfall sdr 3-pane ruler vfo split qsy cat flrig tci hamlib spot hunter panadapter heatmap iaru privileges sniper reticle arming"
         case .clubLogSpots:
             return "\(title) club log live spots cluster activity stream band opportunity recommendation score needed dxcc entities dominant mode oqrs"
         case .clubMembership:
             return "\(title) club membership skcc cwops fists licw 30mdg epc a1 club roster member number auto detect exchange lookup search"
+        case .nteEmulator:
+            return "\(title) nte network transceiver emulator icom ic-705 ic-7300 ic-7610 ic-9700 hamlib rigctld ci-v udp 50001 50002 50003 tcp 4532 awgn fading rayleigh rician doppler synthetic rf ft8 ft4 cw beacon pileup dsp benchmark test loopback front panel vfo oled spectrum waterfall"
         case .qslLabels:
             return "\(title) qsl labels label studio printing avery 5160 5162 5163 a4 l7160 skip matrix peel off printer alignment calibration pdf export"
         case .lotwTqsl:
@@ -126,7 +142,7 @@ private enum HelpTopic: String, CaseIterable, Identifiable {
         case .hamClockShack:
             return "\(title) hamclock shack clock remote web server local ip tablet ipad sdo solar observatory drap d-region ionosphere absorption sfi ssn kp a-index grayline solar terminator"
         case .tacticalPilot:
-            return "\(title) tactical pilot hf propagation voacap snr muf path reliability great circle azimuth beam heading tactical band advisor sdo sunspot"
+            return "\(title) tactical pilot hf propagation voacap snr muf path reliability great circle azimuth beam heading tactical band advisor sdo sunspot 11-band 160m 6m timeline sparkline"
         case .weatherRadar:
             return "\(title) station weather radar nexrad lightning storm detection wind gust antenna safety safety engine alert warning safe zone"
         case .satellites:
@@ -243,10 +259,13 @@ struct HelpView: View {
         case .stations: stationProfiles
         case .logTable: logTable
         case .quickLog: quickLog
+        case .callIntelligence: callIntelligenceView
         case .roverMode: roverModeView
         case .convertExport: convertExportView
         case .globeGrids: globeGridsView
+        case .greylineOverlay: greylineOverlayView
         case .bandmap: bandmapView
+        case .pileupSniper: pileupSniperView
         case .cwWinKeyer: cwWinKeyerView
         case .cwAcademy: cwAcademyView
         case .competitors: competitorsView
@@ -255,6 +274,7 @@ struct HelpView: View {
         case .clubLogSpots: clubLogSpotsView
         case .on4kst: on4kstView
         case .radioBridge: radioBridge
+        case .nteEmulator: nteEmulatorView
         case .contest: contest
         case .digitalContest: digitalContestView
         case .digitalRoster: digitalRosterView
@@ -419,6 +439,12 @@ struct HelpView: View {
                 color: .orange
             )
 
+            HelpScreenshotCard(
+                imageName: "help_rover_mode",
+                title: "Tactical Rover Cockpit & Geodesic Telemetry",
+                caption: "Temporary grid override, compass grid stepper, and geodesic distance & bearing telemetry."
+            )
+
             HelpRoverModeMockup()
 
             HelpFlow(steps: [
@@ -486,6 +512,208 @@ struct HelpView: View {
                 text: "While Rover Mode is active, an amber glowing pill in the window title bar displays your active grid and remaining countdown time. Click it at any time to adjust duration or return home with one click.",
                 color: .orange
             )
+        }
+    }
+
+    private var callIntelligenceView: some View {
+        Group {
+            helpHeader(
+                title: "Call Intelligence Panel (CIP)",
+                subtitle: "Deep multi-database tactical HUD integrating DXCC prefix resolution, Super Check Partial (SCP), LoTW & QRZ activity, international club memberships, solar ephemeris, and live point-to-point HF propagation.",
+                icon: "brain.head.profile",
+                color: .yellow
+            )
+
+            HelpScreenshotCard(
+                imageName: "help_call_intelligence",
+                title: "Call Intelligence Panel (CIP) HUD",
+                caption: "Multi-layered operator intelligence displaying DXCC entity, SCP matching, LoTW verification, and live HF propagation."
+            )
+
+            HelpCallIntelligenceMockup()
+
+            HelpFlow(steps: [
+                HelpFlowStep(icon: "character.cursor.ibeam", title: "1. Type or Spot Callsign", detail: "As soon as you enter 2+ characters in QuickLog or click a spot in Bandmap or DX Cluster, CIP immediately activates."),
+                HelpFlowStep(icon: "flag.fill", title: "2. Resolve Entity & Geodesics", detail: "Instantly extracts country flag, DXCC entity, CQ/ITU zones, continent, beam heading, and distance in km/miles."),
+                HelpFlowStep(icon: "signature", title: "3. Verify LoTW & Clubs", detail: "Cross-checks against the embedded 50,000+ LoTW activity database and international club rosters (CWops, SKCC, FISTS, LICW, 30MDG, EPC, A1)."),
+                HelpFlowStep(icon: "magnifyingglass", title: "4. SCP Autocomplete", detail: "Super Check Partial highlights valid contest callsigns matching your keystrokes to prevent busted calls."),
+                HelpFlowStep(icon: "waveform.path.ecg", title: "5. Propagation & Split Target", detail: "Computes path MUF/LUF, recommended band, and displays the Pileup Sniper radar if the DX is operating split.")
+            ])
+
+            helpSection("Multi-Database Operator Intelligence") {
+                HelpDefinition(
+                    icon: "globe.americas.fill",
+                    title: "Prefix & Geodesic Calculation",
+                    text: "Uses high-precision CTY database matching with prefix overrides. Continuously computes true great-circle short-path (SP) and long-path (LP) headings from your active station (or Rover grid).",
+                    color: .cyan
+                )
+                HelpDefinition(
+                    icon: "sun.max.fill",
+                    title: "Solar Ephemeris at DX",
+                    text: "Calculates the exact local solar time and current solar elevation angle at the target station, highlighting whether they are in daylight, night, or golden twilight hours.",
+                    color: .orange
+                )
+                HelpDefinition(
+                    icon: "person.3.sequence.fill",
+                    title: "International Club Rosters",
+                    text: "Identifies memberships across 7 major telegraphy and digital clubs with official membership numbers, aiding contest exchanges and ragchew QSOs.",
+                    color: .purple
+                )
+            }
+
+            helpSection("Super Check Partial (SCP) Engine") {
+                HelpDefinition(
+                    icon: "bolt.shield.fill",
+                    title: "Contest Call Verification",
+                    text: "Scans the MASTER.SCP active contester database using Levenshtein distance algorithms. Click any suggested callsign to replace or autofill QuickLog instantaneously.",
+                    color: .yellow
+                )
+            }
+
+            helpSection("Point-to-Point Propagation & Split Hunting") {
+                HelpDefinition(
+                    icon: "chart.xyaxis.line",
+                    title: "Integrated MUF & Band Radar",
+                    text: "Directly embeds point-to-point propagation predictions, displaying current circuit reliability, expected SNR in dB, and a 24-hour UTC forecast sparkline.",
+                    color: .teal
+                )
+                HelpDefinition(
+                    icon: "scope",
+                    title: "Pileup Sniper Radar Card",
+                    text: "When cluster comments indicate split operation (e.g. 'UP 5', 'QSX 14025'), CIP renders the tactical Sniper card with VFO-B recommendation and 1-click arming.",
+                    color: .green
+                )
+            }
+        }
+    }
+
+    private var pileupSniperView: some View {
+        Group {
+            helpHeader(
+                title: "Pileup Sniper & Split QSX Frequency Hunter",
+                subtitle: "Tactical DX split analysis assistant that parses cluster comment shorthand, models DX operator listening trajectories, predicts optimal transmit frequencies, and arms VFO-B with a single click.",
+                icon: "scope",
+                color: .orange
+            )
+
+            HelpScreenshotCard(
+                imageName: "help_pileup_sniper",
+                title: "Pileup Sniper Tactical HUD & Split Radar",
+                caption: "Live split spectrum tracking, DX operator trajectory forecasting (Stepping UP), and 1-click VFO-B arming."
+            )
+
+            HelpPileupSniperMockup()
+
+            HelpFlow(steps: [
+                HelpFlowStep(icon: "text.magnifyingglass", title: "1. Cluster Spot Parsing", detail: "Engine reads verbal DX shorthand comments such as 'UP 5-10', 'WKD +3.5', 'QSX 14.025', 'DN 2', or 'SIMPLEX'."),
+                HelpFlowStep(icon: "chart.line.uptrend.xyaxis", title: "2. Trajectory Modeling", detail: "Analyzes recent hit points with 20-minute exponential time-decay to detect whether the DX is stepping UP, stepping DOWN, or clustering."),
+                HelpFlowStep(icon: "target", title: "3. Reticle Positioning", detail: "Calculates the optimal transmit frequency (including a +150 Hz offset in clusters to punch through zero-beat QRM)."),
+                HelpFlowStep(icon: "bolt.horizontal.fill", title: "4. One-Click Arming", detail: "Click [ARM VFO-B] to instantly tune VFO-B and activate Split Transceive without altering VFO-A.")
+            ])
+
+            helpSection("Trajectory Recognition & Patterns") {
+                HelpDefinition(
+                    icon: "arrow.up.right.circle.fill",
+                    title: "Stepping UP Trajectory",
+                    text: "Detects when the DX operator systematically moves higher after each contact. The engine predicts the next step above the last worked frequency, wrapping around to the split floor if an explicit ceiling was reached.",
+                    color: .green
+                )
+                HelpDefinition(
+                    icon: "arrow.down.right.circle.fill",
+                    title: "Stepping DOWN Trajectory",
+                    text: "Tracks downward tuning cycles, recommending frequencies just below the last QSO to stay ahead of the pack.",
+                    color: .cyan
+                )
+                HelpDefinition(
+                    icon: "scope",
+                    title: "Sweet Spot Clustering (+150 Hz Offset)",
+                    text: "When calls are concentrated around a specific frequency, the engine calculates the weighted mean and applies a +150 Hz pitch offset to help your signal punch through heavy zero-beat QRM.",
+                    color: .orange
+                )
+                HelpDefinition(
+                    icon: "waveform.path",
+                    title: "Wide Spread Hunting",
+                    text: "In broad splits (e.g. UP 5-10), the engine aims in the upper third of the window where caller density is lower and signal copy is cleaner.",
+                    color: .purple
+                )
+            }
+
+            helpSection("Zero-Duplication Transceiver Integration") {
+                HelpDefinition(
+                    icon: "antenna.radiowaves.left.and.right",
+                    title: "VFO-A RX Preservation",
+                    text: "Arming split updates only VFO-B (TX) in BandmapEngine and sends CAT commands to your radio, keeping your VFO-A receiver strictly locked on the DX station.",
+                    color: .blue
+                )
+                HelpDefinition(
+                    icon: "ruler.fill",
+                    title: "Bandmap Ruler Reticle",
+                    text: "A glowing yellow reticle marker appears on the vertical Bandmap frequency ruler at the predicted transmit frequency. Clicking it selects the solution immediately.",
+                    color: .yellow
+                )
+                HelpDefinition(
+                    icon: "bolt.badge.clock.fill",
+                    title: "QuickLog Transceiver Desk Badge",
+                    text: "A compact [🎯 SPLIT +X.X kHz] badge lights up in the QuickLog transceiver header, allowing split arming directly from the log entry desk.",
+                    color: .orange
+                )
+            }
+        }
+    }
+
+    private var greylineOverlayView: some View {
+        Group {
+            helpHeader(
+                title: "Live Greyline Propagation Overlay & Solar Ducting",
+                subtitle: "Vector-grade astronomical solar terminator and civil/nautical twilight contours with live station solar status, next event countdown, and great-circle low-band ducting path detection.",
+                icon: "sun.horizon.fill",
+                color: .orange
+            )
+
+            HelpScreenshotCard(
+                imageName: "help_greyline_overlay",
+                title: "Vector Greyline & Solar Ephemeris HUD",
+                caption: "Continuous vector twilight contours, triple-stroke glowing terminator ribbon, and live station ducting telemetry."
+            )
+
+            HelpGreylineOverlayMockup()
+
+            HelpFlow(steps: [
+                HelpFlowStep(icon: "sun.max.fill", title: "1. Solar Ephemeris", detail: "Solves spherical solar altitude equations in real time to locate the exact subsolar point and declination."),
+                HelpFlowStep(icon: "pencil.and.outline", title: "2. Vector Contours", detail: "Generates continuous vector ribbons for the optical terminator (0°), civil twilight (-6°), and nautical twilight (-12°)."),
+                HelpFlowStep(icon: "eye.fill", title: "3. Shaded Polar Mesh", detail: "Renders seamless day, twilight, and night shading on both 3D Globe, Azimuthal Equidistant, and Flat maps."),
+                HelpFlowStep(icon: "bolt.fill", title: "4. Ducting Telemetry", detail: "Calculates low-band ionospheric ducting efficiency and highlights Great Circle paths coinciding with the twilight band.")
+            ])
+
+            helpSection("Astronomical & Ionospheric Physics") {
+                HelpDefinition(
+                    icon: "sun.horizon.fill",
+                    title: "Low-Band Ionospheric Ducting",
+                    text: "During twilight, solar ultraviolet radiation stops ionizing the lower ionosphere, causing the signal-absorbing D-layer to rapidly collapse while the reflective F2-layer remains charged. This creates a low-loss waveguide for 160m, 80m, 40m, and 30m signals.",
+                    color: .orange
+                )
+                HelpDefinition(
+                    icon: "waveform.path.ecg",
+                    title: "Great Circle Path Coincidence (+35 dB Bonus)",
+                    text: "When a great circle path between your station and a spotted DX station traverses the twilight corridor, YAAM renders the beam with a golden halo and applies up to +35 dB ducting bonus in propagation scoring.",
+                    color: .yellow
+                )
+                HelpDefinition(
+                    icon: "deskclock.fill",
+                    title: "Station Solar HUD & Countdown",
+                    text: "A floating glassmorphism widget in the map canvas displays real-time solar elevation, low-band ducting percentage, and an exact countdown to the next solar event (e.g. 'Sunset in 5h 20m').",
+                    color: .blue
+                )
+            }
+
+            helpSection("Full Rover Mode Synchronization") {
+                HelpDefinition(
+                    icon: "shoeprints.fill",
+                    title: "Mobile Twilight Adaptation",
+                    text: "When Tactical Rover Mode is active, all solar calculations, twilight horizon angles, and ducting timers instantly adapt to the rover's Maidenhead grid coordinates.",
+                    color: .purple
+                )
+            }
         }
     }
 
@@ -621,6 +849,118 @@ struct HelpView: View {
             }
             helpCallout(icon: "antenna.radiowaves.left.and.right", title: "First transmission", text: "Begin with a dummy load or minimum RF power. Keep ALC inactive, verify the selected audio device and frequency, and remain able to stop the radio locally before enabling automatic sequencing.", color: .orange)
             helpCallout(icon: "lock.shield", title: "Local-network safety", text: "Keep rigctld and direct Icom LAN on localhost or a trusted private network. Do not expose either control port to the public Internet; use a trusted VPN when remote access is required.", color: .orange)
+        }
+    }
+
+    private var nteEmulatorView: some View {
+        Group {
+            helpHeader(
+                title: "Network Transceiver Emulator (NTE)",
+                subtitle: "Full hardware-grade emulation of modern network transceivers (Icom IC-705, IC-7300/MK2, IC-7610, IC-9700) with CI-V over IP, 48 kHz LPCM16 streaming audio, built-in Hamlib rigctld, and a synthetic RF physics engine.",
+                icon: "server.rack",
+                color: .blue
+            )
+
+            HelpNTEMockup()
+
+            HelpFlow(steps: [
+                HelpFlowStep(icon: "power.circle.fill", title: "1. Power ON Transceiver", detail: "Open Network Transceiver Emulator (Tools > Transceiver Emulator, Option-Command-E, or Operator Desk Tab 24) and click Power Transceiver ON."),
+                HelpFlowStep(icon: "network", title: "2. Bind Control & rigctld Ports", detail: "NTE binds UDP 50001 (Control), UDP 50002 (CI-V), UDP 50003 (Audio), and TCP 4532 (Hamlib rigctld) for immediate client connectivity."),
+                HelpFlowStep(icon: "waveform.path", title: "3. Configure Channel Physics", detail: "Select channel fading (Clean, Mild QSB, Deep Rayleigh, Auroral), set calibrated AWGN SNR (-30 dB to +30 dB), or inject Doppler drift."),
+                HelpFlowStep(icon: "waveform.badge.plus", title: "4. Inject Synthetic Signals", detail: "Activate FT8/FT4 signal synthesis, 5-station pileups, CW beacons, or inject custom callsigns aligned with UTC 15-second time slots."),
+                HelpFlowStep(icon: "link.circle.fill", title: "5. Connect YAAM or WSJT-X", detail: "Click 'Connect YAAM LAN' to test YAAM's internal receiver in loopback, or point WSJT-X / JTDX to localhost:4532 via Hamlib rigctld.")
+            ])
+
+            helpSection("Network & Protocol Architecture") {
+                HelpDefinition(
+                    icon: "server.rack",
+                    title: "Icom LAN Three-Socket UDP Stack",
+                    text: "Implements authentic Icom network protocols: UDP 50001 handles broadcast discovery and handshake tokens; UDP 50002 processes 0x01C0 framing for CI-V frequency, mode, and S-meter registers; UDP 50003 streams uncompressed 48 kHz LPCM16 audio frames at strict 10ms intervals.",
+                    color: .blue
+                )
+                HelpDefinition(
+                    icon: "cable.connector.horizontal",
+                    title: "Built-In Hamlib rigctld Server (TCP 4532)",
+                    text: "A native non-blocking TCP socket server supporting standard Hamlib commands ('f', 'F', 'm', 'M', 't', 'T', 'l', '\\dump_state'). Third-party apps like WSJT-X, JTDX, and N1MM connect with zero configuration and no external virtual serial cables.",
+                    color: .purple
+                )
+                HelpDefinition(
+                    icon: "dot.radiowaves.left.and.right",
+                    title: "Local Network Auto-Discovery",
+                    text: "Responds to UDP broadcast discovery probes, allowing external companion software like wfview or SDR-Control on your LAN to discover the emulator automatically as if it were a physical radio.",
+                    color: .cyan
+                )
+            }
+
+            helpSection("Synthetic RF & Channel Physics Engine") {
+                HelpDefinition(
+                    icon: "waveform.path.ecg",
+                    title: "Calibrated AWGN & Box-Muller Noise",
+                    text: "Generates true additive white Gaussian noise precisely calibrated in a 2.5 kHz bandwidth across a -30 dB to +30 dB SNR range, allowing rigorous receiver sensitivity evaluations.",
+                    color: .orange
+                )
+                HelpDefinition(
+                    icon: "wind",
+                    title: "Ionospheric Multipath Fading",
+                    text: "Models real-world HF ionospheric propagation including Mild QSB (0.2 Hz Doppler spread), Deep Rayleigh flutter (1.5 Hz spread), and high-latitude Auroral flutter (4.0 Hz spread) through complex Gaussian filtering.",
+                    color: .teal
+                )
+                HelpDefinition(
+                    icon: "arrow.left.arrow.right",
+                    title: "Doppler Shift & Frequency Drift",
+                    text: "Simulates satellite passes and ionospheric layer dynamics with continuous phase accumulation supporting static offsets up to ±500 Hz and linear frequency drift up to ±100 Hz/minute.",
+                    color: .indigo
+                )
+                HelpDefinition(
+                    icon: "bolt.fill",
+                    title: "Atmospheric QRN & Network Impairments",
+                    text: "Injects Poisson-distributed impulsive static bursts, along with configurable UDP packet drop (0-25%) and jitter buffer delay (0-100 ms) to stress-test client resilience.",
+                    color: .yellow
+                )
+            }
+
+            helpSection("Signal Studio & DSP Benchmarking") {
+                HelpDefinition(
+                    icon: "waveform",
+                    title: "FT8 / FT4 Continuous-Phase Modulation",
+                    text: "Synthesizes real 79-tone FT8 and 4-GFSK FT4 transmissions using FT8Codec, perfectly synchronized to UTC 15-second and 7.5-second time boundaries.",
+                    color: .green
+                )
+                HelpDefinition(
+                    icon: "person.3.sequence.fill",
+                    title: "5-Station Multi-Caller Pileup",
+                    text: "Generates simultaneous calling stations on distinct audio frequencies (e.g. 1200 Hz, 1450 Hz, 1850 Hz) with independent SNR levels to test receiver selectivity and decoder multi-pass performance.",
+                    color: .pink
+                )
+                HelpDefinition(
+                    icon: "chart.bar.doc.horizontal.fill",
+                    title: "Automated SNR Sensitivity Sweeps",
+                    text: "Runs stepped sensitivity sweeps from +6 dB down to -24 dB in 3 dB increments, evaluating decode success rates and producing structured markdown and JSON benchmark reports.",
+                    color: .purple
+                )
+            }
+
+            helpSection("Hardware OLED Panel & Ergonomics") {
+                HelpDefinition(
+                    icon: "display",
+                    title: "Front Panel OLED with Glowing VFO",
+                    text: "Features high-contrast digital frequency readout, band and mode badges, dynamic analog S-meter and SWR gauges, frequency stepping buttons, and latching PTT.",
+                    color: .mint
+                )
+                HelpDefinition(
+                    icon: "link",
+                    title: "1-Click 'Connect YAAM LAN' Loopback",
+                    text: "Clicking 'Connect YAAM LAN' automatically configures and connects YAAM's internal Icom LAN client to the local emulator, providing an instant end-to-end radio and digital modem testbed.",
+                    color: .blue
+                )
+            }
+
+            helpCallout(
+                icon: "keyboard",
+                title: "Quick Access & Detached Window Mode",
+                text: "Launch the emulator at any time using Option-Command-E, select it in Operator Desk (Tab 24), or click the detach button to pop the emulator into its own independent floating macOS window scene.",
+                color: .blue
+            )
         }
     }
 
@@ -1226,24 +1566,52 @@ struct HelpView: View {
         Group {
             helpHeader(
                 title: "Tactical Pilot & HF Propagation",
-                subtitle: "Point-to-point HF propagation prediction engine based on VOACAP algorithms, SNR forecasting, MUF curves, and tactical band opening advice.",
+                subtitle: "Point-to-point HF propagation prediction engine covering all 11 amateur bands (160m to 6m), SNR forecasting, MUF curves, 24-hour UTC forecast timeline, and dynamic peak hour advice.",
                 icon: "point.topleft.down.to.point.bottomright.curvepath.fill",
                 color: .teal
+            )
+
+            HelpScreenshotCard(
+                imageName: "help_tactical_pilot",
+                title: "11-Band HF Propagation Matrix & MUF Radar",
+                caption: "Full amateur coverage (160m Topband to 6m Magic Band), 24h timeline forecast, and dynamic peak hour calculation."
             )
 
             HelpTacticalPilotMockup()
 
             HelpFlow(steps: [
-                HelpFlowStep(icon: "target", title: "Target Entity", detail: "Select a callsign, DXCC country, or Maidenhead grid locator."),
-                HelpFlowStep(icon: "globe.americas.fill", title: "Path Geometry", detail: "Calculates great circle short-path and long-path azimuth, distance, and ionospheric bounce midpoints."),
-                HelpFlowStep(icon: "chart.line.uptrend.xyaxis", title: "Solar Raytrace", detail: "Uses real-time SFI, SSN, and geomagnetic Kp to model D, E, F1, and F2 layer densities."),
-                HelpFlowStep(icon: "checkmark.seal.fill", title: "Band Advisor", detail: "Scores all 11 amateur bands by SNR, circuit reliability percentage, and operating window.")
+                HelpFlowStep(icon: "target", title: "1. Target Entity", detail: "Select a callsign, DXCC country, or Maidenhead grid locator."),
+                HelpFlowStep(icon: "globe.americas.fill", title: "2. Path Geometry", detail: "Calculates great circle short-path and long-path azimuth, distance, and ionospheric bounce midpoints."),
+                HelpFlowStep(icon: "chart.line.uptrend.xyaxis", title: "3. Solar Raytrace", detail: "Uses real-time SFI, SSN, and geomagnetic Kp to model D, E, F1, and F2 layer densities."),
+                HelpFlowStep(icon: "checkmark.seal.fill", title: "4. 11-Band Spectrum Advisor", detail: "Scores all 11 amateur bands (160m to 6m) by SNR, circuit reliability percentage, and operating window."),
+                HelpFlowStep(icon: "clock.arrow.circlepath", title: "5. 24H Forecast Timeline", detail: "Renders an interactive 24-hour UTC sparkline displaying exact diurnal opening onsets and dynamic peak hour.")
             ])
 
             helpSection("Propagation Telemetry & Calculations") {
-                HelpDefinition(icon: "chart.xyaxis.line", title: "Maximum Usable Frequency (MUF)", text: "Determines the highest frequency refracted back to Earth along the path. Frequencies just below MUF (85–90%) experience the lowest absorption and strongest signal levels.", color: .teal)
+                HelpDefinition(icon: "chart.xyaxis.line", title: "Maximum Usable Frequency (MUF)", text: "Determines the highest frequency refracted back to Earth along the path. Frequencies just below MUF (85–90% FOT) experience the lowest absorption and strongest signal levels.", color: .teal)
                 HelpDefinition(icon: "waveform.badge.plus", title: "Signal-to-Noise Ratio (SNR)", text: "Estimates received signal strength in dB relative to ambient noise floor, accounting for transceiver transmitter power and antenna gains.", color: .green)
-                HelpDefinition(icon: "clock.arrow.circlepath", title: "Diurnal Operating Windows", text: "Predicts exact UTC onset and fade times for target corridors, allowing operators to plan schedules for rare DXpeditions.", color: .orange)
+                HelpDefinition(icon: "clock.arrow.circlepath", title: "Dynamic Peak Hour (UTC)", text: "Analyzes all 24 hours of the diurnal cycle and extracts the statistically optimal hour for highest total circuit reliability.", color: .yellow)
+            }
+
+            helpSection("Full 11-Band Amateur Coverage") {
+                HelpDefinition(
+                    icon: "moon.stars.fill",
+                    title: "160m Topband (1.8 MHz)",
+                    text: "Physical modeling of severe D-layer solar absorption during daytime (signal extinction) transitioning to powerful nocturnal F2 skywave propagation at local midnight.",
+                    color: .orange
+                )
+                HelpDefinition(
+                    icon: "sparkles",
+                    title: "6m Magic Band (50.1 MHz)",
+                    text: "Models summertime sporadic-E (Es) ionization clouds and high solar flux (SFI ≥ 160) F2 cycle peaks, letting VHF enthusiasts monitor transatlantic and transcontinental openings.",
+                    color: .purple
+                )
+                HelpDefinition(
+                    icon: "shoeprints.fill",
+                    title: "Rover Mode Geodesic Synchronization",
+                    text: "When Tactical Rover Mode is active, all great-circle distances, beam headings, hop geometries, and MUF evaluations dynamically recalculate from the rover's temporary Maidenhead grid.",
+                    color: .cyan
+                )
             }
         }
     }
@@ -2042,6 +2410,12 @@ struct HelpView: View {
                     color: .yellow
                 )
                 HelpDefinition(
+                    icon: "scope",
+                    title: "Pileup Sniper Target Reticle",
+                    text: "When a DX spot contains split comments, a luminous yellow sniper reticle marks the optimal VFO-B transmit frequency directly on the vertical ruler. Clicking the reticle selects the solution and arms split.",
+                    color: .orange
+                )
+                HelpDefinition(
                     icon: "flame.fill",
                     title: "Thermal Activity Heatmap Ribbon",
                     text: "Accumulates RF spot activity over rolling 15-minute windows, highlighting hot pile-up frequencies even before signals appear on your local antenna.",
@@ -2649,6 +3023,321 @@ struct HelpHamClockMockup: View {
     }
 }
 
+struct HelpCallIntelligenceMockup: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            // Header
+            HStack(spacing: 8) {
+                Image(systemName: "brain.head.profile")
+                    .font(.headline)
+                    .foregroundStyle(.yellow)
+                Text("Call Intelligence Panel (CIP) — Deep Operator & Tactical HUD")
+                    .font(.subheadline.weight(.bold))
+                Spacer()
+                HStack(spacing: 4) {
+                    Circle().fill(Color.green).frame(width: 7, height: 7)
+                    Text("CIP Active")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.green)
+                }
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(Color.green.opacity(0.15), in: Capsule())
+            }
+            Divider()
+
+            // Callsign Entity Bar
+            HStack(spacing: 12) {
+                Text("🇲🇺").font(.system(size: 26))
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text("3B8/W1AW")
+                            .font(.system(size: 16, weight: .black, design: .monospaced))
+                            .foregroundStyle(.yellow)
+                        Text("NEW DXCC")
+                            .font(.system(size: 9, weight: .heavy))
+                            .padding(.horizontal, 5).padding(.vertical, 2)
+                            .background(Color.red, in: Capsule())
+                            .foregroundStyle(.white)
+                    }
+                    Text("Mauritius · Indian Ocean (AF) · CQ 39 · ITU 53 · Grid LG89ts")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("Bearing: 165° SSE (LP 345°)")
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .foregroundStyle(.cyan)
+                    Text("Dist: 5,420 km · Sun: +18° Day")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.orange)
+                }
+            }
+            .padding(8)
+            .background(Color.black.opacity(0.3), in: RoundedRectangle(cornerRadius: 6))
+
+            // Badges Grid: SCP, LoTW & Clubs
+            HStack(spacing: 8) {
+                // SCP Matches
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Image(systemName: "magnifyingglass.circle.fill").font(.system(size: 10)).foregroundStyle(.cyan)
+                        Text("SCP Contesters:").font(.system(size: 9, weight: .bold)).foregroundStyle(.secondary)
+                    }
+                    HStack(spacing: 4) {
+                        ForEach(["3B8/W1AW", "3B8AW", "3B8BA", "3B8CF"], id: \.self) { c in
+                            Text(c)
+                                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                                .foregroundStyle(c == "3B8/W1AW" ? .yellow : .primary)
+                                .padding(.horizontal, 4).padding(.vertical, 2)
+                                .background(c == "3B8/W1AW" ? Color.yellow.opacity(0.2) : Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 3))
+                        }
+                    }
+                }
+
+                Spacer()
+
+                // LoTW & Clubs
+                VStack(alignment: .trailing, spacing: 4) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "checkmark.seal.fill").font(.system(size: 10)).foregroundStyle(.green)
+                        Text("LoTW Active (Sep 2026)").font(.system(size: 9, weight: .bold)).foregroundStyle(.green)
+                    }
+                    HStack(spacing: 4) {
+                        Text("CWops #1842").font(.system(size: 9, weight: .bold, design: .monospaced)).foregroundStyle(.orange)
+                            .padding(.horizontal, 4).padding(.vertical, 1)
+                            .background(Color.orange.opacity(0.15), in: RoundedRectangle(cornerRadius: 3))
+                        Text("SKCC #24500").font(.system(size: 9, weight: .bold, design: .monospaced)).foregroundStyle(.mint)
+                            .padding(.horizontal, 4).padding(.vertical, 1)
+                            .background(Color.mint.opacity(0.15), in: RoundedRectangle(cornerRadius: 3))
+                        Text("LICW #920").font(.system(size: 9, weight: .bold, design: .monospaced)).foregroundStyle(.purple)
+                            .padding(.horizontal, 4).padding(.vertical, 1)
+                            .background(Color.purple.opacity(0.15), in: RoundedRectangle(cornerRadius: 3))
+                    }
+                }
+            }
+
+            // Propagation & Sniper Banner
+            HStack(spacing: 8) {
+                HStack(spacing: 4) {
+                    Circle().fill(Color.green).frame(width: 6, height: 6)
+                    Text("20m Path: 95% OPEN (+18 dB)").font(.system(size: 10, weight: .bold)).foregroundStyle(.green)
+                    Text("· MUF 31.2 MHz · FOT 26.5 MHz").font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
+                }
+                Spacer()
+                HStack(spacing: 4) {
+                    Image(systemName: "scope").font(.system(size: 9)).foregroundStyle(.yellow)
+                    Text("Sniper: Target 14026.0k (+6.0k)").font(.system(size: 9, weight: .bold, design: .monospaced)).foregroundStyle(.yellow)
+                }
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(Color.yellow.opacity(0.15), in: Capsule())
+            }
+            .padding(6)
+            .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 5))
+        }
+        .padding(12)
+        .background(Color(NSColor.controlBackgroundColor).opacity(0.7), in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.yellow.opacity(0.3), lineWidth: 1))
+        .padding(.vertical, 6)
+    }
+}
+
+struct HelpPileupSniperMockup: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            // Header Bar
+            HStack {
+                Image(systemName: "scope")
+                    .font(.headline)
+                    .foregroundStyle(.orange)
+                Text("Pileup Sniper & Split QSX Cockpit")
+                    .font(.subheadline.weight(.bold))
+                Spacer()
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.up.right.circle.fill").font(.system(size: 10))
+                    Text("Stepping UP · 88% Conf")
+                        .font(.system(size: 10, weight: .bold))
+                }
+                .foregroundStyle(.green)
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(Color.green.opacity(0.15), in: Capsule())
+            }
+            Divider()
+
+            // Dual VFO Comparison
+            HStack(spacing: 12) {
+                // VFO-A
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("VFO-A (DX RX):").font(.system(size: 9, weight: .bold)).foregroundStyle(.secondary)
+                    Text("14.020.000 MHz")
+                        .font(.system(size: 15, weight: .black, design: .monospaced))
+                        .foregroundStyle(.primary)
+                    Text("Preserved on DX receiver").font(.system(size: 8.5)).foregroundStyle(.secondary)
+                }
+                .padding(8).frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.black.opacity(0.3), in: RoundedRectangle(cornerRadius: 6))
+
+                // Target VFO-B
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack {
+                        Text("TARGET VFO-B (MY TX):").font(.system(size: 9, weight: .bold)).foregroundStyle(.yellow)
+                        Spacer()
+                        Text("+6.0 kHz").font(.system(size: 10, weight: .heavy, design: .monospaced)).foregroundStyle(.yellow)
+                    }
+                    Text("14.026.000 MHz")
+                        .font(.system(size: 15, weight: .black, design: .monospaced))
+                        .foregroundStyle(.yellow)
+                    Text("Optimal next predicted CQ target").font(.system(size: 8.5)).foregroundStyle(.yellow.opacity(0.8))
+                }
+                .padding(8).frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.yellow.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.yellow.opacity(0.4), lineWidth: 1))
+            }
+
+            // Big Arming Button
+            HStack {
+                Spacer()
+                HStack(spacing: 6) {
+                    Image(systemName: "scope").font(.system(size: 12, weight: .bold))
+                    Text("ARM VFO-B TO 14.026.0 MHz (+6.0 kHz)")
+                        .font(.system(size: 11, weight: .heavy, design: .monospaced))
+                }
+                .foregroundStyle(.black)
+                .padding(.horizontal, 16).padding(.vertical, 8)
+                .background(
+                    LinearGradient(colors: [Color.yellow, Color.orange], startPoint: .top, endPoint: .bottom),
+                    in: RoundedRectangle(cornerRadius: 6)
+                )
+                Spacer()
+            }
+
+            // Split Spectrum Visualizer Track
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("SPLIT SPECTRUM TRACK: UP 1.0 TO 8.0 kHz").font(.system(size: 8.5, weight: .bold)).foregroundStyle(.tertiary)
+                    Spacer()
+                    Text("3 Verified Historical Hits").font(.system(size: 8.5)).foregroundStyle(.secondary)
+                }
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color.black.opacity(0.5))
+                        .frame(height: 24)
+
+                    HStack {
+                        Spacer().frame(width: 40)
+                        Circle().fill(Color.white.opacity(0.4)).frame(width: 6, height: 6)
+                        Spacer().frame(width: 60)
+                        Circle().fill(Color.white.opacity(0.6)).frame(width: 6, height: 6)
+                        Spacer().frame(width: 60)
+                        Circle().fill(Color.white).frame(width: 7, height: 7)
+                        Spacer().frame(width: 50)
+                        ZStack {
+                            Circle().stroke(Color.yellow, lineWidth: 1.5).frame(width: 14, height: 14)
+                            Circle().fill(Color.yellow).frame(width: 5, height: 5)
+                        }
+                        Spacer()
+                    }
+                }
+            }
+
+            // Tactical Advice
+            HStack(spacing: 6) {
+                Image(systemName: "lightbulb.fill").foregroundStyle(.yellow).font(.system(size: 11))
+                Text("Tactical Advice: DX stepping UP (+1.5 kHz/step). Last worked 14024.5 kHz. Target 14026.0 kHz for next CQ.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(12)
+        .background(Color(NSColor.controlBackgroundColor).opacity(0.7), in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.orange.opacity(0.3), lineWidth: 1))
+        .padding(.vertical, 6)
+    }
+}
+
+struct HelpGreylineOverlayMockup: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Image(systemName: "sun.horizon.fill")
+                    .font(.headline)
+                    .foregroundStyle(.orange)
+                Text("Live Greyline Propagation Overlay & Station Solar HUD")
+                    .font(.subheadline.weight(.bold))
+                Spacer()
+                Text("Astronomical Ephemeris")
+                    .font(.system(size: 10, weight: .bold))
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(Color.orange.opacity(0.15))
+                    .foregroundStyle(.orange)
+                    .cornerRadius(4)
+            }
+            Divider()
+
+            // Visual Twilight Matrix
+            HStack(spacing: 10) {
+                VStack(spacing: 4) {
+                    Text("CIVIL TWILIGHT (0° TO -6°)").font(.system(size: 8.5, weight: .bold)).foregroundStyle(.tertiary)
+                    Rectangle()
+                        .fill(LinearGradient(colors: [Color.orange.opacity(0.4), Color.purple.opacity(0.3)], startPoint: .leading, endPoint: .trailing))
+                        .frame(height: 20)
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                    Text("D-Layer Collapses").font(.system(size: 8.5)).foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+
+                VStack(spacing: 4) {
+                    Text("NAUTICAL TWILIGHT (-6° TO -12°)").font(.system(size: 8.5, weight: .bold)).foregroundStyle(.tertiary)
+                    Rectangle()
+                        .fill(Color(red: 0.1, green: 0.12, blue: 0.25))
+                        .frame(height: 20)
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                    Text("Optimal Waveguide Duct").font(.system(size: 8.5)).foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+
+                VStack(spacing: 4) {
+                    Text("NIGHT (< -12°)").font(.system(size: 8.5, weight: .bold)).foregroundStyle(.tertiary)
+                    Rectangle()
+                        .fill(Color.black.opacity(0.7))
+                        .frame(height: 20)
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                    Text("Nocturnal F2 Skywave").font(.system(size: 8.5)).foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+            }
+
+            // Station HUD Telemetry Preview
+            HStack(spacing: 12) {
+                HStack(spacing: 6) {
+                    Image(systemName: "sun.horizon.fill").foregroundStyle(.orange)
+                    Text("STATION HUD:").font(.system(size: 10, weight: .bold)).foregroundStyle(.secondary)
+                    Text("GREYLINE ACTIVE (-4.2°)").font(.system(size: 10, weight: .heavy)).foregroundStyle(.orange)
+                }
+                Spacer()
+                Label("Sunset in 5h 20m", systemImage: "clock.fill").font(.system(size: 10)).foregroundStyle(.secondary)
+                HStack(spacing: 3) {
+                    Circle().fill(Color.green).frame(width: 6, height: 6)
+                    Text("Duct 95% (160/80m)").font(.system(size: 10, weight: .bold)).foregroundStyle(.green)
+                }
+            }
+            .padding(8)
+            .background(Color.black.opacity(0.4), in: RoundedRectangle(cornerRadius: 6))
+
+            HStack {
+                Image(systemName: "bolt.fill").foregroundStyle(.yellow)
+                Text("Great Circle Path Bonus: Up to +35 dB signal reinforcement along twilight corridor.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(12)
+        .background(Color(NSColor.controlBackgroundColor).opacity(0.7), in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.orange.opacity(0.3), lineWidth: 1))
+        .padding(.vertical, 6)
+    }
+}
+
 struct HelpTacticalPilotMockup: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -2656,10 +3345,10 @@ struct HelpTacticalPilotMockup: View {
                 Image(systemName: "point.topleft.down.to.point.bottomright.curvepath.fill")
                     .font(.headline)
                     .foregroundStyle(.teal)
-                Text("Tactical Pilot HUD & VOACAP-Style Propagation Engine")
+                Text("Tactical Pilot HUD & 11-Band HF Propagation Engine")
                     .font(.subheadline.weight(.bold))
                 Spacer()
-                Text("Engine: Solar Raytrace")
+                Text("Engine: 11-Band Solar Raytrace")
                     .font(.system(size: 10, weight: .bold))
                     .padding(.horizontal, 6).padding(.vertical, 2)
                     .background(Color.teal.opacity(0.15))
@@ -2674,48 +3363,135 @@ struct HelpTacticalPilotMockup: View {
                 Text("🇯🇵 Japan (JA) — Tokyo")
                     .font(.system(size: 12, weight: .bold))
                 Spacer()
-                Text("Bearing: 068° SP  |  Dist: 7,620 km")
+                Text("Bearing: 068° SP | Dist: 7,620 km | MUF: 31.2 MHz")
                     .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.cyan)
             }
 
-            HStack(spacing: 8) {
-                VStack(spacing: 2) {
-                    Text("15m (21 MHz)").font(.caption2.weight(.bold))
-                    Text("SNR +14 dB").font(.system(size: 11, weight: .heavy, design: .monospaced)).foregroundStyle(.green)
-                    Text("92% Rel").font(.system(size: 9)).foregroundStyle(.green)
-                }
-                .padding(6).frame(maxWidth: .infinity)
-                .background(Color.green.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+            // 11-Band Summary Matrix (Two Rows)
+            VStack(spacing: 6) {
+                // Lower Bands: 160m, 80m, 60m, 40m, 30m
+                HStack(spacing: 6) {
+                    VStack(spacing: 2) {
+                        Text("160m").font(.system(size: 8.5, weight: .bold))
+                        Text("EXTINCT").font(.system(size: 7.5, weight: .heavy)).foregroundStyle(.red)
+                        Text("D-Layer Cut").font(.system(size: 7)).foregroundStyle(.secondary)
+                    }
+                    .padding(4).frame(maxWidth: .infinity)
+                    .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 4))
 
-                VStack(spacing: 2) {
-                    Text("20m (14 MHz)").font(.caption2.weight(.bold))
-                    Text("SNR +18 dB").font(.system(size: 11, weight: .heavy, design: .monospaced)).foregroundStyle(.green)
-                    Text("96% Rel").font(.system(size: 9)).foregroundStyle(.green)
-                }
-                .padding(6).frame(maxWidth: .infinity)
-                .background(Color.green.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+                    VStack(spacing: 2) {
+                        Text("80m").font(.system(size: 8.5, weight: .bold))
+                        Text("POOR").font(.system(size: 7.5, weight: .heavy)).foregroundStyle(.orange)
+                        Text("15% Rel").font(.system(size: 7)).foregroundStyle(.secondary)
+                    }
+                    .padding(4).frame(maxWidth: .infinity)
+                    .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 4))
 
-                VStack(spacing: 2) {
-                    Text("12m (24 MHz)").font(.caption2.weight(.bold))
-                    Text("SNR +09 dB").font(.system(size: 11, weight: .heavy, design: .monospaced)).foregroundStyle(.orange)
-                    Text("78% Rel").font(.system(size: 9)).foregroundStyle(.orange)
-                }
-                .padding(6).frame(maxWidth: .infinity)
-                .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+                    VStack(spacing: 2) {
+                        Text("60m").font(.system(size: 8.5, weight: .bold))
+                        Text("FAIR").font(.system(size: 7.5, weight: .heavy)).foregroundStyle(.yellow)
+                        Text("42% Rel").font(.system(size: 7)).foregroundStyle(.secondary)
+                    }
+                    .padding(4).frame(maxWidth: .infinity)
+                    .background(Color.yellow.opacity(0.08), in: RoundedRectangle(cornerRadius: 4))
 
-                VStack(spacing: 2) {
-                    Text("10m (28 MHz)").font(.caption2.weight(.bold))
-                    Text("SNR +02 dB").font(.system(size: 11, weight: .heavy, design: .monospaced)).foregroundStyle(.secondary)
-                    Text("45% Rel").font(.system(size: 9)).foregroundStyle(.secondary)
+                    VStack(spacing: 2) {
+                        Text("40m").font(.system(size: 8.5, weight: .bold))
+                        Text("GOOD").font(.system(size: 7.5, weight: .heavy)).foregroundStyle(.green)
+                        Text("+6 dB · 78%").font(.system(size: 7)).foregroundStyle(.green)
+                    }
+                    .padding(4).frame(maxWidth: .infinity)
+                    .background(Color.green.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
+
+                    VStack(spacing: 2) {
+                        Text("30m").font(.system(size: 8.5, weight: .bold))
+                        Text("OPEN").font(.system(size: 7.5, weight: .heavy)).foregroundStyle(.green)
+                        Text("+10 dB · 85%").font(.system(size: 7)).foregroundStyle(.green)
+                    }
+                    .padding(4).frame(maxWidth: .infinity)
+                    .background(Color.green.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
                 }
-                .padding(6).frame(maxWidth: .infinity)
-                .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+
+                // Upper Bands: 20m, 17m, 15m, 12m, 10m, 6m
+                HStack(spacing: 6) {
+                    VStack(spacing: 2) {
+                        Text("20m").font(.system(size: 8.5, weight: .bold))
+                        Text("STRONG").font(.system(size: 7.5, weight: .heavy)).foregroundStyle(.green)
+                        Text("+18 dB · 96%").font(.system(size: 7, weight: .bold)).foregroundStyle(.green)
+                    }
+                    .padding(4).frame(maxWidth: .infinity)
+                    .background(Color.green.opacity(0.2), in: RoundedRectangle(cornerRadius: 4))
+                    .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.green, lineWidth: 1))
+
+                    VStack(spacing: 2) {
+                        Text("17m").font(.system(size: 8.5, weight: .bold))
+                        Text("OPEN").font(.system(size: 7.5, weight: .heavy)).foregroundStyle(.green)
+                        Text("+15 dB · 94%").font(.system(size: 7)).foregroundStyle(.green)
+                    }
+                    .padding(4).frame(maxWidth: .infinity)
+                    .background(Color.green.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
+
+                    VStack(spacing: 2) {
+                        Text("15m").font(.system(size: 8.5, weight: .bold))
+                        Text("OPTIMUM").font(.system(size: 7.5, weight: .heavy)).foregroundStyle(.cyan)
+                        Text("+14 dB · 92%").font(.system(size: 7, weight: .bold)).foregroundStyle(.cyan)
+                    }
+                    .padding(4).frame(maxWidth: .infinity)
+                    .background(Color.cyan.opacity(0.15), in: RoundedRectangle(cornerRadius: 4))
+
+                    VStack(spacing: 2) {
+                        Text("12m").font(.system(size: 8.5, weight: .bold))
+                        Text("OPEN").font(.system(size: 7.5, weight: .heavy)).foregroundStyle(.green)
+                        Text("+09 dB · 78%").font(.system(size: 7)).foregroundStyle(.green)
+                    }
+                    .padding(4).frame(maxWidth: .infinity)
+                    .background(Color.green.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
+
+                    VStack(spacing: 2) {
+                        Text("10m").font(.system(size: 8.5, weight: .bold))
+                        Text("FAIR").font(.system(size: 7.5, weight: .heavy)).foregroundStyle(.orange)
+                        Text("+02 dB · 45%").font(.system(size: 7)).foregroundStyle(.secondary)
+                    }
+                    .padding(4).frame(maxWidth: .infinity)
+                    .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 4))
+
+                    VStack(spacing: 2) {
+                        Text("6m").font(.system(size: 8.5, weight: .bold))
+                        Text("ES WATCH").font(.system(size: 7.5, weight: .heavy)).foregroundStyle(.purple)
+                        Text("Sporadic-E").font(.system(size: 7)).foregroundStyle(.purple)
+                    }
+                    .padding(4).frame(maxWidth: .infinity)
+                    .background(Color.purple.opacity(0.10), in: RoundedRectangle(cornerRadius: 4))
+                }
+            }
+
+            // 24H Timeline Sparkline
+            VStack(alignment: .leading, spacing: 3) {
+                HStack {
+                    Text("24H FORECAST TIMELINE (UTC)").font(.system(size: 8.5, weight: .bold)).foregroundStyle(.tertiary)
+                    Spacer()
+                    Text("Dynamic Peak: 14:00z · Best Band Now: 20m").font(.system(size: 8.5, weight: .bold)).foregroundStyle(.yellow)
+                }
+                HStack(alignment: .bottom, spacing: 2) {
+                    ForEach(0..<24) { hr in
+                        let h: CGFloat = hr >= 10 && hr <= 17 ? CGFloat([20, 28, 34, 38, 42, 36, 30, 22][hr - 10]) : CGFloat.random(in: 6...14)
+                        let isCurrent = hr == 11
+                        RoundedRectangle(cornerRadius: 1.5)
+                            .fill(isCurrent ? Color.yellow : (h > 30 ? Color.green : (h > 18 ? Color.cyan : Color.white.opacity(0.15))))
+                            .frame(maxWidth: .infinity)
+                            .frame(height: h)
+                            .overlay(isCurrent ? RoundedRectangle(cornerRadius: 1.5).stroke(Color.white, lineWidth: 1) : nil)
+                    }
+                }
+                .frame(height: 44)
+                .padding(4)
+                .background(Color.black.opacity(0.35), in: RoundedRectangle(cornerRadius: 5))
             }
 
             HStack {
                 Image(systemName: "sparkles").foregroundStyle(.yellow)
-                Text("Tactical Advice: Peak opening to East Asia active on 15m/20m until 18:30 UTC.")
+                Text("Tactical Advice: Peak opening to East Asia active on 20m/15m until 18:30 UTC.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -3434,5 +4210,245 @@ struct HelpClubLogSpotsMockup: View {
         .background(Color(NSColor.controlBackgroundColor).opacity(0.7), in: RoundedRectangle(cornerRadius: 10))
         .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.blue.opacity(0.3), lineWidth: 1))
         .padding(.vertical, 6)
+    }
+}
+
+// MARK: - Network Transceiver Emulator (NTE) Mockup
+
+struct HelpNTEMockup: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            mockupTopBar
+            Divider()
+            frontPanelOled
+            cardsGrid
+        }
+        .padding(12)
+        .background(Color(NSColor.controlBackgroundColor).opacity(0.7), in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.blue.opacity(0.3), lineWidth: 1))
+        .padding(.vertical, 6)
+    }
+
+    private var mockupTopBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "server.rack")
+                .font(.headline)
+                .foregroundStyle(.blue)
+            Text("Network Transceiver Emulator (NTE) — Node Emulation")
+                .font(.subheadline.weight(.bold))
+            Spacer()
+            HStack(spacing: 4) {
+                Circle().fill(Color.green).frame(width: 7, height: 7)
+                Text("ONLINE · 3 Sockets")
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.green)
+            }
+            .padding(.horizontal, 6).padding(.vertical, 2)
+            .background(Color.green.opacity(0.15), in: Capsule())
+
+            HStack(spacing: 4) {
+                Image(systemName: "link.circle.fill").font(.caption2)
+                Text("Connect YAAM LAN")
+                    .font(.system(size: 10, weight: .semibold))
+            }
+            .padding(.horizontal, 8).padding(.vertical, 3)
+            .background(Color.purple.opacity(0.2), in: RoundedRectangle(cornerRadius: 5))
+            .foregroundStyle(.purple)
+        }
+    }
+
+    private var frontPanelOled: some View {
+        VStack(spacing: 8) {
+            oledHeader
+            Divider().background(Color.white.opacity(0.2))
+            oledMainFreq
+            oledMeterAndPresets
+        }
+        .padding(10)
+        .background(Color.black.opacity(0.75), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.cyan.opacity(0.25), lineWidth: 1))
+    }
+
+    private var oledHeader: some View {
+        HStack {
+            HStack(spacing: 5) {
+                Circle().fill(Color.green).frame(width: 8, height: 8)
+                Text("RX READY")
+                    .font(.system(size: 10, weight: .black, design: .monospaced))
+                    .foregroundStyle(.green)
+            }
+            Spacer()
+            Text("IC-7300MK2 LAN EMULATOR")
+                .font(.system(size: 11, weight: .heavy, design: .monospaced))
+                .foregroundStyle(.cyan)
+            Spacer()
+            HStack(spacing: 6) {
+                Text("VFO A").font(.system(size: 10, weight: .bold, design: .monospaced)).foregroundStyle(.orange)
+                Text("FIL 1 (3.0k)").font(.system(size: 9, weight: .bold, design: .monospaced)).foregroundStyle(.secondary)
+                Text("AGC FAST").font(.system(size: 9, weight: .bold, design: .monospaced)).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var oledMainFreq: some View {
+        HStack(alignment: .center) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("20M")
+                    .font(.system(size: 11, weight: .heavy))
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(Color.blue.opacity(0.35), in: RoundedRectangle(cornerRadius: 4))
+                    .foregroundStyle(.white)
+                Text("BAND").font(.system(size: 8, weight: .bold)).foregroundStyle(.gray)
+            }
+
+            Spacer()
+
+            HStack(alignment: .lastTextBaseline, spacing: 4) {
+                Text("14.074.000")
+                    .font(.system(size: 28, weight: .black, design: .monospaced))
+                    .foregroundStyle(.green)
+                    .shadow(color: Color.green.opacity(0.5), radius: 6)
+                Text("MHz")
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.green.opacity(0.7))
+            }
+
+            Spacer()
+
+            VStack(spacing: 2) {
+                Text("USB-D")
+                    .font(.system(size: 12, weight: .heavy, design: .monospaced))
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .background(Color.yellow.opacity(0.25), in: RoundedRectangle(cornerRadius: 5))
+                    .foregroundStyle(.yellow)
+                Text("DATA-1").font(.system(size: 8, weight: .bold)).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var oledMeterAndPresets: some View {
+        VStack(spacing: 4) {
+            HStack {
+                Text("SIG").font(.system(size: 8, weight: .bold, design: .monospaced)).foregroundStyle(.secondary)
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        RoundedRectangle(cornerRadius: 2).fill(Color.gray.opacity(0.3))
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(LinearGradient(colors: [.green, .yellow, .red], startPoint: .leading, endPoint: .trailing))
+                            .frame(width: geo.size.width * 0.72)
+                    }
+                }
+                .frame(height: 6)
+                Text("S9+10dB").font(.system(size: 8, weight: .bold, design: .monospaced)).foregroundStyle(.yellow)
+            }
+
+            HStack(spacing: 8) {
+                HStack(spacing: 4) {
+                    Text("PRESETS:").font(.system(size: 8, weight: .bold)).foregroundStyle(.tertiary)
+                    bandPresetChip(label: "40m", active: false)
+                    bandPresetChip(label: "20m", active: true)
+                    bandPresetChip(label: "15m", active: false)
+                    bandPresetChip(label: "10m", active: false)
+                }
+                Spacer()
+                HStack(spacing: 3) {
+                    stepChip(label: "-10k")
+                    stepChip(label: "+10k")
+                    Text("PTT")
+                        .font(.system(size: 8, weight: .black, design: .monospaced))
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Color.red.opacity(0.25), in: RoundedRectangle(cornerRadius: 3))
+                        .foregroundStyle(.red)
+                }
+            }
+        }
+    }
+
+    private func bandPresetChip(label: String, active: Bool) -> some View {
+        Text(label)
+            .font(.system(size: 9, weight: .bold, design: .monospaced))
+            .padding(.horizontal, 4).padding(.vertical, 1)
+            .background(active ? Color.blue.opacity(0.4) : Color.gray.opacity(0.2), in: RoundedRectangle(cornerRadius: 3))
+            .foregroundStyle(active ? .white : .secondary)
+    }
+
+    private func stepChip(label: String) -> some View {
+        Text(label)
+            .font(.system(size: 8, weight: .bold, design: .monospaced))
+            .padding(2)
+            .background(Color.gray.opacity(0.2), in: RoundedRectangle(cornerRadius: 3))
+    }
+
+    private var cardsGrid: some View {
+        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+            featureCard(
+                icon: "network",
+                title: "Protocol Server Endpoints",
+                color: .blue,
+                lines: [
+                    "UDP 50001: Icom Control & Discovery",
+                    "UDP 50002: CI-V Registers Streaming",
+                    "UDP 50003: 48 kHz LPCM16 Audio",
+                    "TCP 4532: Hamlib rigctld (WSJT-X/JTDX)"
+                ]
+            )
+
+            featureCard(
+                icon: "waveform.path",
+                title: "Channel Physics Simulation",
+                color: .orange,
+                lines: [
+                    "AWGN SNR: Calibrated -30 dB to +30 dB",
+                    "Multipath Fading: Rayleigh & Rician",
+                    "Doppler: ±500 Hz shift, ±100 Hz/min drift",
+                    "Atmospheric Impulses: Poisson QRN bursts"
+                ]
+            )
+
+            featureCard(
+                icon: "waveform.badge.magnifyingglass",
+                title: "Synthetic Signal Studio",
+                color: .green,
+                lines: [
+                    "FT8 & FT4: CPFSK UTC-slot aligned",
+                    "Pileup Generator: 5-8 synthetic callers",
+                    "CW Beacon: 20 WPM raised-cosine (5ms)",
+                    "Custom Call Injection: Callsign / Grid / SNR"
+                ]
+            )
+
+            featureCard(
+                icon: "chart.bar.xaxis",
+                title: "Automated DSP Benchmarks",
+                color: .purple,
+                lines: [
+                    "Sensitivity Sweep: +6 dB down to -24 dB",
+                    "Decode Floor: Calculated via FT8Codec",
+                    "Loopback Test: 1-Click YAAM client link",
+                    "Report Export: Markdown & JSON logs"
+                ]
+            )
+        }
+    }
+
+    private func featureCard(icon: String, title: String, color: Color, lines: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 5) {
+                Image(systemName: icon).font(.caption).foregroundStyle(color)
+                Text(title).font(.system(size: 10, weight: .bold)).foregroundStyle(.primary)
+            }
+            Divider().opacity(0.5)
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(lines, id: \.self) { line in
+                    HStack(alignment: .top, spacing: 3) {
+                        Text("•").font(.system(size: 8)).foregroundStyle(color)
+                        Text(line).font(.system(size: 9, design: .monospaced)).foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+        .padding(8)
+        .background(color.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(color.opacity(0.2), lineWidth: 1))
     }
 }

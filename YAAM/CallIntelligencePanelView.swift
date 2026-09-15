@@ -16,6 +16,7 @@ struct CallIntelligencePanelView: View {
 
     @State private var selectedTab: IntelligenceTab = .tactical
     @State private var isRotatorTriggered: Bool = false
+    @State private var isShowingVisualQSLInspector: Bool = false
 
     enum IntelligenceTab: String, CaseIterable, Identifiable {
         case tactical = "Tactical"
@@ -46,6 +47,11 @@ struct CallIntelligencePanelView: View {
             }
         }
         .background(Color(nsColor: .controlBackgroundColor).opacity(0.55))
+        .sheet(isPresented: $isShowingVisualQSLInspector) {
+            if let report = intelligenceEngine.activeReport {
+                VisualQSLInspectorSheet(report: report)
+            }
+        }
     }
 
     // MARK: - Active Callsign Intelligence View
@@ -105,9 +111,15 @@ struct CallIntelligencePanelView: View {
     private func headerIdentityCard(report: CallIntelligenceReport) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .center, spacing: 10) {
-                Text(report.dxcc.flagEmoji)
-                    .font(.system(size: 32))
-                    .shadow(radius: 1)
+                if let img = report.imageURL, !img.isEmpty {
+                    VisualQSLThumbnailView(urlString: img, callsign: report.callsign, size: 44) {
+                        isShowingVisualQSLInspector = true
+                    }
+                } else {
+                    Text(report.dxcc.flagEmoji)
+                        .font(.system(size: 32))
+                        .shadow(radius: 1)
+                }
 
                 VStack(alignment: .leading, spacing: 1) {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -121,6 +133,15 @@ struct CallIntelligencePanelView: View {
                                 .foregroundStyle(.blue)
                                 .help("Verified in Master.scp database")
                         }
+
+                        if let lic = report.licenseClass {
+                            Text(lic.uppercased())
+                                .font(.system(size: 8.5, weight: .heavy))
+                                .padding(.horizontal, 5).padding(.vertical, 1.5)
+                                .background(Color.purple.opacity(0.18), in: Capsule())
+                                .foregroundStyle(.purple)
+                                .help("License Class: \(lic)")
+                        }
                     }
 
                     if !report.operatorName.isEmpty {
@@ -130,10 +151,15 @@ struct CallIntelligencePanelView: View {
                             .lineLimit(1)
                     }
 
-                    Text("\(report.dxcc.entityName) · \(report.continent) · CQ \(report.cqZone) · ITU \(report.ituZone)")
-                        .font(.system(size: 10.5))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                    HStack(spacing: 4) {
+                        if report.imageURL != nil {
+                            Text(report.dxcc.flagEmoji)
+                        }
+                        Text("\(report.dxcc.entityName) · \(report.continent) · CQ \(report.cqZone) · ITU \(report.ituZone)")
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                 }
 
                 Spacer()
@@ -144,24 +170,59 @@ struct CallIntelligencePanelView: View {
                 }
             }
 
-            // Location details: QTH & Grid
-            if !report.qth.isEmpty || !report.grid.isEmpty {
-                HStack(spacing: 8) {
-                    if !report.qth.isEmpty {
-                        Label(report.qth, systemImage: "mappin.and.ellipse")
-                            .font(.system(size: 10.5))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
+            // Location details: QTH & Grid & Geographic / Award Enrichment
+            HStack(spacing: 6) {
+                if !report.qth.isEmpty {
+                    Label(report.qth, systemImage: "mappin.and.ellipse")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
 
-                    if !report.grid.isEmpty {
-                        Text(report.grid)
-                            .font(.system(size: 10, weight: .bold, design: .monospaced))
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 1.5)
-                            .background(Color.blue.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
-                            .foregroundStyle(.blue)
+                if !report.grid.isEmpty {
+                    Text(report.grid)
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1.5)
+                        .background(Color.blue.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
+                        .foregroundStyle(.blue)
+                }
+
+                if let state = report.usState {
+                    Text(state)
+                        .font(.system(size: 9.5, weight: .bold))
+                        .padding(.horizontal, 4.5).padding(.vertical, 1.5)
+                        .background(Color.cyan.opacity(0.14), in: RoundedRectangle(cornerRadius: 3))
+                        .foregroundStyle(.cyan)
+                        .help("US State: \(state)")
+                }
+
+                if let county = report.usCounty {
+                    Text("\(county) Co.")
+                        .font(.system(size: 9.5, weight: .bold))
+                        .padding(.horizontal, 4.5).padding(.vertical, 1.5)
+                        .background(Color.teal.opacity(0.14), in: RoundedRectangle(cornerRadius: 3))
+                        .foregroundStyle(.teal)
+                        .help("US County: \(county)")
+                }
+
+                if let iota = report.iotaReference {
+                    Text("🏝️ \(iota)")
+                        .font(.system(size: 9.5, weight: .bold, design: .monospaced))
+                        .padding(.horizontal, 4.5).padding(.vertical, 1.5)
+                        .background(Color.mint.opacity(0.14), in: RoundedRectangle(cornerRadius: 3))
+                        .foregroundStyle(.mint)
+                        .help("Islands On The Air (IOTA): \(iota)")
+                }
+
+                if report.profileViews > 0 {
+                    HStack(spacing: 2) {
+                        Image(systemName: "eye.fill").font(.system(size: 8))
+                        Text("\(report.profileViews.formatted())")
+                            .font(.system(size: 9, weight: .bold, design: .monospaced))
                     }
+                    .foregroundStyle(.orange)
+                    .help("\(report.profileViews.formatted()) QRZ Profile Views")
                 }
             }
 
@@ -217,6 +278,19 @@ struct CallIntelligencePanelView: View {
         .padding(.vertical, 3)
         .background(tint.opacity(0.18), in: Capsule())
         .foregroundStyle(tint)
+    }
+
+    private func channelDeliveryTag(title: String, active: Bool, color: Color, icon: String) -> some View {
+        HStack(spacing: 3) {
+            Image(systemName: active ? icon : "xmark.circle")
+                .font(.system(size: 8.5))
+            Text(title)
+                .font(.system(size: 9, weight: .bold))
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2.5)
+        .background(active ? color.opacity(0.15) : Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 4))
+        .foregroundStyle(active ? color : .secondary)
     }
 
     // MARK: - Award Badges Strip
@@ -309,6 +383,26 @@ struct CallIntelligencePanelView: View {
             }
             .buttonStyle(.plain)
             .help("Open \(report.callsign) profile on HamQTH.com")
+
+            // QSL Photo & Route Inspector Button
+            if report.imageURL != nil || report.qslManager != nil || (report.lookupData?.address1.isEmpty == false) {
+                Button {
+                    isShowingVisualQSLInspector = true
+                } label: {
+                    HStack(spacing: 3) {
+                        Image(systemName: "photo.artframe")
+                            .font(.system(size: 9.5))
+                        Text(report.imageURL != nil ? "QSL Photo" : "QSL Route")
+                            .font(.system(size: 10.5, weight: .semibold))
+                    }
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 4)
+                    .background(Color.orange.opacity(0.14), in: RoundedRectangle(cornerRadius: 6))
+                    .foregroundStyle(.orange)
+                }
+                .buttonStyle(.plain)
+                .help("Inspect \(report.callsign)'s QSL card, shack photo & routing intelligence")
+            }
 
             Spacer()
 
@@ -429,8 +523,11 @@ struct CallIntelligencePanelView: View {
             // Live HF Propagation & MUF Radar Card
             propagationRadarCard(report: report)
 
+            // Pileup Sniper & Split QSX Radar Card
+            pileupSniperRadarCard(report: report)
+
             // QSL & LoTW Intelligence Card
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Text("QSL & LOTW INTELLIGENCE")
                         .font(.system(size: 9, weight: .bold))
@@ -443,6 +540,41 @@ struct CallIntelligencePanelView: View {
                             .font(.system(size: 9.5, weight: .bold))
                     }
                     .foregroundStyle(report.qslLikelihood.color)
+                }
+
+                // Explicit QSL Manager Banner (if available)
+                if let mgr = report.qslManager {
+                    HStack(spacing: 8) {
+                        Image(systemName: "person.crop.rectangle.stack.fill")
+                            .font(.system(size: 13))
+                            .foregroundStyle(.yellow)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("QSL MANAGER / ROUTE:")
+                                .font(.system(size: 8, weight: .bold))
+                                .foregroundStyle(.secondary)
+                            Text(mgr)
+                                .font(.system(size: 12, weight: .black, design: .monospaced))
+                                .foregroundStyle(.yellow)
+                        }
+                        Spacer()
+                        Button {
+                            isShowingVisualQSLInspector = true
+                        } label: {
+                            HStack(spacing: 3) {
+                                Image(systemName: "envelope.fill")
+                                    .font(.system(size: 8.5))
+                                Text("Mailing Info")
+                                    .font(.system(size: 9, weight: .bold))
+                            }
+                            .padding(.horizontal, 6).padding(.vertical, 3)
+                            .background(Color.yellow.opacity(0.18), in: Capsule())
+                            .foregroundStyle(.yellow)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(8)
+                    .background(Color.yellow.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.yellow.opacity(0.25), lineWidth: 1))
                 }
 
                 HStack(spacing: 8) {
@@ -458,6 +590,47 @@ struct CallIntelligencePanelView: View {
                         Text("Recommended Route: \(report.recommendedQSLRoute)")
                             .font(.system(size: 9.5))
                             .foregroundStyle(.secondary)
+                    }
+                }
+
+                // Delivery Channel Badges
+                HStack(spacing: 6) {
+                    channelDeliveryTag(
+                        title: "LoTW",
+                        active: report.isLoTWUser || report.lookupData?.qslViaLotw == true,
+                        color: .green,
+                        icon: "checkmark.seal.fill"
+                    )
+                    channelDeliveryTag(
+                        title: "eQSL",
+                        active: report.lookupData?.qslViaEqsl == true,
+                        color: .blue,
+                        icon: "envelope.fill"
+                    )
+                    channelDeliveryTag(
+                        title: "Direct / Bureau",
+                        active: report.lookupData?.qslViaMail == true || report.qslManager != nil,
+                        color: .orange,
+                        icon: "paperplane.fill"
+                    )
+
+                    Spacer()
+
+                    if report.imageURL != nil {
+                        Button {
+                            isShowingVisualQSLInspector = true
+                        } label: {
+                            HStack(spacing: 3) {
+                                Image(systemName: "photo.fill")
+                                    .font(.system(size: 8.5))
+                                Text("QSL Card")
+                                    .font(.system(size: 9, weight: .bold))
+                            }
+                            .padding(.horizontal, 6).padding(.vertical, 3)
+                            .background(Color.accentColor.opacity(0.15), in: Capsule())
+                            .foregroundStyle(Color.accentColor)
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
 
@@ -621,6 +794,176 @@ struct CallIntelligencePanelView: View {
             }
             .padding(10)
             .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+        }
+    }
+
+    // MARK: - Pileup Sniper & Split QSX Radar Card
+
+    @ViewBuilder
+    private func pileupSniperRadarCard(report: CallIntelligenceReport) -> some View {
+        if let sniper = report.pileupSniper, sniper.isSplit {
+            VStack(alignment: .leading, spacing: 8) {
+                // Header Row with glowing Scope Badge
+                HStack(alignment: .center) {
+                    Label("PILEUP SNIPER & SPLIT RADAR", systemImage: "scope")
+                        .font(.system(size: 9.5, weight: .black, design: .monospaced))
+                        .foregroundStyle(Color.yellow)
+
+                    Spacer()
+
+                    // Pattern & Confidence Badge
+                    HStack(spacing: 4) {
+                        Image(systemName: sniper.pattern.iconName)
+                            .font(.system(size: 8.5))
+                        Text("\(sniper.pattern.rawValue.uppercased())")
+                            .font(.system(size: 8.5, weight: .bold, design: .monospaced))
+                        Text(String(format: "(%.0f%%)", sniper.confidence * 100))
+                            .font(.system(size: 7.5, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2.5)
+                    .background(sniper.pattern.badgeColor.opacity(0.15), in: Capsule())
+                    .overlay(Capsule().stroke(sniper.pattern.badgeColor.opacity(0.35), lineWidth: 1))
+                    .foregroundStyle(sniper.pattern.badgeColor)
+                }
+
+                // Dual VFO Alignment Grid (RX Base vs Sniper Target)
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("VFO-A (DX RX)")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(.secondary)
+                        Text(String(format: "%.3f MHz", sniper.dxRxFrequencyKHz / 1000.0))
+                            .font(.system(size: 13, weight: .heavy, design: .monospaced))
+                            .foregroundStyle(.cyan)
+                    }
+
+                    Image(systemName: "arrow.right.circle.fill")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary.opacity(0.6))
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 4) {
+                            Text("TARGET VFO-B (TX)")
+                                .font(.system(size: 8, weight: .bold))
+                                .foregroundStyle(.secondary)
+                            Text(sniper.offsetSignFormatted)
+                                .font(.system(size: 8, weight: .black, design: .monospaced))
+                                .foregroundStyle(Color.yellow)
+                        }
+                        Text(sniper.frequencyFormattedMHz)
+                            .font(.system(size: 13, weight: .heavy, design: .monospaced))
+                            .foregroundStyle(Color.yellow)
+                    }
+
+                    Spacer()
+
+                    // Quick Arm Button
+                    Button {
+                        BandmapEngine.shared.applySniperSolution(sniper)
+                        let hz = UInt64(sniper.recommendedTxKHz * 1000.0)
+                        appState.rigControlClient.setFrequencyHz(hz)
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "scope")
+                                .font(.system(size: 9, weight: .bold))
+                            Text("ARM VFO-B")
+                                .font(.system(size: 9.5, weight: .black, design: .monospaced))
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .background(Color.yellow, in: RoundedRectangle(cornerRadius: 6))
+                        .foregroundStyle(.black)
+                        .shadow(color: Color.yellow.opacity(0.4), radius: 3)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Arm VFO-B to Sniper Target (\(sniper.frequencyFormattedMHz)) and activate Split Mode")
+                }
+
+                // Interactive Split Spread Track & Hit Distribution
+                if let spread = sniper.splitSpreadOffsetKHz {
+                    VStack(alignment: .leading, spacing: 4) {
+                        let minOff = spread.lowerBound
+                        let maxOff = spread.upperBound
+                        let span = max(1.0, maxOff - minOff)
+
+                        GeometryReader { geo in
+                            let width = geo.size.width
+
+                            ZStack(alignment: .leading) {
+                                // Background listening track
+                                RoundedRectangle(cornerRadius: 3)
+                                    .fill(Color.secondary.opacity(0.15))
+                                    .frame(height: 12)
+
+                                // Active listening spread glow
+                                RoundedRectangle(cornerRadius: 3)
+                                    .fill(Color.yellow.opacity(0.12))
+                                    .frame(height: 12)
+                                    .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color.yellow.opacity(0.3), lineWidth: 0.8))
+
+                                // Recent hit points (dots)
+                                ForEach(sniper.recentHits) { hit in
+                                    let xFraction = (hit.offsetKHz - minOff) / span
+                                    let clampedX = max(0.0, min(1.0, xFraction))
+                                    let xPos = clampedX * (width - 12) + 6
+
+                                    Circle()
+                                        .fill(Color.orange.opacity(hit.weight))
+                                        .frame(width: 5, height: 5)
+                                        .offset(x: xPos - 2.5)
+                                        .help(String(format: "WKD: %.1f kHz by %@ (%@)", hit.frequencyKHz, hit.spotter, hit.comment))
+                                }
+
+                                // Sniper Recommended Target Reticle (Diamond / Bullseye)
+                                let targetFraction = (sniper.recommendedOffsetKHz - minOff) / span
+                                let targetX = max(0.0, min(1.0, targetFraction)) * (width - 16) + 8
+
+                                ZStack {
+                                    Circle()
+                                        .fill(Color.yellow)
+                                        .frame(width: 9, height: 9)
+                                    Circle()
+                                        .stroke(Color.black, lineWidth: 1.5)
+                                        .frame(width: 9, height: 9)
+                                }
+                                .shadow(color: Color.yellow, radius: 4)
+                                .offset(x: targetX - 4.5)
+                            }
+                        }
+                        .frame(height: 14)
+
+                        // Spread Axis Labels
+                        HStack {
+                            Text(String(format: "%@%.0f kHz", minOff >= 0 ? "+" : "", minOff))
+                            Spacer()
+                            Text("TARGET: \(sniper.offsetSignFormatted)")
+                                .foregroundStyle(Color.yellow)
+                            Spacer()
+                            Text(String(format: "%@%.0f kHz", maxOff >= 0 ? "+" : "", maxOff))
+                        }
+                        .font(.system(size: 7.5, weight: .bold, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                    }
+                }
+
+                // Tactical Strategy Advice
+                HStack(alignment: .top, spacing: 5) {
+                    Image(systemName: "lightbulb.fill")
+                        .font(.system(size: 8.5))
+                        .foregroundStyle(Color.yellow)
+                        .padding(.top, 1)
+
+                    Text(sniper.tacticalAdvice)
+                        .font(.system(size: 8.5, weight: .medium))
+                        .foregroundStyle(.primary.opacity(0.85))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(10)
+            .background(Color.yellow.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.yellow.opacity(0.25), lineWidth: 1))
         }
     }
 

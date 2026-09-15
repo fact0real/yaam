@@ -1592,15 +1592,32 @@ public struct AzimuthalAndFlatMapCanvas: View {
         let isGreyline = solarStatus.isGreylineActive
         let ductPercent = Int(solarStatus.lowBandDuctingEfficiency * 100)
 
+        let circleFill: Color = isGreyline
+            ? Color(red: 1.0, green: 0.78, blue: 0.25).opacity(0.25)
+            : (solarStatus.elevationDeg > 0 ? Color.yellow.opacity(0.20) : Color.indigo.opacity(0.20))
+
+        let titleText: String = isGreyline ? "GREYLINE ACTIVE" : solarStatus.illumination.rawValue.uppercased()
+        let titleColor: Color = isGreyline
+            ? Color(red: 1.0, green: 0.82, blue: 0.30)
+            : (currentTheme == .classicLight ? Color.primary : Color.white)
+
+        let bgFill: Color = (currentTheme == .classicLight)
+            ? Color.white.opacity(0.88)
+            : Color(red: 0.06, green: 0.08, blue: 0.14).opacity(0.85)
+
+        let strokeColor: Color = isGreyline
+            ? Color(red: 1.0, green: 0.75, blue: 0.25).opacity(0.70)
+            : (currentTheme == .classicLight ? Color.gray.opacity(0.30) : Color.white.opacity(0.15))
+
+        let shadowColor: Color = isGreyline
+            ? Color(red: 1.0, green: 0.75, blue: 0.20).opacity(0.35)
+            : Color.black.opacity(0.25)
+
         return HStack(spacing: 8) {
             // Solar State Icon & Pulse Glow
             ZStack {
                 Circle()
-                    .fill(
-                        isGreyline
-                            ? Color(red: 1.0, green: 0.78, blue: 0.25).opacity(0.25)
-                            : (solarStatus.elevationDeg > 0 ? Color.yellow.opacity(0.20) : Color.indigo.opacity(0.20))
-                    )
+                    .fill(circleFill)
                     .frame(width: 26, height: 26)
 
                 if isGreyline {
@@ -1617,9 +1634,9 @@ public struct AzimuthalAndFlatMapCanvas: View {
 
             VStack(alignment: .leading, spacing: 1.5) {
                 HStack(spacing: 5) {
-                    Text(isGreyline ? "GREYLINE ACTIVE" : solarStatus.illumination.rawValue.uppercased())
+                    Text(titleText)
                         .font(.system(size: 9.5, weight: .bold, design: .monospaced))
-                        .foregroundColor(isGreyline ? Color(red: 1.0, green: 0.82, blue: 0.30) : (currentTheme == .classicLight ? Color.primary : Color.white))
+                        .foregroundColor(titleColor)
 
                     Text(String(format: "%+.1f°", solarStatus.elevationDeg))
                         .font(.system(size: 9, weight: .semibold, design: .monospaced))
@@ -1652,18 +1669,13 @@ public struct AzimuthalAndFlatMapCanvas: View {
         .padding(.vertical, 6)
         .background(
             RoundedRectangle(cornerRadius: 8)
-                .fill(currentTheme == .classicLight ? Color.white.opacity(0.88) : Color(red: 0.06, green: 0.08, blue: 0.14).opacity(0.85))
+                .fill(bgFill)
                 .overlay(
                     RoundedRectangle(cornerRadius: 8)
-                        .stroke(
-                            isGreyline
-                                ? Color(red: 1.0, green: 0.75, blue: 0.25).opacity(0.70)
-                                : (currentTheme == .classicLight ? Color.gray.opacity(0.30) : Color.white.opacity(0.15)),
-                            lineWidth: isGreyline ? 1.2 : 0.8
-                        )
+                        .stroke(strokeColor, lineWidth: isGreyline ? 1.2 : 0.8)
                 )
                 .shadow(
-                    color: isGreyline ? Color(red: 1.0, green: 0.75, blue: 0.20).opacity(0.35) : Color.black.opacity(0.25),
+                    color: shadowColor,
                     radius: isGreyline ? 6 : 4,
                     x: 0,
                     y: 2

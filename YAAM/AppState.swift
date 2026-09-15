@@ -35,6 +35,22 @@ enum RankHistoryMetric: String, CaseIterable, Identifiable {
     }
 }
 
+enum NationalLeaderboardTab: String, CaseIterable, Identifiable {
+    case headToHead = "Head-to-Head & Radar"
+    case national = "National Standings"
+    case roadmap = "Climb Roadmap"
+
+    var id: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .headToHead: return "swords"
+        case .national: return "flag.fill"
+        case .roadmap: return "chart.line.uptrend.xyaxis"
+        }
+    }
+}
+
 struct QRZRankHistorySnapshot: Identifiable, Codable {
     let date: Date
     let callsign: String
@@ -1935,6 +1951,19 @@ class AppState: NSObject, ObservableObject {
     @Published var isRefreshingRankHistory: Bool = false
     @Published var rankHistoryStatus: String = ""
     @Published var rankServiceStatus: String = ""
+    @Published var qrzRankCountries: [QRZCountrySummary] = []
+    @Published var selectedNationalCountryIso: String = "ir"
+    @Published var selectedNationalCategory: String = "qso"
+    @Published var selectedNationalDepth: Int = 10
+    @Published var nationalLeaderboard: QRZCountryLeaderboardResponse? = nil
+    @Published var isFetchingNationalLeaderboard: Bool = false
+    @Published var worldChampions: [QRZWorldChampionItem] = []
+    @Published var isFetchingWorldChampions: Bool = false
+    @Published var stationAnalysis: QRZRankAnalysisResponse? = nil
+    @Published var isFetchingStationAnalysis: Bool = false
+    @Published var inspectedStationAnalysis: QRZRankAnalysisResponse? = nil
+    @Published var isFetchingInspectedAnalysis: Bool = false
+    @Published var nationalLeaderboardTab: NationalLeaderboardTab = .headToHead
     private(set) var rankDailyQuota = QRZRankDailyQuota()
     private(set) var rankServerQuota: QRZRankAPIQuota?
     @Published var isDailyRankBackfillRunning: Bool = false
@@ -2048,6 +2077,7 @@ class AppState: NSObject, ObservableObject {
     let icomNetworkRadio = IcomNetworkRadio()
     let ft8Engine = FT8EngineService()
     let digitalModemEngine = DigitalModemEngine.shared
+    let transceiverEmulator = NetworkTransceiverEmulatorEngine()
     var operatorFeatureCancellables: Set<AnyCancellable> = []
     var cloudSyncTimer: Timer?
 
@@ -2067,8 +2097,11 @@ class AppState: NSObject, ObservableObject {
     private var rankCandidateCacheRevision = -1
     private var rankCandidateCacheAvailable = 0
     private var cachedTodayConfirmedRecords: [QSORecordModel]?
+    private var cachedTodayConfirmedIDs: Set<UUID>?
     private var cachedTodayConfirmedRevision = -1
     private var cachedTodayConfirmedDay = ""
+    private var cachedAllNewlyConfirmedIDs: Set<UUID>?
+    private var cachedNewlyConfirmedRevision = -1
     @Published public private(set) var cachedStatisticsSnapshot: StatisticsSnapshot?
     public private(set) var cachedStatisticsRevision = -1
     private var cachedStatisticsRankFingerprint = ""
@@ -2083,6 +2116,8 @@ class AppState: NSObject, ObservableObject {
             availableCountriesCache = nil
             confirmationOpportunityIndexCache = nil
             cachedTodayConfirmedRecords = nil
+            cachedTodayConfirmedIDs = nil
+            cachedAllNewlyConfirmedIDs = nil
             cachedStatisticsSnapshot = nil
             cachedStatisticsRevision = -1
             cachedStatisticsRankFingerprint = ""
@@ -2768,8 +2803,21 @@ class AppState: NSObject, ObservableObject {
         Task { @MainActor in
             let result = await QRZAwardsScraper.shared.fetchAwards(username: username, password: password)
             if !result.awards.isEmpty {
-                self.qrzAwardSummaries = result.awards
-                if let data = try? JSONEncoder().encode(result.awards) {
+                if self.qrzAwardSummaries.isEmpty {
+                    self.qrzAwardSummaries = result.awards
+                } else {
+                    let oldMap = Dictionary(uniqueKeysWithValues: self.qrzAwardSummaries.map { ($0.id, $0) })
+                    var merged = [QRZAwardSummary]()
+                    for newAward in result.awards {
+                        if let oldAward = oldMap[newAward.id], !newAward.progressAvailable, oldAward.progressAvailable {
+                            merged.append(oldAward)
+                        } else {
+                            merged.append(newAward)
+                        }
+                    }
+                    self.qrzAwardSummaries = merged
+                }
+                if let data = try? JSONEncoder().encode(self.qrzAwardSummaries) {
                     UserDefaults.standard.set(data, forKey: "cachedQRZAwards")
                 }
             }
@@ -2992,9 +3040,147 @@ class AppState: NSObject, ObservableObject {
                 if case .success(let response) = result {
                     self?.ownerRankData = response
                     self?.saveRankResponseSnapshot(response)
+                    self?.fetchStationAnalysis(callsign: ownerCall)
                 }
             }
         }
+    }
+
+    func fetchQRZRankCountries() {
+        guard qrzRankCountries.isEmpty else { return }
+        Task { @MainActor in
+            do {
+                let token = rankServiceCredentials().token
+                let list = try await QRZRankService.shared.fetchCountries(
+                    token: token.isEmpty ? nil : token,
+                    userAgent: "YAAM-macOS/\(currentVersion)"
+                )
+                self.qrzRankCountries = list
+            } catch {
+                self.appendLog("Failed to fetch available QRZ countries: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    func fetchNationalLeaderboard(countryIso: String? = nil, category: String? = nil) {
+        let iso = (countryIso ?? selectedNationalCountryIso).trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let cat = category ?? selectedNationalCategory
+        selectedNationalCountryIso = iso
+        selectedNationalCategory = cat
+
+        isFetchingNationalLeaderboard = true
+        Task { @MainActor in
+            do {
+                let token = rankServiceCredentials().token
+                let resp = try await QRZRankService.shared.fetchCountryLeaderboard(
+                    countryIso: iso,
+                    category: cat,
+                    limit: 50,
+                    token: token.isEmpty ? nil : token,
+                    userAgent: "YAAM-macOS/\(currentVersion)"
+                )
+                self.nationalLeaderboard = resp
+                self.isFetchingNationalLeaderboard = false
+            } catch {
+                self.isFetchingNationalLeaderboard = false
+                self.appendLog("Failed to fetch national leaderboard: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    func fetchStationAnalysis(callsign: String? = nil) {
+        let targetCall = (callsign ?? currentStationCallsign).trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard !targetCall.isEmpty else { return }
+
+        isFetchingStationAnalysis = true
+        Task { @MainActor in
+            do {
+                let token = rankServiceCredentials().token
+                let resp = try await QRZRankService.shared.fetchStationAnalysis(
+                    callsign: targetCall,
+                    token: token.isEmpty ? nil : token,
+                    userAgent: "YAAM-macOS/\(currentVersion)"
+                )
+                self.stationAnalysis = resp
+                self.isFetchingStationAnalysis = false
+            } catch {
+                self.isFetchingStationAnalysis = false
+                self.appendLog("Failed to fetch station analysis for \(targetCall): \(error.localizedDescription)")
+            }
+        }
+    }
+
+    func fetchWorldChampions() {
+        isFetchingWorldChampions = true
+        Task { @MainActor in
+            do {
+                let token = rankServiceCredentials().token
+                let list = try await QRZRankService.shared.fetchWorldChampions(
+                    token: token.isEmpty ? nil : token,
+                    userAgent: "YAAM-macOS/\(currentVersion)"
+                )
+                self.worldChampions = list
+                self.isFetchingWorldChampions = false
+            } catch {
+                self.isFetchingWorldChampions = false
+                self.appendLog("Failed to fetch world champions: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    func fetchInspectedStationAnalysis(callsign: String) {
+        let target = callsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard !target.isEmpty else { return }
+        isFetchingInspectedAnalysis = true
+        Task { @MainActor in
+            do {
+                let token = rankServiceCredentials().token
+                let resp = try await QRZRankService.shared.fetchStationAnalysis(
+                    callsign: target,
+                    token: token.isEmpty ? nil : token,
+                    userAgent: "YAAM-macOS/\(currentVersion)"
+                )
+                self.inspectedStationAnalysis = resp
+                self.isFetchingInspectedAnalysis = false
+            } catch {
+                self.isFetchingInspectedAnalysis = false
+                self.appendLog("Failed to fetch analysis for \(target): \(error.localizedDescription)")
+            }
+        }
+    }
+
+    func simulateRankClimb(for callsign: String, additionalQso: Int) -> RankSimulationResult? {
+        guard let items = nationalLeaderboard?.leaderboard, !items.isEmpty else { return nil }
+        let targetCall = callsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let currentItem = items.first { $0.callsign.uppercased() == targetCall }
+        let origScore = currentItem?.score ?? 0
+        let origRank = currentItem?.rank
+        let simulatedScore = origScore + additionalQso
+
+        let stationsAhead = items.filter { item in
+            item.callsign.uppercased() != targetCall && item.score > simulatedScore
+        }
+        let simulatedRank = stationsAhead.count + 1
+
+        let leapfrogged = items.filter { item in
+            item.callsign.uppercased() != targetCall &&
+            item.score <= simulatedScore &&
+            item.score >= origScore
+        }.map { $0.callsign }
+
+        let nextAbove = stationsAhead.min { $0.score < $1.score }
+
+        return RankSimulationResult(
+            callsign: targetCall,
+            originalScore: origScore,
+            additionalQso: additionalQso,
+            simulatedScore: simulatedScore,
+            originalRank: origRank,
+            simulatedRank: simulatedRank,
+            leapfroggedCallsigns: leapfrogged,
+            nextStationAboveCallsign: nextAbove?.callsign,
+            nextStationGap: nextAbove.map { $0.score - simulatedScore }
+        )
     }
 
     func addTrackedRankCallsigns(_ callsigns: [String]) {
@@ -3933,6 +4119,17 @@ class AppState: NSObject, ObservableObject {
                                 self.autoSaveActiveWorkspace(
                                     replaceMissingRecords: mergeResult.removedDuplicates > 0
                                 )
+                            }
+
+                            if !mergeResult.addedRecords.isEmpty && ZeroClickCloudUploadDaemon.shared.isEnabled {
+                                for newRecord in mergeResult.addedRecords {
+                                    ZeroClickCloudUploadDaemon.shared.dispatch(
+                                        record: newRecord,
+                                        stationID: self.activeStationProfileID?.uuidString,
+                                        stationLocation: self.activeStationProfile?.lotwStationLocation,
+                                        qrzKeyOverride: self.activeQRZAPIKey
+                                    )
+                                }
                             }
                             self.isLoading = false
                             var details = "SDR-Control sync complete: \(summary.added) new QSOs added, \(summary.updated) existing QSOs enriched, \(summary.skipped) duplicates skipped"
@@ -6970,20 +7167,57 @@ class AppState: NSObject, ObservableObject {
     }
 
     // MARK: - Newly Confirmed Management
-    func isNewlyConfirmed(record: QSORecordModel) -> Bool {
-        if newlyConfirmedRecordIDs.contains(record.id) { return true }
-        if record["APP_YAAM_NEW_CONFIRMED"] == "Y" { return true }
-        if let confDate = record.latestConfirmationDate {
-            let cutoff = Calendar.current.date(byAdding: .day, value: -14, to: Date()) ?? Date().addingTimeInterval(-14 * 86400)
-            if confDate >= cutoff && confDate <= Date().addingTimeInterval(86400) {
-                return true
+    var allNewlyConfirmedRecordIDs: Set<UUID> {
+        if cachedNewlyConfirmedRevision == qsoRecordsRevision,
+           let cached = cachedAllNewlyConfirmedIDs {
+            return cached
+        }
+
+        var ids = newlyConfirmedRecordIDs
+        let now = Date()
+        let cutoff = now.addingTimeInterval(-14 * 86400)
+        let cutoffStr = Self.adifDateFormatter.string(from: cutoff)
+        let futureLimitStr = Self.adifDateFormatter.string(from: now.addingTimeInterval(86400))
+
+        let dateFields = [
+            "APP_QRZLOG_QSLDATE", "QRZLOG_QSLRDATE", "APP_QRZLOG_QSLRDATE",
+            "LOTW_QSLRDATE", "APP_LOTW_QSLRDATE", "EQSL_QSLRDATE",
+            "APP_EQSL_QSLRDATE", "QSLRDATE"
+        ]
+
+        for record in qsoRecords {
+            if ids.contains(record.id) { continue }
+            if record["APP_YAAM_NEW_CONFIRMED"] == "Y" {
+                ids.insert(record.id)
+                continue
+            }
+            for field in dateFields {
+                if let val = record.fields[field]?.trimmingCharacters(in: .whitespacesAndNewlines), val.count >= 8 {
+                    let dStr = String(val.prefix(8))
+                    if dStr >= cutoffStr && dStr <= futureLimitStr {
+                        ids.insert(record.id)
+                        break
+                    }
+                }
             }
         }
-        return false
+
+        cachedAllNewlyConfirmedIDs = ids
+        cachedNewlyConfirmedRevision = qsoRecordsRevision
+        return ids
+    }
+
+    func isNewlyConfirmed(recordID: UUID) -> Bool {
+        allNewlyConfirmedRecordIDs.contains(recordID)
+    }
+
+    func isNewlyConfirmed(record: QSORecordModel) -> Bool {
+        isNewlyConfirmed(recordID: record.id)
     }
 
     func markRecordAsNewlyConfirmed(id: UUID) {
         newlyConfirmedRecordIDs.insert(id)
+        cachedAllNewlyConfirmedIDs?.insert(id)
         if let idx = qsoRecords.firstIndex(where: { $0.id == id }) {
             qsoRecords[idx].fields["APP_YAAM_NEW_CONFIRMED"] = "Y"
         }
@@ -6993,6 +7227,7 @@ class AppState: NSObject, ObservableObject {
 
     func unmarkRecordAsNewlyConfirmed(id: UUID) {
         newlyConfirmedRecordIDs.remove(id)
+        cachedAllNewlyConfirmedIDs?.remove(id)
         if let idx = qsoRecords.firstIndex(where: { $0.id == id }) {
             qsoRecords[idx].fields.removeValue(forKey: "APP_YAAM_NEW_CONFIRMED")
         }
@@ -7002,6 +7237,7 @@ class AppState: NSObject, ObservableObject {
 
     func clearAllNewlyConfirmed() {
         newlyConfirmedRecordIDs.removeAll()
+        cachedAllNewlyConfirmedIDs = nil
         for idx in qsoRecords.indices {
             qsoRecords[idx].fields.removeValue(forKey: "APP_YAAM_NEW_CONFIRMED")
         }
@@ -7010,7 +7246,7 @@ class AppState: NSObject, ObservableObject {
     }
 
     var newlyConfirmedCount: Int {
-        qsoRecords.filter { isNewlyConfirmed(record: $0) }.count
+        allNewlyConfirmedRecordIDs.count
     }
 
     // MARK: - Today's Confirmed QSOs
@@ -7044,11 +7280,30 @@ class AppState: NSObject, ObservableObject {
         return false
     }
 
-    func isTodayConfirmed(record: QSORecordModel) -> Bool {
+    var todayConfirmedRecordIDs: Set<UUID> {
         let now = Date()
         let todayLocal = Self.adifDateFormatter.string(from: now)
         let todayUTC = Self.todayUTCFormatter.string(from: now)
-        return isTodayConfirmed(record: record, todayLocal: todayLocal, todayUTC: todayUTC)
+        let cacheKey = "\(todayLocal)_\(todayUTC)"
+
+        if cachedTodayConfirmedRevision == qsoRecordsRevision,
+           cachedTodayConfirmedDay == cacheKey,
+           let cached = cachedTodayConfirmedIDs {
+            return cached
+        }
+
+        let filtered = todayConfirmedRecords
+        let ids = Set(filtered.map(\.id))
+        cachedTodayConfirmedIDs = ids
+        return ids
+    }
+
+    func isTodayConfirmed(recordID: UUID) -> Bool {
+        todayConfirmedRecordIDs.contains(recordID)
+    }
+
+    func isTodayConfirmed(record: QSORecordModel) -> Bool {
+        isTodayConfirmed(recordID: record.id)
     }
 
     var todayConfirmedCount: Int {
@@ -7073,6 +7328,7 @@ class AppState: NSObject, ObservableObject {
         cachedTodayConfirmedRecords = filtered
         cachedTodayConfirmedRevision = qsoRecordsRevision
         cachedTodayConfirmedDay = cacheKey
+        cachedTodayConfirmedIDs = Set(filtered.map(\.id))
         return filtered
     }
 
@@ -7126,6 +7382,7 @@ class AppState: NSObject, ObservableObject {
         }
         filteredRecordsCache = nil
         cachedTodayConfirmedRecords = nil
+        cachedTodayConfirmedIDs = nil
         if autoSave {
             objectWillChange.send()
             autoSaveActiveWorkspace()

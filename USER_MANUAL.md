@@ -54,6 +54,7 @@
 15. [QSL Card Label Studio](#15-qsl-card-label-studio)
 16. [International Club Memberships](#16-international-club-memberships)
 17. [Club Log Live Spots & Band Intelligence Engine](#17-club-log-live-spots--band-intelligence-engine)
+18. [Network-Attached Transceiver Emulator (NTE)](#18-network-attached-transceiver-emulator-nte)
 
 ---
 
@@ -251,8 +252,15 @@ A dynamic matrix displays worked vs. needed Maidenhead field multipliers (e.g. J
 ### 8.4 Pre-Submission Validation & Cabrillo 3.0 Generation
 Runs syntax and scoring checks before generating the final Cabrillo 3.0 `.log` file, ensuring error-free robot acceptance.
 
-### 8.5 Sub-Millisecond Master.scp Super Check Partial
-As you type callsigns into the contest log, YAAM queries the bundled `Master.scp` database in real time, highlighting known active contest operators to prevent typographical errors.
+### 8.5 Interactive Super Check Partial (SCP) & Contest Intelligence HUD
+As you type callsigns into QuickLog, the CW Keyer, or the CW Pileup Simulator (after 2 or more characters), YAAM queries the bundled `Master.scp` database in real time with sub-millisecond latency.
+* **Smart Ranking & Matching:** Exact matches appear first, followed by high-relevance prefix and substring matches.
+* **Country Flag & DXCC Identification:** Automatically displays entity emoji flags and names.
+* **Live Contest Status Badges:**
+  - 🟠 **`MULT`:** Unworked DXCC entity (new multiplier).
+  - 🟢 **`NEW`:** Valid callsign unworked on current band/mode.
+  - ⚪️ **`DUPE`:** Callsign already logged on the current operational band and mode.
+* **1-Click Autocomplete:** Click any callsign pill in the HUD to immediately fill the callsign field.
 
 ---
 
@@ -384,6 +392,90 @@ Real-time spot intelligence powered by Club Log feeds:
    Reveals whether opening activity is centered on FT8, CW, or Phone.
 4. **1-Click QSY:**  
    Click **Tune Rig** to issue CAT commands to your transceiver and populate Quick Log fields instantaneously.
+
+---
+
+## 18. Network-Attached Transceiver Emulator (NTE)
+
+The Network-Attached Transceiver Emulator provides complete hardware-level emulation of modern Ethernet/WLAN transceivers (specifically Icom IC-705, IC-7300/MK2, IC-7610, and IC-9700), along with a built-in Hamlib `rigctld` server.
+
+### Key Capabilities:
+1. **Full Protocol Emulation (CI-V over IP & Hamlib)**:
+   * **Icom LAN UDP Channels:** Control channel (`50001`), CI-V register channel (`50002`), and 48 kHz LPCM16 audio streaming channel (`50003`).
+   * **Hamlib rigctld Server:** Multi-client TCP server on port `4532` allowing immediate connection by WSJT-X, JTDX, N1MM, and other software without external bridging daemons.
+   * **Local LAN Auto-Discovery:** Broadcasts and responds to UDP discovery probes so third-party applications (wfview, SDR-Control) find the emulator just like a physical radio.
+2. **Synthetic RF & Channel Physics Engine**:
+   * **Calibrated AWGN:** Adjust Signal-to-Noise Ratio (SNR) continuously from `-30 dB` to `+30 dB`.
+   * **Ionospheric Multipath Fading:** Simulates Clean direct path, Mild QSB (0.2 Hz), Deep Rayleigh flutter (1.5 Hz), and high-Doppler Auroral flutter (4.0 Hz).
+   * **Doppler Shift & Drift:** Carrier frequency shift up to `±500 Hz` with linear drift up to `±100 Hz/min` (simulating satellite passes and ionospheric motion).
+   * **Atmospheric Static (QRN):** Injects impulsive static bursts.
+   * **Network Stress Injection:** Configurable simulated packet loss (0% to 25%) and latency jitter (0 to 100 ms).
+3. **Synthetic Signal Studio**:
+   * **FT8/FT4 Generator:** Real-time continuous-phase FSK synthesis with UTC 15-second / 7.5-second slot alignment.
+   * **5-Station Pileup Simulator:** Generates simultaneous calling stations on distinct audio offsets with varying SNR levels.
+   * **CW Morse Beacon:** 20 WPM beacon with smooth raised-cosine envelopes to prevent spectral key clicks.
+4. **Automated DSP Benchmarking**:
+   * One-click **SNR Sensitivity Sweep** from `+6 dB` down to `-24 dB` in 3 dB increments to measure receiver decoding thresholds and output markdown reports.
+5. **Interactive Front Panel UI**:
+   * High-contrast OLED display with digital VFO, active band pill, S-meter / RF Power / SWR meter, tuning buttons, and latching PTT.
+   * Quick **Connect YAAM LAN** button links YAAM's own client directly to the emulator for immediate loopback evaluation.
+   * Access via Operator Desk (Section 24), Tools menu (`Cmd + Option + E`), or as a standalone detached window.
+
+---
+
+## 19. Super Check Partial (SCP) & Call History Predictive Exchange Engine
+
+YAAM features high-speed predictive callsign verification and contest exchange pre-fill:
+1. **Super Check Partial (SCP) HUD:**
+   * Instant search across thousands of active contest callsigns as you type (minimum 2 characters).
+   * Visual badge indicators: **NEW MULT** (orange with star), **NEW CALL** (green), and **DUPE** (dimmed grey) based on your real-time logbook.
+   * DXCC flag icons and country names for immediate geographical orientation.
+2. **Call History Lookup & Exchange Pre-fill:**
+   * Ships with an internal seed database of top worldwide contesters and self-learns from every QSO logged in YAAM.
+   * Full support for importing standard N1MM / Win-Test `CallHistory.txt` files (`importCallHistory`).
+   * When a callsign is recognized, an interactive pre-fill banner appears under the callsign field.
+   * Press **Spacebar** or click **Pre-Fill (␣)** to automatically populate Operator Name, US State, CQ Zone, ARRL Section, Grid Square, and Contest Exchange without touching the keyboard.
+3. **Macro Token Expansion:**
+   * CW Keyer and ESM macros now expand `{HISNAME}`, `{HISSTATE}`, `{HISZONE}`, `{HISSECT}`, `{HISGRID}`, and `{HISEXCH}` dynamically during transmission.
+
+---
+
+## 20. Interactive Visual Contest Bandmap HUD
+
+Designed for rapid Search & Pounce (S&P) operation without opening separate windows:
+1. **Vertical Frequency Ruler:**
+   * Embedded directly in the Quick Log / ESM contest toolbar via the **[Bandmap]** button.
+   * Displays incoming cluster spots and CW Skimmer decodes along a high-contrast vertical frequency axis for the active band.
+2. **Visual Status Badges & Age Decay:**
+   * Spots are color-coded by contest multiplier value: Orange (`MULT`), Green (`NEW`), and Grey (`DUPE`).
+   * Temporal opacity decay ensures visual clarity: fresh spots appear at 100% brightness, decaying gradually to 75% at 10 minutes, 45% at 20 minutes, and 25% past expiration.
+3. **1-Click CAT QSY:**
+   * Clicking any spot on the Bandmap instantly tunes your physical transceiver (via CI-V / Hamlib / FLRig) and pre-fills the callsign and predicted exchange into Quick Log.
+
+---
+
+## 21. Contest Rate Speedometer & Multiplier 2D Matrix Dashboard
+
+Monitor your operating momentum and maximize contest score in real time:
+1. **Circular Rate Speedometer:**
+   * Displays your rolling 10-minute rate (`QSO/h`) with a dynamic gradient sweep from cool blue (cruising) to blazing orange/amber (high run rate).
+   * Secondary indicators track rolling 60-minute rate, session peak hourly rate, active consecutive QSO streaks, and total on-air operating time.
+2. **2D Band x Multiplier Matrix Heatmap:**
+   * Comprehensive matrix spanning all HF contest bands (160m, 80m, 40m, 20m, 15m, 10m, and 6m).
+   * Breaks down QSOs, unique DXCC entities worked, and CQ Zones worked per band.
+   * Total summary row highlights overall multiplier accumulation for instant Cabrillo score projection.
+   * Toggle view on/off anytime with the **[Rate Matrix]** button in the contest header.
+
+---
+
+## 22. Hardware Paddle Break-In & Instant Macro Interrupt Handler
+
+Full hardware-level safety and interrupt handling for CW contesters:
+1. **Instant Paddle Break-In:**
+   * WinKeyer hardware status bytes (`0xC0...0xCF`) are continuously scanned in real time.
+   * Touching either paddle paddle (Dit or Dah) during automated macro sending or Auto-CQ instantly aborts transmission and cuts off the audio sidetone within milliseconds.
+2. **Visual Warning Badge:**
+   * A vibrant red `[⚡ PADDLE BREAK-IN]` warning badge displays on the contest toolbar when manual paddle override occurs, decaying gracefully after 1.5 seconds.
 
 ---
 

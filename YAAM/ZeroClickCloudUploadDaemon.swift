@@ -11,6 +11,7 @@
 import AppKit
 import Combine
 import Foundation
+import Network
 import SwiftUI
 
 // MARK: - Upload Log Item
@@ -25,6 +26,57 @@ public struct CloudUploadLogItem: Identifiable, Sendable, Equatable {
     public let latencyMs: Int
     public let success: Bool
     public let message: String
+}
+
+// MARK: - Persistent Outbox Item
+
+public struct PendingCloudUploadItem: Codable, Identifiable, Sendable, Equatable {
+    public let id: UUID
+    public var recordFields: [String: String]
+    public let stationID: String?
+    public let stationLocation: String?
+    public let qrzKeyOverride: String?
+    public var pendingServices: [String]
+    public var attemptCount: Int
+    public var lastAttemptDate: Date?
+    public var lastErrorMessage: String?
+    public let enqueuedAt: Date
+
+    public init(
+        id: UUID = UUID(),
+        recordFields: [String: String],
+        stationID: String? = nil,
+        stationLocation: String? = nil,
+        qrzKeyOverride: String? = nil,
+        pendingServices: [String],
+        attemptCount: Int = 0,
+        lastAttemptDate: Date? = nil,
+        lastErrorMessage: String? = nil,
+        enqueuedAt: Date = Date()
+    ) {
+        self.id = id
+        self.recordFields = recordFields
+        self.stationID = stationID
+        self.stationLocation = stationLocation
+        self.qrzKeyOverride = qrzKeyOverride
+        self.pendingServices = pendingServices
+        self.attemptCount = attemptCount
+        self.lastAttemptDate = lastAttemptDate
+        self.lastErrorMessage = lastErrorMessage
+        self.enqueuedAt = enqueuedAt
+    }
+
+    public var callsign: String {
+        recordFields["CALL"] ?? "UNKNOWN"
+    }
+
+    public var band: String {
+        recordFields["BAND"] ?? ""
+    }
+
+    public var mode: String {
+        recordFields["MODE"] ?? ""
+    }
 }
 
 // MARK: - Zero-Click Cloud Upload Daemon
@@ -48,14 +100,118 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
     @Published public var lastUploadLatencyMs: Int = 0
     @Published public var showToast: Bool = false
     @Published public var isUploading: Bool = false
+    @Published public var isFlushingQueue: Bool = false
+    @Published public var isNetworkConnected: Bool = true
     @Published public var pendingQueueCount: Int = 0
+    @Published public var pendingQueue: [PendingCloudUploadItem] = []
     @Published public var recentUploadLogs: [CloudUploadLogItem] = []
 
-    // Offline buffer
-    private var offlineQueue: [QSORecordModel] = []
     private var toastDismissTask: Task<Void, Never>?
+    private var retryTimerTask: Task<Void, Never>?
+    private var pathMonitor: NWPathMonitor?
+    private let monitorQueue = DispatchQueue(label: "org.yaam.cloudUpload.networkMonitor", qos: .utility)
 
-    private init() {}
+    private var queueFileURL: URL {
+        let dir = LogbookDatabase.canonicalDataDirectory()
+        return dir.appendingPathComponent("PendingCloudUploads.json")
+    }
+
+    private init() {
+        loadPendingQueueFromDisk()
+        startNetworkMonitoring()
+        startPeriodicRetryTimer()
+    }
+
+    deinit {
+        pathMonitor?.cancel()
+        retryTimerTask?.cancel()
+        toastDismissTask?.cancel()
+    }
+
+    // MARK: - Disk Persistence
+    private func loadPendingQueueFromDisk() {
+        let url = queueFileURL
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        do {
+            let data = try Data(contentsOf: url)
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            let items = try decoder.decode([PendingCloudUploadItem].self, from: data)
+            self.pendingQueue = items
+            self.pendingQueueCount = items.count
+        } catch {
+            print("⚠️ [ZeroClickDaemon] Failed to load PendingCloudUploads: \(error.localizedDescription)")
+        }
+    }
+
+    private func savePendingQueueToDisk() {
+        self.pendingQueueCount = self.pendingQueue.count
+        let url = queueFileURL
+        let items = self.pendingQueue
+        Task.detached(priority: .utility) {
+            do {
+                let dir = url.deletingLastPathComponent()
+                if !FileManager.default.fileExists(atPath: dir.path) {
+                    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                }
+                let encoder = JSONEncoder()
+                encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+                encoder.dateEncodingStrategy = .iso8601
+                let data = try encoder.encode(items)
+                try data.write(to: url, options: [.atomic, .completeFileProtection])
+            } catch {
+                print("⚠️ [ZeroClickDaemon] Failed to save PendingCloudUploads: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    // MARK: - Network Connectivity Monitoring
+    private func startNetworkMonitoring() {
+        let monitor = NWPathMonitor()
+        self.pathMonitor = monitor
+        monitor.pathUpdateHandler = { [weak self] path in
+            Task { @MainActor [weak self] in
+                guard let self = self else { return }
+                let currentlyConnected = (path.status == .satisfied)
+                let wasDisconnected = !self.isNetworkConnected
+                self.isNetworkConnected = currentlyConnected
+
+                if currentlyConnected && wasDisconnected {
+                    // Reconnected to internet! Wait 2.5s for DNS/routes to settle, then flush outbox
+                    try? await Task.sleep(nanoseconds: 2_500_000_000)
+                    if !self.pendingQueue.isEmpty {
+                        await self.flushPendingQueue(triggerReason: "Internet Reconnected")
+                    }
+                }
+            }
+        }
+        monitor.start(queue: monitorQueue)
+    }
+
+    // MARK: - Periodic Retry Heartbeat
+    private func startPeriodicRetryTimer() {
+        retryTimerTask?.cancel()
+        retryTimerTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 60_000_000_000) // Every 60 seconds
+                guard let self = self else { return }
+                if self.isNetworkConnected && !self.pendingQueue.isEmpty && !self.isFlushingQueue {
+                    await self.flushPendingQueue(triggerReason: "Periodic Check")
+                }
+            }
+        }
+    }
+
+    // MARK: - Active Services Helper
+    public func enabledServices() -> [String] {
+        var services: [String] = []
+        if uploadToQRZ { services.append("QRZ") }
+        if uploadToClubLog { services.append("Club Log") }
+        if uploadToEQSL { services.append("eQSL") }
+        if uploadToWavelog { services.append("Wavelog") }
+        if uploadToLoTW { services.append("LoTW") }
+        return services
+    }
 
     // MARK: - Main Dispatch Entry Point
     func dispatch(
@@ -69,15 +225,118 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
         let call = record["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         guard !call.isEmpty else { return }
 
+        let activeServices = enabledServices()
+        guard !activeServices.isEmpty else { return }
+
+        // If offline right now, enqueue immediately without waiting for network timeouts
+        if !isNetworkConnected {
+            enqueue(
+                record: record,
+                stationID: stationID,
+                stationLocation: stationLocation,
+                qrzKeyOverride: qrzKeyOverride,
+                targetServices: activeServices,
+                errorReason: "Internet disconnected (Offline)"
+            )
+            return
+        }
+
         Task { [weak self] in
             guard let self = self else { return }
             await self.executeUpload(
                 record: record,
                 stationID: stationID,
                 stationLocation: stationLocation,
-                qrzKeyOverride: qrzKeyOverride
+                qrzKeyOverride: qrzKeyOverride,
+                targetServices: activeServices
             )
         }
+    }
+
+    // MARK: - Enqueue into Persistent Outbox
+    private func enqueue(
+        record: QSORecordModel,
+        stationID: String?,
+        stationLocation: String?,
+        qrzKeyOverride: String?,
+        targetServices: [String],
+        errorReason: String?
+    ) {
+        let call = record["CALL"].uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !targetServices.isEmpty else { return }
+
+        if let existingIdx = pendingQueue.firstIndex(where: {
+            let existingCall = ($0.recordFields["CALL"] ?? "").uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
+            let existingDate = $0.recordFields["QSO_DATE"] ?? ""
+            let existingTime = $0.recordFields["TIME_ON"] ?? ""
+            let newDate = record["QSO_DATE"]
+            let newTime = record["TIME_ON"]
+            return existingCall == call && existingDate == newDate && existingTime == newTime
+        }) {
+            var current = Set(pendingQueue[existingIdx].pendingServices)
+            current.formUnion(targetServices)
+            pendingQueue[existingIdx].pendingServices = Array(current)
+            pendingQueue[existingIdx].lastErrorMessage = errorReason
+            pendingQueue[existingIdx].lastAttemptDate = Date()
+        } else {
+            let newItem = PendingCloudUploadItem(
+                recordFields: record.fields,
+                stationID: stationID,
+                stationLocation: stationLocation,
+                qrzKeyOverride: qrzKeyOverride,
+                pendingServices: targetServices,
+                attemptCount: 0,
+                lastAttemptDate: Date(),
+                lastErrorMessage: errorReason,
+                enqueuedAt: Date()
+            )
+            pendingQueue.append(newItem)
+        }
+
+        savePendingQueueToDisk()
+
+        let serviceNames = targetServices.joined(separator: ", ")
+        let statusText = "📦 Offline Outbox: \(call) queued for upload (\(serviceNames))"
+        self.lastUploadStatus = statusText
+        triggerToast()
+
+        let logItem = CloudUploadLogItem(
+            callsign: call,
+            band: record["BAND"],
+            mode: record["MODE"],
+            services: [],
+            timestamp: Date(),
+            latencyMs: 0,
+            success: false,
+            message: "Queued in offline outbox (\(serviceNames)): \(errorReason ?? "Network offline")"
+        )
+        appendRecentLog(logItem)
+    }
+
+    // MARK: - Network Error Detection
+    private func isNetworkFailure(_ message: String) -> Bool {
+        if !isNetworkConnected { return true }
+        let lower = message.lowercased()
+        if lower.isEmpty { return false }
+        return lower.contains("offline") ||
+               lower.contains("internet connection") ||
+               lower.contains("network") ||
+               lower.contains("timed out") ||
+               lower.contains("timeout") ||
+               lower.contains("could not connect") ||
+               lower.contains("cannot find host") ||
+               lower.contains("hostname could not be found") ||
+               lower.contains("connection lost") ||
+               lower.contains("connection refused") ||
+               lower.contains("network is down") ||
+               lower.contains("no route to host") ||
+               lower.contains("the request timed out") ||
+               lower.contains("http error") ||
+               lower.contains("connection reset") ||
+               lower.contains("socket") ||
+               lower.contains("communication error") ||
+               lower.contains("unable to upload") ||
+               lower.contains("upload failed")
     }
 
     // MARK: - Upload Worker
@@ -85,51 +344,59 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
         record: QSORecordModel,
         stationID: String?,
         stationLocation: String?,
-        qrzKeyOverride: String?
+        qrzKeyOverride: String?,
+        targetServices: [String]
     ) async {
         let startTime = Date()
         isUploading = true
         defer { isUploading = false }
 
         var successfulServices: [String] = []
-        var errors: [String] = []
+        var networkFailedServices: [String] = []
+        var configErrors: [String] = []
 
         // 1. QRZ Logbook (ACTION=INSERT)
-        if uploadToQRZ {
+        if targetServices.contains("QRZ") {
             let qrzOutcome = await uploadToQRZLogbook(record: record, stationID: stationID, keyOverride: qrzKeyOverride)
             if qrzOutcome.success {
                 successfulServices.append("QRZ")
+            } else if isNetworkFailure(qrzOutcome.message) {
+                networkFailedServices.append("QRZ")
             } else if !qrzOutcome.message.isEmpty {
-                errors.append("QRZ: \(qrzOutcome.message)")
+                configErrors.append("QRZ: \(qrzOutcome.message)")
             }
         }
 
         // 2. Club Log (realtime.php)
-        if uploadToClubLog {
+        if targetServices.contains("Club Log") {
             let clubLogOutcome = await uploadToClubLogRealTime(record: record)
             if clubLogOutcome.success {
                 successfulServices.append("Club Log")
+            } else if isNetworkFailure(clubLogOutcome.message) {
+                networkFailedServices.append("Club Log")
             } else if !clubLogOutcome.message.isEmpty {
-                errors.append("ClubLog: \(clubLogOutcome.message)")
+                configErrors.append("ClubLog: \(clubLogOutcome.message)")
             }
         }
 
         // 3. eQSL.cc
-        if uploadToEQSL {
+        if targetServices.contains("eQSL") {
             let eqslOutcome = await uploadToEQSLRealTime(record: record)
             if eqslOutcome.success {
                 successfulServices.append("eQSL")
+            } else if isNetworkFailure(eqslOutcome.message) {
+                networkFailedServices.append("eQSL")
             }
         }
 
         // 4. Wavelog / Cloudlog
-        if uploadToWavelog {
+        if targetServices.contains("Wavelog") {
             WavelogSyncEngine.shared.autoPushSingleQSO(record: record)
             successfulServices.append("Wavelog")
         }
 
         // 5. ARRL LoTW via TQSL CLI
-        if uploadToLoTW {
+        if targetServices.contains("LoTW") {
             let lotwOutcome = await uploadToLoTWViaTQSL(
                 record: record,
                 stationID: stationID,
@@ -137,8 +404,10 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
             )
             if lotwOutcome.success {
                 successfulServices.append("LoTW")
+            } else if isNetworkFailure(lotwOutcome.message) {
+                networkFailedServices.append("LoTW")
             } else if !lotwOutcome.message.isEmpty && !lotwOutcome.message.contains("not found") {
-                errors.append("LoTW: \(lotwOutcome.message)")
+                configErrors.append("LoTW: \(lotwOutcome.message)")
             }
         }
 
@@ -149,9 +418,24 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
         let band = record["BAND"]
         let mode = record["MODE"]
 
+        // If any service failed due to network / connectivity issues, buffer in offline outbox!
+        if !networkFailedServices.isEmpty {
+            enqueue(
+                record: record,
+                stationID: stationID,
+                stationLocation: stationLocation,
+                qrzKeyOverride: qrzKeyOverride,
+                targetServices: networkFailedServices,
+                errorReason: "Connection failed during upload"
+            )
+        }
+
         if !successfulServices.isEmpty {
             let serviceList = successfulServices.joined(separator: " & ")
-            let statusText = "☁️ Instant Upload: \(call) (\(band)/\(mode)) → \(serviceList) [\(latency)ms]"
+            var statusText = "☁️ Instant Upload: \(call) (\(band)/\(mode)) → \(serviceList) [\(latency)ms]"
+            if !networkFailedServices.isEmpty {
+                statusText += " (Queued: \(networkFailedServices.joined(separator: ", ")))"
+            }
             self.lastUploadStatus = statusText
             triggerToast()
 
@@ -166,7 +450,7 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
                 message: "Successfully synchronized"
             )
             appendRecentLog(logItem)
-        } else if !errors.isEmpty {
+        } else if !configErrors.isEmpty && networkFailedServices.isEmpty {
             let logItem = CloudUploadLogItem(
                 callsign: call,
                 band: band,
@@ -175,9 +459,122 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
                 timestamp: Date(),
                 latencyMs: latency,
                 success: false,
-                message: errors.joined(separator: "; ")
+                message: configErrors.joined(separator: "; ")
             )
             appendRecentLog(logItem)
+        }
+    }
+
+    // MARK: - Queue Flush (Auto & Manual)
+    public func flushNow() {
+        Task { @MainActor [weak self] in
+            guard let self = self else { return }
+            await self.flushPendingQueue(triggerReason: "Manual Sync")
+        }
+    }
+
+    public func flushPendingQueue(triggerReason: String = "") async {
+        guard !isFlushingQueue else { return }
+        guard !pendingQueue.isEmpty else { return }
+        guard isNetworkConnected else { return }
+
+        isFlushingQueue = true
+        defer { isFlushingQueue = false }
+
+        var fullyCompletedIndices: [Int] = []
+        var totalUploadedServices = 0
+        var encounteredNetworkFailure = false
+
+        for index in pendingQueue.indices {
+            if encounteredNetworkFailure { break }
+
+            var item = pendingQueue[index]
+            let record = QSORecordModel(fields: item.recordFields)
+            var servicesToRemove: [String] = []
+
+            for service in item.pendingServices {
+                var success = false
+                var networkFailure = false
+
+                switch service {
+                case "QRZ":
+                    let outcome = await uploadToQRZLogbook(
+                        record: record,
+                        stationID: item.stationID,
+                        keyOverride: item.qrzKeyOverride
+                    )
+                    success = outcome.success
+                    networkFailure = isNetworkFailure(outcome.message)
+                case "Club Log":
+                    let outcome = await uploadToClubLogRealTime(record: record)
+                    success = outcome.success
+                    networkFailure = isNetworkFailure(outcome.message)
+                case "eQSL":
+                    let outcome = await uploadToEQSLRealTime(record: record)
+                    success = outcome.success
+                    networkFailure = isNetworkFailure(outcome.message)
+                case "Wavelog":
+                    WavelogSyncEngine.shared.autoPushSingleQSO(record: record)
+                    success = true
+                case "LoTW":
+                    let outcome = await uploadToLoTWViaTQSL(
+                        record: record,
+                        stationID: item.stationID,
+                        stationLocation: item.stationLocation
+                    )
+                    success = outcome.success
+                    networkFailure = isNetworkFailure(outcome.message)
+                default:
+                    success = true
+                }
+
+                if success {
+                    servicesToRemove.append(service)
+                    totalUploadedServices += 1
+                } else if networkFailure {
+                    encounteredNetworkFailure = true
+                    item.lastErrorMessage = "Network connection failed during sync"
+                    break
+                } else {
+                    item.lastErrorMessage = "Service configuration error"
+                }
+            }
+
+            item.pendingServices.removeAll { servicesToRemove.contains($0) }
+            item.attemptCount += 1
+            item.lastAttemptDate = Date()
+            pendingQueue[index] = item
+
+            if item.pendingServices.isEmpty {
+                fullyCompletedIndices.append(index)
+            }
+        }
+
+        // Remove fully completed items in reverse order
+        for idx in fullyCompletedIndices.sorted(by: >) {
+            if idx < pendingQueue.count {
+                let completed = pendingQueue.remove(at: idx)
+                let logItem = CloudUploadLogItem(
+                    callsign: completed.callsign,
+                    band: completed.band,
+                    mode: completed.mode,
+                    services: ["Outbox Sync"],
+                    timestamp: Date(),
+                    latencyMs: 0,
+                    success: true,
+                    message: "Completed outbox sync"
+                )
+                appendRecentLog(logItem)
+            }
+        }
+
+        savePendingQueueToDisk()
+
+        if totalUploadedServices > 0 {
+            let reasonStr = triggerReason.isEmpty ? "" : " (\(triggerReason))"
+            let statusText = "☁️ Outbox Synced: \(fullyCompletedIndices.count) QSO(s) uploaded successfully\(reasonStr)"
+            self.lastUploadStatus = statusText
+            triggerToast()
         }
     }
 
@@ -185,7 +582,7 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
         showToast = true
         toastDismissTask?.cancel()
         toastDismissTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            try? await Task.sleep(nanoseconds: 4_500_000_000)
             guard let self = self else { return }
             self.showToast = false
         }
@@ -484,13 +881,30 @@ public struct ZeroClickCloudToastView: View {
     public var body: some View {
         if daemon.showToast && !daemon.lastUploadStatus.isEmpty {
             HStack(spacing: 8) {
-                Image(systemName: "icloud.and.arrow.up.fill")
+                Image(systemName: isOutboxNotification ? "tray.and.arrow.down.fill" : "icloud.and.arrow.up.fill")
                     .font(.system(size: 13, weight: .bold))
                     .foregroundStyle(.white)
 
                 Text(daemon.lastUploadStatus)
                     .font(.system(size: 11, weight: .medium, design: .rounded))
                     .foregroundStyle(.white)
+
+                if daemon.pendingQueueCount > 0 && daemon.isNetworkConnected && !daemon.isFlushingQueue {
+                    Button {
+                        daemon.flushNow()
+                    } label: {
+                        Text("Upload Now")
+                            .font(.system(size: 9.5, weight: .bold, design: .rounded))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(
+                                Capsule()
+                                    .fill(Color.white.opacity(0.28))
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
 
                 Button {
                     withAnimation { daemon.showToast = false }
@@ -505,11 +919,17 @@ public struct ZeroClickCloudToastView: View {
             .padding(.vertical, 8)
             .background(
                 Capsule()
-                    .fill(Color(red: 0.12, green: 0.45, blue: 0.88).opacity(0.92))
+                    .fill(isOutboxNotification
+                          ? Color(red: 0.88, green: 0.48, blue: 0.08).opacity(0.95)
+                          : Color(red: 0.12, green: 0.45, blue: 0.88).opacity(0.92))
                     .shadow(color: Color.black.opacity(0.25), radius: 8, x: 0, y: 4)
             )
             .transition(.move(edge: .top).combined(with: .opacity))
             .animation(.spring(response: 0.35, dampingFraction: 0.8), value: daemon.showToast)
         }
+    }
+
+    private var isOutboxNotification: Bool {
+        daemon.lastUploadStatus.contains("Offline") || daemon.lastUploadStatus.contains("Outbox")
     }
 }

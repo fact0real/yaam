@@ -92,6 +92,20 @@ actor CallsignLookupService {
                 .filter { !$0.isEmpty }
                 .joined(separator: " ")
 
+            let imageURL = xmlValue("image", in: xml) ?? ""
+            let qslManager = xmlValue("qslmgr", in: xml) ?? ""
+            let state = xmlValue("state", in: xml) ?? ""
+            let county = xmlValue("county", in: xml) ?? ""
+            let iota = xmlValue("iota", in: xml) ?? ""
+            let licClass = xmlValue("class", in: xml) ?? ""
+            let mqsl = xmlValue("mqsl", in: xml) == "1"
+            let lotw = xmlValue("lotw", in: xml) == "1"
+            let eqsl = xmlValue("eqsl", in: xml) == "1"
+            let views = Int(xmlValue("u_views", in: xml) ?? "") ?? 0
+            let born = xmlValue("born", in: xml) ?? ""
+            let addr1 = xmlValue("addr1", in: xml) ?? ""
+            let zip = xmlValue("zip", in: xml) ?? ""
+
             return CallsignLookupResult(
                 callsign: callsign,
                 name: formattedName,
@@ -104,6 +118,19 @@ actor CallsignLookupService {
                 email: xmlValue("email", in: xml) ?? "",
                 latitude: xmlValue("lat", in: xml) ?? "",
                 longitude: xmlValue("lon", in: xml) ?? "",
+                imageURL: imageURL,
+                qslManager: qslManager,
+                state: state,
+                county: county,
+                iota: iota,
+                licenseClass: licClass,
+                qslViaMail: mqsl,
+                qslViaLotw: lotw,
+                qslViaEqsl: eqsl,
+                profileViews: views,
+                birthYear: born,
+                address1: addr1,
+                zip: zip,
                 sources: ["QRZ XML"]
             )
         } catch {
@@ -152,6 +179,19 @@ actor CallsignLookupService {
             guard xmlValue("callsign", in: xml) != nil || xml.range(of: "<search", options: .caseInsensitive) != nil else { return nil }
 
             let name = xmlValue("nick", in: xml) ?? xmlValue("adr_name", in: xml) ?? xmlValue("name", in: xml) ?? ""
+            let picture = xmlValue("picture", in: xml) ?? ""
+            let qslManager = xmlValue("qslmgr", in: xml) ?? ""
+            let state = xmlValue("us_state", in: xml) ?? ""
+            let county = xmlValue("us_county", in: xml) ?? ""
+            let iota = xmlValue("iota", in: xml) ?? ""
+            let licClass = xmlValue("lic", in: xml) ?? ""
+            let mqsl = xmlValue("qsl", in: xml)?.uppercased() == "Y"
+            let lotw = xmlValue("lotw", in: xml)?.uppercased() == "Y"
+            let eqsl = xmlValue("eqsl", in: xml)?.uppercased() == "Y"
+            let born = xmlValue("birth_year", in: xml) ?? ""
+            let addr1 = xmlValue("adr_street1", in: xml) ?? ""
+            let zip = xmlValue("adr_zip", in: xml) ?? ""
+
             return CallsignLookupResult(
                 callsign: callsign,
                 name: name,
@@ -164,6 +204,19 @@ actor CallsignLookupService {
                 email: xmlValue("email", in: xml) ?? "",
                 latitude: xmlValue("latitude", in: xml) ?? "",
                 longitude: xmlValue("longitude", in: xml) ?? "",
+                imageURL: picture,
+                qslManager: qslManager,
+                state: state,
+                county: county,
+                iota: iota,
+                licenseClass: licClass,
+                qslViaMail: mqsl,
+                qslViaLotw: lotw,
+                qslViaEqsl: eqsl,
+                profileViews: 0,
+                birthYear: born,
+                address1: addr1,
+                zip: zip,
                 sources: ["HAMQTH"]
             )
         } catch {

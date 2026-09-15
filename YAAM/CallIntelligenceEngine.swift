@@ -185,6 +185,9 @@ struct CallIntelligenceReport: Identifiable, Sendable {
     // MARK: Live HF Propagation & MUF Radar
     let propagationPrediction: PathPropagationPrediction?
 
+    // MARK: Pileup Sniper & Split QSX
+    let pileupSniper: PileupSniperSolution?
+
     // MARK: History
     let totalWorkedCount: Int
     let totalConfirmedCount: Int
@@ -192,6 +195,39 @@ struct CallIntelligenceReport: Identifiable, Sendable {
     let sameBandModeCount: Int
     let lastWorkedDate: Date?
     let matchingPreviousQSOs: [QSORecordModel]
+
+    // MARK: - QRZ & HAMQTH Rich Profile Helpers
+    var qslManager: String? {
+        let mgr = lookupData?.qslManager.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return mgr.isEmpty ? nil : mgr
+    }
+    var imageURL: String? {
+        let img = lookupData?.imageURL.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return img.isEmpty ? nil : img
+    }
+    var licenseClass: String? {
+        let lic = lookupData?.licenseClass.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return lic.isEmpty ? nil : lic
+    }
+    var usState: String? {
+        let s = lookupData?.state.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return s.isEmpty ? nil : s
+    }
+    var usCounty: String? {
+        let c = lookupData?.county.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return c.isEmpty ? nil : c
+    }
+    var iotaReference: String? {
+        let i = lookupData?.iota.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return i.isEmpty ? nil : i
+    }
+    var profileViews: Int {
+        lookupData?.profileViews ?? 0
+    }
+    var birthYear: String? {
+        let b = lookupData?.birthYear.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return b.isEmpty ? nil : b
+    }
 }
 
 // MARK: - Engine Class
@@ -548,7 +584,11 @@ final class CallIntelligenceEngine: ObservableObject {
         let qslLikelihood: QSLLikelihood
         let recommendedRoute: String
 
-        if isLoTWUser {
+        let explicitMgr = lookupResult?.qslManager.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !explicitMgr.isEmpty {
+            qslLikelihood = isLoTWUser ? .veryHigh : .high
+            recommendedRoute = "QSL via \(explicitMgr)" + (isLoTWUser ? " · LoTW Active" : "")
+        } else if isLoTWUser {
             qslLikelihood = .veryHigh
             recommendedRoute = "LoTW (Fastest & Electronic)"
         } else if lastUpload != nil {
@@ -628,6 +668,18 @@ final class CallIntelligenceEngine: ObservableObject {
             propPrediction = nil
         }
 
+        // 9. Pileup Sniper & Split QSX Analysis
+        let dxBaseFreqKHz = matchingClusterSpots.first?.frequencyKHz
+            ?? archivedSpots.first?.frequencyKHz
+            ?? (HFPointToPointPropagationEngine.frequency(for: activeBand) * 1000.0)
+
+        let sniper = PileupSniperEngine.analyze(
+            dxCallsign: cleanCall,
+            dxRxFrequencyKHz: dxBaseFreqKHz,
+            clusterSpots: matchingClusterSpots,
+            archivedSpots: archivedSpots
+        )
+
         return CallIntelligenceReport(
             callsign: cleanCall,
             baseCallsign: baseCall,
@@ -678,6 +730,7 @@ final class CallIntelligenceEngine: ObservableObject {
             liveClusterSpots: matchingClusterSpots,
             recentArchivedSpots: archivedSpots,
             propagationPrediction: propPrediction,
+            pileupSniper: sniper,
             totalWorkedCount: totalWorked,
             totalConfirmedCount: totalConfirmed,
             sameBandCount: sameBandCount,

@@ -366,6 +366,12 @@ public struct BandmapView: View {
                         splitBracketIndicator(yA: yA, yB: yB, offsetKHz: vfoBKHz - vfoAKHz)
                     }
 
+                    // 4.1. Pileup Sniper Target Reticle
+                    if let sniper = bandmap.activeSniperSolution, sniper.isSplit, bandRange.contains(sniper.recommendedTxKHz) {
+                        let ySniper = yPosition(forKHz: sniper.recommendedTxKHz, range: bandRange, totalHeight: totalHeight)
+                        sniperTargetReticle(yPos: ySniper, solution: sniper)
+                    }
+
                     // 5. VFO-A (RX) Indicator
                     if bandRange.contains(vfoAKHz) {
                         let yA = yPosition(forKHz: vfoAKHz, range: bandRange, totalHeight: totalHeight)
@@ -511,6 +517,33 @@ public struct BandmapView: View {
                 .background(Color.orange.opacity(0.2), in: RoundedRectangle(cornerRadius: 3))
         }
         .offset(y: top)
+    }
+
+    private func sniperTargetReticle(yPos: CGFloat, solution: PileupSniperSolution) -> some View {
+        HStack(spacing: 4) {
+            Spacer().frame(width: 74)
+            HStack(spacing: 3) {
+                Image(systemName: "scope")
+                    .font(.system(size: 8.5, weight: .bold))
+                Text("SNIPER \(solution.offsetSignFormatted)")
+                    .font(.system(size: 8, weight: .black, design: .monospaced))
+            }
+            .foregroundColor(.black)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 1.5)
+            .background(Color.yellow, in: RoundedRectangle(cornerRadius: 3))
+            .shadow(color: Color.yellow.opacity(0.6), radius: 3)
+            .onTapGesture {
+                bandmap.applySniperSolution(solution)
+            }
+            .help("Click to arm VFO-B to Sniper Target (\(solution.frequencyFormattedMHz))")
+
+            Rectangle()
+                .fill(Color.yellow.opacity(0.85))
+                .frame(height: 1.5)
+                .shadow(color: Color.yellow.opacity(0.8), radius: 2)
+        }
+        .offset(y: yPos - 9)
     }
 
     // MARK: - Spot Card on Ruler

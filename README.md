@@ -15,6 +15,7 @@ YAAM, short for Yet Another ADIF Manager, is a native macOS amateur-radio logboo
 - Contest workspace with UTC session tracking, serial/exchange support, dupe checks, and Cabrillo 3.0 export.
 - Contest Calendar and 6m Watch panel with WA7BNM calendar access, PSK Reporter reception evidence, and Magic Band opening assessment around the Middle East.
 - Propagation dashboard using solar/VHF context plus live reception reports to help decide when to operate.
+- Network-Attached Transceiver Emulator (NTE): Full hardware emulation of Icom IC-705/7300/7610/9700 (CI-V over IP, 48 kHz LPCM16 audio streaming, LAN auto-discovery) and built-in Hamlib rigctld server with synthetic RF digital mode generation (FT8, FT4, CW) and physical channel simulation (AWGN, Rayleigh/Rician fading, Doppler, QRN).
 - Data safety tools with SQLite-backed storage, restore points, backup/restore, and macOS Keychain credential storage.
 
 ## Core Workflows

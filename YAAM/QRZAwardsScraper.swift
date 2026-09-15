@@ -419,10 +419,12 @@ final class QRZAwardsScraper: NSObject, WKNavigationDelegate {
         (function() {
             var awardedRows = document.querySelectorAll('.issuedAwardsTable tr.awardRow, #issuedAwardsBlock tr.awardRow').length;
             var awardHeaders = document.querySelectorAll('#accordion .awardContainerHeader').length;
+            var bookOptions = document.querySelectorAll('#listbooks option').length;
             return {
-                ready: awardHeaders > 0,
+                ready: awardHeaders > 0 && (bookOptions > 0 || awardedRows > 0),
                 awardedRows: awardedRows,
                 awardHeaders: awardHeaders,
+                bookOptions: bookOptions,
                 loginVisible: !!Array.from(document.querySelectorAll('#username, #password, input[name="username"], input[name="password"]')).find(function(el) {
                     var rect = el.getBoundingClientRect();
                     return rect.width > 1 && rect.height > 1;
@@ -453,7 +455,7 @@ final class QRZAwardsScraper: NSObject, WKNavigationDelegate {
                 && awardedRows == lastAwardedRows
             let nextStablePasses = countsAreStable ? stablePasses + 1 : 0
 
-            if isReady, nextStablePasses >= 3 {
+            if isReady, nextStablePasses >= 2 {
                 self.startAwardAnalysis()
                 return
             }
@@ -795,14 +797,37 @@ final class QRZAwardsScraper: NSObject, WKNavigationDelegate {
     selectedBooks = Array.from(new Set(selectedBooks.filter(Boolean))).sort(function(a, b) { return Number(a) - Number(b); });
 
     var books = selectedBooks.join(",");
+    if (!books) {
+        var issuedBookList = Object.values(issuedByID).map(function(item) { return item.books; }).filter(Boolean);
+        if (issuedBookList.length > 0) {
+            books = issuedBookList[0];
+        }
+    }
     var sbookInput = document.querySelector("input[name='sbook']");
-    var sbook = sbookInput ? sbookInput.value : "0";
-    var endpoint = (typeof THIS === "string" && THIS) ? THIS : location.origin;
+    var sbook = sbookInput ? sbookInput.value : (books ? books.split(",")[0] : "0");
+    var endpoint = (typeof THIS === "string" && THIS && THIS.length > 0) ? THIS : "/logbook";
     var results = new Array(descriptors.length);
     var failed = 0;
     var nextIndex = 0;
 
     async function analyzeOne(descriptor) {
+        var issued = issuedByID[descriptor.id];
+        // If the award is already awarded, QRZ already verified it. Return immediately without sending a redundant heavy query!
+        if (issued) {
+            return {
+                awardID: descriptor.id,
+                title: descriptor.title,
+                detail: issued.info || "Issued by QRZ Logbook Awards",
+                percent: 100,
+                progressAvailable: true,
+                status: "Award received",
+                earned: true,
+                achievement: "Award received",
+                awardType: "Mode: " + descriptor.mode,
+                ribbonURL: descriptor.ribbonURL
+            };
+        }
+
         var body = new URLSearchParams({
             op: "analyze",
             award: descriptor.id,
@@ -812,7 +837,7 @@ final class QRZAwardsScraper: NSObject, WKNavigationDelegate {
         });
         for (var attempt = 0; attempt < 3; attempt += 1) {
             var controller = new AbortController();
-            var timer = setTimeout(function() { controller.abort(); }, 25000);
+            var timer = setTimeout(function() { controller.abort(); }, 30000);
             try {
                 var response = await fetch(endpoint, {
                     method: "POST",
@@ -826,11 +851,14 @@ final class QRZAwardsScraper: NSObject, WKNavigationDelegate {
                 });
                 if (!response.ok) { throw new Error("HTTP " + response.status); }
                 var html = await response.text();
-                return parseAnalysis(descriptor, html, issuedByID[descriptor.id]);
+                if (!html || html.length < 20) {
+                    throw new Error("Empty or truncated response from QRZ");
+                }
+                return parseAnalysis(descriptor, html, null);
             } catch (error) {
                 if (attempt < 2) {
                     await new Promise(function(resolve) {
-                        setTimeout(resolve, 500 * (attempt + 1));
+                        setTimeout(resolve, 800 * (attempt + 1));
                     });
                 }
             } finally {
@@ -839,16 +867,15 @@ final class QRZAwardsScraper: NSObject, WKNavigationDelegate {
         }
 
         failed += 1;
-        var issued = issuedByID[descriptor.id];
         return {
             awardID: descriptor.id,
             title: descriptor.title,
-            detail: issued ? issued.info : "QRZ did not return analysis for this award.",
-            percent: issued ? 100 : 0,
-            progressAvailable: !!issued,
-            status: issued ? "Award received" : "Progress unavailable",
-            earned: !!issued,
-            achievement: issued ? "Award received" : "Not reported",
+            detail: "QRZ did not return analysis for this award.",
+            percent: 0,
+            progressAvailable: false,
+            status: "Progress unavailable",
+            earned: false,
+            achievement: "Not reported",
             awardType: "Mode: " + descriptor.mode,
             ribbonURL: descriptor.ribbonURL
         };
@@ -860,10 +887,11 @@ final class QRZAwardsScraper: NSObject, WKNavigationDelegate {
             nextIndex += 1;
             if (index >= descriptors.length) { return; }
             results[index] = await analyzeOne(descriptors[index]);
+            await new Promise(function(resolve) { setTimeout(resolve, 150); });
         }
     }
 
-    var workerCount = Math.min(3, descriptors.length);
+    var workerCount = Math.min(2, descriptors.length);
     await Promise.all(Array.from({ length: workerCount }, function() { return worker(); }));
 
     Object.keys(issuedByID).forEach(function(id) {

@@ -17,14 +17,32 @@ public struct CWDecoderView: View {
     @ObservedObject private var assistant = CWAdaptiveAssistant.shared
     @ObservedObject private var keyer = CWKeyerService.shared
 
+    @State private var decoderMode: Int = 0 // 0: Single-Tone AFC Decoder, 1: Multi-Channel Passband Skimmer
+
     public init() {}
 
     public var body: some View {
         VStack(spacing: 12) {
-            topControlBar
-            tuningScopeAndMetricsRow
-            decodedTextTerminal
-            adaptiveAssistantRibbon
+            // Mode Segmented Selector
+            HStack {
+                Picker("Decoder Mode", selection: $decoderMode) {
+                    Label("Single-Tone AFC Decoder", systemImage: "waveform.path.badge.plus").tag(0)
+                    Label("Multi-Channel Passband Skimmer", systemImage: "chart.bar.xaxis").tag(1)
+                }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 480)
+
+                Spacer()
+            }
+
+            if decoderMode == 0 {
+                topControlBar
+                tuningScopeAndMetricsRow
+                decodedTextTerminal
+                adaptiveAssistantRibbon
+            } else {
+                CWMultiChannelSkimmerView()
+            }
         }
         .padding(14)
         .background(Color(NSColor.controlBackgroundColor).opacity(0.45))

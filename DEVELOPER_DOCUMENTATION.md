@@ -247,3 +247,40 @@ Accessible from anywhere in the application (`Cmd+Shift+F`, Help menu, About dia
 - **Submission Channels:** Direct `mailto:` email composer, GitHub Issue URL builder with prepopulated markdown labels, and Clipboard copy.
 - **Local Audit History:** Preserves submitted feedback in `UserDefaults` (`savedFeedbackHistory_v1`) so operators can track past suggestions.
 
+---
+
+## 11. Network-Attached Transceiver Emulator (NTE) Architecture
+
+### 11.1 Subsystem Design Overview
+The Network-Attached Transceiver Emulator (`NetworkTransceiverEmulatorEngine.swift`) provides a full hardware-level emulation platform for network RF transceivers. It consists of three decoupled layers:
+
+1. **Network & Protocol Server Layer (`IcomNetworkServer.swift`, `HamlibRigctldServer.swift`):**
+   - **Control Socket (UDP 50001):** Implements discovery probe (`0x03` -> `0x04`), login authentication (128-byte login, 96-byte token reply), capability discovery (66+N*102 bytes), stream negotiation (144-byte stream request, 80-byte stream reply), keepalives (`0x00`), and timestamp pings (`0x07`).
+   - **CI-V Socket (UDP 50002):** Implements `0x01C0` channel open, `0xC1` framing, and translates CI-V commands (`0x03` frequency query, `0x05` frequency set, `0x04` mode query, `0x06` mode set, `0x1C` PTT toggle, and `0x15` meter queries for S-meter, Po, SWR, and ALC).
+   - **Audio Socket (UDP 50003):** High-precision `DispatchSourceTimer` (strict 10 ms interval) streams 48 kHz LPCM16 audio frames (480 samples = 960 bytes per packet) with sequence tracking. Receives client TX audio frames when PTT is active and computes real-time RMS power and ALC modulation.
+   - **Hamlib rigctld Server (TCP 4532):** Non-blocking BSD TCP socket server implementing Hamlib command set (`f`, `F`, `m`, `M`, `t`, `T`, `l`, `\dump_state`) for direct connection by WSJT-X, JTDX, and third-party loggers.
+
+2. **Synthetic RF & Channel Simulation Engine (`SyntheticRFSignalEngine.swift`):**
+   - **Digital Mode Signal Synthesizer:** Real-time continuous-phase frequency-shift keying (CPFSK) using `FT8Codec` for 79-tone FT8 and 4-GFSK for FT4 aligned with UTC 15-second / 7.5-second time slots.
+   - **Morse Code Beacon:** Raised-cosine envelope generator with 5 ms smoothing to eliminate key clicks.
+   - **Multi-Station Pileup Generator:** Generates up to 8 simultaneous synthetic callers on distinct audio offsets with varying SNR.
+   - **Channel Physics / Impairments:**
+     - **AWGN:** Box-Muller transform calibrated to exact SNR (-30 dB to +30 dB in 2.5 kHz bandwidth).
+     - **Fading:** Low-pass filtered complex Gaussian process implementing Rayleigh and Rician fading models with adjustable Doppler spread (0.1 Hz to 5.0 Hz).
+     - **Doppler:** Continuous phase accumulator supporting static Doppler shift (±500 Hz) and dynamic frequency drift (±100 Hz/min).
+     - **Atmospheric QRN:** Poisson-distributed static burst generator.
+     - **Network Impairments:** Injectable UDP packet loss and jitter buffer delay.
+   - **Spectral Analysis:** Real-time Accelerate `vDSP_DFT` computing 512-point FFT magnitudes for live waterfall visualization.
+
+3. **Automated DSP Benchmarking & QA (`NetworkTransceiverAutomatedTester.swift`):**
+   - Implements automated SNR sensitivity sweeps from +6 dB down to -24 dB in 3 dB steps.
+   - Tests synthetic audio through `FT8Codec.decode` and calculates sensitivity floor and success percentages.
+   - Produces structured markdown and JSON benchmark reports.
+
+4. **User Interface (`NetworkTransceiverEmulatorView.swift`):**
+   - Front panel OLED display with glowing digital VFO, band badges, dynamic analog S/Po/SWR meter, and tuning controls.
+   - Real-time Canvas-based audio spectrum visualizer.
+   - Protocol activity terminal console with category filtering.
+   - Accessible via Operator Desk (Tab 24), Tools menu (`Cmd+Option+E`), or standalone window scene (`YAAMWindowID.transceiverEmulator`).
+
+

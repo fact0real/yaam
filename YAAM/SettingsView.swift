@@ -51,6 +51,7 @@ struct SettingsView: View {
     @State private var wavelogAPIKey = ""
     @State private var wavelogCredentialStatus = ""
     @ObservedObject private var wavelogEngine = WavelogSyncEngine.shared
+    @ObservedObject private var cloudDaemon = ZeroClickCloudUploadDaemon.shared
 
     @AppStorage("hamqthUsername") private var hamqthUsername = ""
     @State private var hamqthPassword = ""
@@ -1104,6 +1105,49 @@ struct SettingsView: View {
                     Text("Reads SDR-Control's SmartSDR.smartsdrlog binary plist directly from iCloud, filters deleted contacts, converts date/time to ADIF format, and merges new QSOs into the Master Log. macOS may ask you to choose the file once so YAAM can save permission.")
                         .font(.caption)
                         .foregroundColor(.secondary)
+
+                    Divider()
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Label("Zero-Click Cloud Outbox", systemImage: "icloud.and.arrow.up.fill")
+                                .font(.subheadline.bold())
+                            Spacer()
+                            HStack(spacing: 5) {
+                                Circle()
+                                    .fill(cloudDaemon.isNetworkConnected ? Color.green : Color.orange)
+                                    .frame(width: 8, height: 8)
+                                Text(cloudDaemon.isNetworkConnected ? "Network Online" : "Network Offline")
+                                    .font(.caption2.bold())
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+
+                        HStack {
+                            if cloudDaemon.pendingQueueCount > 0 {
+                                Label("\(cloudDaemon.pendingQueueCount) QSO(s) pending offline upload", systemImage: "tray.full.fill")
+                                    .font(.caption)
+                                    .foregroundColor(.orange)
+                            } else {
+                                Label("Outbox queue is empty (All contacts synchronized)", systemImage: "checkmark.circle.fill")
+                                    .font(.caption)
+                                    .foregroundColor(.green)
+                            }
+
+                            Spacer()
+
+                            if cloudDaemon.pendingQueueCount > 0 {
+                                Button("Upload Outbox Now") {
+                                    cloudDaemon.flushNow()
+                                }
+                                .disabled(!cloudDaemon.isNetworkConnected || cloudDaemon.isFlushingQueue)
+                            }
+                        }
+
+                        Text("Contacts finished in SDR-Control (FT8 UDP or iCloud) are uploaded instantly to QRZ, LoTW, Club Log, eQSL, and Wavelog. If the internet is disconnected, they are stored in the local outbox and automatically uploaded as soon as the connection is restored.")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
                 }
                 .padding()
             }

@@ -57,6 +57,12 @@ public final class WinKeyerDriver: ObservableObject {
 
     public var onCharacterEchoed: (@Sendable (String) -> Void)?
     public var onTransmissionComplete: (@Sendable () -> Void)?
+    public var onPaddleBreakIn: (@Sendable () -> Void)?
+
+    public func triggerPaddleBreakIn() {
+        abort()
+        onPaddleBreakIn?()
+    }
 
     private let serial = SerialPortService.shared
     private var echoTimer: Timer?
@@ -258,6 +264,16 @@ public final class WinKeyerDriver: ObservableObject {
                 let minor = byte & 0x0F
                 self.wkVersion = "K1EL WinKeyer v\(major).\(minor)"
                 self.statusMessage = "Connected (\(wkVersion))"
+            } else if byte >= 0xC0 && byte <= 0xCF {
+                // WinKeyer Status response byte (paddle state, buffer empty, break-in)
+                let paddlePressed = (byte & 0x01) != 0 || (byte & 0x02) != 0 || (byte & 0x08) != 0
+                if paddlePressed {
+                    self.onPaddleBreakIn?()
+                }
+                if (byte & 0x04) == 0 {
+                    self.isTransmitting = false
+                    self.onTransmissionComplete?()
+                }
             } else if byte >= 0x80 {
                 // Sent character echo byte
                 let charVal = byte & 0x7F
@@ -265,10 +281,6 @@ public final class WinKeyerDriver: ObservableObject {
                 let charStr = String(Character(unicode))
                 self.lastEchoedChar = charStr
                 self.onCharacterEchoed?(charStr)
-            } else if byte == 0xC0 {
-                // Buffer empty / transmission complete
-                self.isTransmitting = false
-                self.onTransmissionComplete?()
             }
         }
     }

@@ -1,0 +1,12 @@
+{
+  "images" : [
+    {
+      "filename" : "help_pileup_sniper.png",
+      "idiom" : "universal"
+    }
+  ],
+  "info" : {
+    "author" : "xcode",
+    "version" : 1
+  }
+}

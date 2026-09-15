@@ -87,6 +87,35 @@ fileprivate enum LogTableLayout {
     }
 }
 
+// MARK: - Row Actions
+enum LogRowAction {
+    case toggleSelection
+    case startEditing(header: String, value: String)
+    case commitEditing(header: String, value: String)
+    case inspectCallsign
+    case inspectGrid(GridInspectionContext)
+    case showSentEmail(SentEmailDetailContext)
+    case showRankLegend
+    case showEQSLCard
+    case toggleAgingSort
+    case openEmail(String)
+    case openReminder
+    case openQSLCardComposer
+    case openEmailQSLCard
+    case openCongratulations
+    case enrichCallsign
+    case delete
+    case batchEnrich
+    case batchReminders
+    case batchEmails
+    case batchExport
+    case batchDelete
+    case markNewlyConfirmed
+    case unmarkNewlyConfirmed
+    case trackRival(String)
+    case untrackRival(String)
+}
+
 // MARK: - High Performance Spreadsheet Table View Component
 struct LogTableView: View {
     @EnvironmentObject var appState: AppState
@@ -98,6 +127,9 @@ struct LogTableView: View {
     @State private var columnWidths: [String: CGFloat] = [:]
     @State private var dragStartWidths: [String: CGFloat] = [:]
     @State private var explicitlyShownColumns: Set<String> = []
+    @State private var cachedDisplayedHeaders: [String] = []
+    @State private var cachedPinnedHeaders: [String] = []
+    @State private var cachedUnpinnedHeaders: [String] = []
     @State private var showFullConfirmationSyncPrompt = false
     @State private var selectedEQSLRecord: QSORecordModel? = nil
     @State private var showEQSLCardSheet = false
@@ -106,7 +138,9 @@ struct LogTableView: View {
     @State private var isRoverControlSheetPresented = false
     @State private var localSearchText: String = ""
     @State private var searchDebounceTask: Task<Void, Never>? = nil
-    @State private var displayLimit: Int = 300
+    @State private var displayLimit: Int = 1000
+    @State private var showBackToTop: Bool = false
+    @State private var tableScrollView: NSScrollView? = nil
 
     private var homeCoordinate: GeoCoordinate? {
         if let profile = appState.activeStationProfile {
@@ -132,13 +166,28 @@ struct LogTableView: View {
         appState.filterCriteria.isActive ? 82 : 48
     }
 
+    private func scrollToTop(proxy: ScrollViewProxy) {
+        NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .default)
+        if let scrollView = tableScrollView {
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.35
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                scrollView.contentView.animator().setBoundsOrigin(NSPoint(x: 0, y: 0))
+                scrollView.reflectScrolledClipView(scrollView.contentView)
+            }
+        }
+        withAnimation(.spring(response: 0.45, dampingFraction: 0.8)) {
+            proxy.scrollTo("logTableTopAnchor", anchor: .topLeading)
+        }
+    }
+
     var body: some View {
         let visibleRecords = appState.filteredRecords
-        let currentDisplayed = displayedHeaders
-        let currentPinned = currentDisplayed.filter { isPinnedColumn($0) }
-        let currentUnpinned = currentDisplayed.filter { !isPinnedColumn($0) }
+        let currentPinned = cachedPinnedHeaders.isEmpty ? pinnedHeaders : cachedPinnedHeaders
+        let currentUnpinned = cachedUnpinnedHeaders.isEmpty ? unpinnedHeaders : cachedUnpinnedHeaders
 
-        VStack(spacing: 0) {
+        ScrollViewReader { scrollProxy in
+            VStack(spacing: 0) {
             // MARK: - Toolbar & Quick Actions Summary Bar
             HStack(spacing: 8) {
                 Menu {
@@ -829,111 +878,126 @@ struct LogTableView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color(NSColor.textBackgroundColor))
             } else {
-                ScrollView([.horizontal, .vertical], showsIndicators: true) {
-                    ZStack(alignment: .topLeading) {
-                        GeometryReader { geo in
-                            Color.clear.preference(
-                                key: LogTableScrollOffsetKey.self,
-                                value: geo.frame(in: .named("logTableScrollSpace")).minX
-                            )
-                        }
-                        .frame(height: 0)
+                ZStack(alignment: .bottomTrailing) {
+                    ScrollView([.horizontal, .vertical], showsIndicators: true) {
+                        ZStack(alignment: .topLeading) {
+                            ScrollViewAccessor { self.tableScrollView = $0 }
+                                .frame(width: 0, height: 0)
 
-                        LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
-                            Section {
-                                let renderedRecords = Array(visibleRecords.prefix(displayLimit))
-                                ForEach(renderedRecords) { record in
-                                    LogRowView(
-                                        record: record,
-                                        isSelected: appState.selectedRecordIDs.contains(record.id),
-                                        isNewlyConfirmed: appState.isNewlyConfirmed(record: record),
-                                        isTodayConfirmed: appState.isTodayConfirmed(record: record),
-                                        ordinal: appState.filteredChronologicalOrdinal(for: record.id),
-                                        sentEmail: appState.emailHistoryByCallsign[record["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()] ?? appState.latestEmailHistory(for: record["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()),
-                                        opportunity: appState.confirmationOpportunityIndex.opportunity(for: record.id),
-                                        pinnedOffsetX: pinnedOffsetX,
-                                        isEditingThisRow: editingCellID == record.id,
-                                        editingHeader: editingCellID == record.id ? editingHeader : nil,
-                                        editingText: $editingText,
-                                        pinnedHeaders: currentPinned,
-                                        unpinnedHeaders: currentUnpinned,
-                                        columnWidths: columnWidths,
-                                        utilityColumnWidth: utilityColumnWidth,
-                                        onToggleSelection: { appState.toggleRecordSelection(record.id) },
-                                        onStartEditing: { header, val in
-                                            startEditing(record: record, header: header, value: val)
-                                        },
-                                        onCommitEditing: { header, val in
-                                            appState.updateCell(recordID: record.id, header: header, newValue: val)
-                                            editingCellID = nil
-                                            editingHeader = nil
-                                        },
-                                        onInspectCallsign: {
-                                            activeTablePopover = .callsign(record)
-                                        },
-                                        onInspectGrid: { ctx in
-                                            activeTablePopover = .grid(ctx)
-                                        },
-                                        onShowSentEmail: { ctx in
-                                            activeTablePopover = .sentEmail(ctx)
-                                        },
-                                        onShowRankLegend: {
-                                            activeTablePopover = .rankLegend
-                                        },
-                                        onShowEQSLCard: {
-                                            selectedEQSLRecord = record
-                                            showEQSLCardSheet = true
-                                        },
-                                        onToggleAgingSort: {
-                                            appState.toggleSort(for: "AGING")
+                            GeometryReader { geo in
+                                let frame = geo.frame(in: .named("logTableScrollSpace"))
+                                let rawX = frame.minX
+                                let scrollX = max(0, -rawX)
+                                let quantizedX = scrollX < 10.0 ? 0.0 : (floor(scrollX / 8.0) * 8.0)
+                                let rawY = frame.minY
+                                let scrollY = max(0, -rawY)
+                                let isScrolledDown = scrollY > 60.0
+
+                                Color.clear.preference(
+                                    key: LogTableScrollStateKey.self,
+                                    value: LogTableScrollState(quantizedX: quantizedX, isScrolledDown: isScrolledDown)
+                                )
+                            }
+                            .frame(height: 0)
+
+                                LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
+                                    Section {
+                                        Color.clear
+                                            .frame(width: 1, height: 1)
+                                            .id("logTableTopAnchor")
+
+                                        let renderedRecords = Array(visibleRecords.prefix(displayLimit))
+                                        let trackedRivalsSet = Set(appState.trackedRankCallsigns.map { $0.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() })
+                                        let hasBatch = !appState.selectedRecordIDs.isEmpty
+                                        let batchCount = appState.selectedRecordIDs.count
+
+                                        ForEach(renderedRecords) { record in
+                                            let cleanCall = record["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+                                            LogRowView(
+                                                record: record,
+                                                isSelected: appState.selectedRecordIDs.contains(record.id),
+                                                isNewlyConfirmed: appState.isNewlyConfirmed(recordID: record.id),
+                                                isTodayConfirmed: appState.isTodayConfirmed(recordID: record.id),
+                                                ordinal: appState.filteredChronologicalOrdinal(for: record.id),
+                                                sentEmail: appState.emailHistoryByCallsign[cleanCall],
+                                                opportunity: appState.confirmationOpportunityIndex.opportunity(for: record.id),
+                                                pinnedOffsetX: pinnedOffsetX,
+                                                isEditingThisRow: editingCellID == record.id,
+                                                editingHeader: editingCellID == record.id ? editingHeader : nil,
+                                                editingText: $editingText,
+                                                isTrackedRival: trackedRivalsSet.contains(cleanCall),
+                                                hasBatchSelection: hasBatch,
+                                                batchSelectionCount: batchCount,
+                                                pinnedHeaders: currentPinned,
+                                                unpinnedHeaders: currentUnpinned,
+                                                columnWidths: columnWidths,
+                                                utilityColumnWidth: utilityColumnWidth,
+                                                onAction: { action in
+                                                    handleRowAction(action, record: record)
+                                                }
+                                            )
+                                            .equatable()
                                         }
-                                    )
-                                    .equatable()
-                                }
-                                if displayLimit < visibleRecords.count {
-                                    HStack(spacing: 8) {
-                                        Text("Showing \(min(displayLimit, visibleRecords.count).formatted()) of \(visibleRecords.count.formatted()) QSOs")
-                                            .font(.caption)
-                                            .foregroundColor(.secondary)
-                                        Button("Load Next 500") {
-                                            displayLimit += 500
-                                        }
-                                        .buttonStyle(.bordered)
-                                        .controlSize(.small)
-                                        Button("Show All") {
-                                            displayLimit = visibleRecords.count
-                                        }
-                                        .buttonStyle(.bordered)
-                                        .controlSize(.small)
-                                    }
-                                    .padding(.vertical, 10)
-                                    .frame(maxWidth: .infinity, alignment: .center)
-                                    .onAppear {
                                         if displayLimit < visibleRecords.count {
-                                            displayLimit += 300
+                                            HStack(spacing: 8) {
+                                                Text("Showing \(min(displayLimit, visibleRecords.count).formatted()) of \(visibleRecords.count.formatted()) QSOs")
+                                                    .font(.caption)
+                                                    .foregroundColor(.secondary)
+                                                Button("Load Next 1000") {
+                                                    displayLimit += 1000
+                                                }
+                                                .buttonStyle(.bordered)
+                                                .controlSize(.small)
+                                                Button("Show All") {
+                                                    displayLimit = visibleRecords.count
+                                                }
+                                                .buttonStyle(.bordered)
+                                                .controlSize(.small)
+                                            }
+                                            .padding(.vertical, 10)
+                                            .frame(maxWidth: .infinity, alignment: .center)
+                                            .onAppear {
+                                                if displayLimit < visibleRecords.count {
+                                                    displayLimit += 500
+                                                }
+                                            }
                                         }
+                                    } header: {
+                                        headerRowView(pinnedHeaders: currentPinned, unpinnedHeaders: currentUnpinned)
+                                            .background(Color(NSColor.textBackgroundColor))
                                     }
                                 }
-                            } header: {
-                                headerRowView(pinnedHeaders: currentPinned, unpinnedHeaders: currentUnpinned)
-                                    .background(Color(NSColor.textBackgroundColor))
                             }
                         }
-                    }
-                }
-                .coordinateSpace(name: "logTableScrollSpace")
-                .onPreferenceChange(LogTableScrollOffsetKey.self) { minX in
-                    let scrollX = max(0, -minX)
-                    let effectiveX: CGFloat = scrollX < 4.0 ? 0.0 : scrollX
-                    if effectiveX == 0.0 {
-                        if pinnedOffsetX != 0.0 {
-                            pinnedOffsetX = 0.0
+                        .coordinateSpace(name: "logTableScrollSpace")
+                        .onPreferenceChange(LogTableScrollStateKey.self) { state in
+                            if pinnedOffsetX != state.quantizedX {
+                                pinnedOffsetX = state.quantizedX
+                            }
+                            if showBackToTop != state.isScrolledDown {
+                                withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+                                    showBackToTop = state.isScrolledDown
+                                }
+                            }
                         }
-                    } else if abs(pinnedOffsetX - effectiveX) >= 6.0 {
-                        pinnedOffsetX = effectiveX
+                        .background(Color(NSColor.textBackgroundColor))
+
+                        // Floating Back to Top Button
+                        if showBackToTop {
+                            LogTableBackToTopButton {
+                                scrollToTop(proxy: scrollProxy)
+                            }
+                            .padding(.trailing, 22)
+                            .padding(.bottom, 16)
+                            .transition(
+                                .asymmetric(
+                                    insertion: .move(edge: .bottom).combined(with: .opacity).combined(with: .scale(scale: 0.85)),
+                                    removal: .opacity.combined(with: .scale(scale: 0.9))
+                                )
+                            )
+                            .zIndex(100)
+                        }
                     }
-                }
-                .background(Color(NSColor.textBackgroundColor))
             }
             
             Divider()
@@ -1017,6 +1081,29 @@ struct LogTableView: View {
                     Text("\(appState.qsoRecords.count.formatted()) QSOs")
                         .font(.caption.monospacedDigit().bold())
                 }
+
+                Divider()
+                    .frame(height: 12)
+
+                Button {
+                    scrollToTop(proxy: scrollProxy)
+                } label: {
+                    HStack(spacing: 3.5) {
+                        Image(systemName: "arrow.up.to.line.compact")
+                            .font(.system(size: 10, weight: .bold))
+                        Text("Top")
+                            .font(.system(size: 10.5, weight: .semibold))
+                    }
+                    .foregroundColor(.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2.5)
+                    .background(
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(Color.secondary.opacity(0.08))
+                    )
+                }
+                .buttonStyle(.plain)
+                .help("Scroll back to the top of the table (⌥↑)")
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
@@ -1081,21 +1168,28 @@ struct LogTableView: View {
         .onAppear {
             localSearchText = appState.searchText
             restoreColumnVisibility()
+            refreshHeaderCaches()
         }
         .onChange(of: appState.searchText) { _, newQuery in
             if localSearchText != newQuery {
                 localSearchText = newQuery
             }
-            displayLimit = 300
+            displayLimit = 1000
         }
         .onChange(of: appState.filterCriteria.isActive) { _, _ in
-            displayLimit = 300
+            displayLimit = 1000
         }
         .onChange(of: appState.loadedFileURL) { _, _ in
-            displayLimit = 300
+            displayLimit = 1000
+            refreshHeaderCaches()
+        }
+        .onChange(of: appState.tableHeaders) { _, _ in
+            refreshHeaderCaches()
         }
         .onChange(of: appState.activeStationProfileID) { _, _ in
             restoreColumnVisibility()
+            refreshHeaderCaches()
+        }
         }
     }
 
@@ -1373,6 +1467,72 @@ struct LogTableView: View {
         editingText = value
     }
 
+    private func handleRowAction(_ action: LogRowAction, record: QSORecordModel) {
+        switch action {
+        case .toggleSelection:
+            appState.toggleRecordSelection(record.id)
+        case .startEditing(let header, let value):
+            startEditing(record: record, header: header, value: value)
+        case .commitEditing(let header, let value):
+            appState.updateCell(recordID: record.id, header: header, newValue: value)
+            editingCellID = nil
+            editingHeader = nil
+        case .inspectCallsign:
+            activeTablePopover = .callsign(record)
+        case .inspectGrid(let ctx):
+            activeTablePopover = .grid(ctx)
+        case .showSentEmail(let ctx):
+            activeTablePopover = .sentEmail(ctx)
+        case .showRankLegend:
+            activeTablePopover = .rankLegend
+        case .showEQSLCard:
+            selectedEQSLRecord = record
+            showEQSLCardSheet = true
+        case .toggleAgingSort:
+            appState.toggleSort(for: "AGING")
+        case .openEmail(let email):
+            appState.openEmailComposer(for: record, email: email)
+        case .openReminder:
+            appState.openQSLReminderEmailComposer(for: record)
+        case .openQSLCardComposer:
+            appState.selectedQSLCardQSO = record
+            appState.showQSLCardComposer = true
+        case .openEmailQSLCard:
+            appState.openQSLCardEmailComposer(for: record)
+        case .openCongratulations:
+            appState.openQRZRankCongratulationsEmailComposer(for: record)
+        case .enrichCallsign:
+            Task { await appState.fetchAndStoreQRZEmail(for: record["CALL"]) }
+        case .delete:
+            appState.deleteRecord(id: record.id)
+        case .batchEnrich:
+            appState.enrichSelectedRecords()
+        case .batchReminders:
+            appState.openBatchQSLReminderComposerForSelected()
+        case .batchEmails:
+            appState.openBatchEmailComposerForSelected()
+        case .batchExport:
+            appState.exportSelectedRecordsAs()
+        case .batchDelete:
+            appState.deleteSelectedRecords()
+        case .markNewlyConfirmed:
+            appState.markRecordAsNewlyConfirmed(id: record.id)
+        case .unmarkNewlyConfirmed:
+            appState.unmarkRecordAsNewlyConfirmed(id: record.id)
+        case .trackRival(let call):
+            appState.addTrackedRankCallsigns([call])
+        case .untrackRival(let call):
+            appState.removeTrackedRankCallsign(call)
+        }
+    }
+
+    private func refreshHeaderCaches() {
+        let displayed = displayedHeaders
+        cachedDisplayedHeaders = displayed
+        cachedPinnedHeaders = displayed.filter { isPinnedColumn($0) }
+        cachedUnpinnedHeaders = displayed.filter { !isPinnedColumn($0) }
+    }
+
     private func headerMeta(for header: String) -> LogTableHeaderMeta {
         switch header {
         case "QSL":
@@ -1578,10 +1738,18 @@ struct LogTableView: View {
     }
 }
 
+// MARK: - Fast Date Helpers
+fileprivate enum LogTableDateHelpers {
+    static let emailDateFormatter: DateFormatter = {
+        let df = DateFormatter()
+        df.locale = Locale(identifier: "en_US_POSIX")
+        df.dateFormat = "yyyy-MM-dd HH:mm"
+        return df
+    }()
+}
+
 // MARK: - Equatable High-Performance Log Row View
 fileprivate struct LogRowView: View, Equatable {
-    @EnvironmentObject var appState: AppState
-
     let record: QSORecordModel
     let isSelected: Bool
     let isNewlyConfirmed: Bool
@@ -1593,20 +1761,15 @@ fileprivate struct LogRowView: View, Equatable {
     let isEditingThisRow: Bool
     let editingHeader: String?
     @Binding var editingText: String
+    let isTrackedRival: Bool
+    let hasBatchSelection: Bool
+    let batchSelectionCount: Int
     let pinnedHeaders: [String]
     let unpinnedHeaders: [String]
     let columnWidths: [String: CGFloat]
     let utilityColumnWidth: CGFloat
 
-    let onToggleSelection: () -> Void
-    let onStartEditing: (String, String) -> Void
-    let onCommitEditing: (String, String) -> Void
-    let onInspectCallsign: () -> Void
-    let onInspectGrid: (GridInspectionContext) -> Void
-    let onShowSentEmail: (SentEmailDetailContext) -> Void
-    let onShowRankLegend: () -> Void
-    let onShowEQSLCard: () -> Void
-    let onToggleAgingSort: () -> Void
+    let onAction: (LogRowAction) -> Void
 
     @State private var isHovered: Bool = false
 
@@ -1620,6 +1783,9 @@ fileprivate struct LogRowView: View, Equatable {
         lhs.isEditingThisRow == rhs.isEditingThisRow &&
         lhs.editingHeader == rhs.editingHeader &&
         (!lhs.isEditingThisRow || lhs.editingText == rhs.editingText) &&
+        lhs.isTrackedRival == rhs.isTrackedRival &&
+        lhs.hasBatchSelection == rhs.hasBatchSelection &&
+        lhs.batchSelectionCount == rhs.batchSelectionCount &&
         lhs.utilityColumnWidth == rhs.utilityColumnWidth &&
         lhs.sentEmail == rhs.sentEmail &&
         lhs.opportunity == rhs.opportunity &&
@@ -1698,13 +1864,12 @@ fileprivate struct LogRowView: View, Equatable {
                     HoverQuickActionBar(
                         record: record,
                         call: call,
-                        appState: appState,
+                        onAction: onAction,
                         onEdit: {
-                            onStartEditing("CALL", record["CALL"])
+                            onAction(.startEditing(header: "CALL", value: record["CALL"]))
                         }
                     )
                     .padding(.trailing, 4)
-                    .transition(.opacity.combined(with: .scale(scale: 0.95)))
                 }
             }
 
@@ -1718,11 +1883,12 @@ fileprivate struct LogRowView: View, Equatable {
         }
         .frame(height: 28)
         .contentShape(Rectangle())
+        .onTapGesture {
+            onAction(.toggleSelection)
+        }
         .onHover { hovering in
             if isHovered != hovering {
-                withAnimation(.easeInOut(duration: 0.12)) {
-                    isHovered = hovering
-                }
+                isHovered = hovering
             }
         }
         .contextMenu {
@@ -1747,7 +1913,7 @@ fileprivate struct LogRowView: View, Equatable {
                         .help("Position by UTC date and time in the current filtered result")
                 }
 
-                Button(action: { onToggleSelection() }) {
+                Button(action: { onAction(.toggleSelection) }) {
                     Image(systemName: isSelected ? "checkmark.square.fill" : "square")
                         .font(.system(size: 11))
                         .foregroundColor(isSelected ? .accentColor : .gray)
@@ -1762,12 +1928,25 @@ fileprivate struct LogRowView: View, Equatable {
         .border(Color.gray.opacity(0.15), width: 0.5)
     }
 
+    private func isEditableColumn(_ header: String, isDerived: Bool) -> Bool {
+        !isDerived &&
+        header != "QRZ_URL" &&
+        header != "QRZ" &&
+        header != "QSL" &&
+        header != "GRIDSQUARE" &&
+        header != "GRID" &&
+        header != "AGING" &&
+        header != "APP_VIEW_AGING" &&
+        !header.hasPrefix("RANK_")
+    }
+
+    @ViewBuilder
     private func rowCell(header: String, call: String) -> some View {
         let w = columnWidths[header] ?? LogTableLayout.defaultColumnWidth(for: header)
         let val = record[header]
         let isDerived = ConfirmationCreditColumn.isDerived(header)
         
-        return ZStack {
+        let cellBase = ZStack {
             if header == "AGING" || header == "APP_VIEW_AGING" {
                 AgingCellView(record: record)
             } else if isDerived {
@@ -1777,7 +1956,7 @@ fileprivate struct LogRowView: View, Equatable {
                 )
             } else if isEditingThisRow && editingHeader == header {
                 TextField("", text: $editingText, onCommit: {
-                    onCommitEditing(header, editingText)
+                    onAction(.commitEditing(header: header, value: editingText))
                 })
                 .textFieldStyle(.plain)
                 .font(.system(size: 11, design: .monospaced))
@@ -1796,7 +1975,7 @@ fileprivate struct LogRowView: View, Equatable {
                     if header == "CALL" {
                         HStack(spacing: 4) {
                             Button {
-                                onInspectCallsign()
+                                onAction(.inspectCallsign)
                             } label: {
                                 Text(val)
                                     .font(.system(size: 11.5, weight: .bold, design: .monospaced))
@@ -1819,7 +1998,7 @@ fileprivate struct LogRowView: View, Equatable {
                                 .foregroundColor(.white)
                                 .lineLimit(1)
                                 .fixedSize()
-                                .help("Newly Confirmed QSO! Verified via \(record.confirmationSourcesSummary)\(record.latestConfirmationDate.map { " on " + appState.formattedEmailHistoryDate($0) } ?? "")")
+                                .help("Newly Confirmed QSO! Verified via \(record.confirmationSourcesSummary)\(record.latestConfirmationDate.map { " on " + LogTableDateHelpers.emailDateFormatter.string(from: $0) } ?? "")")
                             } else if let opp = opportunity {
                                 if opp.addsCountryBandCredit {
                                     HStack(spacing: 2) {
@@ -1854,8 +2033,7 @@ fileprivate struct LogRowView: View, Equatable {
 
                             if record.isConfirmed {
                                 Button {
-                                    appState.selectedQSLCardQSO = record
-                                    appState.showQSLCardComposer = true
+                                    onAction(.openQSLCardComposer)
                                 } label: {
                                     Image(systemName: "photo.badge.checkmark")
                                         .font(.system(size: 8.5))
@@ -1869,7 +2047,7 @@ fileprivate struct LogRowView: View, Equatable {
 
                             if let sentEmail {
                                 Button {
-                                    onShowSentEmail(SentEmailDetailContext(record: record, entry: sentEmail))
+                                    onAction(.showSentEmail(SentEmailDetailContext(record: record, entry: sentEmail)))
                                 } label: {
                                     Image(systemName: "envelope.fill")
                                         .font(.system(size: 8.5))
@@ -1878,7 +2056,7 @@ fileprivate struct LogRowView: View, Equatable {
                                         .background(Circle().fill(Color.cyan.opacity(0.18)))
                                 }
                                 .buttonStyle(.plain)
-                                .help("Email sent to \(call) on \(appState.formattedEmailHistoryDate(sentEmail.date)): \"\(sentEmail.subject)\" (\(sentEmail.status)). Click to view.")
+                                .help("Email sent to \(call) on \(LogTableDateHelpers.emailDateFormatter.string(from: sentEmail.date)): \"\(sentEmail.subject)\" (\(sentEmail.status)). Click to view.")
                             }
                         }
                         .lineLimit(1)
@@ -1930,11 +2108,11 @@ fileprivate struct LogRowView: View, Equatable {
                             call: call,
                             sentEmail: sentEmail,
                             onOpenComposer: {
-                                appState.openEmailComposer(for: record, email: val)
+                                onAction(.openEmail(val))
                             },
                             onViewSentEmail: {
                                 if let sentEmail {
-                                    onShowSentEmail(SentEmailDetailContext(record: record, entry: sentEmail))
+                                    onAction(.showSentEmail(SentEmailDetailContext(record: record, entry: sentEmail)))
                                 }
                             }
                         )
@@ -1945,7 +2123,7 @@ fileprivate struct LogRowView: View, Equatable {
                     else if header == "APP_YAAM_LAST_EMAIL" && !val.isEmpty {
                         if let sentEmail {
                             Button {
-                                onShowSentEmail(SentEmailDetailContext(record: record, entry: sentEmail))
+                                onAction(.showSentEmail(SentEmailDetailContext(record: record, entry: sentEmail)))
                             } label: {
                                 HStack(spacing: 4) {
                                     Image(systemName: "envelope.fill")
@@ -1955,7 +2133,7 @@ fileprivate struct LogRowView: View, Equatable {
                                         .foregroundColor(.primary)
                                         .lineLimit(1)
                                     Spacer()
-                                    Text(appState.formattedEmailHistoryDate(sentEmail.date))
+                                    Text(LogTableDateHelpers.emailDateFormatter.string(from: sentEmail.date))
                                         .font(.system(size: 9, design: .monospaced))
                                         .foregroundColor(.secondary)
                                 }
@@ -1989,7 +2167,7 @@ fileprivate struct LogRowView: View, Equatable {
                                 country: record["COUNTRY"],
                                 record: record,
                                 onInspect: { ctx in
-                                    onInspectGrid(ctx)
+                                    onAction(.inspectGrid(ctx))
                                 }
                             )
                         }
@@ -2028,39 +2206,41 @@ fileprivate struct LogRowView: View, Equatable {
         .background(statusBgColor)
         .border(Color.gray.opacity(0.15), width: 0.5)
         .contentShape(Rectangle())
-        .onTapGesture(count: 2) {
-            if !isDerived && header != "QRZ_URL" && header != "QRZ" && header != "QSL" && header != "GRIDSQUARE" && header != "GRID" && header != "AGING" && header != "APP_VIEW_AGING" && !header.hasPrefix("RANK_") {
-                onStartEditing(header, val)
+
+        if header.hasPrefix("RANK_") {
+            cellBase.onTapGesture {
+                onAction(.showRankLegend)
             }
-        }
-        .onTapGesture {
-            if header.hasPrefix("RANK_") {
-                onShowRankLegend()
-            } else if header == "AGING" || header == "APP_VIEW_AGING" {
-                onToggleAgingSort()
-            } else {
-                onToggleSelection()
+        } else if header == "AGING" || header == "APP_VIEW_AGING" {
+            cellBase.onTapGesture {
+                onAction(.toggleAgingSort)
             }
+        } else if isEditableColumn(header, isDerived: isDerived) {
+            cellBase.onTapGesture(count: 2) {
+                onAction(.startEditing(header: header, value: val))
+            }
+        } else {
+            cellBase
         }
     }
 
     @ViewBuilder
     private func rowContextMenuContent(call: String) -> some View {
         Button(isSelected ? "Deselect QSO" : "Select QSO") {
-            onToggleSelection()
+            onAction(.toggleSelection)
         }
         
         let emailVal = record["EMAIL"].trimmingCharacters(in: .whitespacesAndNewlines)
         if !emailVal.isEmpty {
             Button {
-                appState.openEmailComposer(for: record, email: emailVal)
+                onAction(.openEmail(emailVal))
             } label: {
                 Label("Send Email to \(emailVal)...", systemImage: "paperplane")
             }
 
             if !record.isConfirmed {
                 Button {
-                    appState.openQSLReminderEmailComposer(for: record)
+                    onAction(.openReminder)
                 } label: {
                     Label("Send QSL Reminder Email...", systemImage: "bell.badge")
                 }
@@ -2069,13 +2249,13 @@ fileprivate struct LogRowView: View, Equatable {
         
         if !call.isEmpty {
             Button {
-                onInspectCallsign()
+                onAction(.inspectCallsign)
             } label: {
                 Label("Inspect Callsign '\(call)'...", systemImage: "info.circle")
             }
             
             Button("Enrich QRZ Name & Email for '\(call)'") {
-                Task { await appState.fetchAndStoreQRZEmail(for: call) }
+                onAction(.enrichCallsign)
             }
         }
 
@@ -2084,72 +2264,71 @@ fileprivate struct LogRowView: View, Equatable {
             : record["GRIDSQUARE"].trimmingCharacters(in: .whitespacesAndNewlines)
         if !gridVal.isEmpty {
             Button {
-                onInspectGrid(GridInspectionContext(
+                onAction(.inspectGrid(GridInspectionContext(
                     record: record,
                     fullGrid: gridVal,
                     call: call,
                     country: record["COUNTRY"]
-                ))
+                )))
             } label: {
                 Label("Inspect Grid Locator '\(gridVal.uppercased())' (World Map)...", systemImage: "map.fill")
             }
         }
         
-        if !appState.selectedRecordIDs.isEmpty {
+        if hasBatchSelection {
             Divider()
-            Button("🪄 Enrich Selected (\(appState.selectedRecordIDs.count) Rows)") {
-                appState.enrichSelectedRecords()
+            Button("🪄 Enrich Selected (\(batchSelectionCount) Rows)") {
+                onAction(.batchEnrich)
             }
-            Button("🔔 Batch QSL Reminders (\(appState.selectedRecordIDs.count) Rows)...") {
-                appState.openBatchQSLReminderComposerForSelected()
+            Button("🔔 Batch QSL Reminders (\(batchSelectionCount) Rows)...") {
+                onAction(.batchReminders)
             }
-            Button("✉️ Batch Email Selected (\(appState.selectedRecordIDs.count) Rows)...") {
-                appState.openBatchEmailComposerForSelected()
+            Button("✉️ Batch Email Selected (\(batchSelectionCount) Rows)...") {
+                onAction(.batchEmails)
             }
-            Button("⬇️ Export Selected (\(appState.selectedRecordIDs.count) Rows) to ADIF...") {
-                appState.exportSelectedRecordsAs()
+            Button("⬇️ Export Selected (\(batchSelectionCount) Rows) to ADIF...") {
+                onAction(.batchExport)
             }
             Button(role: .destructive) {
-                appState.deleteSelectedRecords()
+                onAction(.batchDelete)
             } label: {
-                Label("Delete Selected (\(appState.selectedRecordIDs.count) Rows)", systemImage: "trash.fill")
+                Label("Delete Selected (\(batchSelectionCount) Rows)", systemImage: "trash.fill")
             }
         }
 
         if !call.isEmpty {
             Divider()
             Button("Email QSL Card") {
-                appState.openQSLCardEmailComposer(for: record)
+                onAction(.openEmailQSLCard)
             }
             .disabled(!record.isConfirmed || record["EMAIL"].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
             if ["RANK_QSO", "RANK_BAND", "RANK_DXCC"].contains(where: { !record[$0].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
                 Button("Congratulate QRZ Achievement & Request Confirmation") {
-                    appState.openQRZRankCongratulationsEmailComposer(for: record)
+                    onAction(.openCongratulations)
                 }
                 .disabled(record["EMAIL"].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
                 Button {
-                    onShowRankLegend()
+                    onAction(.showRankLegend)
                 } label: {
                     Label("Show QRZ Ranks Legend...", systemImage: "questionmark.circle")
                 }
             }
 
             Button("Generate QSL Card") {
-                appState.selectedQSLCardQSO = record
-                appState.showQSLCardComposer = true
+                onAction(.openQSLCardComposer)
             }
 
             Button {
-                onShowEQSLCard()
+                onAction(.showEQSLCard)
             } label: {
                 Label("View eQSL Graphic Card", systemImage: "photo.badge.checkmark")
             }
 
             if let sentEmail {
                 Button {
-                    onShowSentEmail(SentEmailDetailContext(record: record, entry: sentEmail))
+                    onAction(.showSentEmail(SentEmailDetailContext(record: record, entry: sentEmail)))
                 } label: {
                     Label("View Sent Email Details", systemImage: "envelope.badge")
                 }
@@ -2157,13 +2336,13 @@ fileprivate struct LogRowView: View, Equatable {
 
             if isNewlyConfirmed {
                 Button {
-                    appState.unmarkRecordAsNewlyConfirmed(id: record.id)
+                    onAction(.unmarkNewlyConfirmed)
                 } label: {
                     Label("Unmark as Newly Confirmed", systemImage: "sparkles")
                 }
             } else if record.isConfirmed {
                 Button {
-                    appState.markRecordAsNewlyConfirmed(id: record.id)
+                    onAction(.markNewlyConfirmed)
                 } label: {
                     Label("Highlight as Newly Confirmed", systemImage: "sparkles")
                 }
@@ -2171,31 +2350,28 @@ fileprivate struct LogRowView: View, Equatable {
 
             // MARK: Leaderboard Rivals
             let normalizedCall = call.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-            let isTracked = appState.trackedRankCallsigns
-                .map { $0.uppercased() }.contains(normalizedCall)
 
             Divider()
 
-            if isTracked {
+            if isTrackedRival {
                 Button {
-                    appState.removeTrackedRankCallsign(call)
+                    onAction(.untrackRival(call))
                 } label: {
                     Label("Remove '\(normalizedCall)' from Leaderboard Rivals", systemImage: "person.badge.minus")
                 }
             } else {
                 Button {
-                    appState.addTrackedRankCallsigns([call])
+                    onAction(.trackRival(call))
                 } label: {
                     Label("Add '\(normalizedCall)' to Leaderboard Rivals", systemImage: "person.badge.plus")
                 }
-                .disabled(appState.trackedRankCallsigns.count >= 8)
             }
         }
         
         Divider()
         
         Button("Delete QSO") {
-            appState.deleteRecord(id: record.id)
+            onAction(.delete)
         }
     }
 }
@@ -2946,7 +3122,6 @@ struct GridCellView: View {
     let onInspect: (GridInspectionContext) -> Void
 
     @State private var isHovered: Bool = false
-    @State private var hoverTask: Task<Void, Never>? = nil
 
     var body: some View {
         Button {
@@ -2973,22 +3148,11 @@ struct GridCellView: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering in
-            withAnimation(.easeInOut(duration: 0.15)) {
+            if isHovered != hovering {
                 isHovered = hovering
             }
-            if hovering {
-                hoverTask?.cancel()
-                hoverTask = Task { @MainActor in
-                    try? await Task.sleep(nanoseconds: 280_000_000)
-                    if !Task.isCancelled {
-                        triggerInspection()
-                    }
-                }
-            } else {
-                hoverTask?.cancel()
-            }
         }
-        .help("Grid: \(fullGrid.uppercased()) • Click or pause mouse to view world map locator")
+        .help("Grid: \(fullGrid.uppercased()) • Click to view world map locator")
         .frame(maxWidth: .infinity, alignment: .center)
     }
 
@@ -3304,10 +3468,106 @@ struct GridInspectionCard: View {
     }
 }
 
-private struct LogTableScrollOffsetKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+private struct LogTableScrollState: Equatable {
+    var quantizedX: CGFloat = 0
+    var isScrolledDown: Bool = false
+}
+
+private struct LogTableScrollStateKey: PreferenceKey {
+    static var defaultValue = LogTableScrollState()
+    static func reduce(value: inout LogTableScrollState, nextValue: () -> LogTableScrollState) {
         value = nextValue()
+    }
+}
+
+fileprivate struct ScrollViewAccessor: NSViewRepresentable {
+    let onFound: (NSScrollView) -> Void
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async { [weak view] in
+            if let scrollView = view?.enclosingScrollView {
+                onFound(scrollView)
+            }
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {}
+}
+
+// MARK: - Back to Top Floating Button
+struct LogTableBackToTopButton: View {
+    let action: () -> Void
+    @State private var isHovered = false
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                ZStack {
+                    Circle()
+                        .fill(isHovered ? Color.accentColor : Color.secondary.opacity(0.20))
+                        .frame(width: 20, height: 20)
+
+                    Image(systemName: "arrow.up")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(isHovered ? .white : .primary)
+                        .offset(y: isHovered ? -1.0 : 0)
+                }
+
+                Text("Back to Top")
+                    .font(.system(size: 11.5, weight: .semibold, design: .rounded))
+                    .foregroundColor(isHovered ? Color.accentColor : .primary)
+
+                Text("⌥↑")
+                    .font(.system(size: 9.5, weight: .bold, design: .monospaced))
+                    .foregroundColor(.secondary)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 1.5)
+                    .background(
+                        RoundedRectangle(cornerRadius: 3.5)
+                            .fill(Color.secondary.opacity(isHovered ? 0.16 : 0.10))
+                    )
+            }
+            .padding(.leading, 6)
+            .padding(.trailing, 9)
+            .padding(.vertical, 5)
+            .background(
+                Capsule()
+                    .fill(Color(NSColor.windowBackgroundColor).opacity(colorScheme == .dark ? 0.82 : 0.92))
+            )
+            .background(
+                .ultraThinMaterial,
+                in: Capsule()
+            )
+            .overlay(
+                Capsule()
+                    .strokeBorder(
+                        isHovered ? Color.accentColor.opacity(0.65) : Color.primary.opacity(0.14),
+                        lineWidth: 1
+                    )
+            )
+            .shadow(
+                color: Color.black.opacity(colorScheme == .dark ? 0.45 : 0.14),
+                radius: isHovered ? 8 : 5,
+                x: 0,
+                y: isHovered ? 4 : 2
+            )
+            .scaleEffect(isHovered ? 1.03 : 1.0)
+            .animation(.spring(response: 0.25, dampingFraction: 0.7), value: isHovered)
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            isHovered = hovering
+            if hovering {
+                NSCursor.pointingHand.push()
+            } else {
+                NSCursor.pop()
+            }
+        }
+        .keyboardShortcut(KeyEquivalent(Character(UnicodeScalar(NSUpArrowFunctionKey)!)), modifiers: [.option])
+        .help("Scroll back to the top of the log (⌥↑)")
     }
 }
 
@@ -3498,7 +3758,7 @@ struct EmailCellView: View {
             .frame(maxWidth: .infinity, alignment: .center)
             .contentShape(Rectangle())
             .onHover { hovering in
-                withAnimation(.easeInOut(duration: 0.12)) {
+                if isHovered != hovering {
                     isHovered = hovering
                 }
             }
@@ -3613,7 +3873,7 @@ struct AgingCellView: View {
 struct HoverQuickActionBar: View {
     let record: QSORecordModel
     let call: String
-    @ObservedObject var appState: AppState
+    let onAction: (LogRowAction) -> Void
     let onEdit: () -> Void
 
     var body: some View {
@@ -3623,9 +3883,9 @@ struct HoverQuickActionBar: View {
             // Email or QSL Reminder
             Button {
                 if !record.isConfirmed && !emailVal.isEmpty {
-                    appState.openQSLReminderEmailComposer(for: record)
+                    onAction(.openReminder)
                 } else {
-                    appState.openEmailComposer(for: record, email: emailVal)
+                    onAction(.openEmail(emailVal))
                 }
             } label: {
                 Image(systemName: !record.isConfirmed && !emailVal.isEmpty ? "bell.badge.fill" : "envelope.fill")
@@ -3655,8 +3915,7 @@ struct HoverQuickActionBar: View {
 
             // QSL Card Composer
             Button {
-                appState.selectedQSLCardQSO = record
-                appState.showQSLCardComposer = true
+                onAction(.openQSLCardComposer)
             } label: {
                 Image(systemName: "photo.badge.checkmark")
                     .font(.system(size: 8.5))
@@ -3680,7 +3939,7 @@ struct HoverQuickActionBar: View {
 
             // Delete QSO
             Button {
-                appState.deleteRecord(id: record.id)
+                onAction(.delete)
             } label: {
                 Image(systemName: "trash")
                     .font(.system(size: 8.5))

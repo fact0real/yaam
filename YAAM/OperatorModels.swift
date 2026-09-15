@@ -7,7 +7,7 @@ import Foundation
 import SwiftUI
 
 nonisolated enum AmateurBandPlan {
-    private static let ranges: [(ClosedRange<Double>, String)] = [
+    static let ranges: [(ClosedRange<Double>, String)] = [
         (0.1357...0.1378, "2190m"),
         (0.472...0.479, "630m"),
         (1.8...2.0, "160m"),
@@ -249,6 +249,8 @@ nonisolated struct QuickLogDraft: Equatable, Sendable {
     var receivedSerial = ""
     var receivedExchange = ""
     var state = ""
+    var county = ""
+    var qslVia = ""
     var arrlSection = ""
     var comment = ""
     var source = "Manual"
@@ -337,11 +339,24 @@ nonisolated struct CallsignLookupResult: Equatable, Sendable {
     var email: String = ""
     var latitude: String = ""
     var longitude: String = ""
+    var imageURL: String = ""
+    var qslManager: String = ""
+    var state: String = ""
+    var county: String = ""
+    var iota: String = ""
+    var licenseClass: String = ""
+    var qslViaMail: Bool = false
+    var qslViaLotw: Bool = false
+    var qslViaEqsl: Bool = false
+    var profileViews: Int = 0
+    var birthYear: String = ""
+    var address1: String = ""
+    var zip: String = ""
     var sources: [String] = []
     var message: String = ""
 
     var hasUsefulData: Bool {
-        !name.isEmpty || !qth.isEmpty || !grid.isEmpty || !country.isEmpty || !dxcc.isEmpty
+        !name.isEmpty || !qth.isEmpty || !grid.isEmpty || !country.isEmpty || !dxcc.isEmpty || !imageURL.isEmpty || !qslManager.isEmpty || !state.isEmpty || !iota.isEmpty
     }
 
     mutating func mergeMissing(from other: CallsignLookupResult) {
@@ -355,6 +370,19 @@ nonisolated struct CallsignLookupResult: Equatable, Sendable {
         if email.isEmpty { email = other.email }
         if latitude.isEmpty { latitude = other.latitude }
         if longitude.isEmpty { longitude = other.longitude }
+        if imageURL.isEmpty { imageURL = other.imageURL }
+        if qslManager.isEmpty { qslManager = other.qslManager }
+        if state.isEmpty { state = other.state }
+        if county.isEmpty { county = other.county }
+        if iota.isEmpty { iota = other.iota }
+        if licenseClass.isEmpty { licenseClass = other.licenseClass }
+        if !qslViaMail { qslViaMail = other.qslViaMail }
+        if !qslViaLotw { qslViaLotw = other.qslViaLotw }
+        if !qslViaEqsl { qslViaEqsl = other.qslViaEqsl }
+        if birthYear.isEmpty { birthYear = other.birthYear }
+        if address1.isEmpty { address1 = other.address1 }
+        if zip.isEmpty { zip = other.zip }
+        if profileViews == 0 { profileViews = other.profileViews }
         sources = Array(Set(sources + other.sources)).sorted()
         if message.isEmpty { message = other.message }
     }

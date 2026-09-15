@@ -153,6 +153,11 @@ public final class CWKeyerService: ObservableObject {
                 self.activeBufferText = ""
             }
         }
+        WinKeyerDriver.shared.onPaddleBreakIn = { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.handlePaddleBreakIn()
+            }
+        }
     }
 
     public var hardwareStatusSummary: (isConnected: Bool, title: String, detail: String) {
@@ -238,6 +243,27 @@ public final class CWKeyerService: ObservableObject {
 
     // MARK: - Macro Expansion with Rich Ham Radio Tokens
 
+    @Published public var isPaddleBreakInActive: Bool = false
+    public var onPaddleBreakIn: (() -> Void)?
+    private var paddleResetTask: Task<Void, Never>?
+
+    public var isAutoCQRunning: Bool {
+        return isAutoCQActive
+    }
+
+    public func handlePaddleBreakIn() {
+        guard isTransmitting || isAutoCQRunning else { return }
+        stop()
+        isPaddleBreakInActive = true
+        onPaddleBreakIn?()
+
+        paddleResetTask?.cancel()
+        paddleResetTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            self?.isPaddleBreakInActive = false
+        }
+    }
+
     public func expandMacro(
         _ template: String,
         myCall: String = "",
@@ -253,15 +279,37 @@ public final class CWKeyerService: ObservableObject {
         let sentRst = useCutNumbers && rst == "599" ? "5NN" : (rst.isEmpty ? "5NN" : rst)
         let serialFormatted = useCutNumbers ? cutSerial(serial) : String(format: "%03d", serial)
 
+        // Query CallHistoryLookupEngine for predicted exchange details
+        let hist = CallHistoryLookupEngine.shared.lookup(callsign: call)
+        let resolvedName = !name.isEmpty ? name : (hist?.name ?? "")
+        let resolvedExch = !exch.isEmpty ? exch : (hist?.userExchange ?? "")
+        let resolvedState = hist?.state ?? ""
+        let resolvedSect = hist?.arrlSection ?? ""
+        let resolvedGrid = hist?.gridSquare ?? ""
+        let resolvedZone: String = {
+            if let z = hist?.cqZone, z > 0 {
+                return z < 10 ? "0\(z)" : "\(z)"
+            }
+            return ""
+        }()
+
         var result = template
             .replacingOccurrences(of: "{MYCALL}", with: myCall.uppercased())
             .replacingOccurrences(of: "{CALL}", with: call.uppercased())
             .replacingOccurrences(of: "{RST}", with: sentRst)
             .replacingOccurrences(of: "{SENT_RST}", with: sentRst)
-            .replacingOccurrences(of: "{NAME}", with: name.uppercased())
+            .replacingOccurrences(of: "{NAME}", with: resolvedName.uppercased())
+            .replacingOccurrences(of: "{HISNAME}", with: resolvedName.uppercased())
             .replacingOccurrences(of: "{QTH}", with: qth.uppercased())
             .replacingOccurrences(of: "{SERIAL}", with: serialFormatted)
-            .replacingOccurrences(of: "{EXCH}", with: exch.uppercased())
+            .replacingOccurrences(of: "{EXCH}", with: (resolvedExch.isEmpty ? exch : resolvedExch).uppercased())
+            .replacingOccurrences(of: "{HISEXCH}", with: (resolvedExch.isEmpty ? exch : resolvedExch).uppercased())
+            .replacingOccurrences(of: "{HISZONE}", with: resolvedZone)
+            .replacingOccurrences(of: "{ZONE}", with: resolvedZone)
+            .replacingOccurrences(of: "{HISSTATE}", with: resolvedState.uppercased())
+            .replacingOccurrences(of: "{STATE}", with: resolvedState.uppercased())
+            .replacingOccurrences(of: "{HISSECT}", with: resolvedSect.uppercased())
+            .replacingOccurrences(of: "{HISGRID}", with: resolvedGrid.uppercased())
             .replacingOccurrences(of: "{BAND}", with: band.uppercased())
             .replacingOccurrences(of: "{FREQ}", with: freq)
 
@@ -270,6 +318,32 @@ public final class CWKeyerService: ObservableObject {
         }
 
         return result
+    }
+
+    public func expandTemplate(
+        _ template: String,
+        myCall: String = "",
+        call: String = "",
+        rst: String = "599",
+        name: String = "",
+        qth: String = "",
+        serial: Int = 1,
+        exch: String = "",
+        band: String = "",
+        freq: String = ""
+    ) -> String {
+        return expandMacro(
+            template,
+            myCall: myCall,
+            call: call,
+            rst: rst,
+            name: name,
+            qth: qth,
+            serial: serial,
+            exch: exch,
+            band: band,
+            freq: freq
+        )
     }
 
     // MARK: - Send Transmission
@@ -513,12 +587,11 @@ public final class CWKeyerService: ObservableObject {
     // MARK: - cwdaemon UDP Sender
 
     private func sendViaCWDaemon(text: String) {
-        let speedCmd = "\u{1b}2\(wpm)".data(using: .ascii)!
+        let speedCmd = Data("\u{1b}2\(wpm)".utf8)
         sendCWDaemonPacket(data: speedCmd)
 
-        if let msgData = text.data(using: .ascii) {
-            sendCWDaemonPacket(data: msgData)
-        }
+        let msgData = Data(text.utf8)
+        sendCWDaemonPacket(data: msgData)
     }
 
     private func sendCWDaemonPacket(data: Data) {

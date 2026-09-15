@@ -607,8 +607,8 @@ struct QRZAwardsView: View {
         VStack(alignment: .leading, spacing: 10) {
             Text(title).font(.headline)
             LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: 260, maximum: 340), spacing: 10)],
-                alignment: .leading, spacing: 10
+                columns: [GridItem(.adaptive(minimum: 280, maximum: 340), spacing: 12)],
+                alignment: .leading, spacing: 12
             ) {
                 ForEach(awards) { award in
                     AwardCard(award: award, accentColor: selectedSource.accentColor)
@@ -1023,47 +1023,79 @@ struct AwardCard: View {
                 }
             }
 
-            VStack(alignment: .leading, spacing: 9) {
-                HStack(alignment: .top, spacing: 9) {
-                    AwardContinentIcon(award: award, tint: tintColor).frame(width: 84, height: 42)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(award.title).font(.subheadline.weight(.bold)).lineLimit(2)
-                        Text(award.status).font(.caption).foregroundStyle(tintColor).bold().lineLimit(1)
-                    }
-                }
+            VStack(alignment: .leading, spacing: 8) {
+                // Top Header Row (unified fixed height 44)
+                HStack(alignment: .center, spacing: 9) {
+                    AwardContinentIcon(award: award, tint: tintColor)
+                        .frame(width: 80, height: 40)
 
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(award.title)
+                            .font(.system(size: 12, weight: .bold, design: .rounded))
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
+                            .frame(maxWidth: .infinity, alignment: .topLeading)
+
+                        Text(award.status)
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(tintColor)
+                            .lineLimit(1)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                }
+                .frame(height: 44, alignment: .leading)
+
+                // Metric Row (Progress & Achievement) (unified fixed height 34)
                 HStack(spacing: 0) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Progress").font(.caption2).foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Progress").font(.system(size: 9.5)).foregroundStyle(.secondary)
                         Text(award.progressText)
-                            .font(.system(.headline, design: .rounded)).foregroundStyle(tintColor)
+                            .font(.system(size: 14, weight: .bold, design: .rounded))
+                            .foregroundStyle(tintColor)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    Divider().frame(height: 30)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Achievement").font(.caption2).foregroundStyle(.secondary)
-                        Text(award.achievement).font(.caption.bold()).lineLimit(2)
-                    }
-                    .padding(.leading, 9).frame(maxWidth: .infinity, alignment: .leading)
-                }
+                    .frame(width: 68, alignment: .leading)
 
-                if award.progressAvailable {
-                    GeometryReader { g in
-                        ZStack(alignment: .leading) {
-                            Capsule().fill(tintColor.opacity(0.13))
-                            Capsule().fill(LinearGradient(colors: [tintColor.opacity(0.78), tintColor],
-                                                          startPoint: .leading, endPoint: .trailing))
-                            .frame(width: g.size.width * progress / 100)
+                    Divider().frame(height: 24)
+
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Achievement").font(.system(size: 9.5)).foregroundStyle(.secondary)
+                        Text(award.achievement)
+                            .font(.system(size: 10.5, weight: .semibold))
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                    .padding(.leading, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(height: 34, alignment: .leading)
+
+                // Progress Bar (unified fixed height 6)
+                ZStack(alignment: .leading) {
+                    Capsule().fill(tintColor.opacity(award.progressAvailable ? 0.14 : 0.08))
+                    if award.progressAvailable {
+                        GeometryReader { g in
+                            Capsule()
+                                .fill(LinearGradient(colors: [tintColor.opacity(0.80), tintColor],
+                                                     startPoint: .leading, endPoint: .trailing))
+                                .frame(width: max(0, min(g.size.width, g.size.width * progress / 100)))
                         }
                     }
-                    .frame(height: 6)
                 }
+                .frame(height: 6)
 
+                // Footnote / Detail text (unified fixed height 28)
                 Text(award.detail.isEmpty ? award.status : award.detail)
-                    .font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .truncationMode(.tail)
+                    .frame(height: 28, alignment: .topLeading)
             }
-            .padding(11)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 9)
         }
+        .frame(height: 160)
+        .frame(maxWidth: .infinity)
         .background(ZStack {
             Color(NSColor.controlBackgroundColor).opacity(0.55)
             tintColor.opacity(isComplete ? 0.04 : 0.02)
@@ -1072,7 +1104,7 @@ struct AwardCard: View {
         .overlay(RoundedRectangle(cornerRadius: 10)
             .stroke(tintColor.opacity(isComplete ? 0.50 : 0.26),
                     lineWidth: isComplete ? 1.5 : 1.0))
-        .shadow(color: isComplete ? Color.green.opacity(0.10) : Color.clear, radius: 5)
+        .shadow(color: isComplete ? Color.green.opacity(0.08) : Color.clear, radius: 4)
     }
 }
 

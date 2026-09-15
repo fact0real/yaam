@@ -393,8 +393,18 @@ public struct CWPileupSimulatorView: View {
                     RoundedRectangle(cornerRadius: 7)
                         .stroke(isCallsignFocused ? Color.accentColor : Color.primary.opacity(0.15), lineWidth: isCallsignFocused ? 2 : 1)
                 )
+
+                // Super Check Partial (SCP) Autocomplete HUD
+                SuperCheckPartialHUDView(
+                    targetCallsign: $sim.draftCallsign,
+                    activeBand: "20M",
+                    activeMode: "CW"
+                ) { selectedCall in
+                    sim.draftCallsign = selectedCall
+                    isCallsignFocused = true
+                }
             }
-            .frame(maxWidth: 240)
+            .frame(maxWidth: 320)
 
             // Sent Exchange: RST + Serial
             HStack(spacing: 6) {

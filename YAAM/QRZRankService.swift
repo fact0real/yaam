@@ -212,6 +212,71 @@ actor QRZRankService {
         latestQuota = envelope.quota
         return envelope.quota
     }
+
+    func fetchCountries(
+        token: String? = nil,
+        userAgent: String
+    ) async throws -> [QRZCountrySummary] {
+        let request = try QRZRankAPIContract.makeCountriesRequest(token: token, userAgent: userAgent)
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw QRZRankFetchFailure.invalidResponse
+        }
+        return try QRZRankAPIContract.decodeCountries(data)
+    }
+
+    func fetchCountryLeaderboard(
+        countryIso: String,
+        category: String = "qso",
+        limit: Int = 50,
+        token: String? = nil,
+        userAgent: String
+    ) async throws -> QRZCountryLeaderboardResponse {
+        let request = try QRZRankAPIContract.makeCountryLeaderboardRequest(
+            countryIso: countryIso,
+            category: category,
+            limit: limit,
+            token: token,
+            userAgent: userAgent
+        )
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw QRZRankFetchFailure.invalidResponse
+        }
+        return try QRZRankAPIContract.decodeCountryLeaderboard(data)
+    }
+
+    func fetchStationAnalysis(
+        callsign: String,
+        token: String? = nil,
+        userAgent: String
+    ) async throws -> QRZRankAnalysisResponse {
+        let request = try QRZRankAPIContract.makeAnalysisRequest(
+            callsign: callsign,
+            token: token,
+            userAgent: userAgent
+        )
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw QRZRankFetchFailure.invalidResponse
+        }
+        return try QRZRankAPIContract.decodeAnalysis(data)
+    }
+
+    func fetchWorldChampions(
+        token: String? = nil,
+        userAgent: String
+    ) async throws -> [QRZWorldChampionItem] {
+        let request = try QRZRankAPIContract.makeWorldChampionsRequest(
+            token: token,
+            userAgent: userAgent
+        )
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw QRZRankFetchFailure.invalidResponse
+        }
+        return try QRZRankAPIContract.decodeWorldChampions(data)
+    }
 }
 
 nonisolated extension QRZRankResponse {

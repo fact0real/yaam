@@ -748,6 +748,12 @@ struct ContestPanel: View {
                 Divider()
             }
 
+            // Real-Time Contest Rate Speedometer & 2D Multiplier Matrix HUD
+            ContestRateMatrixHUDView(activeBand: inputBand)
+                .padding(20)
+
+            Divider()
+
             // Real-Time Claimed Score Gauge & Metrics Bar
             claimedScoreBanner(summary)
 
@@ -927,6 +933,26 @@ struct ContestPanel: View {
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
                         .background(Color.green.opacity(0.15), in: Capsule())
+                }
+
+                if let hist = CallHistoryLookupEngine.shared.lookup(callsign: inputCall.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "book.pages.fill").font(.system(size: 8)).foregroundStyle(.indigo)
+                        Text("HIST: \(hist.previewSummary)")
+                            .font(.caption2.monospaced().weight(.semibold))
+                            .foregroundStyle(.indigo)
+
+                        Button("Pre-fill") {
+                            if !hist.userExchange.isEmpty { inputRcvdExchange = hist.userExchange }
+                            else if let z = hist.cqZone, z > 0 { inputRcvdExchange = z < 10 ? "0\(z)" : "\(z)" }
+                            else if !hist.state.isEmpty { inputRcvdExchange = hist.state }
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.mini)
+                    }
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.indigo.opacity(0.12), in: Capsule())
                 }
 
                 if !scpMatches.isEmpty {
