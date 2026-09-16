@@ -277,6 +277,17 @@ actor QRZRankService {
         }
         return try QRZRankAPIContract.decodeWorldChampions(data)
     }
+
+    func fetchOverviewStats(
+        userAgent: String
+    ) async throws -> QRZOverviewResponse {
+        let request = try QRZRankAPIContract.makeOverviewStatsRequest(userAgent: userAgent)
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw QRZRankFetchFailure.invalidResponse
+        }
+        return try QRZRankAPIContract.decodeOverviewStats(data)
+    }
 }
 
 nonisolated extension QRZRankResponse {

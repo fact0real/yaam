@@ -278,6 +278,29 @@ nonisolated struct QRZWorldChampionsResponse: Codable, Sendable {
     let champions: [QRZWorldChampionItem]
 }
 
+nonisolated struct QRZOverviewTotals: Codable, Sendable {
+    let totalStations: Int?
+    let totalQso: Int?
+    let totalCountries: Int?
+    let avgQso: Double?
+    let avgDxcc: Double?
+    let avgBand: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case totalStations = "total_stations"
+        case totalQso = "total_qso"
+        case totalCountries = "total_countries"
+        case avgQso = "avg_qso"
+        case avgDxcc = "avg_dxcc"
+        case avgBand = "avg_band"
+    }
+}
+
+nonisolated struct QRZOverviewResponse: Codable, Sendable {
+    let totals: QRZOverviewTotals?
+}
+
+
 nonisolated struct QRZNextRankTarget: Codable, Hashable, Sendable {
     let callsign: String
     let gapQso: Int
@@ -678,6 +701,29 @@ nonisolated enum QRZRankAPIContract {
             throw QRZRankAPIContractError.invalidResponse
         }
     }
+
+    static func makeOverviewStatsRequest(userAgent: String) throws -> URLRequest {
+        guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
+            throw QRZRankAPIContractError.invalidURL
+        }
+        components.percentEncodedPath = "/api/v1/stats/overview"
+        guard let url = components.url else { throw QRZRankAPIContractError.invalidURL }
+        var req = URLRequest(url: url)
+        req.httpMethod = "GET"
+        req.timeoutInterval = 15
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        req.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        return req
+    }
+
+    static func decodeOverviewStats(_ data: Data) throws -> QRZOverviewResponse {
+        do {
+            return try JSONDecoder().decode(QRZOverviewResponse.self, from: data)
+        } catch {
+            throw QRZRankAPIContractError.invalidResponse
+        }
+    }
+
 
     static func decodeQuota(_ data: Data) throws -> QRZRankAPIQuotaEnvelope {
         let envelope: QRZRankAPIQuotaEnvelope

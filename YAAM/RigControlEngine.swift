@@ -17,8 +17,12 @@ import SwiftUI
 // MARK: - Rig Driver Enum
 
 public enum RigDriverType: String, CaseIterable, Identifiable, Sendable {
+    case icomUSB = "Icom Transceiver (USB CI-V)"
     case flrig = "Flrig (XML-RPC)"
     case rigctld = "Hamlib (rigctld TCP)"
+    case tx500 = "Lab599 TX-500 (USB-C Serial)"
+    case fx4cr = "FX-4CR (USB / Bluetooth)"
+    case xiegu6100 = "Xiegu X6100 (USB-C)"
     case disabled = "Disabled"
 
     public var id: String { rawValue }
@@ -27,7 +31,7 @@ public enum RigDriverType: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .flrig: return 12345
         case .rigctld: return 4532
-        case .disabled: return 0
+        case .icomUSB, .tx500, .fx4cr, .xiegu6100, .disabled: return 0
         }
     }
 }
@@ -108,6 +112,11 @@ public final class RigControlEngine: ObservableObject {
         tcpConnection?.cancel()
     }
 
+    private var tx500Cancellables = Set<AnyCancellable>()
+    private var icomUSBCancellables = Set<AnyCancellable>()
+    private var fx4crCancellables = Set<AnyCancellable>()
+    private var xiegu6100Cancellables = Set<AnyCancellable>()
+
     // MARK: - Connect & Disconnect
     public func connect() {
         guard driverType != .disabled else {
@@ -123,6 +132,14 @@ public final class RigControlEngine: ObservableObject {
             startFlrigPolling()
         case .rigctld:
             startRigctldTCP()
+        case .tx500:
+            startTX500Integration()
+        case .icomUSB:
+            startIcomUSBIntegration()
+        case .fx4cr:
+            startFX4CRIntegration()
+        case .xiegu6100:
+            startXiegu6100Integration()
         case .disabled:
             disconnect()
         }
@@ -133,6 +150,19 @@ public final class RigControlEngine: ObservableObject {
         pollingTask = nil
         tcpConnection?.cancel()
         tcpConnection = nil
+        tx500Cancellables.removeAll()
+        icomUSBCancellables.removeAll()
+        fx4crCancellables.removeAll()
+        xiegu6100Cancellables.removeAll()
+        if driverType == .tx500 {
+            Lab599TX500Driver.shared.disconnect()
+        } else if driverType == .icomUSB {
+            IcomUSBRadioDriver.shared.disconnect()
+        } else if driverType == .fx4cr {
+            FX4CRDriver.shared.disconnect()
+        } else if driverType == .xiegu6100 {
+            Xiegu6100Driver.shared.disconnect()
+        }
         isConnected = false
         isConnecting = false
     }
@@ -164,6 +194,26 @@ public final class RigControlEngine: ObservableObject {
                 if let mode = mode, !mode.isEmpty {
                     sendRigctldCommand("M \(mode) 2400\n")
                 }
+            case .tx500:
+                Lab599TX500Driver.shared.setFrequencyHz(frequencyHz)
+                if let mode = mode, !mode.isEmpty {
+                    Lab599TX500Driver.shared.setMode(mode)
+                }
+            case .icomUSB:
+                IcomUSBRadioDriver.shared.setFrequencyHz(frequencyHz)
+                if let mode = mode, !mode.isEmpty {
+                    IcomUSBRadioDriver.shared.setMode(mode)
+                }
+            case .fx4cr:
+                FX4CRDriver.shared.setFrequencyHz(frequencyHz)
+                if let mode = mode, !mode.isEmpty {
+                    FX4CRDriver.shared.setMode(mode)
+                }
+            case .xiegu6100:
+                Xiegu6100Driver.shared.setFrequencyHz(frequencyHz)
+                if let mode = mode, !mode.isEmpty {
+                    Xiegu6100Driver.shared.setMode(mode)
+                }
             case .disabled:
                 break
             }
@@ -183,6 +233,14 @@ public final class RigControlEngine: ObservableObject {
                 _ = await flrigCall(method: "rig.set_mode", param: newMode)
             case .rigctld:
                 sendRigctldCommand("M \(newMode) 2400\n")
+            case .tx500:
+                Lab599TX500Driver.shared.setMode(newMode)
+            case .icomUSB:
+                IcomUSBRadioDriver.shared.setMode(newMode)
+            case .fx4cr:
+                FX4CRDriver.shared.setMode(newMode)
+            case .xiegu6100:
+                Xiegu6100Driver.shared.setMode(newMode)
             case .disabled:
                 break
             }
@@ -198,9 +256,306 @@ public final class RigControlEngine: ObservableObject {
             case .rigctld:
                 let fraction = Double(watts) / 100.0
                 sendRigctldCommand("l RFPOWER \(fraction)\n")
+            case .tx500:
+                Lab599TX500Driver.shared.setPowerWatts(watts)
+            case .icomUSB:
+                // Icom USB sets power via RF power level or telemetry
+                break
+            case .fx4cr:
+                FX4CRDriver.shared.setPowerWatts(watts)
+            case .xiegu6100:
+                Xiegu6100Driver.shared.setPowerWatts(watts)
             case .disabled:
                 break
             }
+        }
+    }
+
+    public func setPTT(_ transmit: Bool) {
+        self.isPTT = transmit
+        switch driverType {
+        case .flrig:
+            Task { _ = await flrigCall(method: "rig.set_ptt", param: transmit ? "1" : "0") }
+        case .rigctld:
+            sendRigctldCommand(transmit ? "T 1\n" : "T 0\n")
+        case .tx500:
+            Lab599TX500Driver.shared.setPTT(transmit)
+        case .icomUSB:
+            IcomUSBRadioDriver.shared.setPTT(transmit)
+        case .fx4cr:
+            FX4CRDriver.shared.setPTT(transmit)
+        case .xiegu6100:
+            Xiegu6100Driver.shared.setPTT(transmit)
+        case .disabled:
+            break
+        }
+    }
+
+    private func startTX500Integration() {
+        let driver = Lab599TX500Driver.shared
+        self.rigModel = "Lab599 TX-500"
+        tx500Cancellables.removeAll()
+
+        driver.$isConnected
+            .receive(on: RunLoop.main)
+            .sink { [weak self] conn in
+                self?.isConnected = conn
+                self?.isConnecting = driver.isConnecting
+            }
+            .store(in: &tx500Cancellables)
+
+        driver.$frequencyHz
+            .receive(on: RunLoop.main)
+            .sink { [weak self] freq in
+                self?.frequencyHz = freq
+                self?.lastResponseTime = Date()
+            }
+            .store(in: &tx500Cancellables)
+
+        driver.$mode
+            .receive(on: RunLoop.main)
+            .sink { [weak self] m in self?.mode = m }
+            .store(in: &tx500Cancellables)
+
+        driver.$sMeterValue
+            .receive(on: RunLoop.main)
+            .sink { [weak self] sm in self?.sMeterValue = sm }
+            .store(in: &tx500Cancellables)
+
+        driver.$powerWatts
+            .receive(on: RunLoop.main)
+            .sink { [weak self] pwr in self?.powerWatts = pwr }
+            .store(in: &tx500Cancellables)
+
+        driver.$isTransmitting
+            .receive(on: RunLoop.main)
+            .sink { [weak self] tx in self?.isPTT = tx }
+            .store(in: &tx500Cancellables)
+
+        if !driver.isConnected && !driver.selectedPort.isEmpty {
+            driver.connect()
+        } else if driver.isConnected {
+            self.isConnected = true
+            self.frequencyHz = driver.frequencyHz
+            self.mode = driver.mode
+            self.sMeterValue = driver.sMeterValue
+            self.powerWatts = driver.powerWatts
+        }
+    }
+
+    private func startIcomUSBIntegration() {
+        let driver = IcomUSBRadioDriver.shared
+        self.rigModel = driver.model == .auto ? "Icom (Auto CI-V)" : driver.model.rawValue
+        icomUSBCancellables.removeAll()
+
+        driver.$isConnected
+            .receive(on: RunLoop.main)
+            .sink { [weak self] conn in
+                self?.isConnected = conn
+                self?.isConnecting = driver.isConnecting
+            }
+            .store(in: &icomUSBCancellables)
+
+        driver.$frequencyHz
+            .receive(on: RunLoop.main)
+            .sink { [weak self] freq in
+                self?.frequencyHz = freq
+                self?.lastResponseTime = Date()
+            }
+            .store(in: &icomUSBCancellables)
+
+        driver.$mode
+            .receive(on: RunLoop.main)
+            .sink { [weak self] m in self?.mode = m }
+            .store(in: &icomUSBCancellables)
+
+        driver.$sMeterValue
+            .receive(on: RunLoop.main)
+            .sink { [weak self] sm in self?.sMeterValue = sm }
+            .store(in: &icomUSBCancellables)
+
+        driver.$rfPowerWatts
+            .receive(on: RunLoop.main)
+            .sink { [weak self] pwr in self?.powerWatts = Int(pwr) }
+            .store(in: &icomUSBCancellables)
+
+        driver.$isTransmitting
+            .receive(on: RunLoop.main)
+            .sink { [weak self] tx in self?.isPTT = tx }
+            .store(in: &icomUSBCancellables)
+
+        driver.$model
+            .receive(on: RunLoop.main)
+            .sink { [weak self] mdl in
+                self?.rigModel = mdl == .auto ? "Icom (Auto CI-V)" : mdl.rawValue
+            }
+            .store(in: &icomUSBCancellables)
+
+        if !driver.isConnected && !driver.selectedPort.isEmpty {
+            driver.connect()
+        } else if driver.isConnected {
+            self.isConnected = true
+            self.frequencyHz = driver.frequencyHz
+            self.mode = driver.mode
+            self.sMeterValue = driver.sMeterValue
+            self.powerWatts = Int(driver.rfPowerWatts)
+            self.rigModel = driver.model == .auto ? "Icom (Auto CI-V)" : driver.model.rawValue
+        }
+    }
+
+    private func startFX4CRIntegration() {
+        fx4crCancellables.removeAll()
+        let driver = FX4CRDriver.shared
+        self.rigModel = "FX-4CR (\(driver.connectionType.rawValue))"
+
+        driver.$isConnected
+            .receive(on: RunLoop.main)
+            .sink { [weak self] conn in
+                self?.isConnected = conn
+                self?.isConnecting = driver.isConnecting
+                if conn {
+                    self?.rigModel = "FX-4CR (\(driver.connectionType.rawValue))"
+                }
+            }
+            .store(in: &fx4crCancellables)
+
+        driver.$isConnecting
+            .receive(on: RunLoop.main)
+            .sink { [weak self] connecting in
+                self?.isConnecting = connecting
+            }
+            .store(in: &fx4crCancellables)
+
+        driver.$frequencyHz
+            .receive(on: RunLoop.main)
+            .sink { [weak self] freq in
+                if freq > 0 {
+                    self?.frequencyHz = freq
+                }
+            }
+            .store(in: &fx4crCancellables)
+
+        driver.$mode
+            .receive(on: RunLoop.main)
+            .sink { [weak self] m in
+                self?.mode = m
+            }
+            .store(in: &fx4crCancellables)
+
+        driver.$sMeterValue
+            .receive(on: RunLoop.main)
+            .sink { [weak self] sm in
+                self?.sMeterValue = sm
+            }
+            .store(in: &fx4crCancellables)
+
+        driver.$powerWatts
+            .receive(on: RunLoop.main)
+            .sink { [weak self] pwr in
+                self?.powerWatts = pwr
+            }
+            .store(in: &fx4crCancellables)
+
+        driver.$isTransmitting
+            .receive(on: RunLoop.main)
+            .sink { [weak self] tx in
+                self?.isPTT = tx
+            }
+            .store(in: &fx4crCancellables)
+
+        driver.$connectionType
+            .receive(on: RunLoop.main)
+            .sink { [weak self] trans in
+                if driver.isConnected {
+                    self?.rigModel = "FX-4CR (\(trans.rawValue))"
+                }
+            }
+            .store(in: &fx4crCancellables)
+
+        if !driver.isConnected && !driver.selectedPort.isEmpty {
+            driver.connect()
+        } else if driver.isConnected {
+            self.isConnected = true
+            self.frequencyHz = driver.frequencyHz
+            self.mode = driver.mode
+            self.sMeterValue = driver.sMeterValue
+            self.powerWatts = driver.powerWatts
+            self.rigModel = "FX-4CR (\(driver.connectionType.rawValue))"
+        }
+    }
+
+    private func startXiegu6100Integration() {
+        xiegu6100Cancellables.removeAll()
+        let driver = Xiegu6100Driver.shared
+        self.rigModel = "Xiegu X6100"
+
+        driver.$isConnected
+            .receive(on: RunLoop.main)
+            .sink { [weak self] conn in
+                self?.isConnected = conn
+                self?.isConnecting = driver.isConnecting
+                if conn {
+                    self?.lastError = nil
+                    self?.lastResponseTime = Date()
+                    self?.rigModel = "Xiegu X6100"
+                }
+            }
+            .store(in: &xiegu6100Cancellables)
+
+        driver.$isConnecting
+            .receive(on: RunLoop.main)
+            .sink { [weak self] connecting in
+                self?.isConnecting = connecting
+            }
+            .store(in: &xiegu6100Cancellables)
+
+        driver.$frequencyHz
+            .receive(on: RunLoop.main)
+            .sink { [weak self] freq in
+                if freq > 0 {
+                    self?.frequencyHz = freq
+                    self?.lastResponseTime = Date()
+                }
+            }
+            .store(in: &xiegu6100Cancellables)
+
+        driver.$mode
+            .receive(on: RunLoop.main)
+            .sink { [weak self] m in
+                self?.mode = m
+            }
+            .store(in: &xiegu6100Cancellables)
+
+        driver.$sMeterValue
+            .receive(on: RunLoop.main)
+            .sink { [weak self] sm in
+                self?.sMeterValue = sm
+            }
+            .store(in: &xiegu6100Cancellables)
+
+        driver.$powerWatts
+            .receive(on: RunLoop.main)
+            .sink { [weak self] pwr in
+                self?.powerWatts = pwr
+            }
+            .store(in: &xiegu6100Cancellables)
+
+        driver.$isTransmitting
+            .receive(on: RunLoop.main)
+            .sink { [weak self] tx in
+                self?.isPTT = tx
+            }
+            .store(in: &xiegu6100Cancellables)
+
+        if !driver.isConnected && !driver.selectedPort.isEmpty {
+            driver.connect()
+        } else if driver.isConnected {
+            self.isConnected = true
+            self.frequencyHz = driver.frequencyHz
+            self.mode = driver.mode
+            self.sMeterValue = driver.sMeterValue
+            self.powerWatts = driver.powerWatts
+            self.rigModel = "Xiegu X6100"
         }
     }
 

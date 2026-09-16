@@ -77,23 +77,24 @@ struct QuickCountryPillsView: View {
         let iso: String
         let name: String
         let flag: String
+        let prefix: String
     }
 
     private let quickCountries: [QuickCountry] = [
-        QuickCountry(iso: "ir", name: "Iran", flag: "🇮🇷"),
-        QuickCountry(iso: "ma", name: "Morocco", flag: "🇲🇦"),
-        QuickCountry(iso: "us", name: "USA", flag: "🇺🇸"),
-        QuickCountry(iso: "de", name: "Germany", flag: "🇩🇪"),
-        QuickCountry(iso: "jp", name: "Japan", flag: "🇯🇵"),
-        QuickCountry(iso: "gb", name: "UK", flag: "🇬🇧"),
-        QuickCountry(iso: "it", name: "Italy", flag: "🇮🇹"),
-        QuickCountry(iso: "es", name: "Spain", flag: "🇪🇸"),
-        QuickCountry(iso: "fr", name: "France", flag: "🇫🇷"),
-        QuickCountry(iso: "br", name: "Brazil", flag: "🇧🇷"),
-        QuickCountry(iso: "ru", name: "Russia", flag: "🇷🇺"),
-        QuickCountry(iso: "ca", name: "Canada", flag: "🇨🇦"),
-        QuickCountry(iso: "au", name: "Australia", flag: "🇦🇺"),
-        QuickCountry(iso: "pl", name: "Poland", flag: "🇵🇱")
+        QuickCountry(iso: "ir", name: "Iran", flag: "🇮🇷", prefix: "EP"),
+        QuickCountry(iso: "ma", name: "Morocco", flag: "🇲🇦", prefix: "CN"),
+        QuickCountry(iso: "us", name: "USA", flag: "🇺🇸", prefix: "W/K"),
+        QuickCountry(iso: "de", name: "Germany", flag: "🇩🇪", prefix: "DL"),
+        QuickCountry(iso: "jp", name: "Japan", flag: "🇯🇵", prefix: "JA"),
+        QuickCountry(iso: "gb", name: "UK", flag: "🇬🇧", prefix: "G"),
+        QuickCountry(iso: "it", name: "Italy", flag: "🇮🇹", prefix: "I"),
+        QuickCountry(iso: "es", name: "Spain", flag: "🇪🇸", prefix: "EA"),
+        QuickCountry(iso: "fr", name: "France", flag: "🇫🇷", prefix: "F"),
+        QuickCountry(iso: "br", name: "Brazil", flag: "🇧🇷", prefix: "PY"),
+        QuickCountry(iso: "ca", name: "Canada", flag: "🇨🇦", prefix: "VE"),
+        QuickCountry(iso: "au", name: "Australia", flag: "🇦🇺", prefix: "VK"),
+        QuickCountry(iso: "pl", name: "Poland", flag: "🇵🇱", prefix: "SP"),
+        QuickCountry(iso: "ru", name: "Russia", flag: "🇷🇺", prefix: "RA")
     ]
 
     var body: some View {
@@ -101,37 +102,54 @@ struct QuickCountryPillsView: View {
             HStack(spacing: 8) {
                 ForEach(quickCountries) { item in
                     let isSelected = appState.selectedNationalCountryIso.lowercased() == item.iso.lowercased()
+                    let profile = CountryThemeRegistry.profile(for: item.iso, fallbackName: item.name)
+
                     Button(action: {
-                        withAnimation(.easeInOut(duration: 0.2)) {
+                        withAnimation(.easeInOut(duration: 0.25)) {
                             appState.selectedNationalCountryIso = item.iso
                             appState.fetchNationalLeaderboard(countryIso: item.iso)
                         }
                     }) {
-                        HStack(spacing: 5) {
+                        HStack(spacing: 6) {
                             Text(item.flag)
-                                .font(.system(size: 14))
+                                .font(.system(size: 15))
+
                             Text(item.name)
-                                .font(.caption)
-                                .fontWeight(isSelected ? .bold : .medium)
+                                .font(.system(size: 12, weight: isSelected ? .bold : .medium))
+                                .foregroundColor(isSelected ? .primary : .secondary)
+
+                            Text(item.prefix)
+                                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                                .foregroundColor(isSelected ? profile.accentColor : .secondary.opacity(0.7))
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 1)
+                                .background(
+                                    Capsule()
+                                        .fill(isSelected ? profile.accentColor.opacity(0.18) : Color.primary.opacity(0.04))
+                                )
                         }
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
+                        .padding(.horizontal, 11)
+                        .padding(.vertical, 6)
                         .background(
                             Capsule()
-                                .fill(isSelected ? Color.cyan.opacity(0.22) : Color(NSColor.controlBackgroundColor))
+                                .fill(isSelected ? profile.accentColor.opacity(0.16) : Color(NSColor.controlBackgroundColor).opacity(0.6))
                         )
                         .overlay(
                             Capsule()
-                                .stroke(isSelected ? Color.cyan : Color.secondary.opacity(0.25), lineWidth: isSelected ? 1.5 : 1)
+                                .stroke(
+                                    isSelected ? profile.accentColor : Color.primary.opacity(0.1),
+                                    lineWidth: isSelected ? 1.5 : 1
+                                )
                         )
+                        .shadow(color: isSelected ? profile.accentColor.opacity(0.3) : Color.clear, radius: 4, x: 0, y: 1)
                     }
                     .buttonStyle(.plain)
                 }
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 6)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 8)
         }
-        .background(Color(NSColor.windowBackgroundColor).opacity(0.6))
+        .background(Color(NSColor.windowBackgroundColor).opacity(0.5))
     }
 }
 
@@ -142,16 +160,38 @@ struct WorldChampionsShowcaseView: View {
     @State private var isExpanded: Bool = true
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack {
-                HStack(spacing: 6) {
-                    Image(systemName: "crown.fill")
-                        .foregroundColor(.yellow)
-                    Text("WORLD CHAMPIONS SHOWCASE")
+                HStack(spacing: 8) {
+                    ZStack {
+                        Circle()
+                            .fill(LinearGradient(colors: [Color(red: 1.0, green: 0.84, blue: 0.0), Color(red: 0.95, green: 0.65, blue: 0.1)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                            .frame(width: 22, height: 22)
+                        Image(systemName: "crown.fill")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(.black)
+                    }
+
+                    Text("GLOBAL QRZ CHAMPIONS & PIONEERS")
                         .font(.caption)
                         .fontWeight(.heavy)
-                        .foregroundColor(.yellow)
-                        .kerning(1.0)
+                        .foregroundStyle(
+                            LinearGradient(
+                                colors: [Color(red: 1.0, green: 0.85, blue: 0.2), Color(red: 0.95, green: 0.65, blue: 0.1)],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .kerning(1.1)
+
+                    if !appState.worldChampions.isEmpty {
+                        Text("\(appState.worldChampions.count)")
+                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.yellow.opacity(0.18), in: Capsule())
+                            .foregroundColor(.yellow)
+                    }
                 }
 
                 Spacer()
@@ -161,19 +201,22 @@ struct WorldChampionsShowcaseView: View {
                 }
 
                 Button(action: {
-                    withAnimation(.spring()) {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
                         isExpanded.toggle()
                     }
                 }) {
-                    HStack(spacing: 4) {
-                        Text(isExpanded ? "Hide" : "Show All (\(appState.worldChampions.count))")
+                    HStack(spacing: 5) {
+                        Text(isExpanded ? "Collapse" : "Show All (\(appState.worldChampions.count))")
                             .font(.caption2)
                             .fontWeight(.semibold)
                         Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
                             .font(.caption2)
                     }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Color.primary.opacity(0.05), in: Capsule())
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(.plain)
             }
 
             if isExpanded {
@@ -185,7 +228,7 @@ struct WorldChampionsShowcaseView: View {
                                 .font(.caption)
                             Spacer()
                         }
-                        .padding(.vertical, 12)
+                        .padding(.vertical, 14)
                     } else {
                         Text("World champions data will be populated once loaded.")
                             .font(.caption)
@@ -199,15 +242,27 @@ struct WorldChampionsShowcaseView: View {
                             }
                         }
                         .padding(.vertical, 4)
+                        .padding(.horizontal, 2)
                     }
                 }
             }
         }
         .padding(14)
         .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color(NSColor.controlBackgroundColor).opacity(0.7))
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.yellow.opacity(0.3), lineWidth: 1))
+            RoundedRectangle(cornerRadius: 14)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(
+                            LinearGradient(
+                                colors: [Color.yellow.opacity(0.35), Color.orange.opacity(0.15)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 1
+                        )
+                )
+                .shadow(color: Color.black.opacity(0.08), radius: 6, x: 0, y: 3)
         )
         .onAppear {
             if appState.worldChampions.isEmpty && !appState.isFetchingWorldChampions {
@@ -223,53 +278,89 @@ struct WorldChampionCard: View {
     var onInspectStation: ((String) -> Void)?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        let profile = CountryThemeRegistry.profile(for: champ.countryIso, fallbackName: champ.countryName)
+
+        VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 6) {
                 Text(flagForCountryIso(champ.countryIso))
-                    .font(.system(size: 16))
+                    .font(.system(size: 17))
                 Text(champ.countryName)
                     .font(.caption2)
                     .fontWeight(.bold)
                     .foregroundColor(.secondary)
                     .lineLimit(1)
+                Spacer()
+                Text(profile.prefix)
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .foregroundColor(profile.accentColor)
             }
 
-            HStack(spacing: 4) {
+            HStack(spacing: 5) {
                 Image(systemName: "crown.fill")
                     .font(.system(size: 11))
-                    .foregroundColor(.yellow)
+                    .foregroundColor(Color(red: 1.0, green: 0.82, blue: 0.1))
                 Text(champ.callsign)
                     .font(.system(size: 15, weight: .black, design: .monospaced))
                     .foregroundColor(.primary)
             }
 
-            Text("\(champ.formattedScore) QSOs")
-                .font(.system(size: 13, weight: .heavy, design: .rounded))
-                .foregroundColor(.cyan)
+            HStack(spacing: 4) {
+                Text(champ.formattedScore)
+                    .font(.system(size: 14, weight: .heavy, design: .rounded))
+                    .foregroundColor(.primary)
+                Text("QSOs")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundColor(.secondary)
+            }
+            .padding(.horizontal, 7)
+            .padding(.vertical, 2.5)
+            .background(Color.yellow.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
 
             HStack(spacing: 6) {
-                Button("Inspect") {
+                Button(action: {
                     onInspectStation?(champ.callsign)
+                }) {
+                    Text("Inspect")
+                        .font(.system(size: 10, weight: .bold))
+                        .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.mini)
 
-                Button("Leaderboard") {
+                Button(action: {
                     withAnimation {
                         appState.selectedNationalCountryIso = champ.countryIso
                         appState.fetchNationalLeaderboard(countryIso: champ.countryIso)
                     }
+                }) {
+                    Text("National")
+                        .font(.system(size: 10, weight: .bold))
+                        .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.mini)
+                .tint(profile.accentColor)
             }
             .padding(.top, 2)
         }
-        .padding(10)
-        .frame(width: 175)
-        .background(Color(NSColor.textBackgroundColor).opacity(0.6))
-        .cornerRadius(10)
-        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.yellow.opacity(0.2), lineWidth: 1))
+        .padding(11)
+        .frame(width: 178)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color(NSColor.controlBackgroundColor).opacity(0.75))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(
+                    LinearGradient(
+                        colors: [Color.yellow.opacity(0.3), profile.accentColor.opacity(0.2)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 1
+                )
+        )
+        .shadow(color: Color.black.opacity(0.05), radius: 4, x: 0, y: 2)
     }
 }
 
@@ -293,6 +384,11 @@ struct NationalLeaderboardContainerView: View {
     ]
 
     var body: some View {
+        let currentProfile = CountryThemeRegistry.profile(
+            for: appState.selectedNationalCountryIso,
+            fallbackName: appState.nationalLeaderboard?.countryName ?? ""
+        )
+
         VStack(spacing: 0) {
             // Quick Country Select Horizontal Pills
             QuickCountryPillsView()
@@ -301,10 +397,11 @@ struct NationalLeaderboardContainerView: View {
 
             // Filter & Depth Bar
             HStack(spacing: 14) {
-                // Country Picker
+                // Country Picker with Flag
                 HStack(spacing: 6) {
-                    Image(systemName: "flag.fill")
-                        .foregroundColor(.cyan)
+                    Text(currentProfile.flagEmoji)
+                        .font(.system(size: 16))
+
                     Text("Country:")
                         .font(.caption)
                         .fontWeight(.bold)
@@ -313,17 +410,17 @@ struct NationalLeaderboardContainerView: View {
                     Picker("", selection: $appState.selectedNationalCountryIso) {
                         if !appState.qrzRankCountries.isEmpty {
                             ForEach(appState.qrzRankCountries) { c in
-                                Text("\(c.name) (\(c.iso.uppercased())) · \(c.stationCount ?? 0) stns")
+                                Text("\(flagForCountryIso(c.iso)) \(c.name) (\(c.iso.uppercased())) · \(c.stationCount ?? 0) stns")
                                     .tag(c.iso.lowercased())
                             }
                         } else {
                             ForEach(fallbackCountries, id: \.iso) { c in
-                                Text(c.name).tag(c.iso)
+                                Text("\(flagForCountryIso(c.iso)) \(c.name)").tag(c.iso)
                             }
                         }
                     }
                     .pickerStyle(.menu)
-                    .frame(width: 220)
+                    .frame(width: 230)
                     .onChange(of: appState.selectedNationalCountryIso) { newIso in
                         appState.fetchNationalLeaderboard(countryIso: newIso)
                     }
@@ -381,87 +478,127 @@ struct NationalLeaderboardContainerView: View {
 
             Divider()
 
-            // Main Content Area
-            if appState.isFetchingNationalLeaderboard && appState.nationalLeaderboard == nil {
-                VStack(spacing: 16) {
-                    ProgressView().scaleEffect(1.3)
-                    Text("Loading national rankings...")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color(NSColor.textBackgroundColor))
-            } else if let data = appState.nationalLeaderboard, !data.leaderboard.isEmpty {
-                let filteredItems = Array(data.leaderboard.prefix(appState.selectedNationalDepth))
+            // Main Content Area with Dynamic Flag & Map Background
+            ZStack {
+                // Layer 1: Ambient National Color Aura Gradients
+                ZStack {
+                    Color(NSColor.windowBackgroundColor)
 
-                ScrollView {
-                    LazyVStack(spacing: 20) {
-                        // World Champions Showcase Section
-                        WorldChampionsShowcaseView(onInspectStation: { call in
-                            inspectingStation = InspectingStationItem(callsign: call)
-                        })
-                        .padding(.horizontal, 24)
-                        .padding(.top, 16)
+                    // Top-right national color ambient glow
+                    RadialGradient(
+                        colors: [
+                            currentProfile.accentColor.opacity(0.18),
+                            Color.clear
+                        ],
+                        center: .topTrailing,
+                        startRadius: 40,
+                        endRadius: 500
+                    )
 
-                        // Country Banner
-                        HStack(spacing: 12) {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("\(data.countryName.uppercased()) HALL OF FAME")
-                                    .font(.caption)
-                                    .fontWeight(.heavy)
-                                    .foregroundColor(.cyan)
-                                    .kerning(1.2)
+                    // Bottom-left national color ambient glow
+                    RadialGradient(
+                        colors: [
+                            currentProfile.secondaryColor.opacity(0.14),
+                            Color.clear
+                        ],
+                        center: .bottomLeading,
+                        startRadius: 40,
+                        endRadius: 550
+                    )
 
-                                HStack(spacing: 8) {
-                                    Text("\(data.totalStations) Ranked Stations")
-                                        .font(.title2)
-                                        .fontWeight(.bold)
-                                    Text("· Top \(min(appState.selectedNationalDepth, data.totalStations)) Displayed")
-                                        .font(.subheadline)
-                                        .foregroundColor(.secondary)
-                                }
-                            }
+                    // Centered Flag Watermark
+                    VStack {
+                        HStack {
                             Spacer()
+                            Text(currentProfile.flagEmoji)
+                                .font(.system(size: 260))
+                                .opacity(0.06)
+                                .blur(radius: 2)
+                                .rotationEffect(.degrees(-8))
+                                .offset(x: 40, y: -20)
                         }
-                        .padding(.horizontal, 24)
+                        Spacer()
+                    }
+                }
+                .ignoresSafeArea()
 
-                        // Top 3 Podium Cards
-                        let top3 = Array(filteredItems.prefix(3))
-                        if !top3.isEmpty {
-                            PodiumSectionView(top3: top3, category: data.category, onInspectStation: { call in
+                // Layer 2: Main Content ScrollView
+                if appState.isFetchingNationalLeaderboard && appState.nationalLeaderboard == nil {
+                    VStack(spacing: 16) {
+                        ProgressView().scaleEffect(1.3)
+                        Text("Loading national rankings for \(currentProfile.name)...")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if let data = appState.nationalLeaderboard, !data.leaderboard.isEmpty {
+                    let filteredItems = Array(data.leaderboard.prefix(appState.selectedNationalDepth))
+
+                    ScrollView {
+                        LazyVStack(spacing: 20) {
+                            // World Champions Showcase Section
+                            WorldChampionsShowcaseView(onInspectStation: { call in
                                 inspectingStation = InspectingStationItem(callsign: call)
                             })
                             .padding(.horizontal, 24)
-                        }
+                            .padding(.top, 16)
 
-                        // Standings Table (Items past podium up to selectedNationalDepth)
-                        let tableItems = filteredItems.count > 3 ? Array(filteredItems.dropFirst(3)) : []
-                        if !tableItems.isEmpty {
-                            NationalTableView(items: tableItems, category: data.category, onInspectStation: { call in
-                                inspectingStation = InspectingStationItem(callsign: call)
-                            })
+                            // Country Hero Banner with Integrated Country Map
+                            CountryHeroBannerView(
+                                data: data,
+                                profile: currentProfile,
+                                displayedDepth: min(appState.selectedNationalDepth, data.totalStations)
+                            )
                             .padding(.horizontal, 24)
-                            .padding(.bottom, 30)
+
+                            // Top 3 Podium Section
+                            let top3 = Array(filteredItems.prefix(3))
+                            if !top3.isEmpty {
+                                PodiumSectionView(
+                                    top3: top3,
+                                    category: data.category,
+                                    profile: currentProfile,
+                                    onInspectStation: { call in
+                                        inspectingStation = InspectingStationItem(callsign: call)
+                                    }
+                                )
+                                .padding(.horizontal, 24)
+                            }
+
+                            // Standings Table
+                            let tableItems = filteredItems.count > 3 ? Array(filteredItems.dropFirst(3)) : []
+                            if !tableItems.isEmpty {
+                                NationalTableView(
+                                    items: tableItems,
+                                    category: data.category,
+                                    profile: currentProfile,
+                                    highestScore: top3.first?.score ?? (tableItems.first?.score ?? 1),
+                                    onInspectStation: { call in
+                                        inspectingStation = InspectingStationItem(callsign: call)
+                                    }
+                                )
+                                .padding(.horizontal, 24)
+                                .padding(.bottom, 30)
+                            }
                         }
                     }
-                }
-                .background(Color(NSColor.textBackgroundColor))
-            } else {
-                VStack(spacing: 16) {
-                    Image(systemName: "flag.slash")
-                        .font(.system(size: 44))
-                        .foregroundColor(.secondary)
-                    Text("No national rankings available yet for this country.")
-                        .font(.headline)
-                        .foregroundColor(.secondary)
-                    Button("Load Iranian (EP) Standings") {
-                        appState.selectedNationalCountryIso = "ir"
-                        appState.fetchNationalLeaderboard(countryIso: "ir")
+                } else {
+                    VStack(spacing: 16) {
+                        Image(systemName: "flag.slash")
+                            .font(.system(size: 44))
+                            .foregroundColor(.secondary)
+                        Text("No national rankings available yet for \(currentProfile.name).")
+                            .font(.headline)
+                            .foregroundColor(.secondary)
+                        Button("Load Iranian (EP) Standings") {
+                            appState.selectedNationalCountryIso = "ir"
+                            appState.fetchNationalLeaderboard(countryIso: "ir")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(currentProfile.accentColor)
                     }
-                    .buttonStyle(.borderedProminent)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color(NSColor.textBackgroundColor))
             }
         }
         .sheet(item: $inspectingStation) { item in
@@ -477,32 +614,188 @@ struct NationalLeaderboardContainerView: View {
     }
 }
 
+// MARK: - Country Hero Banner View (Combines Flag, Title, Radio Stats, and Live MapKit Country Map)
+struct CountryHeroBannerView: View {
+    let data: QRZCountryLeaderboardResponse
+    let profile: CountryThemeProfile
+    let displayedDepth: Int
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 18) {
+            // Left Column: Prestige Badge, Titles & Stats
+            VStack(alignment: .leading, spacing: 10) {
+                // Hall of Fame Header Chip
+                HStack(spacing: 8) {
+                    Text(profile.flagEmoji)
+                        .font(.system(size: 26))
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 6) {
+                            Text("\(data.countryName.uppercased()) HALL OF FAME")
+                                .font(.system(size: 15, weight: .heavy, design: .rounded))
+                                .foregroundStyle(
+                                    LinearGradient(
+                                        colors: [profile.accentColor, profile.secondaryColor],
+                                        startPoint: .leading,
+                                        endPoint: .trailing
+                                    )
+                                )
+                                .kerning(1.3)
+
+                            Text(profile.prefix)
+                                .font(.system(size: 10, weight: .black, design: .monospaced))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(profile.accentColor.opacity(0.18), in: Capsule())
+                                .foregroundColor(profile.accentColor)
+                        }
+
+                        Text("National QRZ Operator Rankings & Elite Standings")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                }
+
+                // Main Stats Row
+                HStack(spacing: 16) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(data.totalStations)")
+                            .font(.system(size: 28, weight: .black, design: .rounded))
+                            .foregroundColor(.primary)
+                        Text("Ranked Stations")
+                            .font(.caption2)
+                            .fontWeight(.bold)
+                            .foregroundColor(.secondary)
+                    }
+
+                    Divider().frame(height: 32)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Top \(displayedDepth)")
+                            .font(.system(size: 28, weight: .black, design: .rounded))
+                            .foregroundColor(profile.accentColor)
+                        Text("Displayed")
+                            .font(.caption2)
+                            .fontWeight(.bold)
+                            .foregroundColor(.secondary)
+                    }
+
+                    Divider().frame(height: 32)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(profile.continent)
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundColor(.primary)
+                        Text("\(profile.cqZone) · \(profile.ituZone)")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .padding(.vertical, 4)
+
+                // Category Metric Explanation
+                HStack(spacing: 6) {
+                    Image(systemName: "checkmark.seal.fill")
+                        .font(.system(size: 11))
+                        .foregroundColor(profile.accentColor)
+                    Text(categoryDescription(for: data.category))
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(18)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(.ultraThinMaterial)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .stroke(
+                                LinearGradient(
+                                    colors: [profile.accentColor.opacity(0.4), profile.secondaryColor.opacity(0.15)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                lineWidth: 1.5
+                            )
+                    )
+            )
+
+            // Right Column: Native Interactive Country Map Card
+            CountryHeroMapCardView(profile: profile)
+                .frame(width: 320)
+        }
+    }
+
+    private func categoryDescription(for category: String) -> String {
+        switch category {
+        case "countries": return "Ranked by unique DXCC entities confirmed"
+        case "band": return "Ranked by DXCC band-slots confirmed across all amateur bands"
+        default: return "Ranked by total verified QSO volume logged on QRZ"
+        }
+    }
+}
+
 // MARK: - Podium Section View
 struct PodiumSectionView: View {
     @EnvironmentObject var appState: AppState
     let top3: [QRZCountryLeaderboardItem]
     let category: String
+    let profile: CountryThemeProfile
     var onInspectStation: ((String) -> Void)?
 
     var body: some View {
-        HStack(spacing: 16) {
+        HStack(alignment: .bottom, spacing: 16) {
             // Rank 2 (Silver)
             if top3.count > 1 {
-                PodiumCard(item: top3[1], medal: "🥈 #2 Silver", color: .gray, onInspectStation: onInspectStation)
+                PodiumCard(
+                    item: top3[1],
+                    medal: "🥈 #2 Silver Medalist",
+                    medalGradient: LinearGradient(
+                        colors: [Color(red: 0.90, green: 0.93, blue: 0.96), Color(red: 0.65, green: 0.70, blue: 0.78)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    accentColor: Color(red: 0.75, green: 0.80, blue: 0.88),
+                    onInspectStation: onInspectStation
+                )
             }
 
-            // Rank 1 (Gold)
+            // Rank 1 (Gold Champion) - Elevated Pedestal
             if !top3.isEmpty {
-                PodiumCard(item: top3[0], medal: "👑 #1 Champion", color: .yellow, isChampion: true, onInspectStation: onInspectStation)
-                    .scaleEffect(1.04)
+                PodiumCard(
+                    item: top3[0],
+                    medal: "👑 #1 National Champion",
+                    medalGradient: LinearGradient(
+                        colors: [Color(red: 1.0, green: 0.86, blue: 0.1), Color(red: 0.95, green: 0.65, blue: 0.05)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    accentColor: Color(red: 1.0, green: 0.82, blue: 0.1),
+                    isChampion: true,
+                    onInspectStation: onInspectStation
+                )
+                .scaleEffect(1.05)
+                .offset(y: -8)
             }
 
             // Rank 3 (Bronze)
             if top3.count > 2 {
-                PodiumCard(item: top3[2], medal: "🥉 #3 Bronze", color: .brown, onInspectStation: onInspectStation)
+                PodiumCard(
+                    item: top3[2],
+                    medal: "🥉 #3 Bronze Medalist",
+                    medalGradient: LinearGradient(
+                        colors: [Color(red: 0.92, green: 0.62, blue: 0.40), Color(red: 0.68, green: 0.40, blue: 0.22)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    accentColor: Color(red: 0.85, green: 0.55, blue: 0.35),
+                    onInspectStation: onInspectStation
+                )
             }
         }
-        .padding(.vertical, 8)
+        .padding(.top, 14)
+        .padding(.bottom, 10)
     }
 }
 
@@ -510,7 +803,8 @@ struct PodiumCard: View {
     @EnvironmentObject var appState: AppState
     let item: QRZCountryLeaderboardItem
     let medal: String
-    let color: Color
+    let medalGradient: LinearGradient
+    let accentColor: Color
     var isChampion: Bool = false
     var onInspectStation: ((String) -> Void)?
 
@@ -520,70 +814,109 @@ struct PodiumCard: View {
 
     var body: some View {
         VStack(spacing: 10) {
-            Text(medal)
-                .font(.caption)
-                .fontWeight(.heavy)
-                .foregroundColor(color)
-                .textCase(.uppercase)
+            // Medal Header
+            HStack(spacing: 5) {
+                if isChampion {
+                    Image(systemName: "crown.fill")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundColor(accentColor)
+                }
+                Text(medal)
+                    .font(.system(size: 11, weight: .heavy, design: .rounded))
+                    .foregroundStyle(medalGradient)
+                    .textCase(.uppercase)
+            }
 
+            // Callsign
             Button(action: {
                 onInspectStation?(item.callsign)
             }) {
                 Text(item.callsign)
-                    .font(.system(size: 22, weight: .black, design: .monospaced))
+                    .font(.system(size: isChampion ? 24 : 20, weight: .black, design: .monospaced))
                     .foregroundColor(.primary)
             }
             .buttonStyle(.plain)
-            .help("Click to view quick station analysis")
+            .help("Click to inspect station analysis")
 
-            Text(scoreTitle)
-                .font(.system(size: 26, weight: .black, design: .rounded))
-                .foregroundColor(.cyan)
+            // Big Score
+            VStack(spacing: 1) {
+                Text(scoreTitle)
+                    .font(.system(size: isChampion ? 28 : 24, weight: .black, design: .rounded))
+                    .foregroundStyle(medalGradient)
 
-            HStack(spacing: 14) {
-                VStack(spacing: 2) {
-                    Text("Countries")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                    Text("\(item.scoreCountries ?? 0)")
-                        .font(.caption)
-                        .fontWeight(.bold)
-                }
-                Divider().frame(height: 18)
-                VStack(spacing: 2) {
-                    Text("Bands")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                    Text("\(item.scoreBand ?? 0)")
-                        .font(.caption)
-                        .fontWeight(.bold)
-                }
+                Text("POINTS / QSOS")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundColor(.secondary)
             }
 
+            // Stats row (DXCC Countries & Bands)
+            HStack(spacing: 14) {
+                VStack(spacing: 2) {
+                    Text("DXCC")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundColor(.secondary)
+                    Text("\(item.scoreCountries ?? 0)")
+                        .font(.system(size: 12, weight: .bold, design: .monospaced))
+                }
+
+                Divider().frame(height: 18)
+
+                VStack(spacing: 2) {
+                    Text("BANDS")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundColor(.secondary)
+                    Text("\(item.scoreBand ?? 0)")
+                        .font(.system(size: 12, weight: .bold, design: .monospaced))
+                }
+
+                Divider().frame(height: 18)
+
+                VStack(spacing: 2) {
+                    Text("GLOBAL")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundColor(.secondary)
+                    Text(item.rankQso.map { "#\($0)" } ?? "-")
+                        .font(.system(size: 12, weight: .bold, design: .monospaced))
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+
+            // Quick Station Analysis Action Button
             Button(action: {
                 onInspectStation?(item.callsign)
             }) {
-                HStack(spacing: 4) {
+                HStack(spacing: 5) {
                     Image(systemName: "chart.line.uptrend.xyaxis")
                     Text("Quick Analysis")
-                        .fontWeight(.semibold)
+                        .font(.system(size: 11, weight: .bold))
                 }
                 .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(.borderedProminent)
+            .tint(accentColor)
             .controlSize(.small)
             .padding(.top, 4)
         }
         .padding(16)
         .frame(maxWidth: .infinity)
         .background(
-            RoundedRectangle(cornerRadius: 14)
-                .fill(Color(NSColor.controlBackgroundColor))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14)
-                        .stroke(isChampion ? Color.yellow.opacity(0.8) : color.opacity(0.4), lineWidth: isChampion ? 2 : 1.5)
+            RoundedRectangle(cornerRadius: 16)
+                .fill(.ultraThinMaterial)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(
+                    medalGradient,
+                    lineWidth: isChampion ? 2.5 : 1.5
                 )
-                .shadow(color: isChampion ? Color.yellow.opacity(0.25) : color.opacity(0.12), radius: isChampion ? 12 : 8)
+        )
+        .shadow(
+            color: isChampion ? accentColor.opacity(0.35) : accentColor.opacity(0.18),
+            radius: isChampion ? 14 : 8,
+            x: 0,
+            y: isChampion ? 4 : 2
         )
     }
 }
@@ -593,6 +926,8 @@ struct NationalTableView: View {
     @EnvironmentObject var appState: AppState
     let items: [QRZCountryLeaderboardItem]
     let category: String
+    let profile: CountryThemeProfile
+    let highestScore: Int
     var onInspectStation: ((String) -> Void)?
 
     var body: some View {
@@ -600,11 +935,11 @@ struct NationalTableView: View {
             // Table Header
             HStack {
                 Text("# Rank")
-                    .frame(width: 75, alignment: .leading)
+                    .frame(width: 80, alignment: .leading)
                 Text("Callsign")
-                    .frame(width: 140, alignment: .leading)
+                    .frame(width: 130, alignment: .leading)
                 Text("Score")
-                    .frame(width: 110, alignment: .trailing)
+                    .frame(width: 140, alignment: .trailing)
                 Text("Countries")
                     .frame(width: 90, alignment: .trailing)
                 Text("Bands")
@@ -618,29 +953,33 @@ struct NationalTableView: View {
             .font(.caption)
             .fontWeight(.bold)
             .foregroundColor(.secondary)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            .background(Color(NSColor.controlBackgroundColor))
+            .padding(.horizontal, 18)
+            .padding(.vertical, 12)
+            .background(Color(NSColor.controlBackgroundColor).opacity(0.8))
 
             Divider()
 
             // Rows
-            ForEach(items) { item in
+            ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                 let isTop10 = item.rank <= 10
+                let isEven = index % 2 == 0
+
                 HStack {
+                    // Rank Badge
                     HStack(spacing: 4) {
                         Text("#\(item.rank)")
-                            .font(.system(size: 13, weight: .bold, design: .monospaced))
-                            .foregroundColor(isTop10 ? .cyan : .secondary)
+                            .font(.system(size: 13, weight: .black, design: .monospaced))
+                            .foregroundColor(isTop10 ? profile.accentColor : .secondary)
 
                         if isTop10 {
                             Image(systemName: "star.fill")
                                 .font(.system(size: 8))
-                                .foregroundColor(.yellow)
+                                .foregroundColor(Color(red: 1.0, green: 0.82, blue: 0.1))
                         }
                     }
-                    .frame(width: 75, alignment: .leading)
+                    .frame(width: 80, alignment: .leading)
 
+                    // Callsign
                     Button(action: {
                         onInspectStation?(item.callsign)
                     }) {
@@ -649,30 +988,59 @@ struct NationalTableView: View {
                             .foregroundColor(.primary)
                     }
                     .buttonStyle(.plain)
-                    .frame(width: 140, alignment: .leading)
+                    .frame(width: 130, alignment: .leading)
 
-                    Text(item.score.formatted())
-                        .font(.system(size: 13, weight: .bold, design: .monospaced))
-                        .foregroundColor(.cyan)
-                        .frame(width: 110, alignment: .trailing)
+                    // Score + Relative Progress bar
+                    VStack(alignment: .trailing, spacing: 3) {
+                        Text(item.score.formatted())
+                            .font(.system(size: 13, weight: .heavy, design: .monospaced))
+                            .foregroundColor(profile.accentColor)
 
+                        // Relative Progress Bar
+                        let progress = highestScore > 0 ? Double(item.score) / Double(highestScore) : 0.0
+                        GeometryReader { geo in
+                            ZStack(alignment: .leading) {
+                                Capsule()
+                                    .fill(Color.primary.opacity(0.08))
+                                    .frame(height: 3)
+
+                                Capsule()
+                                    .fill(profile.accentColor.opacity(0.7))
+                                    .frame(width: max(4, geo.size.width * CGFloat(progress)), height: 3)
+                            }
+                        }
+                        .frame(width: 90, height: 3)
+                    }
+                    .frame(width: 140, alignment: .trailing)
+
+                    // Countries
                     Text("\(item.scoreCountries ?? 0)")
                         .font(.system(size: 13, design: .monospaced))
                         .foregroundColor(.secondary)
                         .frame(width: 90, alignment: .trailing)
 
+                    // Bands
                     Text("\(item.scoreBand ?? 0)")
                         .font(.system(size: 13, design: .monospaced))
                         .foregroundColor(.secondary)
                         .frame(width: 90, alignment: .trailing)
 
-                    Text(item.rankQso.map { "#\($0.formatted())" } ?? "-")
-                        .font(.system(size: 12, design: .monospaced))
+                    // Global Rank
+                    let categoryGlobalRank: Int? = {
+                        switch category {
+                        case "countries": return item.rankCountries
+                        case "band": return item.rankBand
+                        default: return item.rankQso
+                        }
+                    }()
+                    Text(categoryGlobalRank.map { "#\($0.formatted())" } ?? "-")
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
                         .foregroundColor(.secondary)
                         .frame(width: 100, alignment: .trailing)
 
                     Spacer()
 
+                    // Action Button
                     Button(action: {
                         onInspectStation?(item.callsign)
                     }) {
@@ -684,15 +1052,22 @@ struct NationalTableView: View {
                     .controlSize(.mini)
                     .frame(width: 90, alignment: .trailing)
                 }
-                .padding(.horizontal, 16)
+                .padding(.horizontal, 18)
                 .padding(.vertical, 8)
+                .background(isEven ? Color.primary.opacity(0.02) : Color.clear)
 
-                Divider()
+                if index < items.count - 1 {
+                    Divider().opacity(0.6)
+                }
             }
         }
-        .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
-        .cornerRadius(12)
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.secondary.opacity(0.2), lineWidth: 1))
+        .background(.ultraThinMaterial)
+        .cornerRadius(14)
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(profile.accentColor.opacity(0.2), lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.06), radius: 6, x: 0, y: 3)
     }
 }
 

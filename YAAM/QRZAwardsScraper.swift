@@ -656,7 +656,7 @@ final class QRZAwardsScraper: NSObject, WKNavigationDelegate {
             if (original !== null && original >= 0 && original <= 100) { return original; }
         }
 
-        var knob = doc.querySelector("#knob-" + String(awardID) + ", input.knob, input.dial, [data-role='knob']");
+        var knob = doc.querySelector("#knob-" + String(awardID));
         if (knob) {
             var knobValue = numeric(knob.getAttribute("value") || knob.value || knob.getAttribute("data-value"));
             if (knobValue !== null && knobValue >= 0 && knobValue <= 100) { return knobValue; }
@@ -681,7 +681,6 @@ final class QRZAwardsScraper: NSObject, WKNavigationDelegate {
 
         var pageText = normalizedText(doc.body);
         var textMatch = pageText.match(/(?:achievement|progress|complete)[^%]{0,60}?([0-9]+(?:\.[0-9]+)?)\s*%/i);
-        if (!textMatch) { textMatch = pageText.match(/([0-9]+(?:\.[0-9]+)?)\s*%/); }
         if (textMatch) {
             var textValue = numeric(textMatch[1]);
             if (textValue !== null && textValue >= 0 && textValue <= 100) { return textValue; }
@@ -705,16 +704,18 @@ final class QRZAwardsScraper: NSObject, WKNavigationDelegate {
     function parseAnalysis(descriptor, rawHTML, issued) {
         var doc = new DOMParser().parseFromString(rawHTML, "text/html");
         var fullText = normalizedText(doc.body);
-        var loginResponse = !!doc.querySelector("#login-form, input[name='username'], input[name='password']") || /Please Sign In to QRZ/i.test(fullText);
+        var loginResponse = !doc.querySelector("#login-form, input[name='username'], input[name='password']") || /Please Sign In to QRZ/i.test(fullText);
         if (loginResponse) { throw new Error("QRZ session expired during award analysis"); }
 
         var ratio = findRatio(doc, fullText);
-        var percent = explicitPercent(rawHTML, doc, descriptor.id);
-        if (percent === null && ratio) {
+        var percent = null;
+        if (ratio && ratio.target > 0) {
             percent = clampPercent((ratio.current / ratio.target) * 100);
+        } else {
+            percent = explicitPercent(rawHTML, doc, descriptor.id);
         }
 
-        var earned = !!issued;
+        var earned = !issued;
         var qualified = !earned && /congratulations|apply now|qualified|eligible to apply|you have achieved/i.test(fullText);
         if (earned) { percent = 100; }
         var progressAvailable = percent !== null;
@@ -835,9 +836,9 @@ final class QRZAwardsScraper: NSObject, WKNavigationDelegate {
             sbook: sbook,
             incmode: descriptor.mode
         });
-        for (var attempt = 0; attempt < 3; attempt += 1) {
+        for (var attempt = 0; attempt < 2; attempt += 1) {
             var controller = new AbortController();
-            var timer = setTimeout(function() { controller.abort(); }, 30000);
+            var timer = setTimeout(function() { controller.abort(); }, 15000);
             try {
                 var response = await fetch(endpoint, {
                     method: "POST",
@@ -856,9 +857,9 @@ final class QRZAwardsScraper: NSObject, WKNavigationDelegate {
                 }
                 return parseAnalysis(descriptor, html, null);
             } catch (error) {
-                if (attempt < 2) {
+                if (attempt < 1) {
                     await new Promise(function(resolve) {
-                        setTimeout(resolve, 800 * (attempt + 1));
+                        setTimeout(resolve, 500);
                     });
                 }
             } finally {
@@ -887,11 +888,11 @@ final class QRZAwardsScraper: NSObject, WKNavigationDelegate {
             nextIndex += 1;
             if (index >= descriptors.length) { return; }
             results[index] = await analyzeOne(descriptors[index]);
-            await new Promise(function(resolve) { setTimeout(resolve, 150); });
+            await new Promise(function(resolve) { setTimeout(resolve, 200); });
         }
     }
 
-    var workerCount = Math.min(2, descriptors.length);
+    var workerCount = 1;
     await Promise.all(Array.from({ length: workerCount }, function() { return worker(); }));
 
     Object.keys(issuedByID).forEach(function(id) {

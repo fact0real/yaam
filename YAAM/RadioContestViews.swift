@@ -12,9 +12,22 @@ struct RadioBridgePanel: View {
         case tci = "TCI (SDR)"
         case rotator = "Rotator"
         case ft8 = "FT8 Station"
+        case multiRigFT8 = "Multi-Rig Cluster"
         case digitalModem = "Digital Modes Suite"
 
         var id: String { rawValue }
+
+        var icon: String {
+            switch self {
+            case .bridge: return "antenna.radiowaves.left.and.right"
+            case .flrig: return "slider.horizontal.3"
+            case .tci: return "waveform.path"
+            case .rotator: return "location.north.line.fill"
+            case .ft8: return "dot.radiowaves.left.and.right"
+            case .multiRigFT8: return "square.stack.3d.up.fill"
+            case .digitalModem: return "teletype"
+            }
+        }
     }
 
     @EnvironmentObject private var appState: AppState
@@ -41,8 +54,6 @@ struct RadioBridgePanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
             Divider()
             if workspace == .ft8 {
                 FT8StationView(
@@ -51,6 +62,9 @@ struct RadioBridgePanel: View {
                     rig: rig
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if workspace == .multiRigFT8 {
+                MultiRigFT8View(hub: appState.multiRigFT8Hub)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if workspace == .digitalModem {
                 DigitalMasterStationView()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -79,29 +93,64 @@ struct RadioBridgePanel: View {
     private var header: some View {
         HStack(spacing: 14) {
             Image(systemName: "wave.3.right.circle.fill")
-                .font(.system(size: 30))
+                .font(.system(size: 28))
                 .foregroundStyle(.blue)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(workspace == .bridge ? "Radio & Digital Bridge" : workspace.rawValue).font(.title3.weight(.bold))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(workspace == .bridge ? "Radio & Digital Bridge" : workspace.rawValue)
+                    .font(.title3.weight(.bold))
                 Text(workspace == .bridge
                      ? "One operating context for your radio, WSJT-X/JTDX, and Quick Log"
                      : "High-performance rig control and transceiver telemetry")
                     .font(.caption).foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
-            Spacer()
-            Picker("Radio workspace", selection: $workspace) {
-                ForEach(Workspace.allCases) { item in
-                    Text(item.rawValue).tag(item)
+            .layoutPriority(1)
+
+            Spacer(minLength: 8)
+
+            // Dynamic, responsive workspace tabs (never clipped or truncated)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 5) {
+                    ForEach(Workspace.allCases) { item in
+                        let isSelected = workspace == item
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.18)) {
+                                workspace = item
+                            }
+                        } label: {
+                            HStack(spacing: 5) {
+                                Image(systemName: item.icon)
+                                    .font(.system(size: 11, weight: isSelected ? .bold : .medium))
+                                Text(item.rawValue)
+                                    .font(.system(size: 11.5, weight: isSelected ? .bold : .medium))
+                                    .fixedSize(horizontal: true, vertical: false)
+                            }
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 5)
+                            .background(
+                                isSelected ? Color.accentColor : Color(NSColor.controlBackgroundColor),
+                                in: RoundedRectangle(cornerRadius: 6)
+                            )
+                            .foregroundColor(isSelected ? .white : .primary)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .stroke(isSelected ? Color.clear : Color.primary.opacity(0.12), lineWidth: 1)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .help("Switch to \(item.rawValue)")
+                    }
                 }
+                .padding(.vertical, 2)
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(width: 440)
+            .fixedSize(horizontal: false, vertical: true)
+
             if !actionStatus.isEmpty {
                 Text(actionStatus).font(.caption).foregroundStyle(.secondary).lineLimit(2)
             }
         }
-        .padding(20)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
     }
 
     private var rigSection: some View {

@@ -882,6 +882,13 @@ public final class DigitalModemEngine: ObservableObject {
     public func startTransmission() {
         guard !txRemainingText.isEmpty, !isTransmitting else { return }
         isTransmitting = true
+        RigControlEngine.shared.setPTT(true)
+        if Lab599TX500Driver.shared.isConnected {
+            Lab599TX500Driver.shared.setPTT(true)
+        }
+        if Xiegu6100Driver.shared.isConnected {
+            Xiegu6100Driver.shared.setPTT(true)
+        }
 
         txTask = Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else { return }
@@ -905,6 +912,13 @@ public final class DigitalModemEngine: ObservableObject {
             await MainActor.run {
                 self.isTransmitting = false
                 self.txProgress = 1.0
+                RigControlEngine.shared.setPTT(false)
+                if Lab599TX500Driver.shared.isConnected {
+                    Lab599TX500Driver.shared.setPTT(false)
+                }
+                if Xiegu6100Driver.shared.isConnected {
+                    Xiegu6100Driver.shared.setPTT(false)
+                }
             }
         }
     }
@@ -913,6 +927,13 @@ public final class DigitalModemEngine: ObservableObject {
         txTask?.cancel()
         txTask = nil
         isTransmitting = false
+        RigControlEngine.shared.setPTT(false)
+        if Lab599TX500Driver.shared.isConnected {
+            Lab599TX500Driver.shared.setPTT(false)
+        }
+        if Xiegu6100Driver.shared.isConnected {
+            Xiegu6100Driver.shared.setPTT(false)
+        }
         playerNode?.stop()
         txRemainingText = ""
     }

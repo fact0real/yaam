@@ -186,30 +186,350 @@ struct RigConfigPopoverView: View {
                     .fontWeight(.semibold)
                     .foregroundStyle(.secondary)
 
-                HStack(spacing: 8) {
-                    driverCard(
-                        title: "Flrig",
-                        subtitle: "XML-RPC (:12345)",
-                        icon: "waveform.badge.magnifyingglass",
-                        driver: .flrig
-                    )
-                    driverCard(
-                        title: "Hamlib",
-                        subtitle: "rigctld TCP (:4532)",
-                        icon: "cable.connector",
-                        driver: .rigctld
-                    )
-                    driverCard(
-                        title: "Disabled",
-                        subtitle: "Manual / Off",
-                        icon: "power",
-                        driver: .disabled
-                    )
+                VStack(spacing: 6) {
+                    HStack(spacing: 8) {
+                        driverCard(
+                            title: "Icom USB",
+                            subtitle: "CI-V Direct",
+                            icon: "radio.fill",
+                            driver: .icomUSB
+                        )
+                        driverCard(
+                            title: "Xiegu X6100",
+                            subtitle: "USB-C Direct",
+                            icon: "radio.fill",
+                            driver: .xiegu6100
+                        )
+                        driverCard(
+                            title: "TX-500",
+                            subtitle: "USB-C Direct",
+                            icon: "bolt.horizontal.fill",
+                            driver: .tx500
+                        )
+                    }
+                    HStack(spacing: 8) {
+                        driverCard(
+                            title: "FX-4CR",
+                            subtitle: "USB-C / BT",
+                            icon: "antenna.radiowaves.left.and.right",
+                            driver: .fx4cr
+                        )
+                        driverCard(
+                            title: "Flrig",
+                            subtitle: "XML-RPC (:12345)",
+                            icon: "waveform.badge.magnifyingglass",
+                            driver: .flrig
+                        )
+                        driverCard(
+                            title: "Hamlib",
+                            subtitle: "rigctld (:4532)",
+                            icon: "cable.connector",
+                            driver: .rigctld
+                        )
+                        driverCard(
+                            title: "Disabled",
+                            subtitle: "Manual / Off",
+                            icon: "power",
+                            driver: .disabled
+                        )
+                    }
                 }
             }
 
-            // Host and Port Configuration
-            if rig.driverType != .disabled {
+            // Connection Configuration
+            if rig.driverType == .icomUSB {
+                let icom = IcomUSBRadioDriver.shared
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 10) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Label("Icom Model", systemImage: "radio")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Picker("", selection: Binding(get: { icom.model }, set: { icom.model = $0 })) {
+                                ForEach(IcomUSBModel.allCases) { m in
+                                    Text(m.rawValue).tag(m)
+                                }
+                            }
+                            .labelsHidden()
+                            .frame(maxWidth: 160)
+                        }
+
+                        VStack(alignment: .leading, spacing: 3) {
+                            Label("Serial Port", systemImage: "cable.connector")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Picker("", selection: Binding(get: { icom.selectedPort }, set: { icom.selectedPort = $0 })) {
+                                if icom.availablePorts.isEmpty {
+                                    Text("No ports").tag("")
+                                }
+                                ForEach(icom.availablePorts, id: \.self) { port in
+                                    Text(port.components(separatedBy: "/").last ?? port).tag(port)
+                                }
+                            }
+                            .labelsHidden()
+                            .frame(maxWidth: 160)
+                        }
+
+                        Button {
+                            icom.refreshPorts()
+                        } label: {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                        .buttonStyle(.bordered)
+                        .help("Refresh serial ports")
+
+                        Spacer()
+
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text("\(icom.baudRate) 8N1")
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                            Text(String(format: "0x%02X", icom.resolvedCIVAddress))
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .foregroundStyle(.cyan)
+                        }
+                    }
+
+                    HStack {
+                        if icom.isAudioCodecDetected {
+                            HStack(spacing: 4) {
+                                Circle().fill(Color.green).frame(width: 6, height: 6)
+                                Text("USB Audio Codec Ready")
+                                    .font(.caption2.weight(.bold))
+                                    .foregroundStyle(Color.green)
+                            }
+                        }
+                    }
+                }
+                .padding(10)
+                .background(Color(NSColor.controlBackgroundColor).opacity(0.6), in: RoundedRectangle(cornerRadius: 8))
+            } else if rig.driverType == .tx500 {
+                let tx500 = Lab599TX500Driver.shared
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 10) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Label("USB Serial Port (AD-514/AD-502)", systemImage: "cable.connector")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Picker("", selection: Binding(get: { tx500.selectedPort }, set: { tx500.selectedPort = $0 })) {
+                                if tx500.availablePorts.isEmpty {
+                                    Text("No serial ports found").tag("")
+                                }
+                                ForEach(tx500.availablePorts, id: \.self) { port in
+                                    Text(port.components(separatedBy: "/").last ?? port).tag(port)
+                                }
+                            }
+                            .labelsHidden()
+                            .frame(maxWidth: 240)
+                        }
+
+                        Button {
+                            tx500.refreshPorts()
+                        } label: {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                        .buttonStyle(.bordered)
+                        .help("Refresh serial ports")
+
+                        Spacer()
+
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text("9600 8N2")
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                            Text("Menu 34: TS2000")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    HStack {
+                        Toggle("Preserve DIG Mode (Menu 34=TS2000)", isOn: Binding(get: { tx500.preserveDIGMode }, set: { tx500.preserveDIGMode = $0 }))
+                            .font(.caption)
+                            .help("Prevents TX-500 from dropping to USB voice mode on transmit (Firmware Bug #1 fix)")
+
+                        Spacer()
+
+                        if tx500.isAudioDeviceDetected {
+                            HStack(spacing: 4) {
+                                Circle().fill(Color.green).frame(width: 6, height: 6)
+                                Text("AD-508 Audio Ready")
+                                    .font(.caption2.weight(.bold))
+                                    .foregroundStyle(Color.green)
+                            }
+                        }
+                    }
+                }
+                .padding(10)
+                .background(Color(NSColor.controlBackgroundColor).opacity(0.6), in: RoundedRectangle(cornerRadius: 8))
+            } else if rig.driverType == .fx4cr {
+                let fx4cr = FX4CRDriver.shared
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 12) {
+                        // Transport Mode Picker
+                        VStack(alignment: .leading, spacing: 3) {
+                            Label("Transport Link", systemImage: fx4cr.connectionType == .bluetooth ? "antenna.radiowaves.left.and.right" : "cable.connector")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Picker("", selection: Binding(get: { fx4cr.connectionType }, set: { fx4cr.connectionType = $0 })) {
+                                ForEach(FX4CRConnectionType.allCases) { t in
+                                    Text(t.rawValue).tag(t)
+                                }
+                            }
+                            .labelsHidden()
+                            .frame(width: 170)
+                        }
+
+                        // Serial Port Picker
+                        VStack(alignment: .leading, spacing: 3) {
+                            Label(fx4cr.connectionType == .bluetooth ? "Bluetooth Serial Port" : "USB Serial Port", systemImage: "point.filled.topleft.down.curvedto.point.bottomright.up")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Picker("", selection: Binding(get: { fx4cr.selectedPort }, set: { fx4cr.selectedPort = $0 })) {
+                                if fx4cr.availablePorts.isEmpty {
+                                    Text("No matching ports").tag("")
+                                }
+                                ForEach(fx4cr.availablePorts, id: \.self) { port in
+                                    Text(port.components(separatedBy: "/").last ?? port).tag(port)
+                                }
+                            }
+                            .labelsHidden()
+                            .frame(maxWidth: .infinity)
+                        }
+
+                        Button {
+                            fx4cr.refreshPorts()
+                        } label: {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                        .buttonStyle(.bordered)
+                        .help("Refresh available serial ports")
+                    }
+
+                    HStack {
+                        // Protocol Info
+                        Text("Kenwood TS-590S • 115200 8N1")
+                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                            .foregroundStyle(.secondary)
+
+                        Spacer()
+
+                        // Audio Codec Status
+                        if fx4cr.isAudioDeviceDetected {
+                            HStack(spacing: 4) {
+                                Circle().fill(Color.green).frame(width: 6, height: 6)
+                                Text(fx4cr.detectedAudioDeviceName ?? "Audio Codec Ready")
+                                    .font(.caption2.weight(.bold))
+                                    .foregroundStyle(Color.green)
+                            }
+                        } else {
+                            HStack(spacing: 4) {
+                                Circle().fill(Color.orange).frame(width: 6, height: 6)
+                                Text(fx4cr.connectionType == .bluetooth ? "BT Audio Not Found" : "CM108AH Not Found")
+                                    .font(.caption2)
+                                    .foregroundStyle(.orange)
+                            }
+                        }
+                    }
+
+                    // Hardware Quirk Advisory Notice
+                    HStack(spacing: 6) {
+                        Image(systemName: "info.circle.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.blue)
+                        Text(fx4cr.connectionType == .usb
+                             ? "USB-C: Use USB-A adapter & set Radio Menu 'Bluetooth = 0' to avoid UART clash."
+                             : "Bluetooth: Set Radio Menu 'Bluetooth = 1' & pair in macOS System Settings.")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(10)
+                .background(Color(NSColor.controlBackgroundColor).opacity(0.6), in: RoundedRectangle(cornerRadius: 8))
+            } else if rig.driverType == .xiegu6100 {
+                let xiegu = Xiegu6100Driver.shared
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Label("Serial Port (DEV Port)", systemImage: "point.filled.topleft.down.curvedto.point.bottomright.up")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Picker("", selection: Binding(get: { xiegu.selectedPort }, set: { xiegu.selectedPort = $0 })) {
+                                if xiegu.availablePorts.isEmpty {
+                                    Text("No serial ports found").tag("")
+                                }
+                                ForEach(xiegu.availablePorts, id: \.self) { port in
+                                    Text(port.components(separatedBy: "/").last ?? port).tag(port)
+                                }
+                            }
+                            .frame(minWidth: 160)
+                        }
+
+                        Button {
+                            xiegu.refreshPorts()
+                        } label: {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                        .buttonStyle(.bordered)
+                        .help("Refresh serial ports")
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Label("CI-V Baud", systemImage: "speedometer")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Picker("", selection: Binding(get: { xiegu.baudRate }, set: { xiegu.baudRate = $0 })) {
+                                Text("9600").tag(9600)
+                                Text("19200 (Default)").tag(19200)
+                                Text("38400").tag(38400)
+                                Text("57600").tag(57600)
+                                Text("115200").tag(115200)
+                            }
+                            .frame(width: 130)
+                        }
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Label("Address", systemImage: "tag")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            HStack(spacing: 2) {
+                                Text("0x").font(.caption.monospaced()).foregroundColor(.secondary)
+                                TextField("A4", text: Binding(get: { xiegu.civAddressHex }, set: { xiegu.civAddressHex = $0 }))
+                                    .textFieldStyle(.roundedBorder)
+                                    .frame(width: 45)
+                                    .font(.system(.caption, design: .monospaced))
+                            }
+                        }
+                    }
+
+                    // Audio codec pill
+                    HStack(spacing: 8) {
+                        Circle()
+                            .fill(xiegu.isAudioDeviceDetected ? Color.green : Color.orange)
+                            .frame(width: 7, height: 7)
+                        if xiegu.isAudioDeviceDetected {
+                            Text(xiegu.detectedAudioDeviceName ?? "Audio Codec Ready")
+                                .font(.caption2)
+                                .foregroundStyle(.green)
+                        } else {
+                            Text("USB Audio Not Found (connect to DEV port)")
+                                .font(.caption2)
+                                .foregroundStyle(.orange)
+                        }
+                        Spacer()
+                    }
+
+                    HStack(spacing: 6) {
+                        Image(systemName: "info.circle.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.blue)
+                        Text("Connect USB-C cable to DEV port (not HOST). Standard CI-V address: 0xA4, 19200 8N1.")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(10)
+                .background(Color(NSColor.controlBackgroundColor).opacity(0.6), in: RoundedRectangle(cornerRadius: 8))
+            } else if rig.driverType != .disabled {
                 HStack(spacing: 14) {
                     VStack(alignment: .leading, spacing: 4) {
                         Label("Host IP / Address", systemImage: "network")
@@ -277,7 +597,21 @@ struct RigConfigPopoverView: View {
                 HStack(spacing: 8) {
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundStyle(.green)
-                    Text("Connected to \(rig.rigModel) on \(rig.host):\(rig.port)")
+                    let dest: String = {
+                        if rig.driverType == .icomUSB {
+                            return IcomUSBRadioDriver.shared.selectedPort.components(separatedBy: "/").last ?? "USB"
+                        } else if rig.driverType == .tx500 {
+                            return Lab599TX500Driver.shared.selectedPort.components(separatedBy: "/").last ?? "USB"
+                        } else if rig.driverType == .fx4cr {
+                            let p = FX4CRDriver.shared.selectedPort.components(separatedBy: "/").last ?? "Port"
+                            return "\(FX4CRDriver.shared.connectionType.rawValue) (\(p))"
+                        } else if rig.driverType == .xiegu6100 {
+                            return Xiegu6100Driver.shared.selectedPort.components(separatedBy: "/").last ?? "USB"
+                        } else {
+                            return "\(rig.host):\(rig.port)"
+                        }
+                    }()
+                    Text("Connected to \(rig.rigModel) on \(dest)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Spacer()
@@ -308,7 +642,7 @@ struct RigConfigPopoverView: View {
             }
         }
         .padding(20)
-        .frame(width: 450)
+        .frame(width: 480)
     }
 
     private func driverCard(title: String, subtitle: String, icon: String, driver: RigDriverType) -> some View {

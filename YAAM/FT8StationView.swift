@@ -30,6 +30,10 @@ struct FT8StationView: View {
     @ObservedObject var engine: FT8EngineService
     @ObservedObject var radio: IcomNetworkRadio
     @ObservedObject var rig: RigControlClient
+    @ObservedObject var tx500: Lab599TX500Driver = Lab599TX500Driver.shared
+    @ObservedObject var icomUSB: IcomUSBRadioDriver = IcomUSBRadioDriver.shared
+    @ObservedObject var fx4cr: FX4CRDriver = FX4CRDriver.shared
+    @ObservedObject var xiegu: Xiegu6100Driver = Xiegu6100Driver.shared
 
     @AppStorage("icomNetworkHost") private var icomHost = ""
     @AppStorage("icomNetworkControlPort") private var icomPort = 50_001
@@ -56,7 +60,14 @@ struct FT8StationView: View {
     }
 
     private var radioPathConnected: Bool {
-        engine.audioPath == .icomLAN ? radio.state.isConnected : rig.state.isConnected
+        switch engine.audioPath {
+        case .icomLAN: return radio.state.isConnected
+        case .coreAudio: return rig.state.isConnected
+        case .lab599TX500: return tx500.isConnected
+        case .icomUSB: return icomUSB.isConnected
+        case .fx4cr: return fx4cr.isConnected
+        case .xiegu6100: return xiegu.isConnected
+        }
     }
 
     var body: some View {
@@ -146,6 +157,18 @@ struct FT8StationView: View {
         .onChange(of: engine.audioPath) { _, _ in engine.stopMonitoring() }
         .onChange(of: radio.state) { _, state in
             if !state.isConnected, engine.audioPath == .icomLAN { engine.stopMonitoring() }
+        }
+        .onChange(of: tx500.isConnected) { _, connected in
+            if !connected, engine.audioPath == .lab599TX500 { engine.stopMonitoring() }
+        }
+        .onChange(of: icomUSB.isConnected) { _, connected in
+            if !connected, engine.audioPath == .icomUSB { engine.stopMonitoring() }
+        }
+        .onChange(of: fx4cr.isConnected) { _, connected in
+            if !connected, engine.audioPath == .fx4cr { engine.stopMonitoring() }
+        }
+        .onChange(of: xiegu.isConnected) { _, connected in
+            if !connected, engine.audioPath == .xiegu6100 { engine.stopMonitoring() }
         }
         .sheet(isPresented: $showCabrilloExportSheet) {
             DigitalContestCabrilloExportView(
@@ -282,7 +305,18 @@ struct FT8StationView: View {
                         .fill(radioPathConnected ? Color.green : Color.orange)
                         .frame(width: 8, height: 8)
                     Image(systemName: "antenna.radiowaves.left.and.right")
-                    Text(radioPathConnected ? (engine.audioPath == .icomLAN ? "Icom LAN" : "rigctld") : "Connect Radio...")
+                    let labelText: String = {
+                        if !radioPathConnected { return "Connect Radio..." }
+                        switch engine.audioPath {
+                        case .icomLAN: return "Icom LAN"
+                        case .coreAudio: return "rigctld"
+                        case .lab599TX500: return "TX-500"
+                        case .icomUSB: return "Icom USB"
+                        case .fx4cr: return "FX-4CR"
+                        case .xiegu6100: return "X6100"
+                        }
+                    }()
+                    Text(labelText)
                         .font(.caption.weight(.bold))
                     Image(systemName: (showHardwareSettings || !radioPathConnected) ? "chevron.up" : "chevron.down")
                         .font(.caption2)
@@ -300,6 +334,26 @@ struct FT8StationView: View {
                     engine.stopMonitoring()
                 } else if engine.audioPath == .icomLAN {
                     engine.startIcomMonitoring(radio: radio)
+                } else if engine.audioPath == .lab599TX500 {
+                    engine.startTX500Monitoring(
+                        inputDevice: inputDeviceUID,
+                        outputDevice: outputDeviceUID
+                    )
+                } else if engine.audioPath == .icomUSB {
+                    engine.startIcomUSBMonitoring(
+                        inputDevice: inputDeviceUID,
+                        outputDevice: outputDeviceUID
+                    )
+                } else if engine.audioPath == .fx4cr {
+                    engine.startFX4CRMonitoring(
+                        inputDevice: inputDeviceUID,
+                        outputDevice: outputDeviceUID
+                    )
+                } else if engine.audioPath == .xiegu6100 {
+                    engine.startXiegu6100Monitoring(
+                        inputDevice: inputDeviceUID,
+                        outputDevice: outputDeviceUID
+                    )
                 } else {
                     engine.startCoreAudioMonitoring(
                         rig: rig,
@@ -574,57 +628,166 @@ struct FT8StationView: View {
 
     // MARK: - 2. Prominent Radio Connection Panel
 
+    private func iconForAudioPath(_ path: FT8AudioPath) -> String {
+        switch path {
+        case .icomLAN: return "network"
+        case .icomUSB: return "cable.connector"
+        case .coreAudio: return "waveform.path"
+        case .fx4cr: return "antenna.radiowaves.left.and.right"
+        case .lab599TX500: return "radio.fill"
+        case .xiegu6100: return "slider.horizontal.3"
+        }
+    }
+
     private var radioConnectionPanel: some View {
         VStack(alignment: .leading, spacing: 10) {
+            // Row 1: Header Title & Subtitle on Left, Status + Station Info + Dismiss on Right
             HStack(spacing: 12) {
                 Label("Radio & Audio Connection Setup", systemImage: "cable.connector.horizontal")
                     .font(.subheadline.weight(.bold))
+                    .foregroundStyle(.primary)
 
-                Picker("Path", selection: $engine.audioPath) {
-                    ForEach(FT8AudioPath.allCases) { path in Text(path.rawValue).tag(path) }
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 270)
+                Text("Transceiver Interface & Telemetry")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
 
-                Spacer()
+                Spacer(minLength: 12)
 
                 HStack(spacing: 8) {
-                    Text("Station: \(engine.myCall.isEmpty ? "No Call" : engine.myCall)")
-                        .font(.caption.monospacedDigit().weight(.bold))
-                    Text("Grid: \(engine.myGrid.isEmpty ? "----" : engine.myGrid)")
-                        .font(.caption.monospacedDigit().weight(.bold))
-                }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(Color.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: 5))
-
-                if radioPathConnected {
-                    Button {
-                        withAnimation { showHardwareSettings = false }
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(.secondary)
+                    // Connection Status Indicator Pill
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill(radioPathConnected ? Color.green : Color.orange)
+                            .frame(width: 7, height: 7)
+                        Text(radioPathConnected ? "Connected" : "Not Connected")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(radioPathConnected ? Color.green : Color.secondary)
                     }
-                    .buttonStyle(.borderless)
-                    .help("Dismiss connection panel")
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3.5)
+                    .background(
+                        (radioPathConnected ? Color.green : Color.orange).opacity(0.12),
+                        in: Capsule()
+                    )
+
+                    HStack(spacing: 6) {
+                        Text("Station: \(engine.myCall.isEmpty ? "No Call" : engine.myCall)")
+                            .font(.caption.monospacedDigit().weight(.bold))
+                        Text("Grid: \(engine.myGrid.isEmpty ? "----" : engine.myGrid)")
+                            .font(.caption.monospacedDigit().weight(.bold))
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3.5)
+                    .background(Color.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: 5))
+
+                    if radioPathConnected {
+                        Button {
+                            withAnimation { showHardwareSettings = false }
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 15))
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Dismiss connection panel")
+                    }
                 }
             }
 
+            // Row 2: Transceiver Path Selector (Responsive Capsules, Zero Overlap)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(FT8AudioPath.allCases) { path in
+                        let isSelected = engine.audioPath == path
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.18)) {
+                                engine.audioPath = path
+                            }
+                        } label: {
+                            HStack(spacing: 5) {
+                                Image(systemName: iconForAudioPath(path))
+                                    .font(.system(size: 11, weight: isSelected ? .bold : .medium))
+                                Text(path.rawValue)
+                                    .font(.system(size: 11.5, weight: isSelected ? .bold : .medium))
+                                    .fixedSize(horizontal: true, vertical: false)
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(
+                                isSelected ? Color.accentColor : Color(NSColor.controlBackgroundColor),
+                                in: RoundedRectangle(cornerRadius: 6)
+                            )
+                            .foregroundColor(isSelected ? .white : .primary)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .stroke(isSelected ? Color.clear : Color.primary.opacity(0.12), lineWidth: 1)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .help("Configure \(path.rawValue)")
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+            .fixedSize(horizontal: false, vertical: true)
+
+            Divider().opacity(0.6)
+
             if engine.audioPath == .icomLAN {
                 icomSettings
+            } else if engine.audioPath == .icomUSB {
+                icomUSBSettings
+            } else if engine.audioPath == .lab599TX500 {
+                tx500Settings
+            } else if engine.audioPath == .fx4cr {
+                fx4crSettings
+            } else if engine.audioPath == .xiegu6100 {
+                xiegu6100Settings
             } else {
                 coreAudioSettings
             }
 
             // Live Diagnostic Status & Error Banner
-            if !radio.lastMessage.isEmpty {
+            let bannerMessage: String = {
+                switch engine.audioPath {
+                case .icomLAN: return radio.lastMessage
+                case .icomUSB: return icomUSB.lastMessage
+                case .coreAudio: return rig.lastMessage
+                case .lab599TX500: return tx500.lastMessage
+                case .fx4cr: return fx4cr.lastMessage
+                case .xiegu6100: return xiegu.lastMessage
+                }
+            }()
+            let bannerConnected: Bool = radioPathConnected
+            let bannerFailed: Bool = {
+                switch engine.audioPath {
+                case .icomLAN: return radio.state.isFailed
+                case .icomUSB: return icomUSB.lastMessage.contains("Failed")
+                case .coreAudio: return rig.state.title.contains("failed")
+                case .lab599TX500: return tx500.lastMessage.contains("Failed")
+                case .fx4cr: return fx4cr.lastMessage.contains("Failed")
+                case .xiegu6100: return xiegu.lastMessage.contains("Failed")
+                }
+            }()
+            let bannerTransitioning: Bool = {
+                switch engine.audioPath {
+                case .icomLAN: return radio.state.isTransitioning
+                case .icomUSB: return icomUSB.isConnecting
+                case .coreAudio: return rig.state.title == "Connecting"
+                case .lab599TX500: return tx500.isConnecting
+                case .fx4cr: return fx4cr.isConnecting
+                case .xiegu6100: return xiegu.isConnecting
+                }
+            }()
+
+            if !bannerMessage.isEmpty {
                 HStack(spacing: 8) {
-                    if radio.state.isTransitioning {
+                    if bannerTransitioning {
                         ProgressView().controlSize(.mini)
-                    } else if radio.state.isFailed {
+                    } else if bannerFailed {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .foregroundStyle(.red)
-                    } else if radio.state.isConnected {
+                    } else if bannerConnected {
                         Image(systemName: "checkmark.circle.fill")
                             .foregroundStyle(.green)
                     } else {
@@ -632,14 +795,14 @@ struct FT8StationView: View {
                             .foregroundStyle(.secondary)
                     }
 
-                    Text(radio.lastMessage)
+                    Text(bannerMessage)
                         .font(.caption)
-                        .foregroundStyle(radio.state.isFailed ? Color.red : Color.primary)
+                        .foregroundStyle(bannerFailed ? Color.red : Color.primary)
                         .textSelection(.enabled)
 
                     Spacer()
 
-                    if !credentialStatus.isEmpty {
+                    if engine.audioPath == .icomLAN && !credentialStatus.isEmpty {
                         Text(credentialStatus)
                             .font(.caption2.weight(.medium))
                             .foregroundStyle(credentialStatus.contains("Saved") ? Color.green : Color.secondary)
@@ -648,12 +811,347 @@ struct FT8StationView: View {
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
                 .background(
-                    radio.state.isFailed
+                    bannerFailed
                         ? Color.red.opacity(0.12)
-                        : (radio.state.isConnected ? Color.green.opacity(0.10) : Color.secondary.opacity(0.08)),
+                        : (bannerConnected ? Color.green.opacity(0.10) : Color.secondary.opacity(0.08)),
                     in: RoundedRectangle(cornerRadius: 6)
                 )
             }
+        }
+    }
+
+    private var tx500Settings: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .bottom, spacing: 12) {
+                field("USB Serial CAT (AD-514/AD-502)", width: 220) {
+                    Picker("Serial Port", selection: Binding(get: { tx500.selectedPort }, set: { tx500.selectedPort = $0 })) {
+                        if tx500.availablePorts.isEmpty {
+                            Text("No serial ports found").tag("")
+                        }
+                        ForEach(tx500.availablePorts, id: \.self) { p in
+                            Text(p.components(separatedBy: "/").last ?? p).tag(p)
+                        }
+                    }
+                    .labelsHidden()
+                }
+
+                Button { tx500.refreshPorts() } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .help("Refresh serial ports")
+
+                field("Input Audio (AD-508 / Codec)", width: 190) {
+                    Picker("Input", selection: $inputDeviceUID) {
+                        Text("System Default").tag("")
+                        ForEach(engine.inputDevices) { d in Text(d.name).tag(d.uid) }
+                    }
+                    .labelsHidden()
+                }
+
+                field("Output Audio (AD-508 / Codec)", width: 190) {
+                    Picker("Output", selection: $outputDeviceUID) {
+                        Text("System Default").tag("")
+                        ForEach(engine.outputDevices) { d in Text(d.name).tag(d.uid) }
+                    }
+                    .labelsHidden()
+                }
+
+                Button { engine.refreshAudioDevices(); tx500.scanAudioDevices() } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .help("Refresh Core Audio Devices")
+
+                Button {
+                    tx500.toggleConnection()
+                } label: {
+                    Label(tx500.isConnected ? "Disconnect" : "Connect", systemImage: tx500.isConnected ? "xmark.circle" : "bolt.horizontal.fill")
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(tx500.isConnected ? .secondary : .blue)
+
+                Spacer()
+
+                statusPill(tx500.isConnected ? "TX-500 Connected" : (tx500.isConnecting ? "Connecting..." : "TX-500 Offline"), active: tx500.isConnected)
+            }
+
+            // Checklist & Firmware Bug #1 Notice
+            HStack(spacing: 12) {
+                HStack(spacing: 4) {
+                    Image(systemName: "checkmark.seal.fill")
+                        .foregroundStyle(Color.green)
+                        .font(.caption2)
+                    Text("Pre-Flight: Menu 34: TS2000 • Menu 35: 9600 • Menu 09: 30 • Mode: DIG • Audio: 48kHz 16-bit")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                Toggle("Preserve DIG Mode", isOn: Binding(get: { tx500.preserveDIGMode }, set: { tx500.preserveDIGMode = $0 }))
+                    .font(.caption2)
+                    .help("Suppresses CAT mode override to prevent Firmware Bug #1 (TX mode switching to USB with 0W output)")
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
+        }
+    }
+
+    private var fx4crSettings: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .bottom, spacing: 12) {
+                field("Transport Link", width: 140) {
+                    Picker("Transport", selection: Binding(get: { fx4cr.connectionType }, set: { fx4cr.connectionType = $0 })) {
+                        ForEach(FX4CRConnectionType.allCases) { t in
+                            Text(t.rawValue).tag(t)
+                        }
+                    }
+                    .labelsHidden()
+                }
+
+                field(fx4cr.connectionType == .bluetooth ? "Bluetooth Serial Port" : "USB Serial Port", width: 200) {
+                    Picker("Serial Port", selection: Binding(get: { fx4cr.selectedPort }, set: { fx4cr.selectedPort = $0 })) {
+                        if fx4cr.availablePorts.isEmpty {
+                            Text("No matching ports").tag("")
+                        }
+                        ForEach(fx4cr.availablePorts, id: \.self) { p in
+                            Text(p.components(separatedBy: "/").last ?? p).tag(p)
+                        }
+                    }
+                    .labelsHidden()
+                }
+
+                Button { fx4cr.refreshPorts() } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .help("Refresh serial ports")
+
+                field("Input Audio (CM108AH / BT)", width: 180) {
+                    Picker("Input", selection: $inputDeviceUID) {
+                        Text("System Default").tag("")
+                        ForEach(engine.inputDevices) { d in Text(d.name).tag(d.uid) }
+                    }
+                    .labelsHidden()
+                }
+
+                field("Output Audio (CM108AH / BT)", width: 180) {
+                    Picker("Output", selection: $outputDeviceUID) {
+                        Text("System Default").tag("")
+                        ForEach(engine.outputDevices) { d in Text(d.name).tag(d.uid) }
+                    }
+                    .labelsHidden()
+                }
+
+                Button { engine.refreshAudioDevices(); fx4cr.scanAudioDevices() } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .help("Refresh Core Audio Devices")
+
+                Button {
+                    fx4cr.toggleConnection()
+                } label: {
+                    Label(fx4cr.isConnected ? "Disconnect" : "Connect", systemImage: fx4cr.isConnected ? "xmark.circle" : "cable.connector")
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(fx4cr.isConnected ? .secondary : .blue)
+
+                Spacer()
+
+                statusPill(fx4cr.isConnected ? "FX-4CR Linked" : (fx4cr.isConnecting ? "Connecting..." : "FX-4CR Offline"), active: fx4cr.isConnected)
+            }
+        }
+    }
+
+    private var xiegu6100Settings: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .bottom, spacing: 12) {
+                field("Serial Port (DEV Port)", width: 220) {
+                    Picker("Serial Port", selection: Binding(get: { xiegu.selectedPort }, set: { xiegu.selectedPort = $0 })) {
+                        if xiegu.availablePorts.isEmpty {
+                            Text("No matching ports").tag("")
+                        }
+                        ForEach(xiegu.availablePorts, id: \.self) { p in
+                            Text(p.components(separatedBy: "/").last ?? p).tag(p)
+                        }
+                    }
+                    .labelsHidden()
+                }
+
+                Button { xiegu.refreshPorts() } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .help("Refresh serial ports")
+
+                field("CI-V Baud", width: 110) {
+                    Picker("Baud Rate", selection: Binding(get: { xiegu.baudRate }, set: { xiegu.baudRate = $0 })) {
+                        Text("9600").tag(9600)
+                        Text("19200").tag(19200)
+                        Text("38400").tag(38400)
+                        Text("57600").tag(57600)
+                        Text("115200").tag(115200)
+                    }
+                    .labelsHidden()
+                }
+
+                field("Input Audio (USB CODEC)", width: 180) {
+                    Picker("Input", selection: $inputDeviceUID) {
+                        Text("System Default").tag("")
+                        ForEach(engine.inputDevices) { d in Text(d.name).tag(d.uid) }
+                    }
+                    .labelsHidden()
+                }
+
+                field("Output Audio (USB CODEC)", width: 180) {
+                    Picker("Output", selection: $outputDeviceUID) {
+                        Text("System Default").tag("")
+                        ForEach(engine.outputDevices) { d in Text(d.name).tag(d.uid) }
+                    }
+                    .labelsHidden()
+                }
+
+                Button { engine.refreshAudioDevices(); xiegu.scanAudioDevices() } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .help("Refresh Core Audio Devices")
+
+                Button {
+                    xiegu.toggleConnection()
+                } label: {
+                    Label(xiegu.isConnected ? "Disconnect" : "Connect", systemImage: xiegu.isConnected ? "xmark.circle" : "cable.connector")
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(xiegu.isConnected ? .secondary : .blue)
+
+                Spacer()
+
+                statusPill(xiegu.isConnected ? "X6100 Linked" : (xiegu.isConnecting ? "Connecting..." : "X6100 Offline"), active: xiegu.isConnected)
+            }
+        }
+    }
+
+    private var icomUSBSettings: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .bottom, spacing: 12) {
+                field("Radio Model", width: 140) {
+                    Picker("Model", selection: Binding(get: { icomUSB.model }, set: { icomUSB.model = $0 })) {
+                        ForEach(IcomUSBModel.allCases) { m in
+                            Label(m.rawValue, systemImage: m.iconName).tag(m)
+                        }
+                    }
+                    .labelsHidden()
+                }
+
+                field("USB Serial Port (CP210x / CDC)", width: 200) {
+                    Picker("Serial Port", selection: Binding(get: { icomUSB.selectedPort }, set: { icomUSB.selectedPort = $0 })) {
+                        if icomUSB.availablePorts.isEmpty {
+                            Text("No serial ports found").tag("")
+                        }
+                        ForEach(icomUSB.availablePorts, id: \.self) { p in
+                            Text(p.components(separatedBy: "/").last ?? p).tag(p)
+                        }
+                    }
+                    .labelsHidden()
+                }
+
+                Button { icomUSB.refreshPorts() } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .help("Refresh serial ports")
+
+                field("Baud Rate", width: 100) {
+                    Picker("Baud", selection: Binding(get: { icomUSB.baudRate }, set: { icomUSB.baudRate = $0 })) {
+                        Text("115200").tag(115200)
+                        Text("19200").tag(19200)
+                        Text("9600").tag(9600)
+                        Text("4800").tag(4800)
+                    }
+                    .labelsHidden()
+                }
+
+                field("Input Audio (USB CODEC)", width: 180) {
+                    Picker("Input", selection: $inputDeviceUID) {
+                        if let matched = icomUSB.detectedAudioInputName {
+                            Text("Auto: \(matched)").tag(icomUSB.detectedAudioInputUID ?? "")
+                        } else {
+                            Text("System Default").tag("")
+                        }
+                        ForEach(engine.inputDevices) { d in Text(d.name).tag(d.uid) }
+                    }
+                    .labelsHidden()
+                }
+
+                field("Output Audio (USB CODEC)", width: 180) {
+                    Picker("Output", selection: $outputDeviceUID) {
+                        if let matched = icomUSB.detectedAudioOutputName {
+                            Text("Auto: \(matched)").tag(icomUSB.detectedAudioOutputUID ?? "")
+                        } else {
+                            Text("System Default").tag("")
+                        }
+                        ForEach(engine.outputDevices) { d in Text(d.name).tag(d.uid) }
+                    }
+                    .labelsHidden()
+                }
+
+                Button { engine.refreshAudioDevices(); icomUSB.scanAudioDevices() } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .help("Refresh Core Audio Devices")
+
+                Button {
+                    if icomUSB.isConnected {
+                        icomUSB.disconnect()
+                    } else {
+                        icomUSB.connect()
+                    }
+                } label: {
+                    Label(icomUSB.isConnected ? "Disconnect" : "Connect", systemImage: icomUSB.isConnected ? "xmark.circle" : "cable.connector")
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(icomUSB.isConnected ? .secondary : .blue)
+
+                Spacer()
+
+                statusPill(icomUSB.isConnected ? "\(icomUSB.model.rawValue) Linked" : (icomUSB.isConnecting ? "Connecting..." : "Icom Offline"), active: icomUSB.isConnected)
+            }
+
+            // Pre-flight settings info and Audio Codec status
+            HStack(spacing: 12) {
+                HStack(spacing: 6) {
+                    Image(systemName: "checkmark.seal.fill")
+                        .foregroundStyle(Color.blue)
+                        .font(.caption2)
+                    Text("Pre-Flight: Icom Menu -> Connectors -> DATA MOD: USB • CI-V Baud: \(icomUSB.baudRate) • Mode: USB-D")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                HStack(spacing: 8) {
+                    Text("CI-V Addr: 0x\(icomUSB.customCivAddressHex)")
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .foregroundStyle(.secondary)
+
+                    if icomUSB.isAudioCodecDetected {
+                        HStack(spacing: 4) {
+                            Circle().fill(Color.green).frame(width: 6, height: 6)
+                            Text("USB Audio CODEC Ready")
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(Color.green)
+                        }
+                    } else {
+                        HStack(spacing: 4) {
+                            Circle().fill(Color.orange).frame(width: 6, height: 6)
+                            Text("Verify USB Audio in Settings")
+                                .font(.caption2)
+                                .foregroundStyle(Color.orange)
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
         }
     }
 
@@ -1870,7 +2368,7 @@ struct FT8StationView: View {
 
 // MARK: - SDR-Control Style RF Spectrum & Color Waterfall Display
 
-private struct FT8SpectrumWaterfallView: View {
+struct FT8SpectrumWaterfallView: View {
     @ObservedObject var engine: FT8EngineService
     var onSelectRxFrequency: (Float) -> Void
     var onSelectTxFrequency: (Float) -> Void

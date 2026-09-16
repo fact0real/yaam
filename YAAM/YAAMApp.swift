@@ -15,6 +15,7 @@ enum YAAMWindowID {
     static let feedback = "feedback-window"
     static let hamClock = "hamclock-kiosk-window"
     static let transceiverEmulator = "transceiver-emulator-window"
+    static let multiRigFT8 = "multi-rig-ft8-window"
 }
 
 // MARK: - Main Application Entry Point & Global Menu Commands
@@ -266,6 +267,13 @@ struct YAAMApp: App {
 
                 Divider()
 
+                Button("Multi-Rig FT8 Cluster (SO3R)...") {
+                    openWindow(id: YAAMWindowID.multiRigFT8)
+                }
+                .keyboardShortcut("8", modifiers: [.command, .option])
+
+                Divider()
+
                 Button("Log Statistics") {
                     appState.selectedTab = 6
                 }
@@ -424,6 +432,22 @@ struct YAAMApp: App {
                 )
         }
         .defaultSize(width: 1250, height: 850)
+        .windowResizability(.contentMinSize)
+
+        // MARK: - Multi-Rig FT8 Cluster Standalone Window Scene
+        Window("Multi-Rig FT8 Cluster (SO3R)", id: YAAMWindowID.multiRigFT8) {
+            MultiRigFT8View(hub: appState.multiRigFT8Hub)
+                .environmentObject(appState)
+                .frame(
+                    minWidth: 1000,
+                    idealWidth: 1540,
+                    maxWidth: .infinity,
+                    minHeight: 650,
+                    idealHeight: 900,
+                    maxHeight: .infinity
+                )
+        }
+        .defaultSize(width: 1540, height: 900)
         .windowResizability(.contentMinSize)
     }
 }

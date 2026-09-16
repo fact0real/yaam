@@ -14,6 +14,10 @@ public struct CWHardwareSetupSheet: View {
     @ObservedObject private var rigCtl = RigControlClient.shared
     @ObservedObject private var flRig = FLRigClient.shared
     @ObservedObject private var keyer = CWKeyerService.shared
+    @ObservedObject private var tx500 = Lab599TX500Driver.shared
+    @ObservedObject private var icom = IcomUSBRadioDriver.shared
+    @ObservedObject private var fx4cr = FX4CRDriver.shared
+    @ObservedObject private var xiegu = Xiegu6100Driver.shared
 
     @State private var selectedTab: Int = 0
 
@@ -26,23 +30,27 @@ public struct CWHardwareSetupSheet: View {
                 Image(systemName: "cable.connector.horizontal")
                     .font(.title2)
                     .foregroundColor(.accentColor)
+
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("CW Hardware Keying Setup")
-                        .font(.headline.bold())
-                    Text("Configure how YAAM physically transmits Morse code to your transceiver")
+                    Text("CW Keyer Hardware Setup")
+                        .font(.headline)
+                    Text("Configure hardware transceivers, WinKeyer, Serial DTR/RTS, or CAT Morse keying")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
+
                 Spacer()
-                // Live status badge
+
+                // Current Active Mode Status Pill
                 let status = keyer.hardwareStatusSummary
-                HStack(spacing: 5) {
+                HStack(spacing: 6) {
                     Circle()
                         .fill(status.isConnected ? Color.green : Color.orange)
-                        .frame(width: 7, height: 7)
-                    VStack(alignment: .leading, spacing: 0) {
+                        .frame(width: 8, height: 8)
+                    VStack(alignment: .leading, spacing: 1) {
                         Text(status.title)
                             .font(.caption.bold())
+                            .foregroundColor(status.isConnected ? .primary : .orange)
                         Text(status.detail)
                             .font(.caption2)
                             .foregroundColor(.secondary)
@@ -67,9 +75,13 @@ public struct CWHardwareSetupSheet: View {
 
             // Mode tabs
             Picker("", selection: $selectedTab) {
-                Label("WinKeyer", systemImage: "cable.connector.horizontal").tag(0)
-                Label("Serial DTR/RTS", systemImage: "cable.connector").tag(1)
-                Label("CAT Morse", systemImage: "antenna.radiowaves.left.and.right").tag(2)
+                Label("Icom USB", systemImage: "radio.fill").tag(0)
+                Label("Xiegu X6100", systemImage: "radio.fill").tag(1)
+                Label("FX-4CR", systemImage: "antenna.radiowaves.left.and.right").tag(2)
+                Label("Lab599 TX-500", systemImage: "bolt.horizontal.fill").tag(3)
+                Label("WinKeyer", systemImage: "cable.connector.horizontal").tag(4)
+                Label("Serial DTR/RTS", systemImage: "cable.connector").tag(5)
+                Label("CAT Morse", systemImage: "waveform").tag(6)
             }
             .pickerStyle(.segmented)
             .padding(.horizontal, 20)
@@ -79,23 +91,46 @@ public struct CWHardwareSetupSheet: View {
 
             ScrollView {
                 switch selectedTab {
-                case 0: winKeyerPanel
-                case 1: serialPinPanel
-                case 2: catMorsePanel
+                case 0: icomUSBPanel
+                case 1: xiegu6100Panel
+                case 2: fx4crPanel
+                case 3: tx500Panel
+                case 4: winKeyerPanel
+                case 5: serialPinPanel
+                case 6: catMorsePanel
                 default: EmptyView()
                 }
             }
         }
-        .frame(width: 620, height: 580)
+        .frame(width: 680, height: 580)
         .background(Color(NSColor.windowBackgroundColor))
         .onAppear {
+            icom.refreshPorts()
+            xiegu.refreshPorts()
+            fx4cr.refreshPorts()
+            tx500.refreshPorts()
             wk.refreshPorts()
             sk.refreshPorts()
             // Open to tab matching current mode
             switch keyer.transmissionMode {
-            case .winkeyer: selectedTab = 0
-            case .serialDTR_RTS: selectedTab = 1
-            case .catMorse: selectedTab = 2
+            case .icomUSB: selectedTab = 0
+            case .xiegu6100: selectedTab = 1
+            case .fx4cr: selectedTab = 2
+            case .lab599TX500: selectedTab = 3
+            case .winkeyer: selectedTab = 4
+            case .serialDTR_RTS: selectedTab = 5
+            case .catMorse:
+                if xiegu.isConnected {
+                    selectedTab = 1
+                } else if fx4cr.isConnected {
+                    selectedTab = 2
+                } else if tx500.isConnected {
+                    selectedTab = 3
+                } else if icom.isConnected {
+                    selectedTab = 0
+                } else {
+                    selectedTab = 6
+                }
             default: break
             }
         }
@@ -363,6 +398,28 @@ public struct CWHardwareSetupSheet: View {
 
     private var catMorsePanel: some View {
         VStack(alignment: .leading, spacing: 16) {
+            settingsGroup("FX-4CR CAT Morse (Kenwood KY Chunking & KS Speed)") {
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(fx4cr.isConnected ? Color.green : Color.secondary)
+                        .frame(width: 8, height: 8)
+                    Text(fx4cr.isConnected ? "FX-4CR Connected via \(fx4cr.connectionType.rawValue) — TS-590S KY/KS available" : "FX-4CR Offline")
+                        .font(.callout)
+                }
+
+                if fx4cr.isConnected {
+                    Text("YAAM transmits Morse code directly to the FX-4CR's internal keyer over Kenwood TS-590S CAT. Text is automatically chunked into 24-character blocks with auto-pacing, and keyer speed is synchronized via `KS<wpm>;`.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Text("Connect your FX-4CR via USB-C or Bluetooth in the FX-4CR tab or Rig Control toolbar to enable direct CAT Morse.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
             settingsGroup("Hamlib rigctld (\\send_morse)") {
                 let rigState = RigControlClient.shared.state
                 HStack(spacing: 8) {
@@ -405,17 +462,27 @@ public struct CWHardwareSetupSheet: View {
 
             settingsGroup("Priority & Activation") {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("When CAT Morse mode is active, YAAM uses this priority order:")
+                    Text("When CAT Morse mode is active, YAAM transmits using this priority order:")
                         .font(.caption)
                         .foregroundColor(.secondary)
 
                     HStack(spacing: 8) {
                         Text("①").foregroundColor(.accentColor).bold()
-                        Text("Hamlib rigctld (\\ send_morse command)")
+                        Text("FX-4CR Direct CAT Morse (Kenwood KY chunked buffer)")
                     }.font(.callout)
 
                     HStack(spacing: 8) {
                         Text("②").foregroundColor(.accentColor).bold()
+                        Text("Icom USB CI-V (Command 17 Direct Keyer)")
+                    }.font(.callout)
+
+                    HStack(spacing: 8) {
+                        Text("③").foregroundColor(.accentColor).bold()
+                        Text("Hamlib rigctld (\\ send_morse command)")
+                    }.font(.callout)
+
+                    HStack(spacing: 8) {
+                        Text("④").foregroundColor(.accentColor).bold()
                         Text("FLRig XML-RPC (rig.send_morse method)")
                     }.font(.callout)
 
@@ -426,6 +493,450 @@ public struct CWHardwareSetupSheet: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .padding(.top, 4)
+                }
+            }
+        }
+        .padding(20)
+    }
+
+    // MARK: - Lab599 TX-500 Tab
+
+    private var tx500Panel: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            settingsGroup("USB Serial Connection (AD-514/AD-502)") {
+                HStack(spacing: 10) {
+                    Picker("Serial Port", selection: Binding(get: { tx500.selectedPort }, set: { tx500.selectedPort = $0 })) {
+                        if tx500.availablePorts.isEmpty {
+                            Text("No serial ports found").tag("")
+                        }
+                        ForEach(tx500.availablePorts, id: \.self) { port in
+                            Text(port.components(separatedBy: "/").last ?? port).tag(port)
+                        }
+                    }
+                    .frame(maxWidth: 240)
+
+                    Button { tx500.refreshPorts() } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .buttonStyle(.bordered)
+                    .help("Refresh serial ports")
+
+                    Spacer()
+
+                    if tx500.isConnected {
+                        Button("Disconnect", role: .destructive) { tx500.disconnect() }
+                            .buttonStyle(.bordered)
+                    } else {
+                        Button("Connect") { tx500.connect() }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(tx500.selectedPort.isEmpty)
+                    }
+                }
+
+                if tx500.isConnected {
+                    HStack(spacing: 6) {
+                        Circle().fill(Color.green).frame(width: 8, height: 8)
+                        Text(tx500.lastMessage)
+                            .font(.caption.bold())
+                            .foregroundColor(.green)
+                    }
+                }
+            }
+
+            settingsGroup("Kenwood CAT Morse (KY Buffer & KS Speed)") {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("In CAT Morse mode, YAAM transmits text directly to the TX-500's internal keyer using Kenwood `KY <text>;` commands and sets internal keyer speed with `KS<wpm>;`.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+
+                    HStack(spacing: 12) {
+                        Text("Current Speed:")
+                            .font(.caption.bold())
+                        Text("\(keyer.wpm) WPM")
+                            .font(.system(.caption, design: .monospaced).bold())
+                            .foregroundColor(.accentColor)
+                    }
+
+                    HStack(spacing: 6) {
+                        Image(systemName: "info.circle")
+                            .foregroundColor(.secondary)
+                        Text("Radio Setup: Menu 34 = TS2000 • Menu 35 = 9600 • Front-panel Mode = CW")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+
+            if tx500.isConnected {
+                settingsGroup("Hardware CW Transmission Test") {
+                    HStack(spacing: 12) {
+                        Button {
+                            tx500.sendMorse("E", wpm: keyer.wpm)
+                        } label: {
+                            Label("Send Test Dit (E)", systemImage: "dot.radiowaves.left.and.right")
+                        }
+                        .buttonStyle(.bordered)
+
+                        Button {
+                            tx500.sendMorse("TEST DE \(keyer.macros.first?.template.contains("CQ") == true ? "EP2AES" : "YAAM")", wpm: keyer.wpm)
+                        } label: {
+                            Label("Send Test Text", systemImage: "paperplane.fill")
+                        }
+                        .buttonStyle(.bordered)
+
+                        Button {
+                            keyer.transmissionMode = .lab599TX500
+                        } label: {
+                            Label("Use TX-500 as Active CW Mode", systemImage: "checkmark.seal.fill")
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                }
+            }
+        }
+        .padding(20)
+    }
+
+    // MARK: - Xiegu X6100 Tab
+
+    private var xiegu6100Panel: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            settingsGroup("Xiegu X6100 USB-C Serial Connection (DEV Port)") {
+                HStack(spacing: 10) {
+                    Picker("Serial Port", selection: Binding(get: { xiegu.selectedPort }, set: { xiegu.selectedPort = $0 })) {
+                        if xiegu.availablePorts.isEmpty {
+                            Text("No serial ports found").tag("")
+                        }
+                        ForEach(xiegu.availablePorts, id: \.self) { port in
+                            Text(port.components(separatedBy: "/").last ?? port).tag(port)
+                        }
+                    }
+                    .frame(maxWidth: 240)
+
+                    Button { xiegu.refreshPorts() } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .buttonStyle(.bordered)
+                    .help("Refresh serial ports")
+
+                    Spacer()
+
+                    if xiegu.isConnected {
+                        Button("Disconnect", role: .destructive) { xiegu.disconnect() }
+                            .buttonStyle(.bordered)
+                    } else {
+                        Button("Connect") { xiegu.connect() }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(xiegu.selectedPort.isEmpty)
+                    }
+                }
+
+                if xiegu.isConnected {
+                    HStack(spacing: 6) {
+                        Circle().fill(Color.green).frame(width: 8, height: 8)
+                        Text(xiegu.lastMessage)
+                            .font(.caption.bold())
+                            .foregroundColor(.green)
+                    }
+                }
+            }
+
+            settingsGroup("Keying & Hardware Pin Options") {
+                VStack(alignment: .leading, spacing: 8) {
+                    Toggle("Key Transceiver via CI-V CAT Command 17 (Direct ASCII Morse Buffer)", isOn: .constant(true))
+                        .disabled(true)
+                        .font(.caption)
+
+                    Toggle("Hardware DTR CW Keying (DEV port DTR line keys transmitter)", isOn: Binding(get: { xiegu.enableHardwareDTRCW }, set: { xiegu.enableHardwareDTRCW = $0 }))
+                        .font(.caption)
+
+                    Toggle("Hardware RTS PTT (DEV port RTS line asserts TX)", isOn: Binding(get: { xiegu.enableHardwareRTSPTT }, set: { xiegu.enableHardwareRTSPTT = $0 }))
+                        .font(.caption)
+                }
+            }
+
+            settingsGroup("CI-V Protocol Details & Keyer Settings") {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("In Xiegu X6100 mode, YAAM transmits text directly to the radio's internal keyer using CI-V Command 0x17 and sets keyer speed using Command 0x14 0x0C.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+
+                    HStack(spacing: 12) {
+                        Text("Keyer Speed:")
+                            .font(.caption.bold())
+                        Text("\(keyer.wpm) WPM")
+                            .font(.system(.caption, design: .monospaced).bold())
+                            .foregroundColor(.accentColor)
+                    }
+
+                    HStack(spacing: 6) {
+                        Image(systemName: "info.circle")
+                            .foregroundColor(.secondary)
+                        Text("Radio Setup: CI-V Baud: \(xiegu.baudRate) • CI-V Address: 0x\(xiegu.civAddressHex) • Front-panel Mode: CW")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+
+            if xiegu.isConnected {
+                settingsGroup("Hardware CW Transmission Test") {
+                    HStack(spacing: 12) {
+                        Button {
+                            xiegu.setKeyerSpeed(keyer.wpm)
+                            xiegu.sendMorse("E")
+                        } label: {
+                            Label("Send Test Dit (E)", systemImage: "dot.radiowaves.left.and.right")
+                        }
+                        .buttonStyle(.bordered)
+
+                        Button {
+                            xiegu.setKeyerSpeed(keyer.wpm)
+                            xiegu.sendMorse("TEST YAAM DE X6100")
+                        } label: {
+                            Label("Send Test Text", systemImage: "paperplane.fill")
+                        }
+                        .buttonStyle(.bordered)
+
+                        Button {
+                            keyer.transmissionMode = .xiegu6100
+                        } label: {
+                            Label("Use Xiegu X6100 as Active CW Mode", systemImage: "checkmark.seal.fill")
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                }
+            }
+        }
+        .padding(20)
+    }
+
+    // MARK: - FX-4CR Tab
+
+    private var fx4crPanel: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            settingsGroup("FX-4CR Transport Link & Serial Port") {
+                HStack(spacing: 12) {
+                    Picker("Transport", selection: Binding(get: { fx4cr.connectionType }, set: { fx4cr.connectionType = $0 })) {
+                        ForEach(FX4CRConnectionType.allCases) { t in
+                            Text(t.rawValue).tag(t)
+                        }
+                    }
+                    .frame(width: 170)
+
+                    Picker("Port", selection: Binding(get: { fx4cr.selectedPort }, set: { fx4cr.selectedPort = $0 })) {
+                        if fx4cr.availablePorts.isEmpty {
+                            Text("No matching ports").tag("")
+                        }
+                        ForEach(fx4cr.availablePorts, id: \.self) { port in
+                            Text(port.components(separatedBy: "/").last ?? port).tag(port)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+
+                    Button { fx4cr.refreshPorts() } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .buttonStyle(.bordered)
+                    .help("Refresh serial ports")
+
+                    if fx4cr.isConnected {
+                        Button("Disconnect", role: .destructive) { fx4cr.disconnect() }
+                            .buttonStyle(.bordered)
+                    } else {
+                        Button("Connect") { fx4cr.connect() }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(fx4cr.selectedPort.isEmpty)
+                    }
+                }
+
+                if fx4cr.isConnected {
+                    HStack(spacing: 6) {
+                        Circle().fill(Color.green).frame(width: 8, height: 8)
+                        Text("FX-4CR Connected via \(fx4cr.connectionType.rawValue) • \(fx4cr.formattedFrequency) \(fx4cr.mode)")
+                            .font(.caption.bold())
+                            .foregroundColor(.green)
+                    }
+                }
+            }
+
+            settingsGroup("Kenwood CAT Morse (KY Chunking & KS Speed)") {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("YAAM sends Morse code text directly to the FX-4CR's internal keyer over Kenwood TS-590S CAT. Text is automatically chunked into 24-character blocks (`KY <chunk>;`) with auto-pacing, and keyer speed is synchronized via `KS<wpm>;`.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+
+                    HStack(spacing: 12) {
+                        Text("Current Speed:")
+                            .font(.caption.bold())
+                        Text("\(keyer.wpm) WPM")
+                            .font(.system(.caption, design: .monospaced).bold())
+                            .foregroundColor(.accentColor)
+
+                        Spacer()
+
+                        Text("Baud: 115200 8N1")
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    HStack(spacing: 6) {
+                        Image(systemName: "info.circle.fill")
+                            .foregroundColor(.blue)
+                        Text(fx4cr.transport == .usb
+                             ? "USB: Radio Menu 'Bluetooth = 0 (Off)' & use USB-A adapter. Set mode to CW."
+                             : "Bluetooth: Radio Menu 'Bluetooth = 1 (On)' & pair in macOS System Settings. Set mode to CW.")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+
+            if fx4cr.isConnected {
+                settingsGroup("Hardware CW Transmission Test") {
+                    HStack(spacing: 12) {
+                        Button {
+                            fx4cr.sendMorse("E", wpm: keyer.wpm)
+                        } label: {
+                            Label("Send Test Dit (E)", systemImage: "dot.radiowaves.left.and.right")
+                        }
+                        .buttonStyle(.bordered)
+
+                        Button {
+                            fx4cr.sendMorse("TEST DE \(keyer.macros.first?.template.contains("CQ") == true ? "EP2AES" : "YAAM")", wpm: keyer.wpm)
+                        } label: {
+                            Label("Send Test Text", systemImage: "paperplane.fill")
+                        }
+                        .buttonStyle(.bordered)
+
+                        Button {
+                            keyer.transmissionMode = .fx4cr
+                        } label: {
+                            Label("Use FX-4CR as Active Mode", systemImage: "checkmark.seal.fill")
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                }
+            }
+        }
+        .padding(20)
+    }
+
+    // MARK: - Icom USB Tab
+
+    private var icomUSBPanel: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            settingsGroup("Icom Transceiver USB Connection") {
+                HStack(spacing: 10) {
+                    Picker("Model", selection: Binding(get: { icom.model }, set: { icom.model = $0 })) {
+                        ForEach(IcomUSBModel.allCases) { m in
+                            Label(m.rawValue, systemImage: m.iconName).tag(m)
+                        }
+                    }
+                    .frame(maxWidth: 150)
+
+                    Picker("Serial Port", selection: Binding(get: { icom.selectedPort }, set: { icom.selectedPort = $0 })) {
+                        if icom.availablePorts.isEmpty {
+                            Text("No serial ports found").tag("")
+                        }
+                        ForEach(icom.availablePorts, id: \.self) { port in
+                            Text(port.components(separatedBy: "/").last ?? port).tag(port)
+                        }
+                    }
+                    .frame(maxWidth: 200)
+
+                    Button { icom.refreshPorts() } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .buttonStyle(.bordered)
+                    .help("Refresh serial ports")
+
+                    Spacer()
+
+                    if icom.isConnected {
+                        Button("Disconnect", role: .destructive) { icom.disconnect() }
+                            .buttonStyle(.bordered)
+                    } else {
+                        Button("Connect") { icom.connect() }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(icom.selectedPort.isEmpty)
+                    }
+                }
+
+                if icom.isConnected {
+                    HStack(spacing: 8) {
+                        Circle().fill(Color.green).frame(width: 8, height: 8)
+                        Text("\(icom.model.rawValue) Connected @ \(icom.baudRate) bps • CI-V Addr: 0x\(icom.customCivAddressHex)")
+                            .font(.caption.bold())
+                            .foregroundColor(.green)
+                    }
+                }
+            }
+
+            settingsGroup("Keying & Hardware Pin Options") {
+                VStack(alignment: .leading, spacing: 8) {
+                    Toggle("Key Transceiver via CI-V CAT Command 17 (Direct ASCII Morse Buffer)", isOn: .constant(true))
+                        .disabled(true)
+                        .font(.caption)
+
+                    Toggle("Hardware DTR CW Keying (Menu -> Connectors -> USB Keying: DTR)", isOn: Binding(get: { icom.enableHardwareDTRCW }, set: { icom.enableHardwareDTRCW = $0 }))
+                        .font(.caption)
+
+                    Toggle("Hardware RTS PTT (Menu -> Connectors -> USB SEND: RTS)", isOn: Binding(get: { icom.enableHardwareRTSPTT }, set: { icom.enableHardwareRTSPTT = $0 }))
+                        .font(.caption)
+                }
+            }
+
+            settingsGroup("Icom CI-V Protocol Details & Keyer Settings") {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("In Icom USB mode, YAAM transmits text directly to the radio's internal keyer using CI-V Command 0x17 and sets keyer speed using Command 0x14 0x0C.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+
+                    HStack(spacing: 12) {
+                        Text("Keyer Speed:")
+                            .font(.caption.bold())
+                        Text("\(keyer.wpm) WPM")
+                            .font(.system(.caption, design: .monospaced).bold())
+                            .foregroundColor(.accentColor)
+                    }
+
+                    HStack(spacing: 6) {
+                        Image(systemName: "info.circle")
+                            .foregroundColor(.secondary)
+                        Text("Radio Setup: Menu -> Connectors -> CI-V Baud: \(icom.baudRate) • CI-V Address: \(icom.customCivAddressHex)h • Front-panel Mode: CW")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+
+            if icom.isConnected {
+                settingsGroup("Hardware CW Transmission Test") {
+                    HStack(spacing: 12) {
+                        Button {
+                            icom.setKeyerSpeed(keyer.wpm)
+                            icom.sendMorse("E")
+                        } label: {
+                            Label("Send Test Dit (E)", systemImage: "dot.radiowaves.left.and.right")
+                        }
+                        .buttonStyle(.bordered)
+
+                        Button {
+                            icom.setKeyerSpeed(keyer.wpm)
+                            icom.sendMorse("TEST YAAM DE ICOM")
+                        } label: {
+                            Label("Send Test Text", systemImage: "paperplane.fill")
+                        }
+                        .buttonStyle(.bordered)
+
+                        Button {
+                            keyer.transmissionMode = .icomUSB
+                        } label: {
+                            Label("Set Icom USB as Active CW Mode", systemImage: "checkmark.seal.fill")
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
                 }
             }
         }

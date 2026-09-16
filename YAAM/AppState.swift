@@ -39,6 +39,7 @@ enum NationalLeaderboardTab: String, CaseIterable, Identifiable {
     case headToHead = "Head-to-Head & Radar"
     case national = "National Standings"
     case roadmap = "Climb Roadmap"
+    case clubLog = "Club Log League"
 
     var id: String { rawValue }
 
@@ -47,6 +48,7 @@ enum NationalLeaderboardTab: String, CaseIterable, Identifiable {
         case .headToHead: return "swords"
         case .national: return "flag.fill"
         case .roadmap: return "chart.line.uptrend.xyaxis"
+        case .clubLog: return "trophy.fill"
         }
     }
 }
@@ -1964,6 +1966,8 @@ class AppState: NSObject, ObservableObject {
     @Published var inspectedStationAnalysis: QRZRankAnalysisResponse? = nil
     @Published var isFetchingInspectedAnalysis: Bool = false
     @Published var nationalLeaderboardTab: NationalLeaderboardTab = .headToHead
+    @Published var globalTotalStations: Int = 438_638
+
     private(set) var rankDailyQuota = QRZRankDailyQuota()
     private(set) var rankServerQuota: QRZRankAPIQuota?
     @Published var isDailyRankBackfillRunning: Bool = false
@@ -1977,6 +1981,15 @@ class AppState: NSObject, ObservableObject {
     @Published var clubLogDXCCMatrix: ClubLogDXCCMatrix? = nil
     @Published var isFetchingClubLogAwards: Bool = false
     @Published var clubLogAwardsStatus: String = ""
+
+    // Club Log League Standings
+    @Published var clubLogLeagueEntries: [ClubLogLeagueEntry] = []
+    @Published var isFetchingClubLogLeague: Bool = false
+    @Published var clubLogLeagueError: String? = nil
+    @Published var selectedClubLogLeagueMode: ClubLogLeagueMode = .mixed
+    @Published var selectedClubLogLeagueQSL: ClubLogLeagueQSL = .confirmed
+    @Published var selectedClubLogLeagueDate: ClubLogLeagueDate = .allTime
+    @Published var clubLogLeagueSearchText: String = ""
     @Published var qrzIncomingRequests: [QRZIncomingConfirmation] = []
     @Published var isFetchingQRZIncoming = false
     @Published var isRejectingQRZIncoming = false
@@ -2076,6 +2089,7 @@ class AppState: NSObject, ObservableObject {
     let wsjtxListener = WSJTXListener()
     let icomNetworkRadio = IcomNetworkRadio()
     let ft8Engine = FT8EngineService()
+    let multiRigFT8Hub = MultiRigFT8Hub()
     let digitalModemEngine = DigitalModemEngine.shared
     let transceiverEmulator = NetworkTransceiverEmulatorEngine()
     var operatorFeatureCancellables: Set<AnyCancellable> = []
@@ -2884,6 +2898,35 @@ class AppState: NSObject, ObservableObject {
             self.isFetchingClubLogAwards = false
         }
     }
+
+    // MARK: Club Log League Standings
+
+    func fetchClubLogLeague() {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in self?.fetchClubLogLeague() }
+            return
+        }
+        guard !isFetchingClubLogLeague else { return }
+
+        isFetchingClubLogLeague = true
+        clubLogLeagueError = nil
+
+        let mode = selectedClubLogLeagueMode
+        let qsl = selectedClubLogLeagueQSL
+        let date = selectedClubLogLeagueDate
+
+        Task { @MainActor in
+            do {
+                let entries = try await ClubLogLeagueService.shared.fetchLeague(mode: mode, qsl: qsl, date: date)
+                self.clubLogLeagueEntries = entries
+                self.appendLog("ClubLog League: Fetched \(entries.count) ranked callsigns (\(mode.title), \(qsl.title), \(date.title))")
+            } catch {
+                self.clubLogLeagueError = error.localizedDescription
+                self.appendLog("ClubLog League error: \(error.localizedDescription)")
+            }
+            self.isFetchingClubLogLeague = false
+        }
+    }
     
     func fetchQRZLeaderboard(for searchedCallsign: String) {
         guard Thread.isMainThread else {
@@ -2904,6 +2947,7 @@ class AppState: NSObject, ObservableObject {
         
         let group = DispatchGroup()
         
+        fetchOverviewStats()
         if ownerRankData == nil || ownerRankData?.callsign?.uppercased() != ownerCall {
             group.enter()
             fetchSingleRank(callsign: ownerCall, credentials: credentials) { [weak self] result in
@@ -2911,11 +2955,15 @@ class AppState: NSObject, ObservableObject {
                     if case .success(let response) = result {
                         self?.ownerRankData = response
                         self?.saveRankResponseSnapshot(response)
+                        self?.fetchStationAnalysis(callsign: ownerCall)
                     }
                     group.leave()
                 }
             }
+        } else if stationAnalysis == nil || stationAnalysis?.callsign.uppercased() != ownerCall {
+            fetchStationAnalysis(callsign: ownerCall)
         }
+
         
         group.enter()
         fetchSingleRank(callsign: targetCall, credentials: credentials) { [weak self] result in
@@ -2975,6 +3023,7 @@ class AppState: NSObject, ObservableObject {
         var failures: [QRZRankFetchFailure] = []
         let lock = NSLock()
 
+        fetchOverviewStats()
         if ownerRankData == nil || ownerRankData?.callsign?.uppercased() != ownerCall {
             group.enter()
             fetchSingleRank(callsign: ownerCall, credentials: credentials) { [weak self] result in
@@ -2982,11 +3031,15 @@ class AppState: NSObject, ObservableObject {
                     if case .success(let response) = result {
                         self?.ownerRankData = response
                         self?.saveRankResponseSnapshot(response)
+                        self?.fetchStationAnalysis(callsign: ownerCall)
                     }
                     group.leave()
                 }
             }
+        } else if stationAnalysis == nil || stationAnalysis?.callsign.uppercased() != ownerCall {
+            fetchStationAnalysis(callsign: ownerCall)
         }
+
 
         for callsign in targets {
             group.enter()
@@ -3148,6 +3201,22 @@ class AppState: NSObject, ObservableObject {
             }
         }
     }
+
+    func fetchOverviewStats() {
+        Task { @MainActor in
+            do {
+                let resp = try await QRZRankService.shared.fetchOverviewStats(
+                    userAgent: "YAAM-macOS/\(currentVersion)"
+                )
+                if let count = resp.totals?.totalStations, count > 0 {
+                    self.globalTotalStations = count
+                }
+            } catch {
+                // Silently fallback to current globalTotalStations (438,638 default)
+            }
+        }
+    }
+
 
     func simulateRankClimb(for callsign: String, additionalQso: Int) -> RankSimulationResult? {
         guard let items = nationalLeaderboard?.leaderboard, !items.isEmpty else { return nil }

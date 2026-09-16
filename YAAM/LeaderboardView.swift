@@ -154,7 +154,7 @@ struct LeaderboardView: View {
                     }
                 }
                 .pickerStyle(.segmented)
-                .frame(maxWidth: 560)
+                .frame(maxWidth: 740)
 
                 Spacer()
             }
@@ -171,6 +171,8 @@ struct LeaderboardView: View {
                 NationalLeaderboardContainerView()
             case .roadmap:
                 RankRoadmapContainerView()
+            case .clubLog:
+                ClubLogLeagueView()
             }
         }
         .onAppear {
@@ -1405,35 +1407,95 @@ struct RankMovementTrendChart: View {
 
 // MARK: - Player Profile Banner Card
 struct PlayerCard: View {
+    @EnvironmentObject var appState: AppState
     let title: String
     let callsign: String
     let countryIso: String?
     let isOwner: Bool
-    
+
+    private var targetRank: QRZRankResponse? {
+        if isOwner {
+            return appState.ownerRankData
+        }
+        return appState.qrzComparisonRankData.first { $0.callsign?.uppercased() == callsign.uppercased() }
+            ?? appState.qrzRankData
+    }
+
     var body: some View {
         HStack(spacing: 12) {
             if isOwner {
                 Text(countryToFlag(countryIso ?? ""))
                     .font(.system(size: 40))
             }
-            
+
             VStack(alignment: isOwner ? .leading : .trailing, spacing: 2) {
                 Text(title)
                     .font(.system(size: 10, weight: .bold))
                     .foregroundColor(isOwner ? .blue : .purple)
-                
+
                 Text(callsign)
                     .font(.system(size: 28, weight: .heavy, design: .monospaced))
                     .foregroundColor(.primary)
             }
-            
+
+            Spacer()
+
+            // Live Standings Badges (synchronized with qrz-rank.asis.sh)
+            VStack(alignment: isOwner ? .trailing : .leading, spacing: 5) {
+                let rankInt = parseRankInt(targetRank?.rank_qso)
+                if let rank = rankInt, rank > 0 {
+                    let total = appState.globalTotalStations > 0 ? appState.globalTotalStations : 438_638
+                    let pct = max(0.01, 100.0 - (Double(rank) / Double(total) * 100.0))
+                    HStack(spacing: 4) {
+                        Image(systemName: "trophy.fill")
+                            .foregroundColor(.yellow)
+                            .font(.system(size: 10))
+                        Text("TOP \(String(format: "%.2f", pct))% WORLDWIDE (#\(rank.formatted()) OF \(total.formatted()))")
+                            .font(.system(size: 11, weight: .heavy, design: .monospaced))
+                            .foregroundColor(.yellow)
+                    }
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 4)
+                    .background(Color.yellow.opacity(0.14), in: Capsule())
+                    .overlay(Capsule().stroke(Color.yellow.opacity(0.35), lineWidth: 1))
+                }
+
+                if isOwner, let ns = appState.stationAnalysis?.nationalStanding, let natRank = ns.countryRankQso {
+                    HStack(spacing: 6) {
+                        if let totalNat = ns.totalCountryStations {
+                            Text("NAT: #\(natRank) OF \(totalNat)")
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .foregroundColor(.cyan)
+                        } else {
+                            Text("NAT: #\(natRank)")
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .foregroundColor(.cyan)
+                        }
+                        if let dxccNat = ns.countryRankDxcc {
+                            Text("• DXCC: #\(dxccNat)")
+                                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                                .foregroundColor(.secondary)
+                        }
+                        if let bandNat = ns.countryRankBand {
+                            Text("• BAND: #\(bandNat)")
+                                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 3)
+                    .background(Color.cyan.opacity(0.12), in: Capsule())
+                    .overlay(Capsule().stroke(Color.cyan.opacity(0.25), lineWidth: 1))
+                }
+            }
+
             if !isOwner {
                 Text(countryToFlag(countryIso ?? ""))
                     .font(.system(size: 40))
             }
         }
         .padding(16)
-        .frame(maxWidth: .infinity, alignment: isOwner ? .leading : .trailing)
+        .frame(maxWidth: .infinity)
         .background(isOwner ? Color.blue.opacity(0.1) : Color.purple.opacity(0.1))
         .cornerRadius(16)
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(isOwner ? Color.blue.opacity(0.3) : Color.purple.opacity(0.3), lineWidth: 1.5))
@@ -1585,6 +1647,7 @@ struct ComparisonRow: View {
 // MARK: - 360° Radial Performance & Rank Radar Dashboard
 
 struct Leaderboard360RadarView: View {
+    @EnvironmentObject var appState: AppState
     let owner: QRZRankResponse?
     let rivals: [QRZRankResponse]
     let stationRecords: [QSORecordModel]
@@ -1617,12 +1680,14 @@ struct Leaderboard360RadarView: View {
     // 340 currently active DXCC entities
     private let totalActiveDXCCEntities: Double = 340.0
 
-    // 360° Percentile & Coverage Calculations (0.02 to 1.0)
+    // 360° Percentile & Coverage Calculations (0.01 to 1.0)
     private func qsoPercentile(for rankStr: String?) -> Double {
         guard let rank = parseRankInt(rankStr), rank > 0 else { return 0.25 }
-        let normalized = max(0.05, min(1.0, 1.0 - (Double(rank) / 75_000.0)))
+        let total = Double(appState.globalTotalStations > 0 ? appState.globalTotalStations : 438_638)
+        let normalized = max(0.01, min(1.0, 1.0 - (Double(rank) / total)))
         return normalized
     }
+
 
     private func bandCoverage(for scoreBandStr: String?, isOwner: Bool) -> Double {
         let count: Double
@@ -1857,19 +1922,29 @@ struct Leaderboard360RadarView: View {
                 // ─── 2. Multi-Metric Performance Cards ───
                 VStack(spacing: 10) {
                     HStack(spacing: 12) {
+                        let totalStns = appState.globalTotalStations > 0 ? appState.globalTotalStations : 438_638
+                        let qsoRankInt = parseRankInt(target?.rank_qso)
+                        let formattedQsoRank = qsoRankInt.map { "#\($0.formatted())" } ?? (target?.rank_qso ?? "N/A")
+                        let topPct = qsoRankInt.map { max(0.01, (Double($0) / Double(totalStns)) * 100.0) }
+                        let qsoSubtitle = topPct.map { "Top \(String(format: "%.2f", $0))% Worldwide (\(totalStns.formatted()) stns)" }
+                            ?? "\(Int(round(qsoVal * 100)))th Percentile Tier"
+
                         radarMetricTile(
                             title: "QSO WORLD STANDING",
-                            value: target?.rank_qso ?? "N/A",
-                            subtitle: "\(Int(qsoVal * 100))th Percentile Tier",
+                            value: formattedQsoRank,
+                            subtitle: qsoSubtitle,
                             icon: "antenna.radiowaves.left.and.right",
                             color: .blue,
                             progress: qsoVal
                         )
 
+                        let bandRankInt = parseRankInt(target?.rank_band)
+                        let formattedBandRank = bandRankInt.map { "#\($0.formatted())" } ?? (target?.rank_band ?? "N/A")
+                        let bandScoreInt = parseRankInt(target?.score_band) ?? 0
                         radarMetricTile(
                             title: "BAND COVERAGE",
-                            value: target?.rank_band ?? "N/A",
-                            subtitle: "\(target?.score_band ?? "0") / 3,740 Band-Countries (11 Bands)",
+                            value: formattedBandRank,
+                            subtitle: "\(bandScoreInt.formatted()) / 3,740 Band-Countries (11 Bands)",
                             icon: "waveform.path.ecg",
                             color: .orange,
                             progress: bandVal
@@ -1877,10 +1952,13 @@ struct Leaderboard360RadarView: View {
                     }
 
                     HStack(spacing: 12) {
+                        let dxccRankInt = parseRankInt(target?.rank_countries)
+                        let formattedDxccRank = dxccRankInt.map { "#\($0.formatted())" } ?? (target?.rank_countries ?? "N/A")
+                        let dxccScoreInt = parseRankInt(target?.score_countries) ?? 0
                         radarMetricTile(
                             title: "DXCC ENTITY REACH",
-                            value: target?.rank_countries ?? "N/A",
-                            subtitle: "\(target?.score_countries ?? "0") / 340 Active DXCC",
+                            value: formattedDxccRank,
+                            subtitle: "\(dxccScoreInt.formatted()) / 340 Active DXCC",
                             icon: "globe.americas.fill",
                             color: .green,
                             progress: dxccVal
@@ -1919,7 +1997,7 @@ struct Leaderboard360RadarView: View {
                     .foregroundColor(.secondary)
                     .tracking(0.5)
                 Spacer()
-                Text("\(Int(round(progress * 100)))%")
+                Text(progress >= 0.9 ? String(format: "%.1f%%", progress * 100) : "\(Int(round(progress * 100)))%")
                     .font(.system(size: 9, weight: .heavy, design: .monospaced))
                     .foregroundColor(color)
             }
@@ -1943,6 +2021,7 @@ struct Leaderboard360RadarView: View {
         .cornerRadius(7)
         .overlay(RoundedRectangle(cornerRadius: 7).stroke(color.opacity(0.2), lineWidth: 1))
     }
+
 
     private func radarDailyVelocityTile(
         isOwner: Bool,

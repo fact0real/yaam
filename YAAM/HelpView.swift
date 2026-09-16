@@ -6,7 +6,7 @@
 import SwiftUI
 
 private enum HelpTopic: String, CaseIterable, Identifiable {
-    case start, stations, logTable, quickLog, callIntelligence, roverMode, convertExport, globeGrids, greylineOverlay, bandmap, pileupSniper, cwWinKeyer, cwAcademy, competitors, tciSdr, dxCluster, clubLogSpots, on4kst, radioBridge, nteEmulator, contest, digitalContest, digitalRoster, contestCalendar, dxpeditions, magicBand, tacticalPilot, hamClockShack, weatherRadar, satellites, clubMembership, syncCenter, lotwTqsl, qslHub, qslLabels, todayQSL, confirmations, statistics, qrzIncoming, logAssistant, awards, portable, connectivity, importReview, dataSafety, credentials, workflows, faq
+    case start, stations, logTable, quickLog, callIntelligence, roverMode, convertExport, globeGrids, greylineOverlay, bandmap, pileupSniper, cwWinKeyer, cwAcademy, competitors, tciSdr, dxCluster, clubLogSpots, on4kst, radioBridge, nteEmulator, multiRigFT8, contest, digitalContest, digitalRoster, contestCalendar, dxpeditions, magicBand, tacticalPilot, hamClockShack, weatherRadar, satellites, clubMembership, syncCenter, lotwTqsl, qslHub, qslLabels, todayQSL, confirmations, statistics, qrzIncoming, logAssistant, awards, portable, connectivity, importReview, dataSafety, credentials, workflows, faq
     var id: String { rawValue }
 
     var title: String {
@@ -31,6 +31,7 @@ private enum HelpTopic: String, CaseIterable, Identifiable {
         case .on4kst: return "ON4KST Chat & Microwave"
         case .radioBridge: return "Radio, Icom & FT8"
         case .nteEmulator: return "Network Transceiver Emulator (NTE)"
+        case .multiRigFT8: return "Multi-Rig FT8 Cluster (SO2R/SO3R)"
         case .contest: return "Contest Workspace"
         case .digitalContest: return "Digital Contest Suite (FT8/FT4)"
         case .digitalRoster: return "Digital Call Roster & Voice Alerts"
@@ -84,6 +85,7 @@ private enum HelpTopic: String, CaseIterable, Identifiable {
         case .on4kst: return "bubble.left.and.bubble.right.fill"
         case .radioBridge: return "wave.3.right.circle"
         case .nteEmulator: return "server.rack"
+        case .multiRigFT8: return "square.split.3x1.fill"
         case .contest: return "flag.checkered"
         case .digitalContest: return "trophy.fill"
         case .digitalRoster: return "waveform.and.person.filled"
@@ -133,6 +135,8 @@ private enum HelpTopic: String, CaseIterable, Identifiable {
             return "\(title) club membership skcc cwops fists licw 30mdg epc a1 club roster member number auto detect exchange lookup search"
         case .nteEmulator:
             return "\(title) nte network transceiver emulator icom ic-705 ic-7300 ic-7610 ic-9700 hamlib rigctld ci-v udp 50001 50002 50003 tcp 4532 awgn fading rayleigh rician doppler synthetic rf ft8 ft4 cw beacon pileup dsp benchmark test loopback front panel vfo oled spectrum waterfall"
+        case .multiRigFT8:
+            return "\(title) multi-rig ft8 cluster so2r so3r multi-transceiver icom lan tx-500 x6100 rigctld interlock concurrent strict lockout alternating slots opportunity radar cross-band waterfall dispatch qso radio slot audio routing cmd option 8"
         case .qslLabels:
             return "\(title) qsl labels label studio printing avery 5160 5162 5163 a4 l7160 skip matrix peel off printer alignment calibration pdf export"
         case .lotwTqsl:
@@ -275,6 +279,7 @@ struct HelpView: View {
         case .on4kst: on4kstView
         case .radioBridge: radioBridge
         case .nteEmulator: nteEmulatorView
+        case .multiRigFT8: multiRigFT8View
         case .contest: contest
         case .digitalContest: digitalContestView
         case .digitalRoster: digitalRosterView
@@ -960,6 +965,124 @@ struct HelpView: View {
                 title: "Quick Access & Detached Window Mode",
                 text: "Launch the emulator at any time using Option-Command-E, select it in Operator Desk (Tab 24), or click the detach button to pop the emulator into its own independent floating macOS window scene.",
                 color: .blue
+            )
+        }
+    }
+
+    private var multiRigFT8View: some View {
+        Group {
+            helpHeader(
+                title: "Multi-Rig FT8 Cluster (SO2R / SO3R)",
+                subtitle: "Operate up to 4 independent transceivers concurrently on separate amateur bands with dedicated DSP decoders, isolated CoreAudio routing, cross-rig TX interlock protection, and unified SQLite log deduplication.",
+                icon: "square.split.3x1.fill",
+                color: .indigo
+            )
+
+            HelpMultiRigMockup()
+
+            HelpFlow(steps: [
+                HelpFlowStep(icon: "plus.square.dashed", title: "1. Configure Transceiver Slots", detail: "Assign radios (Icom LAN UDP, Lab599 TX-500, Xiegu X6100, Hamlib rigctld, or NTE Emulator) and dial frequencies (e.g. 20m, 40m, 10m)."),
+                HelpFlowStep(icon: "speaker.wave.2.fill", title: "2. Isolate Audio Hardware", detail: "Bind distinct CoreAudio input/output channels per slot (e.g. USB Audio CODEC, network LPCM, virtual cable) to guarantee zero audio bleed."),
+                HelpFlowStep(icon: "lock.shield.fill", title: "3. Choose TX Interlock Policy", detail: "Select Strict Lockout (mutex), Alternating Slots (even/odd 15s SO2R), or Concurrent TX to prevent front-end desensitization and RF burnout."),
+                HelpFlowStep(icon: "waveform.path.ecg", title: "4. Start All Decoders", detail: "Click 'Start All' to initiate simultaneous background DSP decoding and live 3 kHz waterfall spectrums across all slots."),
+                HelpFlowStep(icon: "bolt.horizontal.circle.fill", title: "5. Cross-Band DX Dispatch", detail: "Inspect the Cross-Band Opportunity Radar for unworked DXCCs or grids and click 'Answer on Rig X' to tune, arm, and reply instantly.")
+            ])
+
+            helpSection("Architecture & Signal Processing Isolation") {
+                HelpDefinition(
+                    icon: "cpu",
+                    title: "Autonomous DSP Engines (FT8EngineService)",
+                    text: "Each slot executes an independent DSP decoder on dedicated Grand Central Dispatch queues. A heavy pileup or decode cycle on 20m will never cause dropped samples or timing lag on 40m or 10m.",
+                    color: .blue
+                )
+                HelpDefinition(
+                    icon: "cable.connector.horizontal",
+                    title: "Strict Audio Device Binding (Zero Bleed)",
+                    text: "Every engine binds directly to a unique CoreAudio hardware UID. Transmit audio synthesized for Slot 1 never leaks into the receive stream of Slot 2 or Slot 3.",
+                    color: .purple
+                )
+                HelpDefinition(
+                    icon: "radio",
+                    title: "Universal CAT Driver Support",
+                    text: "Mix and match transceivers seamlessly: Icom direct LAN UDP (IC-705, IC-7300MK2, IC-7610), USB-C serial (Lab599 TX-500, Xiegu X6100, Icom USB), Hamlib rigctld (TCP 4532), and YAAM's internal NTE Emulator.",
+                    color: .teal
+                )
+            }
+
+            helpSection("Cross-Rig TX Interlock Coordinator") {
+                HelpDefinition(
+                    icon: "lock.shield.fill",
+                    title: "Strict Lockout (Mutual Exclusion)",
+                    text: "A hardware-level mutex guarantees that only one transceiver may key PTT at any instant. If Rig 1 is transmitting, Rig 2 is held in standby until Rig 1 releases PTT.",
+                    color: .red
+                )
+                HelpDefinition(
+                    icon: "clock.arrow.2.circlepath",
+                    title: "Alternating Slots (SO2R Gold Standard)",
+                    text: "Synchronized with the UTC 15-second FT8 epoch: Rig 1 transmits on even slots (:00, :30) while Rig 2 listens; Rig 2 transmits on odd slots (:15, :45) while Rig 1 listens. Slot 3 acts as a continuous listener or runner.",
+                    color: .orange
+                )
+                HelpDefinition(
+                    icon: "antenna.radiowaves.left.and.right",
+                    title: "Concurrent TX Mode",
+                    text: "Permits simultaneous transmission across all armed radios. Recommended only for multi-operator stations with physically isolated antenna towers and high-rejection bandpass filters (BPFs).",
+                    color: .green
+                )
+                HelpDefinition(
+                    icon: "exclamationmark.octagon.fill",
+                    title: "Emergency Master Disarm (Disarm All TX)",
+                    text: "Instantly releases PTT and disarms transmit state across all transceivers simultaneously with one click.",
+                    color: .red
+                )
+            }
+
+            helpSection("Ergonomic Console Layouts & Waterfalls") {
+                HelpDefinition(
+                    icon: "rectangle.split.3x1",
+                    title: "3-Column Parallel",
+                    text: "Displays 3 transceivers side-by-side with full-height waterfalls, live S-meters, power/SWR telemetry, and decode lists. Optimized for 16:9 and ultrawide displays.",
+                    color: .blue
+                )
+                HelpDefinition(
+                    icon: "rectangle.split.1x2",
+                    title: "Hero + 2 Sub-Rigs",
+                    text: "High-resolution main band waterfall on top; two secondary bands side-by-side below for fast secondary-station tracking.",
+                    color: .indigo
+                )
+                HelpDefinition(
+                    icon: "rectangle.split.2x1",
+                    title: "Dual Split & Quad Matrix",
+                    text: "Provides 50/50 dual-rig layout for classic SO2R, or a 2x2 grid for monitoring 4 bands simultaneously.",
+                    color: .cyan
+                )
+            }
+
+            helpSection("Cross-Band DX Opportunity Radar & Unified Logging") {
+                HelpDefinition(
+                    icon: "radar",
+                    title: "Real-Time Opportunity Aggregator",
+                    text: "Collects incoming CQ frames from all slots in real time, cross-referencing your central logbook to identify and badge NEW DXCC, NEW BAND, and NEW GRID entities.",
+                    color: .pink
+                )
+                HelpDefinition(
+                    icon: "arrowshape.turn.up.right.fill",
+                    title: "1-Click Cross-Band Dispatch",
+                    text: "Click 'Answer on Rig X' to tune the corresponding radio to the target audio frequency, generate the response macro, and queue transmission for the next UTC slot.",
+                    color: .green
+                )
+                HelpDefinition(
+                    icon: "doc.text.fill",
+                    title: "Unified SQLite Logbook with RADIO Tags",
+                    text: "Every completed QSO is automatically committed to YAAM's central database with ADIF tags for RADIO (e.g. 'Rig 1 (20m FT8)') and exact frequency. Worked status immediately propagates across all active slots.",
+                    color: .mint
+                )
+            }
+
+            helpCallout(
+                icon: "macwindow.on.rectangle",
+                title: "Multi-Monitor Floating Window (Cmd + Option + 8)",
+                text: "Press Command-Option-8 or select Window > Multi-Rig FT8 Cluster (SO3R)... to launch the cluster console in an independent floating window scene, keeping your primary monitor open for logbook analysis, maps, and awards.",
+                color: .indigo
             )
         }
     }
@@ -4452,3 +4575,125 @@ struct HelpNTEMockup: View {
         .overlay(RoundedRectangle(cornerRadius: 6).stroke(color.opacity(0.2), lineWidth: 1))
     }
 }
+
+// MARK: - Multi-Rig FT8 Cluster Mockup
+
+struct HelpMultiRigMockup: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            mockupTopBar
+            Divider()
+            mockupSlotsRow
+            Divider()
+            mockupOpportunityRadar
+        }
+        .padding(12)
+        .background(Color(NSColor.controlBackgroundColor).opacity(0.7), in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.indigo.opacity(0.3), lineWidth: 1))
+        .padding(.vertical, 6)
+    }
+
+    private var mockupTopBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "square.split.3x1.fill")
+                .font(.headline)
+                .foregroundStyle(.indigo)
+            Text("Multi-Rig FT8 Cluster Console (SO3R)")
+                .font(.subheadline.weight(.bold))
+            Spacer()
+            HStack(spacing: 4) {
+                Circle().fill(Color.orange).frame(width: 7, height: 7)
+                Text("INTERLOCK: STRICT LOCKOUT")
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.orange)
+            }
+            .padding(.horizontal, 6).padding(.vertical, 2)
+            .background(Color.orange.opacity(0.15), in: Capsule())
+
+            HStack(spacing: 4) {
+                Image(systemName: "clock.fill").font(.caption2)
+                Text("12:04:15 UTC · :15 SLOT")
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+            }
+            .padding(.horizontal, 8).padding(.vertical, 3)
+            .background(Color.blue.opacity(0.15), in: RoundedRectangle(cornerRadius: 5))
+            .foregroundStyle(.blue)
+        }
+    }
+
+    private var mockupSlotsRow: some View {
+        HStack(spacing: 8) {
+            slotCard(name: "Rig 1", band: "20m (14.074)", driver: "Icom LAN", status: "RX DECODE", statusColor: .green, caller: "JA1ABC -08", country: "Japan")
+            slotCard(name: "Rig 2", band: "40m (7.074)", driver: "Lab599 TX-500", status: "TX ARMED", statusColor: .orange, caller: "DL1XYZ -12", country: "Germany")
+            slotCard(name: "Rig 3", band: "10m (28.074)", driver: "NTE Emulator", status: "MONITORING", statusColor: .cyan, caller: "W6XYZ DM13", country: "USA")
+        }
+    }
+
+    private func slotCard(name: String, band: String, driver: String, status: String, statusColor: Color, caller: String, country: String) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack {
+                Text(name).font(.caption.weight(.bold))
+                Spacer()
+                Text(band).font(.system(size: 9, weight: .bold, design: .monospaced)).foregroundStyle(.secondary)
+            }
+            HStack {
+                Text(driver).font(.system(size: 8)).foregroundStyle(.secondary)
+                Spacer()
+                Text(status)
+                    .font(.system(size: 8, weight: .bold, design: .monospaced))
+                    .foregroundStyle(statusColor)
+            }
+            // Mini waterfall mockup
+            RoundedRectangle(cornerRadius: 4)
+                .fill(
+                    LinearGradient(
+                        colors: [.black, .blue.opacity(0.6), .purple.opacity(0.4), .orange.opacity(0.3), .black],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .frame(height: 38)
+                .overlay(
+                    HStack {
+                        Rectangle().fill(Color.red.opacity(0.8)).frame(width: 3)
+                        Spacer()
+                    }
+                    .padding(.leading, 18)
+                )
+            HStack {
+                Text(caller).font(.system(size: 9, weight: .bold, design: .monospaced))
+                Spacer()
+                Text(country).font(.system(size: 8)).foregroundStyle(.secondary)
+            }
+        }
+        .padding(8)
+        .background(Color.black.opacity(0.3), in: RoundedRectangle(cornerRadius: 6))
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.white.opacity(0.1), lineWidth: 1))
+    }
+
+    private var mockupOpportunityRadar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "radar")
+                .foregroundStyle(.pink)
+                .font(.caption)
+            Text("Cross-Band DX Radar:")
+                .font(.caption.weight(.bold))
+            Text("JA1ABC (20m) · Tokyo, Japan")
+                .font(.system(size: 10, design: .monospaced))
+            Text("NEW DXCC")
+                .font(.system(size: 8, weight: .bold))
+                .padding(.horizontal, 4).padding(.vertical, 1)
+                .background(Color.pink.opacity(0.2), in: Capsule())
+                .foregroundStyle(.pink)
+            Spacer()
+            Text("Answer on Rig 1")
+                .font(.system(size: 9, weight: .bold))
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(Color.green.opacity(0.25), in: RoundedRectangle(cornerRadius: 4))
+                .foregroundStyle(.green)
+        }
+        .padding(.horizontal, 8).padding(.vertical, 4)
+        .background(Color.pink.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
+    }
+}
+

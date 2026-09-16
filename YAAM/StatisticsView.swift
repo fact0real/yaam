@@ -537,17 +537,11 @@ struct StatisticsView: View {
                 opportunityByRecordID: Dictionary(
                     uniqueKeysWithValues: currentSnapshot.followUpCandidates.map { ($0.record.id, $0.opportunity) }
                 ),
-                emailLookupRecordID: emailLookupRecordID,
                 onShowInLog: showRecordInLog,
-                onEmail: { record in
-                    prepareEmail(for: record, qslDelivery: selection.state == .confirmed)
-                },
-                onFindEmail: { record in
-                    lookupEmail(for: record, qslDelivery: selection.state == .confirmed)
-                },
                 onPreviewQSL: previewQSL,
                 onOpenQRZ: openQRZ
             )
+            .environmentObject(appState)
         }
         .onAppear {
             appState.refreshOwnerQRZRankIfNeeded()
@@ -766,7 +760,6 @@ struct StatisticsView: View {
             return
         }
 
-        appState.selectedTab = 0
         if qslDelivery {
             appState.openQSLCardEmailComposer(for: record)
         } else {
@@ -778,9 +771,6 @@ struct StatisticsView: View {
             appState.selectedEmailIncomingRequest = nil
             appState.showEmailComposer = true
         }
-        selectedCountryBandDetails = nil
-        dismissWindow(id: YAAMWindowID.statistics)
-        NSApp.activate(ignoringOtherApps: true)
     }
 
     private func lookupEmail(for record: QSORecordModel, qslDelivery: Bool) {
@@ -790,21 +780,19 @@ struct StatisticsView: View {
         Task { @MainActor in
             emailLookupRecordID = record.id
             defer { emailLookupRecordID = nil }
-            guard let email = await appState.fetchAndStoreQRZEmail(for: callsign), !email.isEmpty else { return }
+            let foundEmail = await appState.fetchAndStoreQRZEmail(for: callsign) ?? ""
             var enrichedRecord = record
-            enrichedRecord.fields["EMAIL"] = email
-            refreshSnapshot()
+            if !foundEmail.isEmpty {
+                enrichedRecord.fields["EMAIL"] = foundEmail
+                refreshSnapshot()
+            }
             prepareEmail(for: enrichedRecord, qslDelivery: qslDelivery)
         }
     }
 
     private func previewQSL(for record: QSORecordModel) {
-        appState.selectedTab = 0
         appState.selectedQSLCardQSO = record
         appState.showQSLCardComposer = true
-        selectedCountryBandDetails = nil
-        dismissWindow(id: YAAMWindowID.statistics)
-        NSApp.activate(ignoringOtherApps: true)
     }
 
     private func openQRZ(for record: QSORecordModel) {
@@ -866,19 +854,34 @@ guard !callsign.isEmpty, let url = URL(string: urlString) else { return }
                 ScrollView {
                     LazyVStack(spacing: 2) {
                         ForEach(visibleCountryBandCoverage) { coverage in
+                            let hasPending = coverage.workedUnconfirmedBandCount > 0
+                            let isSelected = selectedCountryBandCoverage?.country == coverage.country
+
                             Button {
                                 selectedCoverageCountry = coverage.country
                             } label: {
-                                HStack(spacing: 7) {
+                                HStack(spacing: 6) {
+                                    if hasPending {
+                                        RoundedRectangle(cornerRadius: 1.5)
+                                            .fill(Color.orange)
+                                            .frame(width: 3, height: 26)
+                                    }
+
                                     Text(countryToFlag(coverage.country))
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(coverage.country)
-                                            .font(.caption.weight(.semibold))
+                                            .font(.caption.weight(hasPending ? .bold : .semibold))
+                                            .foregroundStyle(hasPending ? Color.orange : Color.primary)
                                             .lineLimit(1)
                                         if coverage.isWorked {
-                                            Text("\(coverage.confirmedBandCount) confirmed · \(coverage.workedUnconfirmedBandCount) pending")
-                                                .font(.caption2.monospacedDigit())
-                                                .foregroundStyle(.secondary)
+                                            HStack(spacing: 3) {
+                                                Text("\(coverage.confirmedBandCount) confirmed ·")
+                                                    .foregroundStyle(.secondary)
+                                                Text("\(coverage.workedUnconfirmedBandCount) pending")
+                                                    .foregroundStyle(hasPending ? Color.orange : .secondary)
+                                                    .fontWeight(hasPending ? .semibold : .regular)
+                                            }
+                                            .font(.caption2.monospacedDigit())
                                         } else {
                                             Text("Needed DXCC · \(coverage.neededBandCount) bands open")
                                                 .font(.caption2.monospacedDigit())
@@ -886,7 +889,22 @@ guard !callsign.isEmpty, let url = URL(string: urlString) else { return }
                                         }
                                     }
                                     Spacer(minLength: 0)
-                                    if selectedCountryBandCoverage?.country == coverage.country {
+
+                                    if hasPending {
+                                        HStack(spacing: 2) {
+                                            Image(systemName: "clock.fill")
+                                                .font(.system(size: 8))
+                                            Text("\(coverage.workedUnconfirmedBandCount)")
+                                                .font(.system(size: 9.5, weight: .bold, design: .monospaced))
+                                        }
+                                        .foregroundStyle(Color.orange)
+                                        .padding(.horizontal, 5)
+                                        .padding(.vertical, 2)
+                                        .background(Color.orange.opacity(0.14))
+                                        .clipShape(Capsule())
+                                    }
+
+                                    if isSelected {
                                         Image(systemName: "chevron.right")
                                             .font(.caption.bold())
                                             .foregroundStyle(Color.accentColor)
@@ -895,9 +913,9 @@ guard !callsign.isEmpty, let url = URL(string: urlString) else { return }
                                 .padding(.horizontal, 8)
                                 .frame(height: 43)
                                 .background(
-                                    selectedCountryBandCoverage?.country == coverage.country
+                                    isSelected
                                         ? Color.accentColor.opacity(0.12)
-                                        : Color.clear
+                                        : (hasPending ? Color.orange.opacity(0.08) : Color.clear)
                                 )
                                 .contentShape(Rectangle())
                             }
@@ -1259,15 +1277,16 @@ private struct StatisticsCountryBandDetailSelection: Identifiable {
 
 private struct StatisticsCountryBandDetailSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var appState: AppState
 
     let selection: StatisticsCountryBandDetailSelection
     let opportunityByRecordID: [UUID: QSOConfirmationOpportunity]
-    let emailLookupRecordID: UUID?
     let onShowInLog: (QSORecordModel) -> Void
-    let onEmail: (QSORecordModel) -> Void
-    let onFindEmail: (QSORecordModel) -> Void
     let onPreviewQSL: (QSORecordModel) -> Void
     let onOpenQRZ: (QSORecordModel) -> Void
+
+    @State private var emailLookupRecordID: UUID?
+    @State private var isShowingEmailComposer = false
 
     private var isConfirmed: Bool {
         selection.state == .confirmed
@@ -1318,8 +1337,8 @@ private struct StatisticsCountryBandDetailSheet: View {
                                 kind: isConfirmed ? .confirmedQSL : .confirmationFollowUp,
                                 isLookingUpEmail: emailLookupRecordID == record.id,
                                 onShowInLog: { onShowInLog(record) },
-                                onEmail: { onEmail(record) },
-                                onFindEmail: { onFindEmail(record) },
+                                onEmail: { handleEmail(for: record) },
+                                onFindEmail: { handleFindEmail(for: record) },
                                 onPreviewQSL: { onPreviewQSL(record) },
                                 onOpenQRZ: { onOpenQRZ(record) }
                             )
@@ -1347,6 +1366,47 @@ private struct StatisticsCountryBandDetailSheet: View {
         }
         .padding(16)
         .frame(minWidth: 720, idealWidth: 840, minHeight: 380, idealHeight: 520)
+        .sheet(isPresented: $isShowingEmailComposer) {
+            EmailComposerView()
+                .environmentObject(appState)
+        }
+    }
+
+    private func handleEmail(for record: QSORecordModel) {
+        let email = record["EMAIL"].trimmingCharacters(in: .whitespacesAndNewlines)
+        if email.isEmpty {
+            handleFindEmail(for: record)
+            return
+        }
+        setupEmailContext(for: record, email: email)
+        isShowingEmailComposer = true
+    }
+
+    private func handleFindEmail(for record: QSORecordModel) {
+        let callsign = record["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard !callsign.isEmpty, emailLookupRecordID == nil else { return }
+
+        Task { @MainActor in
+            emailLookupRecordID = record.id
+            defer { emailLookupRecordID = nil }
+            let foundEmail = await appState.fetchAndStoreQRZEmail(for: callsign) ?? ""
+            var enrichedRecord = record
+            if !foundEmail.isEmpty {
+                enrichedRecord.fields["EMAIL"] = foundEmail
+            }
+            setupEmailContext(for: enrichedRecord, email: foundEmail)
+            isShowingEmailComposer = true
+        }
+    }
+
+    private func setupEmailContext(for record: QSORecordModel, email: String) {
+        let callsign = record["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        appState.selectedEmailCallsign = callsign
+        appState.selectedEmailAddress = email
+        appState.selectedEmailQSO = record
+        appState.selectedEmailTemplate = isConfirmed ? "QSL Card Delivery" : "LoTW/QRZ Confirmation"
+        appState.selectedEmailUnconfirmedQSOs = isConfirmed ? [] : [record]
+        appState.selectedEmailIncomingRequest = nil
     }
 }
 
@@ -1463,6 +1523,10 @@ private struct StatisticsQSOActionRow: View {
                     .lineLimit(1)
             }
             .frame(minWidth: 260, maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                onShowInLog()
+            }
 
             HStack(spacing: 5) {
                 if opportunity?.addsCountryBandCredit == true {

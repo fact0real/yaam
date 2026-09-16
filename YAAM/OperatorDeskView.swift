@@ -80,6 +80,8 @@ struct OperatorDeskView: View {
             return AnyView(DigitalMasterStationView())
         case 24:
             return AnyView(NetworkTransceiverEmulatorView(emulator: appState.transceiverEmulator))
+        case 25:
+            return AnyView(MultiRigFT8View(hub: appState.multiRigFT8Hub))
         default:
             return AnyView(QuickLogPanel())
         }
@@ -101,6 +103,7 @@ struct OperatorDeskView: View {
             DeskTabItem(tag: 13, title: "Bandmap", icon: "waveform.path.ecg.rectangle"),
             DeskTabItem(tag: 23, title: "Digital Suite", icon: "teletype"),
             DeskTabItem(tag: 24, title: "Transceiver Emulator", icon: "server.rack"),
+            DeskTabItem(tag: 25, title: "Multi-Rig FT8", icon: "square.split.3x1.fill"),
             DeskTabItem(tag: 14, title: "CW Keyer", icon: "tuningfork"),
             DeskTabItem(tag: 18, title: "WinKeyer", icon: "cable.connector.horizontal"),
             DeskTabItem(tag: 17, title: "ON4KST Chat", icon: "bubble.left.and.bubble.right.fill"),
@@ -235,6 +238,9 @@ struct OperatorDeskView: View {
                 Button { selectTab(21, proxy: proxy) } label: { Label("DX News", systemImage: "newspaper.fill") }
                 Button { selectTab(12, proxy: proxy) } label: { Label("Globe & Grids", systemImage: "globe.americas.fill") }
                 Button { selectTab(13, proxy: proxy) } label: { Label("Bandmap", systemImage: "waveform.path.ecg.rectangle") }
+                Button { selectTab(23, proxy: proxy) } label: { Label("Digital Suite", systemImage: "teletype") }
+                Button { selectTab(24, proxy: proxy) } label: { Label("Transceiver Emulator", systemImage: "server.rack") }
+                Button { selectTab(25, proxy: proxy) } label: { Label("Multi-Rig FT8", systemImage: "square.split.3x1.fill") }
                 Button { selectTab(14, proxy: proxy) } label: { Label("CW Keyer", systemImage: "tuningfork") }
                 Button { selectTab(18, proxy: proxy) } label: { Label("WinKeyer", systemImage: "cable.connector.horizontal") }
                 Button { selectTab(17, proxy: proxy) } label: { Label("ON4KST Chat", systemImage: "bubble.left.and.bubble.right.fill") }
@@ -343,6 +349,8 @@ struct OperatorDeskView: View {
             (appState.digitalModemEngine.isListening, appState.digitalModemEngine.isListening ? "Digital Suite Active" : "Digital Suite Standby")
         case 24:
             (appState.transceiverEmulator.isServerRunning, appState.transceiverEmulator.isServerRunning ? "Transceiver Emulator Online" : "Transceiver Emulator Standby")
+        case 25:
+            (appState.multiRigFT8Hub.slots.contains { $0.isMonitoring }, "Multi-Rig FT8 Cluster (\(appState.multiRigFT8Hub.slots.count) Rigs)")
         default:
             (appState.dxClusterClient.state.isConnected, appState.dxClusterClient.state.title)
         }

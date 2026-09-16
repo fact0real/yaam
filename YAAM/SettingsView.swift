@@ -12,7 +12,7 @@ import UniformTypeIdentifiers
 // MARK: - macOS Preferences & Credentials Settings Sheet
 struct SettingsView: View {
     private enum Tabs: Hashable {
-        case stations, dataSafety, antennaWeatherSafety, bands, qrz, qrzRank, clubLog, lotw, eqsl, wavelog, clubs, tci, winkeyer, on4kst, hrdlog, hamqth, smtp, externalADIF, sdrControl, assistant, audioAlerts
+        case stations, dataSafety, antennaWeatherSafety, bands, tx500, xiegu6100, qrz, qrzRank, clubLog, lotw, eqsl, wavelog, clubs, tci, winkeyer, on4kst, hrdlog, hamqth, smtp, externalADIF, sdrControl, assistant, audioAlerts
     }
 
     @EnvironmentObject var appState: AppState
@@ -755,6 +755,20 @@ struct SettingsView: View {
                 Label("TCI", systemImage: "antenna.radiowaves.left.and.right")
             }
             .tag(Tabs.tci)
+
+            // MARK: - Lab599 Discovery TX-500 Hardware Settings Tab
+            Lab599TX500SetupView()
+                .tabItem {
+                    Label("TX-500", systemImage: "bolt.horizontal.fill")
+                }
+                .tag(Tabs.tx500)
+
+            // MARK: - Xiegu X6100 Hardware Settings Tab
+            Xiegu6100SetupView()
+                .tabItem {
+                    Label("Xiegu X6100", systemImage: "radio.fill")
+                }
+                .tag(Tabs.xiegu6100)
 
             // MARK: - WinKeyer Hardware Settings Tab
             Form {

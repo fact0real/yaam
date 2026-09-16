@@ -55,6 +55,13 @@
 16. [International Club Memberships](#16-international-club-memberships)
 17. [Club Log Live Spots & Band Intelligence Engine](#17-club-log-live-spots--band-intelligence-engine)
 18. [Network-Attached Transceiver Emulator (NTE)](#18-network-attached-transceiver-emulator-nte)
+19. [Super Check Partial (SCP) & Contest Exchange Predictor](#19-super-check-partial-scp--contest-exchange-predictor)
+20. [Contest Bandmap HUD & Rapid Multiplier Navigation](#20-contest-bandmap-hud--rapid-multiplier-navigation)
+21. [Contest Rate Speedometer & Multiplier 2D Matrix Dashboard](#21-contest-rate-speedometer--multiplier-2d-matrix-dashboard)
+22. [Hardware Paddle Break-In & Instant Macro Interrupt Handler](#22-hardware-paddle-break-in--instant-macro-interrupt-handler)
+23. [Lab599 Discovery TX-500: USB-C Integration (Digital & Morse Modes)](#23-lab599-discovery-tx-500-usb-c-integration-digital--morse-modes)
+24. [Xiegu X6100: USB-C Integration (Digital & Morse Modes)](#24-xiegu-x6100-usb-c-integration-digital--morse-modes)
+25. [Multi-Rig FT8 Cluster: Multi-Transceiver Operation (SO2R / SO3R)](#25-multi-rig-ft8-cluster-multi-transceiver-operation-so2r--so3r)
 
 ---
 
@@ -479,5 +486,174 @@ Full hardware-level safety and interrupt handling for CW contesters:
 
 ---
 
+## 23. Lab599 Discovery TX-500: USB-C Integration (Digital & Morse Modes)
+
+YAAM features native, driver-level integration for the ultra-compact **Lab599 Discovery TX-500** HF/6m QRP transceiver over macOS USB-C ports.
+
+### 23.1 Dual-Channel USB-C Cable Topology
+The TX-500 requires two separate hardware channels connected to your Mac:
+* **Channel 1 — Serial CAT Control (GX12 4-Pin):**
+  Connect the transceiver's `CAT` connector via the Lab599 **AD-514** (or **AD-502**) cable. The integrated FTDI FT232R USB-to-UART bridge mounts on macOS as `/dev/cu.usbserial-*`.
+* **Channel 2 — Analog Baseband Audio (GX12 7-Pin):**
+  Connect the transceiver's `REM/DATA` port via the Lab599 **AD-508** (or **AD-509**) USB-C audio codec. macOS CoreAudio recognizes this device as `USB Audio Device` operating at 48.0 kHz 16-bit PCM.
+
+### 23.2 Transceiver Menu Configuration (Pre-Flight Checklist)
+Ensure your TX-500 has the following settings configured in its hardware menu:
+1. **`Menu 34 (CAT MODEL): TS2000`** — Sets Kenwood TS-2000 emulation mode.
+2. **`Menu 35 (CAT SPEED): 9600`** — Sets communication baud rate to 9600 bps (8 data bits, no parity, 2 stop bits — **8N2**).
+3. **`Menu 09 (CAT PTT-TO): 30`** — Sets hardware PTT safety timeout to 30 seconds.
+4. **Operating Mode:** Select **`DIG`** directly on the radio front panel.
+
+### 23.3 Firmware Bug #1 Mitigation: `preserveDIGMode`
+> [!IMPORTANT]
+> In TX-500 firmware (v1.30.00), transmitting while sending standard CAT mode change commands (`MD`) forces the transceiver from `DIG` mode into voice `USB` mode. In voice `USB`, the REM/DATA baseband input is electronically muted, causing the radio to key up with **0 Watts RF output**.
+>
+> YAAM includes an automatic safety lock: **Preserve DIG Mode** (`preserveDIGMode: true`). When operating in FT8, FT4, RTTY, or PSK31, YAAM deliberately omits CAT mode override commands upon transmission, guaranteeing the transceiver remains locked in hardware `DIG` mode with full RF power delivery.
+
+### 23.4 Digital Modes Operation (FT8, FT4, RTTY, PSK31)
+1. In the **FT8 / FT4 Station View** or **Digital Modem**, set the audio/radio path to **Lab599 TX-500**.
+2. Select your `/dev/cu.usbserial-*` port and the `USB Audio Device` input/output.
+3. Click **Connect**; the connection pill turns green and live frequency and S-meter telemetry synchronize.
+4. Transmit sequences automatically assert CAT PTT (`TX;` / `RX;`) protected by a strict 14.0-second safety watchdog.
+
+### 23.5 Morse / CW Keying & Audio Decoding
+1. In the **CW Keyer** or **CW Academy**, set transmission mode to **`Lab599 TX-500 (USB-C CAT & Pin)`**.
+2. **CAT Buffer Keying:** Characters typed into Quick-Transmit or contest macros are buffered into 24-character bursts via Kenwood `KY <text>;` commands with speed set via `KS<wpm>;`.
+3. **Hardware Pin Keying:** Optional DTR/RTS line keying directly pulses the serial port's hardware pins.
+4. **Audio Decoding:** Received CW baseband audio from the AD-508 adapter feeds the real-time Goertzel DSP decoder (`CWAudioDecoderEngine`) with auto-tracking tone filters.
+
+### 23.6 Diagnostics Workbench
+Access the dedicated diagnostics workbench via **Preferences -> Lab599 TX-500** or the Rig Control toolbar card:
+* **Interactive PTT Test:** 1-second pulse test to verify relay engagement without full RF burst.
+* **CW Test Burst:** Sends a brief test string (`TEST EP2AES`) to verify CAT buffer timing.
+* **Live S-Meter & Power Bar:** Displays real-time signal strength (`SM;`) and transmitter status (`IF;` / `PC;`).
+
+---
+
+## 24. Xiegu X6100: USB-C Integration (Digital & Morse Modes)
+
+YAAM features native, driver-level integration for the **Xiegu X6100** SDR QRP HF/50MHz transceiver over a single macOS USB-C cable without requiring third-party middleware (such as Hamlib or FLRig).
+
+### 24.1 Hardware Architecture: Single-Cable USB-C `DEV` Port vs `HOST` Port
+> [!IMPORTANT]
+> The Xiegu X6100 possesses two USB-C ports on its left panel: **`DEV`** and **`HOST`**.
+> * **Always connect your Mac to the `DEV` (Device) port.**
+> * The `HOST` port is reserved exclusively for peripheral devices (mouse, keyboard, external USB storage) and will not enumerate on macOS as a serial CAT or audio device.
+
+A single standard USB-C cable connected to the `DEV` port provides two concurrent hardware channels:
+1. **Serial CAT Communications (Dual-UART):**
+   * The X6100 internal USB controller enumerates two serial ports on macOS (typically `/dev/cu.usbserial-xxx` or `/dev/cu.usbmodem*` or `wchusbserial`).
+   * **Port B (the higher index):** Dedicated to CI-V CAT rig control and CW keying.
+   * YAAM's intelligent port scanner automatically discovers and selects Port B.
+2. **Integrated Bidirectional USB Audio CODEC:**
+   * CoreAudio enumerates the internal sound card as **`USB Audio CODEC`** or **`X6100 Audio`**.
+   * YAAM streams 48.0 kHz 16-bit PCM baseband audio with zero analog loss, hum, or cable clutter.
+
+### 24.2 Icom IC-705 CI-V Emulation Protocol & Serial UART Settings
+The Xiegu X6100 internal baseband Linux OS natively emulates the **Icom CI-V** communication protocol (matching the IC-705 subset).
+* **Default CI-V Address:** `0xA4` (matching Icom IC-705).
+* **Controller Address:** `0xE0` (standard master controller).
+* **Default Baud Rate:** `19200` bps, 8 Data Bits, No Parity, 1 Stop Bit (**8N1**). Rates up to `115200` bps are supported.
+* **CI-V Transceive:** When enabled, tuning the VFO knob on the radio instantly reflects on the YAAM spectrum and dial indicators in real time.
+
+### 24.3 Integrated USB Audio CODEC Configuration in macOS CoreAudio
+1. In YAAM **FT8 Station View** or **Settings -> Xiegu X6100**, the audio input and output devices are detected automatically.
+2. Audio streaming runs at 48.0 kHz with hardware sample rate conversion if needed.
+3. Ensure the microphone permission is granted in macOS `System Settings -> Privacy & Security -> Microphone`.
+
+### 24.4 Digital Modes Operation (FT8, FT4, RTTY, PSK31), Auto USB-D & PTT Watchdog
+1. **Radio Path Selection:** Set the radio path in FT8 Station View or Digital Modem to **`Xiegu X6100 (USB-C)`**.
+2. **Automatic USB-D Switching:** When selecting any FT8 or digital band, YAAM automatically sends CI-V mode commands (`06 01 01` & `1A 06 01 01`) to engage **USB-D** (digital data mode) and adjust IF filter bandwidth.
+3. **Fail-Safe PTT Watchdog:**
+   * Digital transmission commands issue CI-V PTT ON (`1C 00 01`).
+   * An autonomous hardware watchdog timer enforces a maximum 16.0-second transmission window. If transmission stalls or connection drops, PTT OFF (`1C 00 00`) is asserted automatically to protect the final RF amplifier stage.
+4. **QRP Power Setting:** Transmit power can be adjusted between 1W and 10W (external 13.8V supply) or 1W and 5W (internal battery) via standard CI-V commands (`14 0A`).
+
+### 24.5 Morse Code (CW) Keying via CI-V Command 17 Buffer & Hardware DTR/RTS Pin Keying
+YAAM offers two distinct Morse code transmission modes for the X6100:
+1. **CI-V Command 17 Text Buffer Keying (Recommended):**
+   * Pre-formatted ASCII text from the CW Keyer or contest macros is transmitted directly to the X6100 internal keyer buffer via CI-V frame: `FE FE A4 E0 17 <ASCII> FD`.
+   * The radio's internal firmware generates perfectly shaped dits and dahs with zero macOS timing jitter.
+   * **WPM Speed Sync:** Speed changes in YAAM automatically synchronize the radio keyer speed via CI-V command `14 0C <speed>`.
+   * **Instant Abort:** Pressing `Escape` or clicking `Stop` instantly sends the CI-V break sequence `17 FF` to silence the transmitter.
+2. **Hardware Serial Pin Keying (DTR / RTS):**
+   * For direct paddle emulation or external software keying, YAAM can toggle the physical DTR or RTS lines of the USB-C serial port.
+3. **Goertzel DSP Audio Decoding:**
+   * Received CW audio from the USB Audio CODEC is routed to YAAM's Goertzel tone tracking decoder for live text transcription.
+
+### 24.6 Diagnostics Workbench, S-Meter, SWR & ALC Real-Time Telemetry
+Open **Settings -> Xiegu X6100** or the **Rig Control Toolbar** card to access the diagnostics workbench:
+* **Interactive 1-Second PTT Pulse:** Confirms relay engagement without broadcasting sustained RF carrier.
+* **CW Burst Test:** Sends a test burst (`TEST EP2AES`) to verify CI-V command 17 buffer operation.
+* **Live Telemetry Bars:**
+  * **S-Meter:** Real-time signal strength from `S0` to `S9+60dB` via command `15 02`.
+  * **SWR Meter:** Reflected power monitoring via command `15 12`.
+  * **ALC Indicator:** Real-time modulation headroom via command `15 13`.
+
+---
+
+## 25. Multi-Rig FT8 Cluster: Multi-Transceiver Operation (SO2R / SO3R)
+
+The **Multi-Rig FT8 Cluster** is an advanced operational mode in YAAM designed for serious DXers and contest stations who want to operate **up to 4 independent transceivers simultaneously** across different amateur bands.
+
+```
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│                        YAAM Multi-Rig FT8 Cluster Console (SO3R)                       │
+├────────────────────────────────────────┬───────────────────────────────────────────────┤
+│ Slot 1: Icom LAN (IC-7610 / IC-705)    │ 20m (14.074 MHz) · Waterfall 1 · Audio Ch 1   │
+│ Slot 2: Lab599 Discovery TX-500 (USB)  │ 40m (7.074 MHz)  · Waterfall 2 · Audio Ch 2   │
+│ Slot 3: Transceiver Emulator / rigctld │ 10m (28.074 MHz) · Waterfall 3 · Audio Ch 3   │
+├────────────────────────────────────────┴───────────────────────────────────────────────┤
+│  Cross-Rig Hardware Interlock  ·  Cross-Band Opportunity Radar  ·  Unified SQLite Log  │
+└────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 25.1 Architecture & Concept of Multi-Rig Operation
+Managing multiple transceivers from a single computer is essential for:
+* **SO2R (Single Operator 2 Radios):** Calling CQ or listening on one band while transmitting on another.
+* **SO3R (Single Operator 3 Radios):** Tri-band coverage (e.g. 20m daytime DX, 40m night-time DX, and 10m sporadic-E monitoring).
+* **Multi-Transceiver DX Hunting:** Spotting and working unworked DXCC countries or Maidenhead grids concurrently without manually band-switching.
+
+### 25.2 Autonomous DSP Audio & CAT Pipeline Isolation
+Each transceiver is hosted inside an autonomous `MultiRigSlot` container:
+1. **Isolated DSP & Waterfall:** Each slot runs an independent `FT8EngineService` instance on dedicated Grand Central Dispatch queues with its own 3 kHz audio spectrogram waterfall.
+2. **Audio Hardware Binding:** Each slot binds directly to a distinct CoreAudio device (e.g., `USB Audio CODEC`, network LPCM stream, or virtual cable). Transmit audio generated for Slot 1 will never leak into the input stream of Slot 2 or Slot 3.
+3. **Driver Support:** Supports direct Icom LAN UDP (IC-705, IC-7300MK2, IC-7610, IC-9700), Lab599 TX-500 USB, Xiegu X6100 USB-C, Icom USB, Hamlib `rigctld`, and internal Network-Attached Transceiver Emulator.
+
+### 25.3 Cross-Rig TX Interlock Coordinator
+Keying multiple transmitters at once in a shared physical shack can cause severe receiver desensitization or damage to the sensitive receiver front-end. YAAM prevents this with its built-in hardware interlock coordinator:
+* **Concurrent TX:** Allows all armed transceivers to transmit simultaneously (for stations with separate towers and high-grade bandpass filters).
+* **Strict Lockout:** First-come, first-served mutual exclusion. Only one radio may assert PTT at any instant. Other radios wait until PTT is released.
+* **Alternating Slots (SO2R Standard):** Synchronized to the UTC 15-second FT8 epoch:
+  * Slot 1 transmits on even periods (`:00`, `:30`).
+  * Slot 2 transmits on odd periods (`:15`, `:45`).
+  * Slot 3 acts as a continuous receive monitor or standby runner.
+* **Emergency Disarm (`Disarm All TX`):** Instantly cancels all transmissions and de-asserts PTT across all radios with one click.
+
+### 25.4 Multi-Pane Console Layouts
+Switch between 5 ergonomic layouts depending on your display setup:
+1. **3-Column Parallel:** Side-by-side view with live waterfalls and decode logs for 3 transceivers.
+2. **Hero + 2 Sub-Rigs:** High-resolution main band waterfall on top; two secondary bands side-by-side below.
+3. **Dual Split:** 50/50 split for classic 2-radio SO2R operation.
+4. **Quad Matrix:** 2x2 grid for up to 4 transceivers.
+5. **Focused Single:** Full-screen focus on one slot with quick-switch tabs for the others.
+
+### 25.5 Cross-Band DX Opportunity Radar
+Located at the bottom of the console, the **Cross-Band DX Opportunity Radar** collates incoming CQ calls across all active slots:
+* Analyzes calls in real time against your local SQLite logbook.
+* Badges opportunities as **NEW DXCC**, **NEW BAND**, **NEW GRID**, or **CALLING ME**.
+* **1-Click Answer:** Clicking `Answer on Rig X` tunes the audio offset, formats the response message, and queues transmission on that transceiver for the next time slot.
+
+### 25.6 Unified Logbook Integration & Multi-Monitor Window (`Cmd + Option + 8`)
+* **Unified SQLite Log:** All completed QSOs are saved to the central logbook with the originating radio stored in the ADIF `RADIO` field (e.g. `Rig 1 (20m FT8)`).
+* **Instant Propagation of Worked Status:** A QSO logged on Slot 1 immediately updates the worked status on Slot 2 and Slot 3.
+* **Dedicated Secondary Window Scene:**
+  * Open via `Window -> Multi-Rig FT8 Cluster (SO3R)...` or shortcut `Cmd + Option + 8`.
+  * Move the cluster window to a second monitor while keeping your primary display open for log analysis, maps, or awards tracking.
+
+---
+
 > **Support & Feedback:**  
 > Press `Cmd + Shift + F` anywhere within YAAM to open the feedback panel to submit suggestions, bug reports, or feature requests directly to the development team.
+
+

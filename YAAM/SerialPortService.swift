@@ -26,14 +26,29 @@ public final class SerialPortService: @unchecked Sendable {
 
     // MARK: - Port Discovery
 
-    public static func availablePorts() -> [String] {
+    public static func availablePorts(includeBluetooth: Bool = true) -> [String] {
         guard let files = try? FileManager.default.contentsOfDirectory(atPath: "/dev") else {
             return []
         }
         return files
-            .filter { $0.hasPrefix("cu.") && !$0.contains("Bluetooth") && !$0.contains("wlan") }
+            .filter { name in
+                guard name.hasPrefix("cu.") else { return false }
+                if name.contains("wlan") || name.contains("debug-console") { return false }
+                if !includeBluetooth && name.contains("Bluetooth") { return false }
+                return true
+            }
             .map { "/dev/\($0)" }
             .sorted()
+    }
+
+    public static func isBluetoothPort(_ path: String) -> Bool {
+        let lower = path.lowercased()
+        return lower.contains("bluetooth") || lower.contains("bt") || lower.contains("rfcomm")
+    }
+
+    public static func isUSBPort(_ path: String) -> Bool {
+        let lower = path.lowercased()
+        return lower.contains("usbserial") || lower.contains("usbmodem") || lower.contains("wchusb") || lower.contains("slab")
     }
 
     public var isOpen: Bool {
@@ -45,6 +60,7 @@ public final class SerialPortService: @unchecked Sendable {
     public func openPort(
         path: String,
         baudRate: Int = 1200,
+        stopBits: Int = 1,
         onReceive: (@Sendable (Data) -> Void)? = nil
     ) -> Bool {
         closePort()
@@ -84,9 +100,14 @@ public final class SerialPortService: @unchecked Sendable {
         }
         cfsetspeed(&settings, speed)
 
-        // 8 Data Bits, 1 Stop Bit, No Parity
+        // 8 Data Bits, Configurable Stop Bits (1 or 2), No Parity
         settings.c_cflag |= tcflag_t(CS8 | CLOCAL | CREAD)
-        settings.c_cflag &= ~tcflag_t(PARENB | CSTOPB | CRTSCTS)
+        if stopBits == 2 {
+            settings.c_cflag |= tcflag_t(CSTOPB)
+        } else {
+            settings.c_cflag &= ~tcflag_t(CSTOPB)
+        }
+        settings.c_cflag &= ~tcflag_t(PARENB | CRTSCTS)
         settings.c_iflag &= ~tcflag_t(IXON | IXOFF | IXANY)
 
         // VMIN and VTIME for non-blocking read

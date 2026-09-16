@@ -9,8 +9,12 @@ import FT8Codec
 import FT8808Engine
 
 nonisolated enum FT8AudioPath: String, CaseIterable, Identifiable, Sendable {
+    case fx4cr = "FX-4CR (USB / Bluetooth)"
+    case icomUSB = "Icom USB (CI-V + Audio)"
     case icomLAN = "Direct Icom LAN"
     case coreAudio = "rigctld + Audio"
+    case lab599TX500 = "Lab599 TX-500"
+    case xiegu6100 = "Xiegu X6100 (USB-C)"
 
     var id: String { rawValue }
 }
@@ -496,6 +500,11 @@ final class FT8EngineService: ObservableObject {
     var isCallWorked: ((_ call: String) -> Bool)?
     var isGridWorked: ((_ grid: String) -> Bool)?
 
+    // Multi-Rig cluster hooks & identification
+    var radioInstanceName: String = "Radio 1"
+    var interlockWillTransmit: ((_ engine: FT8EngineService) -> Bool)?
+    var interlockDidFinishTransmit: ((_ engine: FT8EngineService) -> Void)?
+
     private var liveSource: LiveRadioSource?
     private var icomSource: IcomFT8AudioSource?
     private weak var activeIcom: IcomNetworkRadio?
@@ -553,6 +562,14 @@ final class FT8EngineService: ObservableObject {
                 startIcomMonitoring(radio: r)
             } else if audioPath == .coreAudio, let rig = activeRig {
                 startCoreAudioMonitoring(rig: rig, inputDevice: inputDevices.first?.uid, outputDevice: activeOutputDevice)
+            } else if audioPath == .icomUSB {
+                startIcomUSBMonitoring(inputDevice: inputDevices.first?.uid, outputDevice: activeOutputDevice)
+            } else if audioPath == .lab599TX500 {
+                startTX500Monitoring(inputDevice: inputDevices.first?.uid, outputDevice: activeOutputDevice)
+            } else if audioPath == .fx4cr {
+                startFX4CRMonitoring(inputDevice: inputDevices.first?.uid, outputDevice: activeOutputDevice)
+            } else if audioPath == .xiegu6100 {
+                startXiegu6100Monitoring(inputDevice: inputDevices.first?.uid, outputDevice: activeOutputDevice)
             }
         }
         status = "Switched to \(proto == .ft4 ? "FT4 (7.5s slot)" : "FT8 (15s slot)") on \(formattedDial)"
@@ -623,6 +640,108 @@ final class FT8EngineService: ObservableObject {
         launchWaterfall(frames: source.frames())
         state = .monitoring
         status = "Listening to the selected Core Audio input (\(operatingProtocol == .ft4 ? "FT4" : "FT8"))"
+    }
+
+    func startIcomUSBMonitoring(
+        inputDevice: String?,
+        outputDevice: String?
+    ) {
+        stopMonitoring()
+        audioPath = .icomUSB
+        activeRig = nil
+        activeIcom = nil
+        activeOutputDevice = cleanDevice(inputDevice: outputDevice)
+
+        let source = LiveRadioSource(
+            device: cleanDevice(inputDevice: inputDevice),
+            slotSeconds: slotDuration,
+            fftSize: 2048,
+            hop: 512,
+            fMin: 200,
+            fMax: 3_000
+        )
+        liveSource = source
+        launchDecode(source: source)
+        launchWaterfall(frames: source.frames())
+        state = .monitoring
+        let modelName = IcomUSBRadioDriver.shared.model.rawValue
+        status = "Listening to \(modelName) USB Audio input (\(operatingProtocol == .ft4 ? "FT4" : "FT8"))"
+    }
+
+    func startTX500Monitoring(
+        inputDevice: String?,
+        outputDevice: String?
+    ) {
+        stopMonitoring()
+        audioPath = .lab599TX500
+        activeRig = nil
+        activeIcom = nil
+        activeOutputDevice = cleanDevice(inputDevice: outputDevice)
+
+        let source = LiveRadioSource(
+            device: cleanDevice(inputDevice: inputDevice),
+            slotSeconds: slotDuration,
+            fftSize: 2048,
+            hop: 512,
+            fMin: 200,
+            fMax: 3_000
+        )
+        liveSource = source
+        launchDecode(source: source)
+        launchWaterfall(frames: source.frames())
+        state = .monitoring
+        status = "Listening to TX-500 USB Audio input (\(operatingProtocol == .ft4 ? "FT4" : "FT8"))"
+    }
+
+    func startFX4CRMonitoring(
+        inputDevice: String?,
+        outputDevice: String?
+    ) {
+        stopMonitoring()
+        audioPath = .fx4cr
+        activeRig = nil
+        activeIcom = nil
+        activeOutputDevice = cleanDevice(inputDevice: outputDevice)
+
+        let source = LiveRadioSource(
+            device: cleanDevice(inputDevice: inputDevice),
+            slotSeconds: slotDuration,
+            fftSize: 2048,
+            hop: 512,
+            fMin: 200,
+            fMax: 3_000
+        )
+        liveSource = source
+        launchDecode(source: source)
+        launchWaterfall(frames: source.frames())
+        state = .monitoring
+        let transportLabel = FX4CRDriver.shared.connectionType == .usb ? "USB-C" : "Bluetooth"
+        status = "Listening to FX-4CR Audio input via \(transportLabel) (\(operatingProtocol == .ft4 ? "FT4" : "FT8"))"
+    }
+
+    func startXiegu6100Monitoring(
+        inputDevice: String?,
+        outputDevice: String?
+    ) {
+        stopMonitoring()
+        audioPath = .xiegu6100
+        activeRig = nil
+        activeIcom = nil
+        activeOutputDevice = cleanDevice(inputDevice: outputDevice)
+
+        let source = LiveRadioSource(
+            device: cleanDevice(inputDevice: inputDevice),
+            slotSeconds: slotDuration,
+            fftSize: 2048,
+            hop: 512,
+            fMin: 200,
+            fMax: 3_000
+        )
+        liveSource = source
+        launchDecode(source: source)
+        launchWaterfall(frames: source.frames())
+        state = .monitoring
+        status = "Listening to Xiegu X6100 USB Audio input (\(operatingProtocol == .ft4 ? "FT4" : "FT8"))"
     }
 
     func stopMonitoring() {
@@ -768,6 +887,41 @@ final class FT8EngineService: ObservableObject {
             activeRig.setFrequencyHz(dialFrequencyHz)
             activeRig.setMode("USB", passbandHz: 3_000)
             status = "Dial set to \(formattedDial) MHz through rigctld"
+        case .lab599TX500:
+            let tx500 = Lab599TX500Driver.shared
+            guard tx500.isConnected else {
+                fail("Connect the Lab599 TX-500 first.")
+                return
+            }
+            tx500.setFrequencyHz(dialFrequencyHz)
+            // Fix for Firmware Bug #1: keep transceiver in DIG mode; omit CAT mode override
+            status = "Dial set to \(formattedDial) MHz on TX-500 (DIG Mode Preserved)"
+        case .icomUSB:
+            let icom = IcomUSBRadioDriver.shared
+            guard icom.isConnected else {
+                fail("Connect the Icom USB radio first.")
+                return
+            }
+            icom.prepareForDigital(frequencyHz: dialFrequencyHz)
+            status = "Dial set to \(formattedDial) MHz in USB-D on \(icom.model.rawValue) via USB"
+        case .fx4cr:
+            let fx = FX4CRDriver.shared
+            guard fx.isConnected else {
+                fail("Connect the FX-4CR first.")
+                return
+            }
+            fx.setFrequencyHz(dialFrequencyHz)
+            fx.setMode("USB")
+            let transportLabel = fx.connectionType == .usb ? "USB-C" : "Bluetooth"
+            status = "Dial set to \(formattedDial) MHz on FX-4CR via \(transportLabel) in USB"
+        case .xiegu6100:
+            let xiegu = Xiegu6100Driver.shared
+            guard xiegu.isConnected else {
+                fail("Connect the Xiegu X6100 first.")
+                return
+            }
+            xiegu.prepareForDigital(frequencyHz: dialFrequencyHz)
+            status = "Dial set to \(formattedDial) MHz in USB-D on Xiegu X6100 via USB-C"
         }
     }
 
@@ -975,6 +1129,26 @@ final class FT8EngineService: ObservableObject {
                 fail("rigctld is not connected, so PTT is unavailable.")
                 return
             }
+        case .lab599TX500:
+            guard Lab599TX500Driver.shared.isConnected else {
+                fail("The Lab599 TX-500 is not connected.")
+                return
+            }
+        case .icomUSB:
+            guard IcomUSBRadioDriver.shared.isConnected else {
+                fail("The Icom USB radio is not connected.")
+                return
+            }
+        case .fx4cr:
+            guard FX4CRDriver.shared.isConnected else {
+                fail("The FX-4CR transceiver is not connected.")
+                return
+            }
+        case .xiegu6100:
+            guard Xiegu6100Driver.shared.isConnected else {
+                fail("The Xiegu X6100 transceiver is not connected.")
+                return
+            }
         }
 
         transmitTask = Task { @MainActor [weak self] in
@@ -999,6 +1173,14 @@ final class FT8EngineService: ObservableObject {
                 let wait = keyAt.timeIntervalSinceNow
                 if wait > 0 { try await Task.sleep(for: .seconds(wait)) }
                 try Task.checkCancellation()
+
+                // Consult Multi-Rig Interlock Coordinator
+                if let checkInterlock = interlockWillTransmit, !checkInterlock(self) {
+                    state = decodeTask == nil ? .idle : .monitoring
+                    status = "TX deferred by Multi-Rig Interlock (another transmitter is active)"
+                    transmitTask = nil
+                    return
+                }
 
                 state = .transmitting
                 transmitProgress = 0
@@ -1042,18 +1224,101 @@ final class FT8EngineService: ObservableObject {
                         transmitProgress = player.progress
                         try await Task.sleep(for: .milliseconds(50))
                     }
+                case .lab599TX500:
+                    let tx500 = Lab599TX500Driver.shared
+                    guard tx500.isConnected else { throw FT8RunError.rigUnavailable }
+                    let player = WaveformPlayer(samples: waveform, amplitude: gain)
+                    let output = TxAudioOutput(player: player, sampleRate: 48_000, device: outputDevice)
+                    txPlayer = player
+                    txOutput = output
+                    tx500.setPTT(true, maximumDuration: slotSecs)
+                    defer {
+                        output.stop()
+                        tx500.setPTT(false)
+                        txOutput = nil
+                        txPlayer = nil
+                    }
+                    try output.start()
+                    while !output.isFinished {
+                        try Task.checkCancellation()
+                        transmitProgress = player.progress
+                        try await Task.sleep(for: .milliseconds(50))
+                    }
+                case .icomUSB:
+                    let icom = IcomUSBRadioDriver.shared
+                    guard icom.isConnected else { throw FT8RunError.rigUnavailable }
+                    let player = WaveformPlayer(samples: waveform, amplitude: gain)
+                    let output = TxAudioOutput(player: player, sampleRate: 48_000, device: outputDevice)
+                    txPlayer = player
+                    txOutput = output
+                    icom.setPTT(true, maximumDuration: slotSecs)
+                    defer {
+                        output.stop()
+                        icom.setPTT(false)
+                        txOutput = nil
+                        txPlayer = nil
+                    }
+                    try output.start()
+                    while !output.isFinished {
+                        try Task.checkCancellation()
+                        transmitProgress = player.progress
+                        try await Task.sleep(for: .milliseconds(50))
+                    }
+                case .fx4cr:
+                    let fx = FX4CRDriver.shared
+                    guard fx.isConnected else { throw FT8RunError.rigUnavailable }
+                    let player = WaveformPlayer(samples: waveform, amplitude: gain)
+                    let output = TxAudioOutput(player: player, sampleRate: 48_000, device: outputDevice)
+                    txPlayer = player
+                    txOutput = output
+                    fx.setPTT(true, maximumDuration: slotSecs)
+                    defer {
+                        output.stop()
+                        fx.setPTT(false)
+                        txOutput = nil
+                        txPlayer = nil
+                    }
+                    try output.start()
+                    while !output.isFinished {
+                        try Task.checkCancellation()
+                        transmitProgress = player.progress
+                        try await Task.sleep(for: .milliseconds(50))
+                    }
+                case .xiegu6100:
+                    let xiegu = Xiegu6100Driver.shared
+                    guard xiegu.isConnected else { throw FT8RunError.rigUnavailable }
+                    let player = WaveformPlayer(samples: waveform, amplitude: gain)
+                    let output = TxAudioOutput(player: player, sampleRate: 48_000, device: outputDevice)
+                    txPlayer = player
+                    txOutput = output
+                    xiegu.setPTT(true, maximumDuration: slotSecs)
+                    defer {
+                        output.stop()
+                        xiegu.setPTT(false)
+                        txOutput = nil
+                        txPlayer = nil
+                    }
+                    try output.start()
+                    while !output.isFinished {
+                        try Task.checkCancellation()
+                        transmitProgress = player.progress
+                        try await Task.sleep(for: .milliseconds(50))
+                    }
                 }
 
                 transmitProgress = 1
                 state = decodeTask == nil ? .idle : .monitoring
                 status = "\(protoStr) transmission completed; PTT released"
+                interlockDidFinishTransmit?(self)
             } catch is CancellationError {
                 releasePTT()
                 state = decodeTask == nil ? .idle : .monitoring
                 status = "\(proto == .ft4 ? "FT4" : "FT8") transmission cancelled; PTT released"
+                interlockDidFinishTransmit?(self)
             } catch {
                 releasePTT()
                 fail(error.localizedDescription)
+                interlockDidFinishTransmit?(self)
             }
             transmitTask = nil
         }
@@ -1070,6 +1335,7 @@ final class FT8EngineService: ObservableObject {
         transmitProgress = 0
         state = decodeTask == nil ? .idle : .monitoring
         status = reason
+        interlockDidFinishTransmit?(self)
     }
 
     func runSelfTest() {
@@ -1554,6 +1820,22 @@ final class FT8EngineService: ObservableObject {
                     self.liveSWR = icom.swr
                     self.liveALC = icom.alcLevel
                     self.liveSMeter = icom.sMeterUnits
+                } else if self.audioPath == .lab599TX500 {
+                    let tx500 = Lab599TX500Driver.shared
+                    self.livePowerWatts = Double(tx500.powerWatts)
+                    self.liveSMeter = tx500.sMeterValue
+                } else if self.audioPath == .icomUSB {
+                    let icom = IcomUSBRadioDriver.shared
+                    self.livePowerWatts = icom.rfPowerWatts
+                    self.liveSWR = icom.swr
+                    self.liveALC = icom.alcLevel
+                    self.liveSMeter = icom.sMeterValue
+                } else if self.audioPath == .xiegu6100 {
+                    let xiegu = Xiegu6100Driver.shared
+                    self.livePowerWatts = Double(xiegu.powerWatts)
+                    self.liveSWR = xiegu.swr
+                    self.liveALC = xiegu.alcLevel
+                    self.liveSMeter = xiegu.sMeterValue
                 }
 
                 try? await Task.sleep(for: .milliseconds(100))
@@ -1575,6 +1857,10 @@ final class FT8EngineService: ObservableObject {
         activeIcom?.setPTT(false)
         activeIcom?.transmitArmed = false
         activeRig?.setPTT(false)
+        Lab599TX500Driver.shared.setPTT(false)
+        IcomUSBRadioDriver.shared.setPTT(false)
+        FX4CRDriver.shared.setPTT(false)
+        Xiegu6100Driver.shared.setPTT(false)
     }
 
     private func validateIdentity() -> Bool {

@@ -113,6 +113,9 @@ extension AppState {
                 (rec.fields["GRIDSQUARE"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased().hasPrefix(targetGrid)
             }
         }
+
+        // Bridge Multi-Rig FT8 Cluster with AppState Logbook
+        multiRigFT8Hub.configureBridges(with: self)
     }
 
     func logFT8StationQSO(call: String, grid: String, sentRST: String, rcvdRST: String, band: String, freqMHz: Double) {

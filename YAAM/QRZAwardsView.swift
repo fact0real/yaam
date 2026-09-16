@@ -111,13 +111,20 @@ struct QRZAwardsView: View {
     private var effectiveAwards: [QRZAwardSummary] {
         switch selectedSource {
         case .qrz:
-            if !appState.qrzAwardSummaries.isEmpty { return appState.qrzAwardSummaries }
-            return buildLogbookAwards(from: allConfirmedRecords)
+            let baseList = !appState.qrzAwardSummaries.isEmpty
+                ? appState.qrzAwardSummaries
+                : buildLogbookAwards(from: allConfirmedRecords)
+            return enrichAwards(baseList, records: allConfirmedRecords)
         case .eqsl:
             return buildEQSLAwards(from: eqslRecords)
         case .clublog:
-            return appState.clubLogDXCCMatrix?.toAwardSummaries()
-                ?? buildLogbookAwards(from: clublogRecords)
+            if let matrix = appState.clubLogDXCCMatrix {
+                return matrix.toAwardSummaries()
+            }
+            if !clublogRecords.isEmpty {
+                return ClubLogDXCCMatrix.matrixFromLogbook(records: clublogRecords).toAwardSummaries()
+            }
+            return ClubLogDXCCMatrix.empty().toAwardSummaries()
         case .combined:
             return buildLogbookAwards(from: allConfirmedRecords)
         }
@@ -156,6 +163,12 @@ struct QRZAwardsView: View {
             if selectedSource == .qrz && appState.qrzAwardSummaries.isEmpty && !appState.isFetchingQRZAwards {
                 appState.fetchQRZAwards()
             }
+            if selectedSource == .eqsl && eqslRecords.isEmpty && !appState.isProcessingQSLQueue {
+                let user = UserDefaults.standard.string(forKey: "eqslUsername") ?? ""
+                if !user.isEmpty {
+                    Task { await appState.downloadEQSLConfirmations() }
+                }
+            }
         }
         .onChange(of: selectedSource) { _, newSrc in
             withAnimation(.spring(response: 0.4, dampingFraction: 0.65)) {
@@ -166,6 +179,12 @@ struct QRZAwardsView: View {
             }
             if newSrc == .qrz && appState.qrzAwardSummaries.isEmpty && !appState.isFetchingQRZAwards {
                 appState.fetchQRZAwards()
+            }
+            if newSrc == .eqsl && eqslRecords.isEmpty && !appState.isProcessingQSLQueue {
+                let user = UserDefaults.standard.string(forKey: "eqslUsername") ?? ""
+                if !user.isEmpty {
+                    Task { await appState.downloadEQSLConfirmations() }
+                }
             }
             if newSrc == .clublog && appState.clubLogDXCCMatrix == nil && !appState.isFetchingClubLogAwards {
                 appState.fetchClubLogDXCCMatrix()
@@ -423,15 +442,25 @@ struct QRZAwardsView: View {
             ) { appState.fetchClubLogDXCCMatrix() }
 
         case .eqsl:
-            actionPill(label: "Open eQSL.cc", icon: "safari", disabled: false) {
-                if let url = URL(string: "https://www.eqsl.cc/qslcard/Awards.cfm") {
-                    NSWorkspace.shared.open(url)
+            HStack(spacing: 8) {
+                actionPill(
+                    label: appState.isProcessingQSLQueue ? "Syncing…" : "Sync eQSL",
+                    icon: "arrow.clockwise.icloud",
+                    disabled: appState.isProcessingQSLQueue
+                ) {
+                    Task { await appState.downloadEQSLConfirmations() }
+                }
+                actionPill(label: "eQSL.cc", icon: "safari", disabled: false) {
+                    if let url = URL(string: "https://www.eqsl.cc/qslcard/Awards.cfm") {
+                        NSWorkspace.shared.open(url)
+                    }
                 }
             }
 
         case .combined:
-            actionPill(label: "Sync All", icon: "arrow.triangle.2.circlepath", disabled: false) {
+            actionPill(label: "Sync All", icon: "arrow.triangle.2.circlepath", disabled: appState.isProcessingQSLQueue) {
                 appState.downloadLoTWAndQRZConfirmations()
+                Task { await appState.downloadEQSLConfirmations() }
             }
         }
     }
@@ -470,22 +499,23 @@ struct QRZAwardsView: View {
                 statCard("AGM Level",  value: agmLevelText(eqslRecords.count), icon: "medal.fill", color: .orange)
 
             case .clublog:
-                if let matrix = appState.clubLogDXCCMatrix {
-                    statCard("Confirmed",  value: "\(matrix.totalConfirmed)", icon: "checkmark.seal.fill",                    color: .green)
-                    statCard("Worked",     value: "\(matrix.totalWorked)",    icon: "antenna.radiowaves.left.and.right",       color: selectedSource.accentColor)
-                    statCard("Continents", value: "\(matrix.continentsConfirmed.count)/6", icon: "globe",                    color: .purple)
-                    statCard("Bands",      value: "\(activeBands(matrix))",   icon: "waveform",                               color: .orange)
-                } else if appState.isFetchingClubLogAwards {
+                if appState.isFetchingClubLogAwards {
                     loadingStatCards
                 } else {
-                    placeholderStatCards
+                    let matrix = appState.clubLogDXCCMatrix
+                        ?? (!clublogRecords.isEmpty ? ClubLogDXCCMatrix.matrixFromLogbook(records: clublogRecords) : ClubLogDXCCMatrix.empty())
+                    statCard("Confirmed",  value: "\(matrix.totalConfirmed)",             icon: "checkmark.seal.fill",                    color: .green)
+                    statCard("Worked",     value: "\(matrix.totalWorked)",                icon: "antenna.radiowaves.left.and.right",       color: selectedSource.accentColor)
+                    statCard("CQ Zones",   value: "\(matrix.cqZonesConfirmed.count)/40",  icon: "map.circle.fill",                         color: .orange)
+                    statCard("Continents", value: "\(matrix.continentsConfirmed.count)/6",icon: "globe",                                  color: .purple)
+                    statCard("Challenge",  value: "\(matrix.dxccChallengePoints)",        icon: "flame.fill",                              color: .pink)
                 }
             }
         }
     }
 
     private var loadingStatCards: some View {
-        ForEach(0..<4, id: \.self) { _ in
+        ForEach(0..<5, id: \.self) { _ in
             RoundedRectangle(cornerRadius: 10)
                 .fill(Color(NSColor.controlBackgroundColor).opacity(0.4))
                 .frame(height: 78)
@@ -557,13 +587,21 @@ struct QRZAwardsView: View {
     @ViewBuilder
     private var mainContent: some View {
         switch selectedSource {
-        case .qrz, .combined:
+        case .qrz:
             standardAwardsContent
+
+        case .combined:
+            VStack(alignment: .leading, spacing: 16) {
+                lotwProgressPanel
+                standardAwardsContent
+            }
 
         case .eqsl:
             VStack(alignment: .leading, spacing: 16) {
+                if eqslRecords.isEmpty {
+                    eqslSyncBanner
+                }
                 agmTierView
-                lotwProgressPanel
                 standardAwardsContent
             }
 
@@ -575,10 +613,65 @@ struct QRZAwardsView: View {
                     loadingPanel("Fetching DXCC matrix from Club Log…")
                 } else {
                     clubLogEmptyState
+                    let previewMatrix = !clublogRecords.isEmpty
+                        ? ClubLogDXCCMatrix.matrixFromLogbook(records: clublogRecords)
+                        : ClubLogDXCCMatrix.empty()
+                    clubLogBandMatrix(previewMatrix)
                 }
                 standardAwardsContent
             }
         }
+    }
+
+    // MARK: eQSL Sync Banner
+
+    private var eqslSyncBanner: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "envelope.badge.shield.half.filled.fill")
+                .font(.system(size: 26))
+                .foregroundStyle(selectedSource.accentColor)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Sync eQSL Confirmations")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(.primary)
+
+                let user = UserDefaults.standard.string(forKey: "eqslUsername") ?? ""
+                if !user.isEmpty {
+                    Text("eQSL account (\(user)) is configured. Tap Sync Inbox to download your electronic QSL cards.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("Configure your eQSL.cc credentials in Settings to download and match electronic confirmations.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Spacer()
+
+            Button {
+                Task { await appState.downloadEQSLConfirmations() }
+            } label: {
+                HStack(spacing: 6) {
+                    if appState.isProcessingQSLQueue {
+                        ProgressView().controlSize(.small)
+                        Text("Syncing…")
+                    } else {
+                        Image(systemName: "arrow.clockwise.icloud.fill")
+                        Text("Sync Inbox Now")
+                    }
+                }
+                .font(.caption.weight(.semibold))
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(selectedSource.accentColor)
+            .disabled(appState.isProcessingQSLQueue)
+        }
+        .padding(14)
+        .background(Color(NSColor.controlBackgroundColor).opacity(0.60))
+        .cornerRadius(12)
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(selectedSource.accentColor.opacity(0.30)))
     }
 
     // MARK: Standard Awards
@@ -746,84 +839,146 @@ struct QRZAwardsView: View {
     // MARK: ClubLog Band Matrix
 
     private func clubLogBandMatrix(_ matrix: ClubLogDXCCMatrix) -> some View {
-        let bands = ClubLogDXCCMatrix.hfBands.filter {
-            matrix.confirmedCount(band: $0) > 0 || matrix.workedCount(band: $0) > 0
-        }
+        let bands = ClubLogDXCCMatrix.allBands
+
         return VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Label("DXCC Band Matrix", systemImage: "chart.bar.xaxis").font(.headline)
+            HStack(alignment: .center) {
+                Label("DXCC Band Matrix", systemImage: "chart.bar.xaxis")
+                    .font(.headline)
+
                 Spacer()
+
+                // Quick Summary Chips
+                HStack(spacing: 6) {
+                    summaryChip(icon: "crown.fill", text: "\(matrix.fiveBandDXCCCompletedBands)/5 5BDX", color: .orange)
+                    summaryChip(icon: "sparkles", text: "\(matrix.nineBandDXCCCompletedBands)/9 9BDX", color: .purple)
+                    summaryChip(icon: "flame.fill", text: "\(matrix.dxccChallengePoints) pts", color: .pink)
+                    summaryChip(icon: "map.circle.fill", text: "\(matrix.cqZonesConfirmed.count)/40 WAZ", color: .red)
+                }
+
+                Spacer()
+
                 Text("Updated \(matrix.fetchedAt, style: .relative) ago")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            if bands.isEmpty {
-                Text("No band data found. Fetch the matrix first.")
-                    .font(.caption).foregroundStyle(.secondary)
-            } else {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 0) {
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(spacing: 0) {
+                        Text("Band").font(.caption.bold()).frame(width: 72, alignment: .leading).padding(.leading, 8)
+                        Text("Class").font(.caption.bold()).frame(width: 58, alignment: .center)
+                        Text("Worked").font(.caption.bold()).frame(width: 66, alignment: .center)
+                        Text("Confirmed").font(.caption.bold()).frame(width: 78, alignment: .center)
+                        Text("DXCC Progress").font(.caption.bold()).frame(width: 150, alignment: .center)
+                    }
+                    .padding(.vertical, 7)
+                    .background(Color(NSColor.controlBackgroundColor).opacity(0.75))
+
+                    Divider()
+
+                    ForEach(Array(bands.enumerated()), id: \.element) { idx, band in
+                        let worked    = matrix.workedCount(band: band)
+                        let confirmed = matrix.confirmedCount(band: band)
+                        let target    = targetForBand(band)
+                        let pct       = min(1.0, Double(confirmed) / Double(target))
+                        let bType     = bandType(band)
+
                         HStack(spacing: 0) {
-                            Text("Band").font(.caption.bold()).frame(width: 52, alignment: .leading).padding(.leading, 6)
-                            ForEach(["Worked", "Confirmed", "Progress"], id: \.self) { col in
-                                Text(col).font(.caption.bold())
-                                    .frame(width: col == "Progress" ? 88 : 74, alignment: .center)
-                            }
-                        }
-                        .padding(.vertical, 6)
-                        .background(Color(NSColor.controlBackgroundColor).opacity(0.70))
+                            Text(band.uppercased())
+                                .font(.system(size: 11.5, weight: .bold, design: .monospaced))
+                                .frame(width: 72, alignment: .leading).padding(.leading, 8)
 
-                        Divider()
+                            Text(bType.label)
+                                .font(.system(size: 9, weight: .bold, design: .rounded))
+                                .padding(.horizontal, 5).padding(.vertical, 2)
+                                .background(bType.color.opacity(0.16))
+                                .foregroundStyle(bType.color)
+                                .cornerRadius(4)
+                                .frame(width: 58, alignment: .center)
 
-                        ForEach(Array(bands.enumerated()), id: \.element) { idx, band in
-                            let worked    = matrix.workedCount(band: band)
-                            let confirmed = matrix.confirmedCount(band: band)
-                            let pct       = min(1.0, Double(confirmed) / max(1, Double(worked)))
+                            Text("\(worked)")
+                                .font(.system(size: 11, design: .rounded))
+                                .foregroundStyle(worked > 0 ? .primary : .secondary)
+                                .frame(width: 66, alignment: .center)
 
-                            HStack(spacing: 0) {
-                                Text(band.uppercased())
-                                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                                    .frame(width: 52, alignment: .leading).padding(.leading, 6)
-
-                                Text("\(worked)")
-                                    .font(.system(size: 11, design: .rounded))
-                                    .frame(width: 74, alignment: .center)
-
-                                HStack(spacing: 4) {
-                                    Text("\(confirmed)")
-                                        .font(.system(size: 11, weight: .bold, design: .rounded))
-                                        .foregroundStyle(confirmed >= 100 ? .green : selectedSource.accentColor)
-                                    if confirmed >= 100 {
-                                        Image(systemName: "checkmark.seal.fill")
-                                            .font(.system(size: 9)).foregroundStyle(.green)
-                                    }
+                            HStack(spacing: 4) {
+                                Text("\(confirmed)")
+                                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                                    .foregroundStyle(confirmed >= target ? .green : (confirmed > 0 ? selectedSource.accentColor : .secondary))
+                                if confirmed >= target {
+                                    Image(systemName: "checkmark.seal.fill")
+                                        .font(.system(size: 9)).foregroundStyle(.green)
                                 }
-                                .frame(width: 74, alignment: .center)
+                            }
+                            .frame(width: 78, alignment: .center)
 
+                            HStack(spacing: 6) {
                                 GeometryReader { geo in
                                     ZStack(alignment: .leading) {
                                         Capsule().fill(Color.secondary.opacity(0.12))
                                         Capsule()
-                                            .fill(pct > 0.9 ? Color.green.opacity(0.68) : selectedSource.accentColor.opacity(0.65))
+                                            .fill(confirmed >= target ? Color.green.opacity(0.8) : selectedSource.accentColor.opacity(0.75))
                                             .frame(width: geo.size.width * pct)
                                     }
                                 }
-                                .frame(width: 68, height: 7).padding(.horizontal, 10)
+                                .frame(height: 7)
+
+                                Text("\(Int((pct * 100).rounded()))%")
+                                    .font(.system(size: 9.5, weight: .semibold, design: .rounded))
+                                    .foregroundStyle(confirmed >= target ? .green : .secondary)
+                                    .frame(width: 32, alignment: .trailing)
                             }
-                            .padding(.vertical, 6)
-                            .background(idx.isMultiple(of: 2)
-                                        ? Color(NSColor.controlBackgroundColor).opacity(0.22)
-                                        : Color.clear)
+                            .frame(width: 150)
+                            .padding(.horizontal, 6)
                         }
+                        .padding(.vertical, 5)
+                        .background(idx.isMultiple(of: 2)
+                                    ? Color(NSColor.controlBackgroundColor).opacity(0.22)
+                                    : Color.clear)
                     }
                 }
-                .cornerRadius(10)
-                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.secondary.opacity(0.16)))
             }
+            .cornerRadius(10)
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.secondary.opacity(0.16)))
         }
         .padding(16)
         .background(Color(NSColor.controlBackgroundColor).opacity(0.50))
         .cornerRadius(12)
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(selectedSource.accentColor.opacity(0.24)))
+    }
+
+    private func targetForBand(_ band: String) -> Int {
+        switch band.lowercased() {
+        case "60m": return 50
+        case "2m":  return 25
+        case "70cm": return 10
+        default:    return 100
+        }
+    }
+
+    private func bandType(_ band: String) -> (label: String, color: Color) {
+        let b = band.lowercased()
+        if ["80m", "40m", "20m", "15m", "10m"].contains(b) {
+            return ("5BDX", .orange)
+        } else if ["30m", "17m", "12m"].contains(b) {
+            return ("WARC", .teal)
+        } else if ["6m", "2m", "70cm"].contains(b) {
+            return ("VHF/UHF", .purple)
+        } else {
+            return ("HF", .blue)
+        }
+    }
+
+    private func summaryChip(icon: String, text: String, color: Color) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon).font(.system(size: 9, weight: .bold)).foregroundStyle(color)
+            Text(text).font(.system(size: 10, weight: .semibold, design: .rounded))
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3)
+        .background(color.opacity(0.12))
+        .cornerRadius(6)
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(color.opacity(0.25), lineWidth: 0.8))
     }
 
     private var clubLogEmptyState: some View {
@@ -897,56 +1052,70 @@ struct QRZAwardsView: View {
 
     private func buildEQSLAwards(from records: [QSORecordModel]) -> [QRZAwardSummary] {
         var list = [QRZAwardSummary]()
-        guard !records.isEmpty else { return list }
 
         let total    = records.count
-        let dxccSet  = Set(records.map { $0["DXCC"] }.filter { !$0.isEmpty })
+        let dxccSet  = Set(records.map { $0["DXCC"] }.filter { !$0.isEmpty && $0 != "0" && $0 != "UNKNOWN" })
         let stateSet = Set(records.map { $0["STATE"].uppercased() }.filter { !$0.isEmpty })
         let contSet  = Set(records.map { $0["CONT"].uppercased() }.filter { !$0.isEmpty })
         let gridSet  = Set(records.map {
             ($0["GRIDSQUARE"].isEmpty ? $0["GRID"] : $0["GRIDSQUARE"]).prefix(4).uppercased()
         }.filter { $0.count == 4 })
 
-        // AGM
-        let agmTarget: Int; let agmName: String; let prevThreshold: Int
+        // AGM (Authenticard Gold Medal)
+        let agmTarget: Int
+        let agmName: String
+        let prevThreshold: Int
         if total >= 5000      { agmTarget = 5000; agmName = "Platinum"; prevThreshold = 1000 }
         else if total >= 1000 { agmTarget = 5000; agmName = "Gold";     prevThreshold = 1000 }
         else if total >= 500  { agmTarget = 1000; agmName = "Silver";   prevThreshold = 500  }
         else if total >= 100  { agmTarget = 500;  agmName = "Bronze";   prevThreshold = 100  }
-        else                  { agmTarget = 100;  agmName = "Working…"; prevThreshold = 0    }
-        let agmPct = min(100, Double(total - prevThreshold) / Double(agmTarget - prevThreshold) * 100)
-        list.append(QRZAwardSummary(id: "eqsl_agm", title: "AGM \(agmName)", detail: "\(total) AG eQSL cards received",
-            percentComplete: agmPct, status: total >= 5000 ? "Platinum achieved!" : "\(max(0, agmTarget - total)) to next level",
-            earned: total >= 100, progressAvailable: true, achievement: "\(total) Confirmations", awardType: "eqsl", ribbonURL: ""))
+        else                  { agmTarget = 100;  agmName = "Bronze";   prevThreshold = 0    }
 
-        list.append(make("eqsl_dxcc", "DX World via eQSL", dxccSet.count, 100, "dxcc", "\(dxccSet.count) entities confirmed", "Entities"))
-        list.append(make("eqsl_wac",  "All Continents via eQSL", contSet.count, 6, "continent", contSet.sorted().joined(separator: " · "), "Continents"))
-        list.append(make("eqsl_was",  "All US States via eQSL",  stateSet.count, 50, "was", "\(stateSet.count) of 50 states", "States"))
-        list.append(make("eqsl_grid", "Grid Award via eQSL (100)", gridSet.count, 100, "grid", "\(gridSet.count) Maidenhead grids", "Grids"))
+        let agmPct: Double
+        if total >= 100 {
+            agmPct = min(100.0, Double(total - prevThreshold) / Double(max(1, agmTarget - prevThreshold)) * 100.0)
+        } else {
+            agmPct = min(100.0, Double(total) / 100.0 * 100.0)
+        }
+
+        list.append(QRZAwardSummary(
+            id: "eqsl_agm",
+            title: total >= 100 ? "AGM \(agmName)" : "AGM Bronze (Authenticard)",
+            detail: total >= 100 ? "\(total) AG eQSL cards received" : "\(total) AG eQSL cards received (100 needed for Bronze)",
+            percentComplete: agmPct,
+            status: total >= 5000 ? "Platinum achieved!" : (total >= 100 ? "\(max(0, agmTarget - total)) to next level" : "\(max(0, 100 - total)) cards to Bronze"),
+            earned: total >= 100,
+            progressAvailable: true,
+            achievement: "\(total) / \(total >= 100 ? agmTarget : 100) Confirmations",
+            awardType: "eqsl",
+            ribbonURL: ""
+        ))
+
+        list.append(make("eqsl_dxcc", "DX World via eQSL", dxccSet.count, 100, "dxcc", "\(dxccSet.count) entities confirmed via eQSL", "Entities"))
+        list.append(make("eqsl_wac",  "All Continents via eQSL", contSet.count, 6, "continent", contSet.isEmpty ? "No continents confirmed via eQSL yet" : contSet.sorted().joined(separator: " · "), "Continents"))
+        list.append(make("eqsl_was",  "All US States via eQSL",  stateSet.count, 50, "was", "\(stateSet.count) of 50 US states confirmed via eQSL", "States"))
+        list.append(make("eqsl_grid", "Grid Award via eQSL (100)", gridSet.count, 100, "grid", "\(gridSet.count) Maidenhead grids confirmed via eQSL", "Grids"))
 
         let cwRecs  = records.filter { $0["MODE"].uppercased() == "CW" }
         let ssbRecs = records.filter { ["SSB","LSB","USB","FM","AM"].contains($0["MODE"].uppercased()) }
         let digRecs = records.filter { ["FT8","FT4","PSK31","PSK","JS8","WSPR","RTTY","DATA","DIGITAL"].contains($0["MODE"].uppercased()) }
-        if cwRecs.count  > 0 { list.append(make("eqsl_cw",  "CW Award via eQSL",      cwRecs.count,  100, "cw",      "\(cwRecs.count) CW QSOs",      "CW QSOs")) }
-        if ssbRecs.count > 0 { list.append(make("eqsl_ssb", "Phone Award via eQSL",   ssbRecs.count, 100, "phone",   "\(ssbRecs.count) Phone QSOs",  "Phone QSOs")) }
-        if digRecs.count > 0 { list.append(make("eqsl_dig", "Digital Award via eQSL", digRecs.count, 100, "digital", "\(digRecs.count) Digital QSOs","Digital QSOs")) }
+
+        list.append(make("eqsl_cw",  "CW Award via eQSL",      cwRecs.count,  100, "cw",      "\(cwRecs.count) CW QSOs confirmed via eQSL",      "CW QSOs"))
+        list.append(make("eqsl_ssb", "Phone Award via eQSL",   ssbRecs.count, 100, "phone",   "\(ssbRecs.count) Phone QSOs confirmed via eQSL",  "Phone QSOs"))
+        list.append(make("eqsl_dig", "Digital Award via eQSL", digRecs.count, 100, "digital", "\(digRecs.count) Digital QSOs confirmed via eQSL","Digital QSOs"))
 
         for (band, label, target) in [("160m","160m",50),("80m","80m",100),("40m","40m",100),
                                        ("20m","20m",100),("15m","15m",100),("10m","10m",100),
                                        ("6m","6m Magic Band",50),("2m","2m",25)] as [(String,String,Int)] {
             let recs = records.filter { $0["BAND"].lowercased() == band }
-            if recs.count > 0 {
-                list.append(make("eqsl_band_\(band)", "\(label) Band Award", recs.count, target, "band", "\(recs.count) QSOs on \(label)", "QSOs on \(band)"))
-            }
+            list.append(make("eqsl_band_\(band)", "\(label) Band Award via eQSL", recs.count, target, "band", "\(recs.count) QSOs on \(label) confirmed via eQSL", "QSOs on \(band)"))
         }
 
-        for (id, title, code, target) in [("eu","Europe Award","EU",25),("as","Asia Award","AS",25),
-                                           ("af","Africa Award","AF",25),("na","North America Award","NA",25),
-                                           ("oc","Oceania Award","OC",15),("sa","South America Award","SA",10)] as [(String,String,String,Int)] {
-            let ents = Set(records.filter { $0["CONT"].uppercased() == code }.map { $0["DXCC"] }.filter { !$0.isEmpty })
-            if !ents.isEmpty {
-                list.append(make("eqsl_cont_\(id)", title, ents.count, target, "geographic", "\(ents.count) \(code) entities", "Entities in \(code)"))
-            }
+        for (id, title, code, target) in [("eu","Europe Award via eQSL","EU",25),("as","Asia Award via eQSL","AS",25),
+                                           ("af","Africa Award via eQSL","AF",25),("na","North America Award via eQSL","NA",25),
+                                           ("oc","Oceania Award via eQSL","OC",15),("sa","South America Award via eQSL","SA",10)] as [(String,String,String,Int)] {
+            let ents = Set(records.filter { $0["CONT"].uppercased() == code }.map { $0["DXCC"] }.filter { !$0.isEmpty && $0 != "0" && $0 != "UNKNOWN" })
+            list.append(make("eqsl_cont_\(id)", title, ents.count, target, "geographic", "\(ents.count) \(code) entities confirmed via eQSL", "Entities in \(code)"))
         }
         return list
     }
@@ -983,6 +1152,292 @@ struct QRZAwardsView: View {
         ]
     }
 
+    private func enrichAwards(_ awards: [QRZAwardSummary], records: [QSORecordModel]) -> [QRZAwardSummary] {
+        guard !awards.isEmpty else { return awards }
+
+        var qsosByContinent: [String: Int] = [:]
+        var entitiesByContinent: [String: Set<String>] = [:]
+        var allConfirmedDXCC = Set<String>()
+        var allConfirmedStates = Set<String>()
+        var allConfirmedGrids = Set<String>()
+        var winterDays = Set<String>()
+
+        for record in records {
+            let cont = record["CONT"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            let dxcc = record["DXCC"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+
+            if !cont.isEmpty {
+                qsosByContinent[cont, default: 0] += 1
+                if !dxcc.isEmpty, dxcc != "0", dxcc != "UNKNOWN" {
+                    entitiesByContinent[cont, default: []].insert(dxcc)
+                }
+            }
+            if !dxcc.isEmpty, dxcc != "0", dxcc != "UNKNOWN" {
+                allConfirmedDXCC.insert(dxcc)
+            }
+            let st = record["STATE"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            if !st.isEmpty {
+                allConfirmedStates.insert(st)
+            }
+            let grid = (record["GRIDSQUARE"].isEmpty ? record["GRID"] : record["GRIDSQUARE"]).prefix(4).uppercased()
+            if grid.count == 4 {
+                allConfirmedGrids.insert(String(grid))
+            }
+            let cleanDate = record["QSO_DATE"].filter { $0.isNumber }
+            if cleanDate.count >= 8 {
+                let month = String(cleanDate.dropFirst(4).prefix(2))
+                if month == "12" || month == "01" || month == "02" {
+                    winterDays.insert(String(cleanDate.prefix(8)))
+                }
+            }
+        }
+
+        return awards.map { award in
+            // 1. If already earned, keep completed status clean
+            if award.earned {
+                return QRZAwardSummary(
+                    id: award.id,
+                    title: award.title,
+                    detail: award.detail.isEmpty ? "Issued by QRZ Logbook Awards" : award.detail,
+                    percentComplete: 100.0,
+                    status: award.status.isEmpty ? "Award received" : award.status,
+                    earned: true,
+                    progressAvailable: true,
+                    achievement: (award.achievement.isEmpty || award.achievement == "Not reported") ? "Award received" : award.achievement,
+                    awardType: award.awardType,
+                    ribbonURL: award.ribbonURL
+                )
+            }
+
+            // 2. Check if award already has a ratio like "X / Y Unit" in achievement
+            var fixedPercent = award.percentComplete
+            var parsedRatio: (curr: Int, target: Int)? = nil
+            if let match = award.achievement.range(of: #"(\d+)\s*/\s*(\d+)"#, options: .regularExpression) {
+                let parts = String(award.achievement[match]).components(separatedBy: "/")
+                if parts.count == 2,
+                   let curr = Int(parts[0].trimmingCharacters(in: .whitespaces)),
+                   let target = Int(parts[1].trimmingCharacters(in: .whitespaces)),
+                   target > 0 {
+                    parsedRatio = (curr, target)
+                    let mathPct = min(100.0, max(0.0, Double(curr) / Double(target) * 100.0))
+                    if abs(fixedPercent - mathPct) > 0.5 {
+                        fixedPercent = mathPct
+                    }
+                }
+            }
+
+            // 3. Does this award have valid progress from QRZ?
+            let hasValidProgress = award.progressAvailable
+                && award.achievement != "Not reported"
+                && !award.detail.contains("QRZ did not return analysis")
+                && (fixedPercent > 0 || (parsedRatio != nil && parsedRatio!.curr == 0))
+
+            if hasValidProgress {
+                return QRZAwardSummary(
+                    id: award.id,
+                    title: award.title,
+                    detail: award.detail,
+                    percentComplete: fixedPercent,
+                    status: award.status.isEmpty ? (fixedPercent >= 100 ? "Eligible to apply" : "In progress") : award.status,
+                    earned: fixedPercent >= 100,
+                    progressAvailable: true,
+                    achievement: award.achievement,
+                    awardType: award.awardType,
+                    ribbonURL: award.ribbonURL
+                )
+            }
+
+            // 4. Enrich / fallback from local confirmed logbook records
+            let norm = award.title.uppercased()
+
+            // A) Worked All Continents (WAC) sub-awards or individual continents
+            if norm.contains("WORKED ALL CONTINENTS") || norm.contains("WAC") || norm.contains("CONTINENT") {
+                let continentMap: [(name: String, code: String, title: String)] = [
+                    ("AFRICA",        "AF", "Africa"),
+                    ("ASIA",          "AS", "Asia"),
+                    ("EUROPE",        "EU", "Europe"),
+                    ("NORTH AMERICA", "NA", "North America"),
+                    ("SOUTH AMERICA", "SA", "South America"),
+                    ("OCEANIA",       "OC", "Oceania")
+                ]
+
+                if let found = continentMap.first(where: { norm.contains($0.name) }) {
+                    let count = qsosByContinent[found.code] ?? 0
+                    let achieved = count >= 1
+                    let pct: Double = achieved ? 100.0 : 0.0
+                    return QRZAwardSummary(
+                        id: award.id,
+                        title: award.title,
+                        detail: achieved ? "1 confirmed QSO in \(found.title)" : "No confirmed contacts in \(found.title) yet",
+                        percentComplete: pct,
+                        status: achieved ? "Eligible to apply" : "1 Continent remaining",
+                        earned: achieved,
+                        progressAvailable: true,
+                        achievement: "\(achieved ? 1 : 0) / 1 Continents",
+                        awardType: award.awardType.isEmpty ? "Mode: Mixed" : award.awardType,
+                        ribbonURL: award.ribbonURL
+                    )
+                }
+
+                // Global WAC (6 continents)
+                let confirmedContinents = continentMap.filter { (qsosByContinent[$0.code] ?? 0) > 0 }.count
+                let pct = min(100.0, Double(confirmedContinents) / 6.0 * 100.0)
+                let achieved = confirmedContinents >= 6
+                return QRZAwardSummary(
+                    id: award.id,
+                    title: award.title,
+                    detail: "\(confirmedContinents) of 6 continents confirmed in logbook",
+                    percentComplete: pct,
+                    status: achieved ? "Eligible to apply" : "\(6 - confirmedContinents) Continents remaining",
+                    earned: achieved,
+                    progressAvailable: true,
+                    achievement: "\(confirmedContinents) / 6 Continents",
+                    awardType: award.awardType.isEmpty ? "Mode: Mixed" : award.awardType,
+                    ribbonURL: award.ribbonURL
+                )
+            }
+
+            // B) Master of Radio Communication
+            if norm.contains("MASTER OF RADIO") || norm.contains("RADIO COMMUNICATION") {
+                let mrcTargets: [(name: String, code: String, target: Int, title: String)] = [
+                    ("AFRICA",        "AF", 76, "Africa"),
+                    ("ASIA",          "AS", 40, "Asia"),
+                    ("EUROPE",        "EU", 67, "Europe"),
+                    ("NORTH AMERICA", "NA", 49, "North America"),
+                    ("SOUTH AMERICA", "SA", 14, "South America"),
+                    ("OCEANIA",       "OC", 30, "Oceania")
+                ]
+
+                if let found = mrcTargets.first(where: { norm.contains($0.name) }) {
+                    let ents = entitiesByContinent[found.code]?.count ?? 0
+                    let pct = min(100.0, Double(ents) / Double(found.target) * 100.0)
+                    let achieved = ents >= found.target
+                    return QRZAwardSummary(
+                        id: award.id,
+                        title: award.title,
+                        detail: "\(ents) of \(found.target) \(found.title) DXCC entities confirmed",
+                        percentComplete: pct,
+                        status: achieved ? "Eligible to apply" : "\(max(0, found.target - ents)) Entities remaining",
+                        earned: achieved,
+                        progressAvailable: true,
+                        achievement: "\(ents) / \(found.target) Entities",
+                        awardType: award.awardType.isEmpty ? "Mode: Mixed" : award.awardType,
+                        ribbonURL: award.ribbonURL
+                    )
+                }
+            }
+
+            // C) 12 Days of QRZ
+            if norm.contains("12 DAYS") {
+                let count = winterDays.count
+                let pct = min(100.0, Double(count) / 12.0 * 100.0)
+                let achieved = count >= 12
+                return QRZAwardSummary(
+                    id: award.id,
+                    title: award.title,
+                    detail: "\(count) winter days logged with confirmed QSOs (Dec–Feb)",
+                    percentComplete: pct,
+                    status: achieved ? "Eligible to apply" : "\(max(0, 12 - count)) days remaining",
+                    earned: achieved,
+                    progressAvailable: true,
+                    achievement: "\(min(count, 12)) / 12 Winter Days",
+                    awardType: award.awardType.isEmpty ? "Mode: Mixed" : award.awardType,
+                    ribbonURL: award.ribbonURL
+                )
+            }
+
+            // D) QRZ 30th Anniversary Award
+            if norm.contains("30") && (norm.contains("YEAR") || norm.contains("ANNIVERSARY")) {
+                let count = records.count
+                let pct = min(100.0, Double(count) / 30.0 * 100.0)
+                let achieved = count >= 30
+                return QRZAwardSummary(
+                    id: award.id,
+                    title: award.title,
+                    detail: "\(count) confirmed QSOs in logbook (30 needed)",
+                    percentComplete: pct,
+                    status: achieved ? "Eligible to apply" : "\(max(0, 30 - count)) QSOs remaining",
+                    earned: achieved,
+                    progressAvailable: true,
+                    achievement: "\(min(count, 30)) / 30 Confirmed QSOs",
+                    awardType: award.awardType.isEmpty ? "Mode: Mixed" : award.awardType,
+                    ribbonURL: award.ribbonURL
+                )
+            }
+
+            // E) DX World / DXCC
+            if norm.contains("DX WORLD") || norm.contains("DXCC") {
+                let count = allConfirmedDXCC.count
+                let pct = min(100.0, Double(count) / 100.0 * 100.0)
+                let achieved = count >= 100
+                return QRZAwardSummary(
+                    id: award.id,
+                    title: award.title,
+                    detail: "\(count) DXCC entities confirmed",
+                    percentComplete: pct,
+                    status: achieved ? "Eligible to apply" : "\(max(0, 100 - count)) Entities remaining",
+                    earned: achieved,
+                    progressAvailable: true,
+                    achievement: "\(count) / 100 Entities",
+                    awardType: award.awardType.isEmpty ? "Mode: Mixed" : award.awardType,
+                    ribbonURL: award.ribbonURL
+                )
+            }
+
+            // F) Worked All States / WAS
+            if norm.contains("STATES") || norm.contains("WAS") {
+                let count = allConfirmedStates.count
+                let pct = min(100.0, Double(count) / 50.0 * 100.0)
+                let achieved = count >= 50
+                return QRZAwardSummary(
+                    id: award.id,
+                    title: award.title,
+                    detail: "\(count) of 50 US states confirmed",
+                    percentComplete: pct,
+                    status: achieved ? "Eligible to apply" : "\(max(0, 50 - count)) States remaining",
+                    earned: achieved,
+                    progressAvailable: true,
+                    achievement: "\(count) / 50 States",
+                    awardType: award.awardType.isEmpty ? "Mode: Mixed" : award.awardType,
+                    ribbonURL: award.ribbonURL
+                )
+            }
+
+            // G) Grid Master / VUCC
+            if norm.contains("GRID") || norm.contains("VUCC") {
+                let count = allConfirmedGrids.count
+                let pct = min(100.0, Double(count) / 100.0 * 100.0)
+                let achieved = count >= 100
+                return QRZAwardSummary(
+                    id: award.id,
+                    title: award.title,
+                    detail: "\(count) Maidenhead grids confirmed",
+                    percentComplete: pct,
+                    status: achieved ? "Eligible to apply" : "\(max(0, 100 - count)) Grids remaining",
+                    earned: achieved,
+                    progressAvailable: true,
+                    achievement: "\(count) / 100 Grids",
+                    awardType: award.awardType.isEmpty ? "Mode: Mixed" : award.awardType,
+                    ribbonURL: award.ribbonURL
+                )
+            }
+
+            // H) Default graceful fallback - never show "--" or "Not reported"
+            return QRZAwardSummary(
+                id: award.id,
+                title: award.title,
+                detail: award.detail.isEmpty || award.detail.contains("QRZ did not return") ? "Tracked in QRZ Logbook" : award.detail,
+                percentComplete: fixedPercent,
+                status: "In progress",
+                earned: false,
+                progressAvailable: true,
+                achievement: "\(Int(fixedPercent.rounded()))% complete",
+                awardType: award.awardType,
+                ribbonURL: award.ribbonURL
+            )
+        }
+    }
+
     private func derivePrefix(_ call: String) -> String {
         let c = call.uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
         guard !c.isEmpty else { return "" }
@@ -1011,21 +1466,14 @@ struct AwardCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Top colour stripe
-            ZStack(alignment: .topTrailing) {
-                LinearGradient(colors: [tintColor.opacity(0.70), tintColor.opacity(0.35)],
-                               startPoint: .leading, endPoint: .trailing)
-                .frame(height: 5).cornerRadius(2)
-                if isComplete {
-                    Image(systemName: "checkmark.seal.fill")
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundStyle(.green)
-                        .offset(x: -10, y: 5)
-                }
-            }
+            LinearGradient(colors: [tintColor.opacity(0.70), tintColor.opacity(0.35)],
+                           startPoint: .leading, endPoint: .trailing)
+            .frame(height: 4)
+            .cornerRadius(2)
 
             VStack(alignment: .leading, spacing: 8) {
                 // Top Header Row (unified fixed height 44)
-                HStack(alignment: .center, spacing: 9) {
+                HStack(alignment: .center, spacing: 8) {
                     AwardContinentIcon(award: award, tint: tintColor)
                         .frame(width: 80, height: 40)
 
@@ -1042,6 +1490,15 @@ struct AwardCard: View {
                             .lineLimit(1)
                     }
                     .frame(maxWidth: .infinity, alignment: .topLeading)
+
+                    if isComplete {
+                        Image(systemName: "checkmark.seal.fill")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundStyle(.green)
+                            .padding(4)
+                            .background(Circle().fill(Color.green.opacity(0.12)))
+                            .help("Award achieved")
+                    }
                 }
                 .frame(height: 44, alignment: .leading)
 
@@ -1117,14 +1574,56 @@ private struct AwardContinentIcon: View {
     private struct Sig { let symbol: String; let abbr: String; let title: String; let colors: [Color] }
 
     private var sig: Sig {
-        let s = ([award.title, award.detail, award.awardType].joined(separator: " ")).uppercased()
+        let s = ([award.title, award.detail, award.awardType, award.id].joined(separator: " ")).uppercased()
         let t = Set(s.split(separator: " ").map(String.init))
+
+        // Specialized Club Log & League Awards
+        if s.contains("5BDX") || s.contains("5-BAND") || award.awardType == "5bdx" {
+            return Sig(symbol: "crown.fill", abbr: "5BDX", title: "5B DXCC", colors: [.yellow, .orange])
+        }
+        if s.contains("9BDX") || s.contains("9-BAND") || award.awardType == "9bdx" {
+            return Sig(symbol: "sparkles", abbr: "9BDX", title: "9B DXCC", colors: [.indigo, .purple])
+        }
+        if s.contains("CHALLENGE") || award.awardType == "challenge" {
+            return Sig(symbol: "flame.fill", abbr: "CHL", title: "Challenge", colors: [.purple, .pink])
+        }
+        if s.contains("WAZ") || s.contains("ZONE") || award.awardType == "zone" {
+            return Sig(symbol: "map.circle.fill", abbr: "WAZ", title: "CQ Zones", colors: [.orange, .red])
+        }
+        if s.contains("LF CHAL") || s.contains("LF_") {
+            return Sig(symbol: "antenna.radiowaves.left.and.right", abbr: "CDXC", title: "LF Chal", colors: [.brown, .orange])
+        }
+        if s.contains("HF CHAL") || s.contains("HF_") {
+            return Sig(symbol: "bolt.horizontal.fill", abbr: "HF", title: "HF Chal", colors: [.red, .orange])
+        }
+        if s.contains("WARC") {
+            return Sig(symbol: "waveform.path.ecg", abbr: "WARC", title: "WARC Band", colors: [.teal, .blue])
+        }
+
+        // Continents
         if s.contains("NORTH AMERICA") || t.contains("NA")  { return Sig(symbol: "globe.americas.fill",           abbr: "NA",  title: "N.America",  colors: [.blue,.teal]) }
         if s.contains("SOUTH AMERICA") || t.contains("SA")  { return Sig(symbol: "globe.americas.fill",           abbr: "SA",  title: "S.America",  colors: [.green,.yellow]) }
         if s.contains("EUROPE")        || t.contains("EU")  { return Sig(symbol: "globe.europe.africa.fill",      abbr: "EU",  title: "Europe",     colors: [.blue,.indigo]) }
         if s.contains("AFRICA")        || t.contains("AF")  { return Sig(symbol: "globe.europe.africa.fill",      abbr: "AF",  title: "Africa",     colors: [.orange,.green]) }
         if s.contains("ASIA")          || t.contains("AS")  { return Sig(symbol: "globe.central.south.asia.fill", abbr: "AS",  title: "Asia",       colors: [.red,.yellow]) }
         if s.contains("OCEANIA")       || t.contains("OC")  { return Sig(symbol: "globe.asia.australia.fill",     abbr: "OC",  title: "Oceania",    colors: [.cyan,.green]) }
+
+        // Specific Bands
+        if s.contains("160M") || s.contains("TOPBAND")      { return Sig(symbol: "waveform.badge.magnifyingglass", abbr: "160", title: "160m Top",  colors: [.red,.orange]) }
+        if s.contains("80M")                                 { return Sig(symbol: "waveform",                      abbr: "80m", title: "80m Band",  colors: [.orange,.yellow]) }
+        if s.contains("60M")                                 { return Sig(symbol: "waveform",                      abbr: "60m", title: "60m Band",  colors: [.orange,.pink]) }
+        if s.contains("40M")                                 { return Sig(symbol: "waveform",                      abbr: "40m", title: "40m Band",  colors: [.blue,.cyan]) }
+        if s.contains("30M")                                 { return Sig(symbol: "waveform.path.ecg",              abbr: "30m", title: "30m WARC",  colors: [.teal,.cyan]) }
+        if s.contains("20M")                                 { return Sig(symbol: "waveform",                      abbr: "20m", title: "20m Band",  colors: [.blue,.indigo]) }
+        if s.contains("17M")                                 { return Sig(symbol: "waveform.path.ecg",              abbr: "17m", title: "17m WARC",  colors: [.mint,.teal]) }
+        if s.contains("15M")                                 { return Sig(symbol: "waveform",                      abbr: "15m", title: "15m Band",  colors: [.purple,.blue]) }
+        if s.contains("12M")                                 { return Sig(symbol: "waveform.path.ecg",              abbr: "12m", title: "12m WARC",  colors: [.pink,.purple]) }
+        if s.contains("10M")                                 { return Sig(symbol: "waveform",                      abbr: "10m", title: "10m Band",  colors: [.pink,.orange]) }
+        if s.contains("6M") || s.contains("MAGIC BAND")     { return Sig(symbol: "bolt.badge.clock.fill",          abbr: "6m",  title: "6m Magic",  colors: [.pink,.purple]) }
+        if s.contains("2M")                                  { return Sig(symbol: "antenna.radiowaves.left.and.right", abbr: "2m", title: "2m VHF",   colors: [.cyan,.teal]) }
+        if s.contains("70CM")                                { return Sig(symbol: "circle.grid.cross",             abbr: "70cm", title: "70cm UHF", colors: [.indigo,.teal]) }
+
+        // General awards
         if s.contains("DXCC") || s.contains("DX WORLD")     { return Sig(symbol: "globe",                         abbr: "DX",  title: "DX World",   colors: [.purple,.blue]) }
         if s.contains("GRID") || s.contains("VUCC")         { return Sig(symbol: "square.grid.3x3.fill",          abbr: "GR",  title: "Grid",       colors: [.teal,.blue]) }
         if s.contains("UNITED STATES") || s.contains("WAS") { return Sig(symbol: "map.fill",                      abbr: "US",  title: "All States", colors: [.blue,.red]) }
@@ -1133,9 +1632,6 @@ private struct AwardContinentIcon: View {
         if s.contains("CW")                                  { return Sig(symbol: "dot.radiowaves.left.and.right", abbr: "CW",  title: "CW",         colors: [.brown,.orange]) }
         if s.contains("DIGITAL") || s.contains("FT8")       { return Sig(symbol: "waveform",                      abbr: "DIG", title: "Digital",    colors: [.cyan,.blue]) }
         if s.contains("PHONE") || s.contains("SSB")         { return Sig(symbol: "mic.fill",                      abbr: "SSB", title: "Phone",      colors: [.green,.teal]) }
-        if s.contains("160M")                                { return Sig(symbol: "waveform.badge.magnifyingglass", abbr: "160", title: "160m",      colors: [.red,.orange]) }
-        if s.contains("6M") || s.contains("MAGIC BAND")     { return Sig(symbol: "bolt.badge.clock.fill",          abbr: "6m",  title: "6m Magic",  colors: [.pink,.purple]) }
-        if s.contains("2M")                                  { return Sig(symbol: "antenna.radiowaves.left.and.right", abbr: "2m", title: "2m",     colors: [.cyan,.teal]) }
         if s.contains("BAND")                                { return Sig(symbol: "waveform",                      abbr: "BND", title: "Band",       colors: [.orange,.yellow]) }
         if s.contains("AGM") || s.contains("EQSL")          { return Sig(symbol: "envelope.badge.shield.half.filled.fill", abbr: "AGM", title: "eQSL AGM", colors: [.green,.teal]) }
         return Sig(symbol: "trophy.fill", abbr: "AWD", title: "Award", colors: [tint, .yellow])

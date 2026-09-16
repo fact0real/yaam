@@ -283,4 +283,52 @@ The Network-Attached Transceiver Emulator (`NetworkTransceiverEmulatorEngine.swi
    - Protocol activity terminal console with category filtering.
    - Accessible via Operator Desk (Tab 24), Tools menu (`Cmd+Option+E`), or standalone window scene (`YAAMWindowID.transceiverEmulator`).
 
+---
 
+## 12. Multi-Rig FT8 Cluster & SO2R/SO3R Architecture
+
+### 12.1 Subsystem Topology & Multi-Instance Engine Design (`MultiRigFT8Hub.swift`, `FT8EngineService.swift`)
+The Multi-Rig FT8 Cluster subsystem orchestrates up to 4 concurrent, physically isolated transceivers. Rather than sharing a single audio pipeline or multiplexing CAT sessions sequentially, YAAM deploys fully autonomous DSP and control stacks:
+
+1. **Autonomous Slot Containers (`MultiRigSlot`):**
+   - Each slot owns an isolated instance of `FT8EngineService` executing on dedicated Grand Central Dispatch queues.
+   - Separate audio processing: Each engine binds to an explicit CoreAudio hardware UID (e.g. `USB Audio CODEC`, `BlackHole 2ch`, or internal network audio stream from `IcomNetworkRadio`).
+   - Separate CAT driver layer: Supported drivers include Icom LAN UDP (direct raw socket), Hamlib `rigctld` (TCP socket), Lab599 Discovery TX-500 (USB serial), Xiegu X6100 (USB-C CI-V), Icom USB, and Internal Network-Attached Transceiver Emulator.
+2. **State Synchronization & Persistence (`MultiRigFT8Hub`):**
+   - MainActor-isolated orchestrator managing slot lifecycle, layout preferences, and hardware configuration persistence via `UserDefaults` keys `multiRigFT8.slots.v2`, `multiRigFT8.layout.v2`, and `multiRigFT8.interlock.v2`.
+   - Defaults to an active 3-slot SO3R profile:
+     - **Slot 1:** 20m (14.074 MHz) on Icom LAN UDP (`192.168.1.150`).
+     - **Slot 2:** 40m (7.074 MHz) on Lab599 Discovery TX-500 (USB serial).
+     - **Slot 3:** 10m (28.074 MHz) on Transceiver Emulator / rigctld (`127.0.0.1:4532`).
+
+### 12.2 Cross-Rig Hardware Interlock Coordinator (`MultiRigInterlockCoordinator`)
+Simultaneous transmission across collocated antennas introduces severe risks of receiver desensitization or RF front-end damage. The `MultiRigInterlockCoordinator` acts as an arbitrated hardware gate between DSP engines and physical PTT keying:
+
+- **Interlock Policies (`MultiRigInterlockPolicy`):**
+  - `.concurrent`: Unrestricted concurrent transmission across all armed slots (designed for stations with high-isolation bandpass filters or separate antenna towers).
+  - `.strictLockout`: Hardware mutex policy. Only one transceiver may assert PTT at any instant. If Rig 1 is transmitting, Rig 2 is held in standby until Rig 1 releases PTT.
+  - `.alternatingSlots` (SO2R Standard): Time-synchronized alternating slots based on the 15-second FT8 epoch:
+    - Even slots (`:00`, `:30`): Primary Slot (Rig 1) transmits; secondary slots remain in receive.
+    - Odd slots (`:15`, `:45`): Secondary Slot (Rig 2) transmits; Rig 1 remains in receive.
+- **Emergency Circuit (`disarmAllTransmit`):** Instantaneously disarms transmit flags and de-asserts PTT across all active radio drivers simultaneously.
+
+### 12.3 Cross-Band DX Opportunity Radar
+Decoded message streams from all active slots are continuously fed into an aggregated opportunity evaluation pipeline:
+- Decodes are filtered for `CQ` announcements and analyzed against the central station database.
+- Opportunity badges are computed in real time: `NEW DXCC`, `NEW BAND`, `NEW GRID`, or `CALLING ME`.
+- **1-Click Cross-Band Dispatch (`answerOpportunity`):** Automatically selects the corresponding transceiver slot, locks the FT8 audio offset frequency, formats the response message (e.g. `JA1ABC EP2AES LL45`), and arms transmission for the subsequent slot.
+
+### 12.4 Unified Database Transaction & Log Concurrency
+- `FT8EngineService` completion callbacks trigger `AppState.logMultiRigQSO(slot:qso:)`.
+- Dispatched safely onto `@MainActor` to prevent SQLite write lock contention.
+- Enriches ADIF records with `RADIO` metadata tags (e.g. `Rig 1 (20m FT8)`) and persists frequencies directly to `LogbookDatabase`.
+- Updates global worked/confirmed tables so other active slots immediately recognize newly worked entities.
+
+### 12.5 Presentation Layer & Window Topology (`MultiRigFT8View.swift`)
+- **Responsive Layout Engine (`MultiRigLayoutMode`):**
+  - `tripleColumn`: 3 parallel columns with independent waterfalls and decoders.
+  - `heroAndSub`: High-resolution hero waterfall above dual compact sub-rig cards.
+  - `dualSplit`: 50/50 vertical split for classic SO2R workflows.
+  - `quadGrid`: 2x2 grid for 4-transceiver monitoring.
+  - `focusedSingle`: Single active slot focus with hot-switch tab bar.
+- **Standalone Window Topology:** Available in main window Operator Desk workspace and as a dedicated secondary window scene (`YAAMWindowID.multiRigFT8`) via shortcut `Cmd + Option + 8`.

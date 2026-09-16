@@ -14,9 +14,13 @@ import Foundation
 import Network
 
 public enum CWTransmissionMode: String, CaseIterable, Identifiable, Sendable {
+    case icomUSB = "Icom USB (CI-V CAT & Pin)"
     case winkeyer = "K1EL WinKeyer (USB Serial)"
     case serialDTR_RTS = "Serial Pin (DTR/RTS Keying)"
     case catMorse = "CAT Morse (Rig/FLRig)"
+    case lab599TX500 = "Lab599 TX-500 (USB-C CAT & Pin)"
+    case fx4cr = "FX-4CR (USB-C & Bluetooth CAT/Pin)"
+    case xiegu6100 = "Xiegu X6100 (USB-C CAT & Pin)"
     case tci = "TCI DSP (SunSDR / Thetis)"
     case cwdaemon = "cwdaemon (UDP 6789)"
     case audioOnly = "Audio Sidetone Only"
@@ -25,9 +29,13 @@ public enum CWTransmissionMode: String, CaseIterable, Identifiable, Sendable {
 
     public var iconName: String {
         switch self {
+        case .icomUSB: return "radio.fill"
         case .winkeyer: return "cable.connector.horizontal"
         case .serialDTR_RTS: return "cable.connector"
         case .catMorse: return "antenna.radiowaves.left.and.right"
+        case .lab599TX500: return "bolt.horizontal.fill"
+        case .fx4cr: return "antenna.radiowaves.left.and.right"
+        case .xiegu6100: return "radio.fill"
         case .tci: return "waveform.badge.magnifyingglass"
         case .cwdaemon: return "network"
         case .audioOnly: return "speaker.wave.2.fill"
@@ -170,7 +178,13 @@ public final class CWKeyerService: ObservableObject {
             let pinDesc = "CW:\(sk.cwPin.rawValue) PTT:\(sk.pttPin.rawValue)"
             return (sk.isConnected, sk.isConnected ? "Serial Keyer" : "Disconnected", sk.isConnected ? pinDesc : (sk.selectedPort.isEmpty ? "No port" : sk.selectedPort.components(separatedBy: "/").last ?? sk.selectedPort))
         case .catMorse:
-            if rigControlClientRef?.state.isConnected == true {
+            if FX4CRDriver.shared.isConnected {
+                let d = FX4CRDriver.shared
+                return (true, "FX-4CR CAT (\(d.connectionType.rawValue))", "\(d.formattedFrequency) \(d.mode)")
+            } else if IcomUSBRadioDriver.shared.isConnected {
+                let d = IcomUSBRadioDriver.shared
+                return (true, "\(d.model.rawValue) CI-V", "\(d.formattedFrequency) \(d.mode)")
+            } else if rigControlClientRef?.state.isConnected == true {
                 let snap = rigControlClientRef?.snapshot
                 return (true, "Hamlib CAT", snap != nil ? "\(snap!.frequencyMHz) \(snap!.mode)" : "Connected")
             } else if FLRigClient.shared.isConnected {
@@ -178,6 +192,21 @@ public final class CWKeyerService: ObservableObject {
             } else {
                 return (false, "CAT Offline", "Connect Rig / FLRig")
             }
+        case .icomUSB:
+            let icom = IcomUSBRadioDriver.shared
+            let portShort = icom.selectedPort.isEmpty ? "No port" : icom.selectedPort.components(separatedBy: "/").last ?? icom.selectedPort
+            return (icom.isConnected, icom.isConnected ? "\(icom.model.rawValue) CI-V" : "Icom Offline", portShort)
+        case .lab599TX500:
+            let tx500 = Lab599TX500Driver.shared
+            return (tx500.isConnected, tx500.isConnected ? "TX-500 CAT/Pin" : "TX-500 Offline", tx500.selectedPort.isEmpty ? "No port" : tx500.selectedPort.components(separatedBy: "/").last ?? tx500.selectedPort)
+        case .fx4cr:
+            let fx4cr = FX4CRDriver.shared
+            let portShort = fx4cr.selectedPort.isEmpty ? "No port" : fx4cr.selectedPort.components(separatedBy: "/").last ?? fx4cr.selectedPort
+            return (fx4cr.isConnected, fx4cr.isConnected ? "FX-4CR (\(fx4cr.connectionType.rawValue))" : "FX-4CR Offline", portShort)
+        case .xiegu6100:
+            let xiegu = Xiegu6100Driver.shared
+            let portShort = xiegu.selectedPort.isEmpty ? "No port" : xiegu.selectedPort.components(separatedBy: "/").last ?? xiegu.selectedPort
+            return (xiegu.isConnected, xiegu.isConnected ? "Xiegu X6100 CI-V" : "X6100 Offline", portShort)
         case .tci:
             return (TCIClient.shared.isConnected, TCIClient.shared.isConnected ? "TCI Connected" : "TCI Offline", "ExpertSDR")
         case .cwdaemon:
@@ -421,6 +450,48 @@ public final class CWKeyerService: ObservableObject {
                 } else {
                     await self.simulateTransmitProgress(text: expanded)
                 }
+            case .icomUSB:
+                let icom = IcomUSBRadioDriver.shared
+                if icom.isConnected {
+                    icom.setKeyerSpeed(self.wpm)
+                    icom.sendMorse(expanded)
+                }
+                if self.sidetoneEnabled {
+                    await self.playMorseSidetone(text: expanded)
+                } else {
+                    await self.simulateTransmitProgress(text: expanded)
+                }
+            case .lab599TX500:
+                let tx500 = Lab599TX500Driver.shared
+                if tx500.isConnected {
+                    tx500.sendMorse(expanded, wpm: self.wpm)
+                }
+                if self.sidetoneEnabled {
+                    await self.playMorseSidetone(text: expanded)
+                } else {
+                    await self.simulateTransmitProgress(text: expanded)
+                }
+            case .fx4cr:
+                let fx4cr = FX4CRDriver.shared
+                if fx4cr.isConnected {
+                    fx4cr.sendMorse(expanded, wpm: self.wpm)
+                }
+                if self.sidetoneEnabled {
+                    await self.playMorseSidetone(text: expanded)
+                } else {
+                    await self.simulateTransmitProgress(text: expanded)
+                }
+            case .xiegu6100:
+                let xiegu = Xiegu6100Driver.shared
+                if xiegu.isConnected {
+                    xiegu.setKeyerSpeed(self.wpm)
+                    xiegu.sendMorse(expanded)
+                }
+                if self.sidetoneEnabled {
+                    await self.playMorseSidetone(text: expanded)
+                } else {
+                    await self.simulateTransmitProgress(text: expanded)
+                }
             case .tci:
                 TCIClient.shared.sendCW(text: expanded, wpm: self.wpm)
                 await self.simulateTransmitProgress(text: expanded)
@@ -455,6 +526,14 @@ public final class CWKeyerService: ObservableObject {
             WinKeyerDriver.shared.abort()
         case .serialDTR_RTS:
             SerialKeyerDriver.shared.abort()
+        case .icomUSB:
+            IcomUSBRadioDriver.shared.stopMorse()
+        case .lab599TX500:
+            Lab599TX500Driver.shared.stopMorse()
+        case .fx4cr:
+            FX4CRDriver.shared.stopMorse()
+        case .xiegu6100:
+            Xiegu6100Driver.shared.stopMorse()
         case .tci:
             TCIClient.shared.stopCW()
         case .cwdaemon:
@@ -462,7 +541,15 @@ public final class CWKeyerService: ObservableObject {
         case .catMorse:
             Task { [weak self] in
                 guard let self else { return }
-                if self.rigControlClientRef?.state.isConnected == true {
+                if FX4CRDriver.shared.isConnected {
+                    FX4CRDriver.shared.stopMorse()
+                } else if Lab599TX500Driver.shared.isConnected {
+                    Lab599TX500Driver.shared.stopMorse()
+                } else if IcomUSBRadioDriver.shared.isConnected {
+                    IcomUSBRadioDriver.shared.stopMorse()
+                } else if Xiegu6100Driver.shared.isConnected {
+                    Xiegu6100Driver.shared.stopMorse()
+                } else if self.rigControlClientRef?.state.isConnected == true {
                     self.rigControlClientRef?.stopMorse()
                 } else if FLRigClient.shared.isConnected {
                     try? await FLRigClient.shared.stopMorse()
@@ -574,11 +661,25 @@ public final class CWKeyerService: ObservableObject {
     // MARK: - CAT Morse Sender
 
     private func sendViaCAT(text: String) async {
-        // Priority 1: Hamlib rigctld \send_morse
-        if rigControlClientRef?.state.isConnected == true {
+        // Priority 0: Direct FX-4CR Kenwood CAT KY Morse
+        if FX4CRDriver.shared.isConnected {
+            FX4CRDriver.shared.sendMorse(text, wpm: wpm)
+        // Priority 1: Direct Lab599 TX-500 Kenwood CAT KY Morse
+        } else if Lab599TX500Driver.shared.isConnected {
+            Lab599TX500Driver.shared.sendMorse(text, wpm: wpm)
+        // Priority 2: Direct Icom USB CI-V CAT Command 17
+        } else if IcomUSBRadioDriver.shared.isConnected {
+            IcomUSBRadioDriver.shared.setKeyerSpeed(wpm)
+            IcomUSBRadioDriver.shared.sendMorse(text)
+        // Priority 2.5: Direct Xiegu X6100 CI-V CAT Command 17
+        } else if Xiegu6100Driver.shared.isConnected {
+            Xiegu6100Driver.shared.setKeyerSpeed(wpm)
+            Xiegu6100Driver.shared.sendMorse(text)
+        // Priority 3: Hamlib rigctld \send_morse
+        } else if rigControlClientRef?.state.isConnected == true {
             rigControlClientRef?.setKeyerSpeed(wpm)
             rigControlClientRef?.sendMorse(text)
-        // Priority 2: FLRig XML-RPC rig.send_morse
+        // Priority 4: FLRig XML-RPC rig.send_morse
         } else if FLRigClient.shared.isConnected {
             try? await FLRigClient.shared.sendMorse(text)
         }

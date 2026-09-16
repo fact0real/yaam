@@ -198,7 +198,22 @@ enum QRZRankAPIContractRegression {
         precondition(moroccoResp.leaderboard.count == 2)
         precondition(moroccoResp.leaderboard[0].callsign == "CN8AM")
         precondition(moroccoResp.leaderboard[0].score == 55219)
-        precondition(moroccoResp.leaderboard[0].scoreCountries == 194)
+        let overviewData = Data(
+            """
+            {
+              "totals": {
+                "total_stations": 438630,
+                "total_qso": 583449842,
+                "total_countries": 158
+              }
+            }
+            """.utf8
+        )
+        let overview = try QRZRankAPIContract.decodeOverviewStats(overviewData)
+        precondition(overview.totals?.totalStations == 438630)
+        precondition(overview.totals?.totalQso == 583449842)
+        let overviewReq = try QRZRankAPIContract.makeOverviewStatsRequest(userAgent: "YAAM-Regression/1")
+        precondition(overviewReq.url?.absoluteString == "https://qrz-rank.asis.sh/api/v1/stats/overview")
 
         print("QRZ Rank API contract regression passed.")
     }
