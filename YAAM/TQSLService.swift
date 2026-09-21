@@ -77,6 +77,20 @@ public final class TQSLService: ObservableObject {
             let items = try fileManager.contentsOfDirectory(atPath: sourceDir)
             var count = 0
             for item in items {
+                // Never copy active SQLite database files, WAL journals, lock files, logs, or temporary files
+                let lower = item.lowercased()
+                if lower.starts(with: "uploaded.db") ||
+                   lower.starts(with: "dblock") ||
+                   lower.starts(with: "dberr") ||
+                   lower.starts(with: "curl") ||
+                   lower.hasSuffix(".tq8") ||
+                   lower.hasSuffix(".adi") ||
+                   lower.hasSuffix(".log") ||
+                   lower.starts(with: "yaam_lotw") ||
+                   lower.starts(with: "yaam-lotw") {
+                    continue
+                }
+
                 let srcItem = (sourceDir as NSString).appendingPathComponent(item)
                 let dstItem = (targetDir as NSString).appendingPathComponent(item)
 
@@ -187,51 +201,20 @@ public final class TQSLService: ObservableObject {
 
         defer { self.isProcessing = false }
 
-        return try await withCheckedThrowingContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                Self.synchronizeTQSLStorage()
-                let process = Process()
-                process.executableURL = URL(fileURLWithPath: binaryPath)
-                process.environment = Self.tqslProcessEnvironment()
+        let outcome = await TQSLCoordinator.shared.execute(
+            adifFileURL: adifFileURL,
+            stationLocation: stationLocation,
+            certificatePassword: certificatePassword,
+            customExecutablePath: binaryPath
+        )
 
-                var arguments: [String] = ["-d", "-u", "-x", "-q"]
-                if !stationLocation.isEmpty {
-                    arguments.append(contentsOf: ["-l", stationLocation])
-                }
-                if !certificatePassword.isEmpty {
-                    arguments.append(contentsOf: ["-p", certificatePassword])
-                }
-                arguments.append(adifFileURL.path)
-                process.arguments = arguments
-
-                let pipe = Pipe()
-                process.standardOutput = pipe
-                process.standardError = pipe
-
-                do {
-                    try process.run()
-                    process.waitUntilExit()
-
-                    let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                    let output = String(data: data, encoding: .utf8) ?? ""
-
-                    DispatchQueue.main.async {
-                        self.lastLogOutput = output
-                        if process.terminationStatus == 0 {
-                            continuation.resume(returning: (true, output))
-                        } else {
-                            let error = NSError(domain: "TQSLService", code: Int(process.terminationStatus), userInfo: [NSLocalizedDescriptionKey: "TQSL exited with code \(process.terminationStatus):\n\(output)"])
-                            self.lastError = error.localizedDescription
-                            continuation.resume(throwing: error)
-                        }
-                    }
-                } catch {
-                    DispatchQueue.main.async {
-                        self.lastError = error.localizedDescription
-                        continuation.resume(throwing: error)
-                    }
-                }
-            }
+        self.lastLogOutput = outcome.message
+        if outcome.success {
+            return (true, outcome.message)
+        } else {
+            let error = NSError(domain: "TQSLService", code: 1, userInfo: [NSLocalizedDescriptionKey: outcome.message])
+            self.lastError = outcome.message
+            throw error
         }
     }
 }

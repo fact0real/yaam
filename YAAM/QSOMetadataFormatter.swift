@@ -59,22 +59,15 @@ enum QSOMetadataFormatter {
                 case "SRX", "EXCHANGE", "CONTEST_EXCHANGE":
                     if contestExchange == nil { contestExchange = value }
                 case "MY_GRIDSQUARE":
-                    // Operator's own grid - do not overwrite station grid, but can fallback if grid is empty
-                    if grid == nil && !value.isEmpty {
-                        grid = value
-                    }
+                    // Operator's own grid - should never overwrite or fallback to contacted station's grid
+                    break
                 default:
                     break
                 }
             }
             
             // Remove all [KEY=VALUE] tokens from the comment to get clean readable text
-            working = regex.stringByReplacingMatches(
-                in: working,
-                options: [],
-                range: NSRange(location: 0, length: nsString.length),
-                withTemplate: ""
-            )
+            working = cleanComment(working)
         }
         
         let cleaned = working.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -88,6 +81,21 @@ enum QSOMetadataFormatter {
             contestExchange: contestExchange,
             cleanComment: cleaned
         )
+    }
+    /// Strips bracketed pseudo-tags like [MY_GRIDSQUARE=LM55], [STATE=...], [IOTA=...] from comment strings.
+    static func cleanComment(_ rawComment: String) -> String {
+        let pattern = #"\[[A-Za-z0-9_]+=[^\]]*\]"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
+            return rawComment.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        let nsString = rawComment as NSString
+        let cleaned = regex.stringByReplacingMatches(
+            in: rawComment,
+            options: [],
+            range: NSRange(location: 0, length: nsString.length),
+            withTemplate: ""
+        )
+        return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
     }
     
     /// Formats frequency and band into a crisp band tag and rounded MHz string

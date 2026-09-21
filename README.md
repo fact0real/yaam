@@ -26,6 +26,23 @@ YAAM, short for Yet Another ADIF Manager, is a native macOS amateur-radio logboo
 4. Sync LoTW and QRZ confirmations to keep local counts aligned with cloud logbooks.
 5. Track QRZ Rank competitors and use the leaderboard recommendation to decide whether to invest in QSO volume, band coverage, DXCC reach, or 6m opportunities.
 
+## Operator Desk Workspaces
+
+The desk uses six workspaces with a contextual tool strip. Each workspace remembers its last tool. **All tools** searches tool names, services, and earlier names such as Sync Center and Connect. The macOS Tools menu follows the same structure.
+
+| Workspace | Tools |
+| --- | --- |
+| Operating | Quick Log, Shack Clock, Portable |
+| DX Activity | DX Cluster, Club Log Spots, Bandmap, Call Roster, Globe & Grids, 6m Watch, DX News, ON4KST Chat |
+| Radio & Digital | Radio Bridge, FLRig, TCI SDR, Rotator, FT8 Station, Multi-Rig FT8, Digital Suite, Emulator |
+| CW Workstation | Keyer & Memories, Academy, Q-Codes & Prosigns, Audio Decoder, Pileup Trainer, WinKeyer & Hardware |
+| Contest & Awards | Contest Operations, Contest Calendar, Awards, Club Memberships |
+| QSL & Data | QSL Hub, Labels & Printing, Log Sources & Automation, Cloud & Companion |
+
+**QSL Hub → Sync Confirmations** handles LoTW, QRZ, eQSL, and Club Log. **Log Sources & Automation → Sync Local Logs** imports External ADIF and SDR-Control updates; Wavelog has its own button. The existing automatic schedule continues to cover External ADIF, SDR-Control, LoTW, and QRZ. Cloud folder synchronization and the phone companion remain under Cloud & Companion.
+
+Existing destination IDs and operating shortcuts are retained. Log Sources & Automation uses **⌘⌥⇧S**, resolving the previous conflict with **File → Save As (⌘⇧S)**. Detached Shack Clock, emulator, and Multi-Rig windows remain available under **Tools → Open in Separate Window**.
+
 ## Developer & User Documentation Guides
 
 Comprehensive user manuals and architectural blueprints are available:

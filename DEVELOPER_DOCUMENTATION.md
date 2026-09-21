@@ -203,6 +203,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -scheme YAAM
 ```
 
 ### 8.3 Key Regression Suites to Check Before Commits:
+- `OperatorDeskNavigationRegression.swift`: Verifies all 26 legacy deep links, CW subroutes, unique tool ownership, group restoration, and old-name search aliases. Compile alongside `YAAM/OperatorDeskNavigation.swift` to run without starting station services.
 - `QSOIdentityRegression.swift`: Ensures deduplication keys never regress.
 - `ConfirmationSyncRegression.swift`: Verifies LoTW and QRZ record merging.
 - `CountryFlagLookupRegression.swift`: Validates country canonicalization and emoji flag generation.
@@ -235,7 +236,7 @@ YAAM unifies multi-source weekly DX intelligence into structured, rich domain mo
   - Cached locally in `UserDefaults` under `dxpeditionCache.v2` for offline resilience.
 
 ### 10.2 DX News & Intelligence Desk (`DXNewsAndIntelligenceView.swift`)
-Located in Operator Desk (Desk Tab 21, shortcut `Cmd+Shift+N`):
+Located in Operator Desk → DX Activity → DX News (legacy section 21, shortcut `Cmd+Shift+N`):
 1. **DXpeditions Intelligence:** Live cluster spot cross-referencing, filter chips (Active Now, Upcoming, ATNO/Needed, Digital FT8, 6m, IOTA), and one-click rig QSY.
 2. **Live DX News Feed:** Full-text searchable cards with category tagging and an in-app article reader sheet.
 3. **Weekly Bulletins Reader:** Full-text viewer for DX-World and 425 issues with in-text search, copy to clipboard, and direct web links.
@@ -281,7 +282,7 @@ The Network-Attached Transceiver Emulator (`NetworkTransceiverEmulatorEngine.swi
    - Front panel OLED display with glowing digital VFO, band badges, dynamic analog S/Po/SWR meter, and tuning controls.
    - Real-time Canvas-based audio spectrum visualizer.
    - Protocol activity terminal console with category filtering.
-   - Accessible via Operator Desk (Tab 24), Tools menu (`Cmd+Option+E`), or standalone window scene (`YAAMWindowID.transceiverEmulator`).
+   - Accessible via Operator Desk → Radio & Digital → Emulator (legacy section 24), Tools menu (`Cmd+Option+E`), or standalone window scene (`YAAMWindowID.transceiverEmulator`).
 
 ---
 

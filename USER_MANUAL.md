@@ -273,6 +273,17 @@ As you type callsigns into QuickLog, the CW Keyer, or the CW Pileup Simulator (a
 
 ## 9. Operator Desk & Direct Icom MK2 LAN Architecture
 
+Operator Desk is organized into six workspaces: **Operating**, **DX Activity**, **Radio & Digital**, **CW Workstation**, **Contest & Awards**, and **QSL & Data**. Choose a workspace in the upper row, then a tool in the lower row. When the tool strip cannot fit, its menu lists every tool in that workspace. **All tools** searches the entire desk, including familiar older names.
+
+- Radio Bridge, FLRig, TCI SDR, Rotator, FT8 Station, Multi-Rig FT8, Digital Suite, and Emulator each have one destination under **Radio & Digital**.
+- WinKeyer diagnostics and the complete CW hardware setup are under **CW Workstation → WinKeyer & Hardware**.
+- DXpedition schedules and bulletins live in **DX Activity → DX News**. **Contest & Awards → Contest Calendar** links to them and focuses on contest planning.
+- **QSL & Data → QSL Hub → Sync Confirmations** downloads online confirmations. Its ellipsis menu includes LoTW-only and QRZ-only sync.
+- **QSL & Data → Log Sources & Automation → Sync Local Logs** imports External ADIF and SDR-Control updates. Wavelog has its own sync button. The existing automatic schedule still covers local logs plus LoTW and QRZ; its saved settings are preserved.
+- **Cloud & Companion** contains cloud folder packages, the mobile companion, and the local API. **Labels & Printing** contains the QSL label designer.
+
+Each workspace remembers its last tool. Existing operating shortcuts remain; Log Sources & Automation is **Command-Option-Shift-S**, leaving **Command-Shift-S** for Save As. Separate windows are under **Tools → Open in Separate Window**.
+
 For operators of the **IC-7300MK2**, **IC-7610**, and **IC-705**:
 * Direct Ethernet and Wi-Fi LAN connection eliminating external USB cables and virtual COM port drivers.
 * CI-V rig control packets on UDP port 50001; low-latency 48 kHz 16-bit uncompressed digital audio stream on UDP port 50002.
@@ -655,5 +666,4 @@ Located at the bottom of the console, the **Cross-Band DX Opportunity Radar** co
 
 > **Support & Feedback:**  
 > Press `Cmd + Shift + F` anywhere within YAAM to open the feedback panel to submit suggestions, bug reports, or feature requests directly to the development team.
-
 

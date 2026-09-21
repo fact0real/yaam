@@ -110,6 +110,8 @@ public final class OliviaMFSKEngine: ObservableObject {
     private var recentToneIndices: [Int] = []
     private var txTask: Task<Void, Never>?
     private var simTimer: Timer?
+    private var simPIdx: Int = 0
+    private var simCIdx: Int = 0
 
     public init() {
         self.samplesPerSymbol = 48000.0 / config.baudRate
@@ -119,7 +121,6 @@ public final class OliviaMFSKEngine: ObservableObject {
     // MARK: - Frequency Helpers
 
     public func toneFrequency(at index: Int) -> Double {
-        let n = config.toneCount
         let spacing = config.toneSpacingHz
         let startFreq = centerFrequencyHz - (config.bandwidthHz * 0.5) + (spacing * 0.5)
         return startFreq + Double(index) * spacing
@@ -353,15 +354,15 @@ public final class OliviaMFSKEngine: ObservableObject {
 
     private func synthesizeAndPlayMFSKChar(_ char: Character) async {
         let ascii = Int(char.asciiValue ?? 32)
-        let numTones = await config.toneCount
-        let symbolDuration = 1.0 / (await config.baudRate)
-        let sRate = await sampleRate
+        let numTones = config.toneCount
+        let symbolDuration = 1.0 / config.baudRate
+        let sRate = sampleRate
         let frameCount = Int(symbolDuration * sRate)
 
         // Generate 8-tone Walsh-Hadamard sequence for character
         for i in 0..<8 {
             let toneIdx = (ascii + i * 3) % numTones
-            let freq = await toneFrequency(at: toneIdx)
+            let freq = toneFrequency(at: toneIdx)
             await playContinuousTone(frequency: freq, frameCount: frameCount)
         }
     }
@@ -387,14 +388,8 @@ public final class OliviaMFSKEngine: ObservableObject {
             }
         }
 
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            Task { @MainActor in
-                if let player = self.playerNode, player.isPlaying {
-                    player.scheduleBuffer(buffer) { continuation.resume() }
-                } else {
-                    continuation.resume()
-                }
-            }
+        if let player = self.playerNode, player.isPlaying {
+            await player.scheduleBuffer(buffer)
         }
     }
 
@@ -418,19 +413,19 @@ public final class OliviaMFSKEngine: ObservableObject {
             "73 GL ES HPE CU AGN DE G4ABC SK "
         ]
 
-        var pIdx = 0
-        var cIdx = 0
+        simPIdx = 0
+        simCIdx = 0
 
         simTimer = Timer.scheduledTimer(withTimeInterval: 0.18, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                let phrase = Array(phrases[pIdx % phrases.count])
+                let phrase = Array(phrases[self.simPIdx % phrases.count])
                 guard !phrase.isEmpty else { return }
-                let ch = phrase[cIdx % phrase.count]
-                cIdx += 1
-                if cIdx >= phrase.count {
-                    cIdx = 0
-                    pIdx += 1
+                let ch = phrase[self.simCIdx % phrase.count]
+                self.simCIdx += 1
+                if self.simCIdx >= phrase.count {
+                    self.simCIdx = 0
+                    self.simPIdx += 1
                 }
 
                 self.appendDecodedChar(ch)

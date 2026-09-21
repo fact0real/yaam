@@ -136,141 +136,29 @@ struct YAAMApp: App {
 
             // MARK: - Tools & Desks Menu
             CommandMenu("Tools") {
-                Button("Quick Log QSO") {
-                    appState.selectedTab = 5
-                    appState.operatorDeskSection = 0
-                }
-                .keyboardShortcut("l", modifiers: .command)
-
-                Button("Digital Call Roster (Live FT8)") {
-                    appState.selectedTab = 5
-                    appState.operatorDeskSection = 20
-                }
-                .keyboardShortcut("r", modifiers: [.command, .shift])
-
-                Button("CW Keyer Memories Console") {
-                    appState.selectedTab = 5
-                    appState.operatorDeskSection = 14
-                    appState.cwWorkstationSection = 0
-                }
-                .keyboardShortcut("k", modifiers: [.command, .shift])
-
-                Button("CW Academy & Trainer") {
-                    appState.selectedTab = 5
-                    appState.operatorDeskSection = 14
-                    appState.cwWorkstationSection = 1
-                }
-                .keyboardShortcut("a", modifiers: [.command, .shift])
-
-                Button("CW Q-Codes & Prosigns Reference") {
-                    appState.selectedTab = 5
-                    appState.operatorDeskSection = 14
-                    appState.cwWorkstationSection = 2
-                }
-                .keyboardShortcut("q", modifiers: [.command, .shift])
-
-                Button("Real-Time CW Audio Decoder") {
-                    appState.selectedTab = 5
-                    appState.operatorDeskSection = 14
-                    appState.cwWorkstationSection = 3
-                }
-                .keyboardShortcut("d", modifiers: [.command, .shift])
-
-                Button("3D Globe & Grid Tracker") {
-                    appState.selectedTab = 5
-                    appState.operatorDeskSection = 12
-                }
-                .keyboardShortcut("g", modifiers: .command)
-
-                Button("6m Magic Band Watch") {
-                    appState.selectedTab = 5
-                    appState.operatorDeskSection = 11
-                }
-                .keyboardShortcut("6", modifiers: .command)
-
-                Button("Contest Operations & Cabrillo") {
-                    appState.selectedTab = 5
-                    appState.operatorDeskSection = 4
-                }
-                .keyboardShortcut("4", modifiers: .command)
-
-                Button("Contest Calendar") {
-                    appState.selectedTab = 5
-                    appState.operatorDeskSection = 9
-                }
-
-                Button("Open DX Cluster") {
-                    appState.selectedTab = 5
-                    appState.operatorDeskSection = 1
-                }
-
-                Button("Bandmap Studio") {
-                    appState.selectedTab = 5
-                    appState.operatorDeskSection = 13
-                }
-                .keyboardShortcut("b", modifiers: [.command, .option])
-
-                Button("Club Log Personal Spots") {
-                    appState.selectedTab = 5
-                    appState.operatorDeskSection = 10
-                }
-
-                Button("DX News & Intelligence") {
-                    appState.selectedTab = 5
-                    appState.operatorDeskSection = 21
-                }
-                .keyboardShortcut("n", modifiers: [.command, .shift])
-
-                Button("Sync Center (LoTW & QRZ)") {
-                    appState.selectedTab = 5
-                    appState.operatorDeskSection = 2
-                }
-                .keyboardShortcut("s", modifiers: [.command, .shift])
-
-                Button("ON4KST Chat & Skeds") {
-                    appState.selectedTab = 5
-                    appState.operatorDeskSection = 17
-                }
-
-                Button("QSL Labels Studio") {
-                    appState.selectedTab = 5
-                    appState.operatorDeskSection = 19
-                }
-                .keyboardShortcut("p", modifiers: [.command, .option])
-
-                Button("Connected Station (Ecosystem)") {
-                    appState.selectedTab = 5
-                    appState.operatorDeskSection = 8
-                }
-
-                Button("Shack Clock & Mission Control (HamClock)") {
-                    appState.selectedTab = 5
-                    appState.operatorDeskSection = 22
-                }
-                .keyboardShortcut("h", modifiers: [.command, .option])
-
-                Button("Open Shack Clock in Separate Window...") {
-                    openWindow(id: YAAMWindowID.hamClock)
+                ForEach(OperatorDeskGroup.allCases) { group in
+                    Menu {
+                        ForEach(group.destinations) { destination in
+                            Button {
+                                appState.openOperatorDesk(destination)
+                            } label: {
+                                Label(destination.title, systemImage: destination.icon)
+                            }
+                            .keyboardShortcut(destination.deskShortcut)
+                        }
+                    } label: {
+                        Label(group.title, systemImage: group.icon)
+                    }
                 }
 
                 Divider()
 
-                Button("Network Transceiver Emulator (IC-705 LAN)") {
-                    appState.selectedTab = 5
-                    appState.operatorDeskSection = 24
+                Menu("Open in Separate Window") {
+                    Button("Shack Clock") { openWindow(id: YAAMWindowID.hamClock) }
+                    Button("Transceiver Emulator") { openWindow(id: YAAMWindowID.transceiverEmulator) }
+                    Button("Multi-Rig FT8") { openWindow(id: YAAMWindowID.multiRigFT8) }
+                        .keyboardShortcut("8", modifiers: [.command, .option])
                 }
-                .keyboardShortcut("e", modifiers: [.command, .option])
-
-                Button("Open Transceiver Emulator in Separate Window...") {
-                    openWindow(id: YAAMWindowID.transceiverEmulator)
-                }
-
-                Divider()
-
-                Button("Multi-Rig FT8 Cluster (SO3R)...") {
-                    openWindow(id: YAAMWindowID.multiRigFT8)
-                }
-                .keyboardShortcut("8", modifiers: [.command, .option])
 
                 Divider()
 

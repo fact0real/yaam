@@ -22,7 +22,11 @@ public struct CWKeyerView: View {
     @State private var showTokenCheatSheet: Bool = false
     @State private var showHardwareSetupSheet: Bool = false
 
-    public init() {}
+    public var showsHardwareDiagnostics: Bool
+
+    public init(showsHardwareDiagnostics: Bool = false) {
+        self.showsHardwareDiagnostics = showsHardwareDiagnostics
+    }
 
     private static let columns = [
         GridItem(.flexible(), spacing: 10),
@@ -33,22 +37,21 @@ public struct CWKeyerView: View {
 
     public var body: some View {
         VStack(spacing: 12) {
-            // Workstation Top Segment Selector
-            HStack {
-                Picker("Workstation", selection: $appState.cwWorkstationSection) {
-                    Label("Memories Console", systemImage: "tuningfork").tag(0)
-                    Label("CW Academy & Trainer", systemImage: "graduationcap.fill").tag(1)
-                    Label("Q-Codes & Prosigns", systemImage: "book.closed.fill").tag(2)
-                    Label("DSP Audio Decoder", systemImage: "headphones").tag(3)
-                    Label("Pileup Trainer", systemImage: "antenna.radiowaves.left.and.right.circle").tag(4)
+            if showsHardwareDiagnostics {
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("CW Hardware & Diagnostics").font(.headline)
+                        Text("Configure your keying hardware, then inspect and test WinKeyer below.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button { showHardwareSetupSheet = true } label: {
+                        Label("Configure CW Hardware", systemImage: "gearshape.fill")
+                    }
+                    .buttonStyle(.borderedProminent)
                 }
-                .pickerStyle(.segmented)
-                .frame(maxWidth: 820)
-
-                Spacer()
-            }
-
-            if appState.cwWorkstationSection == 0 {
+                ScrollView { WinKeyerView() }
+            } else if appState.cwWorkstationSection == 0 {
                 topControlBar
                 liveStatusHUD
                 bankSelectorBar

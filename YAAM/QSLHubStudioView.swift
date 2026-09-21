@@ -139,7 +139,7 @@ public struct QSLHubStudioView: View {
                     Text("Two-Way QSL Hub Studio")
                         .font(.headline.bold())
                 }
-                Text("Email & Card Dropzone · 1-Click Multi-Sync · Conflict Resolver · Paper QSLs")
+                Text("Online confirmations · Received cards · Conflict resolution · Paper QSLs")
                     .font(.system(size: 10.5))
                     .foregroundColor(.secondary)
             }
@@ -194,7 +194,7 @@ public struct QSLHubStudioView: View {
                     } else {
                         Image(systemName: "bolt.horizontal.fill")
                     }
-                    Text(syncEngine.isSyncing ? "Syncing..." : "Sync All Services")
+                    Text(syncEngine.isSyncing ? "Syncing..." : "Sync Confirmations")
                         .fontWeight(.bold)
                 }
                 .padding(.horizontal, 12)
@@ -203,8 +203,23 @@ public struct QSLHubStudioView: View {
                 .foregroundColor(.black)
             }
             .buttonStyle(.plain)
-            .disabled(syncEngine.isSyncing)
+            .disabled(syncEngine.isSyncing || appState.isUnifiedSyncRunning || appState.isSyncingAPI)
             .help("Synchronize LoTW, eQSL.cc, QRZ, and Club Log in parallel")
+
+            Menu {
+                Button("Sync LoTW Only") { appState.runSync(.lotw) }
+                    .disabled(syncEngine.isSyncing || appState.isUnifiedSyncRunning || appState.isSyncingAPI)
+                Button("Sync QRZ Only") { appState.runSync(.qrz) }
+                    .disabled(syncEngine.isSyncing || appState.isUnifiedSyncRunning || appState.isSyncingAPI)
+                Divider()
+                Button("Automatic Schedule & Log Sources…") { appState.openOperatorDesk(.logSources) }
+                Button("Labels & Printing…") { appState.openOperatorDesk(.qslLabels) }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .help("Individual confirmation sources, automatic schedule, and printing")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)

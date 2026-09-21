@@ -394,14 +394,8 @@ public final class SSTVEngine: ObservableObject {
             }
         }
 
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            Task { @MainActor in
-                if let player = self.playerNode, player.isPlaying {
-                    player.scheduleBuffer(buffer) { continuation.resume() }
-                } else {
-                    continuation.resume()
-                }
-            }
+        if let player = self.playerNode, player.isPlaying {
+            await player.scheduleBuffer(buffer)
         }
     }
 

@@ -195,6 +195,14 @@ nonisolated enum ImportReviewAnalyzer {
                 }
             }
         }
+        if let comment = merged["COMMENT"] {
+            let cleaned = QSOMetadataFormatter.cleanComment(comment)
+            if cleaned.isEmpty {
+                merged.removeValue(forKey: "COMMENT")
+            } else {
+                merged["COMMENT"] = cleaned
+            }
+        }
         return merged
     }
 

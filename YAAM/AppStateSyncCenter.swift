@@ -103,7 +103,7 @@ extension AppState {
     }
 
     func runSync(_ source: SyncSource) {
-        guard !isUnifiedSyncRunning else { return }
+        guard !isUnifiedSyncRunning, !QSLSyncEngine.shared.isSyncing else { return }
         refreshSyncServiceConfiguration()
         guard syncServiceStatuses.first(where: { $0.source == source })?.configured == true else {
             switch source {
@@ -139,15 +139,15 @@ extension AppState {
         }
     }
 
-    func runUnifiedSync() {
-        guard !isUnifiedSyncRunning, !isLoading, !isSyncingAPI else { return }
+    func runUnifiedSync(includeConfirmations: Bool = true) {
+        guard !isUnifiedSyncRunning, !isLoading, !isSyncingAPI, !QSLSyncEngine.shared.isSyncing else { return }
         refreshSyncServiceConfiguration()
         isUnifiedSyncRunning = true
 
         let externalConfigured = syncServiceStatuses.first(where: { $0.source == .externalADIF })?.configured == true
         let sdrConfigured = syncServiceStatuses.first(where: { $0.source == .sdrControl })?.configured == true
         let confirmationSources = Set(syncServiceStatuses.compactMap { status -> SyncSource? in
-            guard status.configured, status.source == .lotw || status.source == .qrz else { return nil }
+            guard includeConfirmations, status.configured, status.source == .lotw || status.source == .qrz else { return nil }
             return status.source
         })
 

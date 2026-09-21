@@ -421,7 +421,7 @@ struct NationalLeaderboardContainerView: View {
                     }
                     .pickerStyle(.menu)
                     .frame(width: 230)
-                    .onChange(of: appState.selectedNationalCountryIso) { newIso in
+                    .onChange(of: appState.selectedNationalCountryIso) { _, newIso in
                         appState.fetchNationalLeaderboard(countryIso: newIso)
                     }
                 }
@@ -454,7 +454,7 @@ struct NationalLeaderboardContainerView: View {
                 }
                 .pickerStyle(.segmented)
                 .frame(width: 280)
-                .onChange(of: appState.selectedNationalCategory) { newCat in
+                .onChange(of: appState.selectedNationalCategory) { _, newCat in
                     appState.fetchNationalLeaderboard(category: newCat)
                 }
 

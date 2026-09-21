@@ -97,6 +97,7 @@ nonisolated final class LogbookDatabase: @unchecked Sendable {
 
         try openDatabase()
         try initializeSchema()
+        try cleanLegacySmartSDRComments()
     }
 
     deinit {
@@ -1131,6 +1132,86 @@ nonisolated final class LogbookDatabase: @unchecked Sendable {
             );
             """)
         try setMetadataValue("3", for: "schema.version")
+    }
+
+    private func cleanLegacySmartSDRComments() throws {
+        let migrationKey = "migration.cleanSmartSDRComments.v1"
+        if (try? metadataValue(for: migrationKey)) == "done" {
+            return
+        }
+
+        let selectStmt = try prepare("""
+            SELECT id, fields_json
+            FROM qsos
+            WHERE fields_json LIKE '%MY_GRIDSQUARE=%';
+        """)
+        defer { sqlite3_finalize(selectStmt) }
+
+        var updates: [(id: String, newJSON: String)] = []
+        let tokenPattern = #"\[([A-Z0-9_]+)=([^\]]*)\]"#
+        let regex = try? NSRegularExpression(pattern: tokenPattern, options: .caseInsensitive)
+
+        while sqlite3_step(selectStmt) == SQLITE_ROW {
+            guard let idCStr = sqlite3_column_text(selectStmt, 0),
+                  let jsonCStr = sqlite3_column_text(selectStmt, 1) else { continue }
+            let id = String(cString: idCStr)
+            let jsonStr = String(cString: jsonCStr)
+
+            guard let data = jsonStr.data(using: .utf8),
+                  var fields = try? JSONSerialization.jsonObject(with: data) as? [String: String] else {
+                continue
+            }
+
+            guard let rawComment = fields["COMMENT"], !rawComment.isEmpty else { continue }
+
+            if let regex {
+                let nsString = rawComment as NSString
+                let matches = regex.matches(in: rawComment, options: [], range: NSRange(location: 0, length: nsString.length))
+                for match in matches where match.numberOfRanges >= 3 {
+                    let key = nsString.substring(with: match.range(at: 1)).uppercased()
+                    let val = nsString.substring(with: match.range(at: 2)).trimmingCharacters(in: .whitespacesAndNewlines)
+                    if (fields[key] ?? "").isEmpty && !val.isEmpty && key != "GRID" && key != "GRIDSQUARE" {
+                        fields[key] = val
+                    }
+                }
+                let cleaned = regex.stringByReplacingMatches(
+                    in: rawComment,
+                    options: [],
+                    range: NSRange(location: 0, length: nsString.length),
+                    withTemplate: ""
+                ).trimmingCharacters(in: .whitespacesAndNewlines)
+
+                if cleaned.isEmpty {
+                    fields.removeValue(forKey: "COMMENT")
+                } else {
+                    fields["COMMENT"] = cleaned
+                }
+            }
+
+            if let newData = try? JSONSerialization.data(withJSONObject: fields, options: [.sortedKeys]),
+               let newJSONStr = String(data: newData, encoding: .utf8) {
+                updates.append((id: id, newJSON: newJSONStr))
+            }
+        }
+
+        if !updates.isEmpty {
+            try execute("BEGIN TRANSACTION;")
+            let updateStmt = try prepare("UPDATE qsos SET fields_json = ?, updated_at = ? WHERE id = ?;")
+            defer { sqlite3_finalize(updateStmt) }
+            let now = Date().timeIntervalSince1970
+
+            for update in updates {
+                sqlite3_reset(updateStmt)
+                sqlite3_clear_bindings(updateStmt)
+                bind(update.newJSON, to: 1, in: updateStmt)
+                sqlite3_bind_double(updateStmt, 2, now)
+                bind(update.id, to: 3, in: updateStmt)
+                try stepDone(updateStmt)
+            }
+            try execute("COMMIT;")
+        }
+
+        try setMetadataValue("done", for: migrationKey)
     }
 
     private func updateFieldCatalog(

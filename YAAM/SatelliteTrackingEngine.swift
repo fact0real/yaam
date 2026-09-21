@@ -328,8 +328,12 @@ public final class SatelliteTrackingEngine: ObservableObject {
         let rs = re + satAltitudeKm
         let slantRangeKm = sqrt(re * re + rs * rs - 2.0 * re * rs * cos(cRad))
 
-        // Elevation angle theta
-        let elRad = asin(max(-1.0, min(1.0, (rs * sin(cRad)) / max(1.0, slantRangeKm)))) - cRad
+        // Elevation angle theta relative to local horizon (-90° Nadir to +90° Zenith)
+        // Law of cosines in triangle (Earth Center, Observer, Satellite):
+        // rs^2 = re^2 + d^2 - 2 * re * d * cos(gamma) where gamma is angle from Nadir (downwards)
+        let cosGamma = max(-1.0, min(1.0, (re * re + slantRangeKm * slantRangeKm - rs * rs) / (2.0 * re * max(1.0, slantRangeKm))))
+        let gamma = acos(cosGamma)
+        let elRad = gamma - (.pi * 0.5)
         let elevationDeg = elRad * 180.0 / .pi
 
         // Azimuth angle from observer

@@ -43,7 +43,7 @@ private enum HelpTopic: String, CaseIterable, Identifiable {
         case .weatherRadar: return "Station Weather & Lightning Safety"
         case .satellites: return "Satellite & APRS Tracking"
         case .clubMembership: return "International Club Memberships"
-        case .syncCenter: return "Sync Center"
+        case .syncCenter: return "Log Sources & Automation"
         case .lotwTqsl: return "LoTW & TQSL Digital Signing"
         case .qslHub: return "QSL Hub"
         case .qslLabels: return "QSL Card Label Studio"
@@ -335,7 +335,7 @@ struct HelpView: View {
                 HelpInstruction(number: 2, title: "Add online accounts", text: "Use the QRZ.com, LoTW, HAMQTH, and Email tabs, then press the password Save button once. Secret values are stored in macOS Keychain.")
                 HelpInstruction(number: 3, title: "Bring in your log", text: "Choose File > Import Log File and select .adi, .adif, or SmartSDR.smartsdrlog. Review the categories and import only the records you intend to keep.")
                 HelpInstruction(number: 4, title: "Check protection", text: "Open Settings > Data Safety to verify the database and view automatic restore points.")
-                HelpInstruction(number: 5, title: "Open Operator Desk", text: "Use Quick Log during an operating session, DX Cluster for live spots, and Sync Center to monitor every configured log source.")
+                HelpInstruction(number: 5, title: "Open Operator Desk", text: "Choose one of six workspaces, then a tool below it. Operating contains Quick Log; DX Activity contains spots and maps; QSL & Data contains confirmations and log sources. All tools searches both current and familiar older names.")
             }
             helpCallout(icon: "arrow.down.doc.fill", title: "Existing users", text: "On first launch, YAAM copies legacy MasterLogbook ADIF data into the protected database. The original ADIF file is retained as an additional fallback.", color: .green)
         }
@@ -771,7 +771,7 @@ struct HelpView: View {
             HelpClubLogSpotsMockup()
 
             HelpFlow(steps: [
-                HelpFlowStep(icon: "network", title: "1. Open Club Log Desk", detail: "Select the 'Club Log' tab (Tag 10) in Operator Desk to establish a persistent live stream."),
+                HelpFlowStep(icon: "network", title: "1. Open Club Log Spots", detail: "Select Operator Desk > DX Activity > Club Log Spots to establish a persistent live stream."),
                 HelpFlowStep(icon: "flame.fill", title: "2. Inspect Band Opportunity", detail: "Review the top banner recommendation scoring all amateur bands by active spot density and needed DXCC entities."),
                 HelpFlowStep(icon: "line.3.horizontal.decrease.circle", title: "3. Filter Mode & Band", detail: "Filter by Digital (FT8/FT4), CW, or Phone/Voice, or type to search specific prefixes or DXpedition callsigns."),
                 HelpFlowStep(icon: "dot.radiowaves.left.and.right", title: "4. One-Click QSY & Log", detail: "Click 'Tune Rig' on any spot to send CAT commands to your transceiver and immediately stage the contact.")
@@ -823,7 +823,7 @@ struct HelpView: View {
             ])
             helpSection("Hamlib Rig Control") {
                 HelpInstruction(number: 1, title: "Configure the radio backend", text: "Start rigctld with the model and serial/network parameters required by your transceiver. YAAM speaks the standard rigctld TCP protocol rather than opening the radio device itself.")
-                HelpInstruction(number: 2, title: "Open Operator Desk > Radio Bridge", text: "Enter the rigctld host and port, then press Connect. Frequency, band, mode, and passband update about once per second.")
+                HelpInstruction(number: 2, title: "Open Radio & Digital > Radio Bridge", text: "Enter the rigctld host and port, then press Connect. Frequency, band, mode, and passband update about once per second. FLRig, TCI SDR, and Rotator each have their own tool in Radio & Digital.")
                 HelpInstruction(number: 3, title: "Choose the fill behavior", text: "Use Use in Quick Log for a one-time copy, or enable Fill Quick Log to keep frequency and mode synchronized automatically.")
             }
             helpSection("WSJT-X / JTDX UDP") {
@@ -839,7 +839,7 @@ struct HelpView: View {
                     HelpFlowStep(icon: "waveform.path.ecg", title: "Monitor", detail: "Choose an FT8 dial frequency, set USB-D, and allow one complete 15-second UTC slot."),
                     HelpFlowStep(icon: "paperplane.fill", title: "Reply safely", detail: "Select a decode, review the generated message, arm TX, and send in the opposite sequence.")
                 ])
-                HelpInstruction(number: 1, title: "Open Operator Desk > Radio Bridge > FT8 Station", text: "Direct Icom LAN carries login, CI-V control, and 48 kHz LPCM16 receive/transmit audio over separate UDP streams. Set DATA MOD to WLAN so keyed FT8 audio reaches the transmitter. Connect keeps the password only for the current session; press the key button only when you explicitly want to save it in macOS Keychain. It is never written into preferences or the log database.")
+                HelpInstruction(number: 1, title: "Open Operator Desk > Radio & Digital > FT8 Station", text: "Direct Icom LAN carries login, CI-V control, and 48 kHz LPCM16 receive/transmit audio over separate UDP streams. Set DATA MOD to WLAN so keyed FT8 audio reaches the transmitter. Connect keeps the password only for the current session; press the key button only when you explicitly want to save it in macOS Keychain. It is never written into preferences or the log database.")
                 HelpInstruction(number: 2, title: "Verify the receive path", text: "Press Start Monitoring and watch the waterfall. Decode results appear after a full UTC slot. Use the audio passband from 200 to 3000 Hz and keep macOS time synchronization enabled.")
                 HelpInstruction(number: 3, title: "Prepare a standard exchange", text: "Prepare CQ or choose a decoded CQ/message addressed to your callsign. YAAM selects the opposite odd/even sequence and advances Grid, report, R-report, RR73, and 73 messages.")
                 HelpInstruction(number: 4, title: "Arm only when ready", text: "Check the callsign, Grid, dial frequency, audio offset, antenna path, and RF power before enabling Arm TX. Send at Next Slot schedules against the UTC slot boundary.")
@@ -869,7 +869,7 @@ struct HelpView: View {
             HelpNTEMockup()
 
             HelpFlow(steps: [
-                HelpFlowStep(icon: "power.circle.fill", title: "1. Power ON Transceiver", detail: "Open Network Transceiver Emulator (Tools > Transceiver Emulator, Option-Command-E, or Operator Desk Tab 24) and click Power Transceiver ON."),
+                HelpFlowStep(icon: "power.circle.fill", title: "1. Open Emulator", detail: "Open Operator Desk > Radio & Digital > Emulator or press Option-Command-E. The network emulator starts when its view opens; its power control stops or restarts it."),
                 HelpFlowStep(icon: "network", title: "2. Bind Control & rigctld Ports", detail: "NTE binds UDP 50001 (Control), UDP 50002 (CI-V), UDP 50003 (Audio), and TCP 4532 (Hamlib rigctld) for immediate client connectivity."),
                 HelpFlowStep(icon: "waveform.path", title: "3. Configure Channel Physics", detail: "Select channel fading (Clean, Mild QSB, Deep Rayleigh, Auroral), set calibrated AWGN SNR (-30 dB to +30 dB), or inject Doppler drift."),
                 HelpFlowStep(icon: "waveform.badge.plus", title: "4. Inject Synthetic Signals", detail: "Activate FT8/FT4 signal synthesis, 5-station pileups, CW beacons, or inject custom callsigns aligned with UTC 15-second time slots."),
@@ -963,7 +963,7 @@ struct HelpView: View {
             helpCallout(
                 icon: "keyboard",
                 title: "Quick Access & Detached Window Mode",
-                text: "Launch the emulator at any time using Option-Command-E, select it in Operator Desk (Tab 24), or click the detach button to pop the emulator into its own independent floating macOS window scene.",
+                text: "Launch the emulator using Option-Command-E or Radio & Digital > Emulator. Tools > Open in Separate Window provides a standalone emulator window.",
                 color: .blue
             )
         }
@@ -1588,7 +1588,7 @@ struct HelpView: View {
             helpCallout(
                 icon: "keyboard",
                 title: "Instant Global Access: ⌘⇧R",
-                text: "Open the Digital Call Roster at any time from anywhere in YAAM by pressing Command + Shift + R or opening Operator Desk tab 20.",
+                text: "Open the Digital Call Roster by pressing Command + Shift + R or choosing Operator Desk > DX Activity > Call Roster.",
                 color: .purple
             )
         }
@@ -1598,7 +1598,7 @@ struct HelpView: View {
         Group {
             helpHeader(title: "Contest Calendar", subtitle: "Use the Operator Desk calendar to pick upcoming operating windows and move quickly into a contest session.", icon: "calendar.badge.clock", color: .blue)
             HelpFlow(steps: [
-                HelpFlowStep(icon: "calendar", title: "Review", detail: "Open Operator Desk > Calendar/6m. YAAM loads the current WA7BNM 8-day calendar and keeps the last successful copy available offline."),
+                HelpFlowStep(icon: "calendar", title: "Review", detail: "Open Operator Desk > Contest & Awards > Contest Calendar for the WA7BNM 5-week schedule. DXpedition details live in DX Activity > DX News; 6m propagation lives in DX Activity > 6m Watch."),
                 HelpFlowStep(icon: "arrow.up.right.square", title: "Verify", detail: "Open the WA7BNM 5-week calendar for the official schedule and rule links."),
                 HelpFlowStep(icon: "flag.checkered", title: "Prepare", detail: "Create or resume a Contest Workspace session with the official contest ID."),
                 HelpFlowStep(icon: "square.and.arrow.up", title: "Submit", detail: "Export Cabrillo after the session and validate with the sponsor's checker.")
@@ -1870,7 +1870,7 @@ struct HelpView: View {
         Group {
             helpHeader(title: "DXpedition Watch & DX News Desk", subtitle: "Keep announced operations visible, review full weekly bulletins and articles, and distinguish a planned operation from a live spot before changing the radio.", icon: "binoculars.fill", color: .purple)
             HelpFlow(steps: [
-                HelpFlowStep(icon: "calendar", title: "Load & Parse", detail: "Open Operator Desk > DX News (or Calendar / 6m). YAAM reads the newest DX-World and 425 DX News weekly bulletins alongside their current feeds/calendars and DXPing in parallel."),
+                HelpFlowStep(icon: "calendar", title: "Load & Parse", detail: "Open Operator Desk > DX Activity > DX News. YAAM reads the newest DX-World and 425 DX News weekly bulletins alongside their current feeds/calendars and DXPing in parallel."),
                 HelpFlowStep(icon: "tag.fill", title: "Extract Rich Attributes", detail: "Bands, modes (FT8, CW, SSB), QSL managers, IOTA island references, operators, and Maidenhead grids are automatically extracted."),
                 HelpFlowStep(icon: "newspaper.fill", title: "News & Bulletins", detail: "Browse categorized DX articles from DX-World and 425 DX News, or inspect full weekly bulletin text archives with issue search and copy."),
                 HelpFlowStep(icon: "dot.radiowaves.left.and.right", title: "Verify live activity", detail: "A green on-air indicator appears only when the same callsign is currently present in the DX Cluster feed."),
@@ -1885,7 +1885,7 @@ struct HelpView: View {
                 HelpDefinition(icon: "checkmark.shield", title: "Verify free-form notices", text: "Weekly magazines contain prose and schedules can change. YAAM normalizes clear callsigns and date windows, while the linked source remains authoritative for frequencies, modes, QSL routes, and late changes.", color: .green)
             }
             helpSection("Workspaces and Tools") {
-                HelpDefinition(icon: "newspaper.fill", title: "DX News & Intelligence Desk", text: "Accessible from Operator Desk > DX News (Desk tab 21) or Tools > DX News & Intelligence (Cmd+Shift+N). Includes Quick Filters for Active Now, Upcoming, ATNO / Needed, FT8 / Digital, 6m Band, and IOTA Islands.")
+                HelpDefinition(icon: "newspaper.fill", title: "DX News & Intelligence Desk", text: "Accessible from Operator Desk > DX Activity > DX News or the matching Tools menu (Cmd+Shift+N). Includes Quick Filters for Active Now, Upcoming, ATNO / Needed, FT8 / Digital, 6m Band, and IOTA Islands.")
                 HelpDefinition(icon: "doc.plaintext", title: "Weekly Bulletins Reader", text: "Switch between issues of 425 DX News and DX-World Weekly, search full bulletin text, copy passages, or open original source URLs.")
                 HelpDefinition(icon: "antenna.radiowaves.left.and.right", title: "One-Click Rig Tune", text: "When a DXpedition is spotted on the cluster, click 'Tune Rig' to instantly QSY your connected transceiver via CAT or TCI SDR.")
             }
@@ -1992,31 +1992,25 @@ struct HelpView: View {
     private var syncCenter: some View {
         Group {
             helpHeader(
-                title: "Sync Center",
-                subtitle: "See configuration, health, results, and recent history for every source that can change the active station's Master Log.",
+                title: "Log Sources & Automation",
+                subtitle: "Import local logger updates, synchronize Wavelog, and manage the existing log and confirmation schedule.",
                 icon: "arrow.triangle.2.circlepath",
                 color: .green
             )
 
-            HelpScreenshotCard(
-                imageName: "help_sync_center",
-                title: "Synchronization Health & Multi-Source Sync",
-                caption: "One-click 'Sync All' for ARRL LoTW, QRZ Logbook, SDR-Control, Wavelog, and automatic scheduling."
-            )
-
             HelpFlow(steps: [
                 HelpFlowStep(icon: "gearshape", title: "Configure", detail: "Choose live ADIF or SDR files and add LoTW or QRZ credentials."),
-                HelpFlowStep(icon: "arrow.triangle.2.circlepath", title: "Sync All", detail: "YAAM processes local sources first, then online confirmations."),
+                HelpFlowStep(icon: "arrow.triangle.2.circlepath", title: "Sync Local Logs", detail: "Import External ADIF and SDR-Control updates. Wavelog has a separate sync button."),
                 HelpFlowStep(icon: "checkmark.shield", title: "Verify", detail: "Each source reports success, changes, duration, or a specific failure."),
-                HelpFlowStep(icon: "clock.arrow.circlepath", title: "Schedule", detail: "Enable a single automatic interval for configured sources.")
+                HelpFlowStep(icon: "clock.arrow.circlepath", title: "Schedule", detail: "The existing schedule covers External ADIF, SDR-Control, LoTW, and QRZ. eQSL, Club Log, and Wavelog remain manual here.")
             ])
             helpSection("Downloading Confirmations from QRZ & LoTW") {
-                HelpInstruction(number: 1, title: "Open Sync Center", text: "Click 'Operator Desk' in the main top tab bar, then select 'Sync Center' from the panel bar (or choose Tools > Sync Center / press ⌘⇧S).")
-                HelpInstruction(number: 2, title: "One-Click 'Sync All'", text: "Press the prominent blue 'Sync All' button in the top right corner. YAAM immediately contacts ARRL LoTW and QRZ Logbook to download all new confirmations.")
-                HelpInstruction(number: 3, title: "Individual Provider Sync", text: "To pull confirmations from only one source, locate the LoTW or QRZ Logbook card and click the circular refresh icon (🔄) on the bottom right of that card.")
-                HelpInstruction(number: 4, title: "Hands-Free Auto Sync", text: "Toggle 'Automatic sync' at the bottom and set an interval (e.g., 30 minutes) so YAAM automatically fetches new confirmations in the background.")
+                HelpInstruction(number: 1, title: "Open QSL Hub", text: "Choose Operator Desk > QSL & Data > QSL Hub for all manual confirmation downloads.")
+                HelpInstruction(number: 2, title: "Sync Confirmations", text: "Sync Confirmations checks configured LoTW, QRZ, eQSL, and Club Log services. It does not import local logger files.")
+                HelpInstruction(number: 3, title: "Individual Provider Sync", text: "The ellipsis menu beside Sync Confirmations includes Sync LoTW Only and Sync QRZ Only, plus links to automation and label printing.")
+                HelpInstruction(number: 4, title: "Hands-Free Auto Sync", text: "Open QSL & Data > Log Sources & Automation (⌘⌥⇧S), enable Scheduled log & confirmation sync, and choose an interval. The previous schedule is preserved. ⌘⇧S remains File > Save As.")
             }
-            helpSection("Source Cards") {
+            helpSection("Local Sources & Scheduled Confirmations") {
                 HelpDefinition(icon: "doc.text.fill", title: "External ADIF", text: "Watches the configured logger file and merges only meaningful additions or updates.")
                 HelpDefinition(icon: "radio.fill", title: "SDR-Control", text: "Reads SmartSDR.smartsdrlog directly, ignores entries marked Deleted, normalizes date/time fields, and preserves the SDR Control record ID. When SDR Control stores the same QSO once at a rounded minute/frequency and once with precise seconds/frequency, YAAM keeps the precise identity and merges the richer details and confirmations into it.")
                 HelpDefinition(icon: "checkmark.seal.fill", title: "LoTW", text: "The first successful run builds a complete confirmation baseline for the active callsign. Matching follows call, date, band, and LoTW's 30-minute time window; later runs use the last-QSL cursor.")
@@ -2025,7 +2019,7 @@ struct HelpView: View {
             helpSection("Status & Performance") {
                 HelpDefinition(icon: "circle.dotted", title: "Not configured", text: "The source is skipped until its file or credentials are supplied in Settings.", color: .secondary)
                 HelpDefinition(icon: "checkmark.circle.fill", title: "Success", text: "The card records the last successful run, number of fetched items, changed QSOs, and elapsed time.", color: .green)
-                HelpDefinition(icon: "exclamationmark.triangle.fill", title: "Needs attention", text: "The source keeps its failure message and time in history so a partial Sync All run is never mistaken for full success.", color: .orange)
+                HelpDefinition(icon: "exclamationmark.triangle.fill", title: "Needs attention", text: "Source errors and timestamps remain in the shared Log & Confirmation Activity history.", color: .orange)
                 HelpDefinition(icon: "bolt.fill", title: "Indexed matching", text: "Confirmation candidates are indexed by callsign, date, and band before matching, keeping large logs responsive.", color: .yellow)
             }
             helpCallout(icon: "clock.badge.checkmark", title: "Automatic sync", text: "Choose an interval of at least five minutes. YAAM avoids overlapping runs and keeps the latest 100 source results locally.", color: .green)
@@ -2326,7 +2320,7 @@ struct HelpView: View {
                 HelpDefinition(icon: "externaldrive.fill.badge.checkmark", title: "Restore before merge", text: "A database restore point is created before any incoming package adds or updates QSOs.", color: .green)
             }
             helpSection("Mobile Companion") {
-                HelpInstruction(number: 1, title: "Start explicitly", text: "Open Operator Desk > Connect, choose a high local port, and press Start. The server is off at every fresh launch.")
+                HelpInstruction(number: 1, title: "Start explicitly", text: "Open Operator Desk > QSL & Data > Cloud & Companion, choose a high local port, and press Start. The server is off at every fresh launch.")
                 HelpInstruction(number: 2, title: "Scan or open", text: "Use the QR code or private URL from a phone on the same Wi-Fi or trusted LAN.")
                 HelpInstruction(number: 3, title: "Control write access", text: "Disable Allow Quick Log for a read-only dashboard. Rotate the Keychain token whenever a link may have been exposed.")
                 HelpDefinition(icon: "list.number", title: "Paginated local API", text: "GET /api/v1/qsos accepts offset and limit. A page is capped at 500 QSOs so a large log cannot stall the phone or desktop app.")
@@ -2409,7 +2403,7 @@ struct HelpView: View {
             helpSection("Common Tasks") {
                 HelpInstruction(number: 1, title: "Log while operating", text: "Open Operator Desk > Quick Log or press Command-L. Command-Return saves a validated QSO.")
                 HelpInstruction(number: 2, title: "Work a DX spot", text: "Open Operator Desk > DX Cluster, connect to your node, and double-click a relevant spot to prepare it in Quick Log.")
-                HelpInstruction(number: 3, title: "Sync every source", text: "Open Operator Desk > Sync Center and use Sync All, or run only the source you need.")
+                HelpInstruction(number: 3, title: "Sync by purpose", text: "Under QSL & Data, use QSL Hub for online confirmations and Log Sources & Automation for External ADIF, SDR-Control, Wavelog, and scheduling.")
                 HelpInstruction(number: 4, title: "Convert or filter", text: "Open Convert, choose an ADIF or SmartSDR input and an output file, then select an optional UTC range, band, mode, or any combination before processing.")
                 HelpInstruction(number: 5, title: "Enrich contacts", text: "Select rows in Log Table or use Enrich Data to add authenticated QRZ Rank values plus available QRZ/HAMQTH identity data.")
                 HelpInstruction(number: 6, title: "Backfill rankings", text: "Use Daily Rank in the Log Table toolbar to fill missing rankings for unique callsigns. Progress and the requests remaining today stay visible while it runs.")
@@ -2570,7 +2564,7 @@ struct HelpView: View {
                 color: .yellow
             )
             HelpFlow(steps: [
-                HelpFlowStep(icon: "cable.connector", title: "Connect Port", detail: "Select your serial port (USB-to-UART / WinKeyer) in Settings or Operator Desk."),
+                HelpFlowStep(icon: "cable.connector", title: "Connect Port", detail: "Open CW Workstation > WinKeyer & Hardware. Configure CW Hardware covers all backends; the WinKeyer panel provides serial settings and diagnostics."),
                 HelpFlowStep(icon: "speedometer", title: "Speed Control", detail: "Adjust speed from 5 to 50 WPM with real-time speed pot sync."),
                 HelpFlowStep(icon: "keyboard", title: "Macros F1–F12", detail: "One-click transmission of CQ, exchange, TU, serial numbers, and callsigns."),
                 HelpFlowStep(icon: "tuningfork", title: "Paddle & Sidetone", detail: "Configure Iambic A/B, Ultimatic, paddle reverse, and internal sidetone frequency.")
@@ -2666,7 +2660,7 @@ struct HelpView: View {
             )
             HelpFlow(steps: [
                 HelpFlowStep(icon: "network", title: "Enable TCI", detail: "Start TCI server in ExpertSDR (default port 40001)."),
-                HelpFlowStep(icon: "link", title: "Connect in YAAM", detail: "Enter host and port in Operator Desk > TCI SDR panel."),
+                HelpFlowStep(icon: "link", title: "Connect in YAAM", detail: "Enter host and port in Operator Desk > Radio & Digital > TCI SDR."),
                 HelpFlowStep(icon: "arrow.triangle.2.circlepath", title: "Bidirectional Sync", detail: "VFO frequency, mode, and modulation sync automatically in real time."),
                 HelpFlowStep(icon: "dot.radiowaves.left.and.right", title: "Click-to-Tune", detail: "Clicking any cluster spot instantly QSYs your SDR to the exact frequency.")
             ])
@@ -2706,7 +2700,7 @@ struct HelpView: View {
             FAQItem(question: "Does DX Advisor use the active station?", answer: "Yes. Grid Locator, radio, power, antenna, and height come from the active station profile.")
             FAQItem(question: "What frequency formats does Quick Log accept?", answer: "MHz, kHz, and Hz are accepted. For 20-meter FT8, 14.074, 14074, and 14074000 resolve to the same frequency and band.")
             FAQItem(question: "Why is a DX spot marked as new?", answer: "Status is calculated from the active station's Master Log. New Callsign means no prior QSO; New Band means the callsign exists but not on that band.")
-            FAQItem(question: "Why did Sync All skip a source?", answer: "Only configured sources run. Open the source card or its Settings section and supply the required file, password, or station API key.")
+            FAQItem(question: "Where did Sync Center and Connect go?", answer: "Both are under QSL & Data: Sync Center is now Log Sources & Automation, and Connect is Cloud & Companion. Online confirmation downloads live in QSL Hub. All tools can find the older names.")
             FAQItem(question: "How do QRZ and LoTW confirmation downloads stay complete?", answer: "Sync QSLs downloads incremental changes. Use the visible Full QSL History button to retrieve both providers from the beginning. YAAM reports downloaded, locally matched, unmatched, and updated counts separately.")
             FAQItem(question: "What happens when duplicate QSOs are removed?", answer: "YAAM keeps the record with the strongest confirmation evidence and most complete data, fills its missing fields from the duplicates, and removes only the selected extras. A database checkpoint is created first so the operation remains recoverable.")
             FAQItem(question: "Why are Russia, European Russia, and Asiatic Russia separate?", answer: "European Russia and Asiatic Russia are separate DXCC entities, while a plain Russia value is ambiguous source data. YAAM therefore keeps all three labels distinct instead of assigning credit to the wrong entity.")
@@ -4696,4 +4690,3 @@ struct HelpMultiRigMockup: View {
         .background(Color.pink.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
     }
 }
-

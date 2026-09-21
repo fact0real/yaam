@@ -101,7 +101,7 @@ public final class TCIClient: ObservableObject {
         pingTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self = self, let task = self.webSocketTask, self.isConnected else { return }
-                task.sendPing { error in
+                task.sendPing { [weak self] error in
                     if error != nil {
                         Task { @MainActor [weak self] in
                             self?.handleDisconnect(reason: "Ping failed")
@@ -247,7 +247,7 @@ public final class TCIClient: ObservableObject {
     public func sendCommand(_ command: String) {
         guard let task = webSocketTask, isConnected else { return }
         let msg = command.hasSuffix(";") ? command : "\(command);"
-        task.send(.string(msg)) { error in
+        task.send(.string(msg)) { [weak self] error in
             if let err = error {
                 Task { @MainActor [weak self] in
                     self?.lastError = err.localizedDescription

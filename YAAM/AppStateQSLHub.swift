@@ -423,6 +423,13 @@ extension AppState {
         var result = ""
         for key in normalizedFields.keys.sorted() {
             guard let value = normalizedFields[key], !value.isEmpty else { continue }
+            if key.starts(with: "APP_YAAM_") { continue }
+            if key == "COMMENT" {
+                let sanitized = QSOMetadataFormatter.cleanComment(value)
+                guard !sanitized.isEmpty else { continue }
+                result += "<\(key):\(sanitized.utf8.count)>\(sanitized)"
+                continue
+            }
             result += "<\(key):\(value.utf8.count)>\(value)"
         }
         return result + "<EOR>"

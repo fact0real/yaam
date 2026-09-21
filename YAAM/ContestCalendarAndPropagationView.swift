@@ -25,7 +25,7 @@ struct ContestCalendarPanel: View {
             VStack(alignment: .leading, spacing: 18) {
                 sectionHeader(
                     title: "Contest Calendar",
-                    subtitle: "Contest planning, WA7BNM 5-week schedule, and DXpedition opportunities",
+                    subtitle: "Plan your operating sessions with the WA7BNM 5-week contest schedule",
                     icon: "calendar",
                     color: .blue
                 )
@@ -37,7 +37,7 @@ struct ContestCalendarPanel: View {
         }
         .onAppear {
             appState.fetchContestCalendar()
-            appState.fetchDXpeditions()
+            if appState.dxpeditionEntries.isEmpty { appState.fetchDXpeditions() }
         }
         .onChange(of: appState.dxClusterClient.spots.first?.id) { _, _ in
             appState.scheduleDXpeditionOpportunityNotifications()
@@ -53,101 +53,32 @@ struct ContestCalendarPanel: View {
     }
 
     private var dxpeditionWatch: some View {
-        let workIndex = appState.workIndex()
-        return VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Label("DXpedition watch", systemImage: "binoculars.fill")
-                    .font(.headline)
-                Spacer()
-                Button {
-                    appState.fetchDXpeditions(force: true)
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                }
-                .buttonStyle(.borderless)
-                .help("Refresh DXpeditions")
-                .disabled(appState.isFetchingDXpeditions)
+        HStack(spacing: 14) {
+            Image(systemName: "binoculars.fill")
+                .font(.title2)
+                .foregroundStyle(.purple)
+                .frame(width: 42, height: 42)
+                .background(Color.purple.opacity(0.09), in: RoundedRectangle(cornerRadius: 10))
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Planning a DXpedition contact?").font(.headline)
+                Text(appState.dxpeditionEntries.isEmpty
+                     ? "Explore expedition schedules, needed entities, news, and weekly bulletins in DX News."
+                     : "\(appState.dxpeditionEntries.filter(\.isActive).count) active expeditions · Full schedules and needed-entity filters in DX News.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
-
-            if appState.dxpeditionEntries.isEmpty {
-                ContentUnavailableView("DXpedition list unavailable", systemImage: "binoculars", description: Text(appState.dxpeditionStatus))
-                    .frame(maxWidth: .infinity, minHeight: 110)
-            } else {
-                let visibleEntries = Array(appState.dxpeditionEntries.prefix(10))
-                VStack(spacing: 0) {
-                    ForEach(Array(visibleEntries.enumerated()), id: \.element.id) { index, entry in
-                        dxpeditionRow(entry, workIndex: workIndex)
-                        if index < visibleEntries.count - 1 {
-                            Divider()
-                        }
-                    }
-                }
-                .padding(.horizontal, 12)
-                .background(Color(nsColor: .controlBackgroundColor).opacity(0.55), in: RoundedRectangle(cornerRadius: 8))
+            Spacer(minLength: 12)
+            Button {
+                appState.openOperatorDesk(.dxNews)
+            } label: {
+                Label("Open DX News", systemImage: "arrow.up.right")
             }
-
-            Text(appState.dxpeditionStatus)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            .buttonStyle(.bordered)
         }
-        .contestOperationsBand(color: .purple)
-    }
-
-    private func dxpeditionRow(_ entry: DXpeditionEntry, workIndex: LogWorkIndex) -> some View {
-        let spot = appState.dxClusterClient.spots.first { $0.callsign.uppercased() == entry.callsign.uppercased() }
-        let isWorked = spot.map { workIndex.status(for: entry.callsign, band: $0.band) == .worked } ?? false
-
-        return HStack(alignment: .top, spacing: 12) {
-            Image(systemName: spot == nil ? (entry.isActive ? "clock.badge.checkmark" : "calendar") : "dot.radiowaves.left.and.right")
-                .font(.title3)
-                .foregroundStyle(spot == nil ? (entry.isActive ? Color.orange : Color.gray) : Color.green)
-                .frame(width: 24)
-
-            VStack(alignment: .leading, spacing: 5) {
-                HStack(spacing: 8) {
-                    Text(entry.callsign)
-                        .font(.headline.monospaced())
-                    Text(entry.entity)
-                        .font(.subheadline)
-                        .lineLimit(1)
-                    Spacer(minLength: 8)
-                    Text(entry.sourceSummary)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 3)
-                        .background(Color.purple.opacity(0.11), in: RoundedRectangle(cornerRadius: 5))
-                    if let sourceURL = entry.primarySourceURL {
-                        Link(destination: sourceURL) {
-                            Image(systemName: "arrow.up.right.square")
-                        }
-                        .help("Open source announcement")
-                    }
-                }
-
-                HStack(spacing: 8) {
-                    Text(entry.scheduleText)
-                    if let spot {
-                        Text("ON AIR · \(spot.band) · \(String(format: "%.3f", spot.frequencyMHz)) MHz")
-                            .foregroundStyle(.green)
-                        Text(isWorked ? "Worked on this band" : "New opportunity")
-                            .foregroundStyle(isWorked ? Color.gray : Color.blue)
-                    } else {
-                        Text(entry.isActive ? "Within announced window" : "Planned")
-                            .foregroundStyle(entry.isActive ? .orange : .secondary)
-                    }
-                }
-                .font(.caption.monospaced())
-
-                if !entry.details.isEmpty {
-                    Text(entry.details)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                }
-            }
-        }
-        .padding(.vertical, 10)
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.purple.opacity(0.035), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.purple.opacity(0.14)))
     }
 
     private var contestCalendar: some View {

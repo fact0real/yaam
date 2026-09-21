@@ -383,7 +383,7 @@ struct ConnectivityPanel: View {
     private var headerSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             sectionHeader(
-                title: "Connected Station & Ecosystem",
+                title: "Cloud & Companion",
                 subtitle: "Cloud package synchronization, phone web companion, and local automation REST API",
                 icon: "network",
                 color: .blue
@@ -395,7 +395,7 @@ struct ConnectivityPanel: View {
                     .font(.system(size: 14))
                     .foregroundColor(.blue)
 
-                Text("Looking to connect your transceiver or antenna hardware? Rig CAT and FLRig connect in **Radio Bridge**, ExpertSDR connects in **TCI SDR**, and rotators connect in **Rotator** settings. This panel connects your log data to mobile devices, cloud storage, and home automation.")
+                Text("Share your log data with cloud folders, mobile devices, and local automation. Transceivers and antenna rotators are configured under **Radio & Digital**.")
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)
                     .lineSpacing(2)

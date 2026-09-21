@@ -438,7 +438,7 @@ nonisolated final class SyntheticRFSignalEngine: @unchecked Sendable {
         vDSP_hann_window(&window, vDSP_Length(fftSize), Int32(vDSP_HANN_NORM))
         vDSP_vmul(slice, 1, window, 1, &windowed, 1, vDSP_Length(fftSize))
 
-        var imagIn = [Float](repeating: 0.0, count: fftSize)
+        let imagIn = [Float](repeating: 0.0, count: fftSize)
         var realOut = [Float](repeating: 0.0, count: fftSize)
         var imagOut = [Float](repeating: 0.0, count: fftSize)
 

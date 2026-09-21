@@ -370,7 +370,7 @@ public struct CWPileupSimulatorView: View {
                         .onSubmit {
                             sim.handleEnterKey()
                         }
-                        .onChange(of: sim.draftCallsign) { newValue in
+                        .onChange(of: sim.draftCallsign) { _, newValue in
                             sim.draftCallsign = newValue.uppercased()
                         }
 

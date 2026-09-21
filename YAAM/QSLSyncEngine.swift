@@ -104,7 +104,7 @@ public final class QSLSyncEngine: ObservableObject {
     // MARK: - One-Click Sync All Services
 
     func syncAllServices(appState: AppState) async {
-        guard !isSyncing else { return }
+        guard !isSyncing, !appState.isUnifiedSyncRunning, !appState.isSyncingAPI else { return }
 
         isSyncing = true
         progress = 0.05

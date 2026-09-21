@@ -276,7 +276,14 @@ nonisolated func generateADIF(originalContent: String, records: [[String: String
         
         for key in priorityKeys {
             if let val = rec[key], !val.isEmpty {
-                recordStr += "<\(key):\(val.count)>\(val)"
+                if key == "COMMENT" {
+                    let sanitized = QSOMetadataFormatter.cleanComment(val)
+                    if !sanitized.isEmpty {
+                        recordStr += "<\(key):\(sanitized.utf8.count)>\(sanitized)"
+                    }
+                } else {
+                    recordStr += "<\(key):\(val.count)>\(val)"
+                }
                 remainingKeys.remove(key)
             }
         }

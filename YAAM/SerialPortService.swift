@@ -10,7 +10,7 @@
 import Darwin
 import Foundation
 
-public final class SerialPortService: @unchecked Sendable {
+nonisolated public final class SerialPortService: @unchecked Sendable {
     public static let shared = SerialPortService()
 
     private var fileDescriptor: Int32 = -1

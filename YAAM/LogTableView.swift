@@ -528,7 +528,7 @@ struct LogTableView: View {
                 .background(Color(NSColor.textBackgroundColor))
                 .cornerRadius(6)
                 .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.gray.opacity(0.3), lineWidth: 1))
-                .frame(minWidth: 120, idealWidth: 160, maxWidth: 200)
+                .frame(minWidth: 100, idealWidth: 135, maxWidth: 170)
                 
                 Divider().frame(height: 14)
 
@@ -613,226 +613,250 @@ struct LogTableView: View {
                     }
                 }
                 
-                let todayConfirmedCount = appState.todayConfirmedCount
-                Button {
-                    appState.filterCriteria.useTodayConfirmed.toggle()
-                } label: {
-                    HStack(spacing: 3) {
-                        Image(systemName: "checkmark.seal.fill")
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundColor(todayConfirmedCount > 0 || appState.filterCriteria.useTodayConfirmed ? .green : .secondary)
-                        Text("Today Confirmed (\(todayConfirmedCount))")
-                            .font(.system(size: 11, weight: appState.filterCriteria.useTodayConfirmed ? .bold : .medium))
-                            .foregroundColor(appState.filterCriteria.useTodayConfirmed ? .green : (todayConfirmedCount > 0 ? .primary : .secondary))
-                    }
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 3)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(appState.filterCriteria.useTodayConfirmed ? Color.green.opacity(0.22) : (todayConfirmedCount > 0 ? Color.green.opacity(0.08) : Color.clear))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6)
-                            .stroke(appState.filterCriteria.useTodayConfirmed ? Color.green : (todayConfirmedCount > 0 ? Color.green.opacity(0.3) : Color.secondary.opacity(0.2)), lineWidth: 1)
-                    )
-                }
-                .buttonStyle(.plain)
-                .help(appState.filterCriteria.useTodayConfirmed ? "Showing only today's confirmed QSOs. Click to reset." : "Filter log table to show confirmed QSOs from today (\(todayConfirmedCount))")
-
-                if todayConfirmedCount > 0 {
-                    let readyUnsent = appState.todayConfirmedReadyUnsentCount
-                    let totalUnsent = appState.todayConfirmedUnsentCount
-
-                    if readyUnsent > 0 || totalUnsent > 0 {
-                        let badgeCount = readyUnsent > 0 ? readyUnsent : totalUnsent
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 5) {
+                        let todayConfirmedCount = appState.todayConfirmedCount
                         Button {
-                            appState.showTodayConfirmedQSLSheet = true
+                            appState.filterCriteria.useTodayConfirmed.toggle()
                         } label: {
-                            HStack(spacing: 3.5) {
-                                Image(systemName: "paperplane.fill")
-                                    .font(.system(size: 8.5))
-                                Text("Send QSLs (\(badgeCount))")
-                                    .font(.system(size: 10.5, weight: .bold))
+                            HStack(spacing: 3) {
+                                Image(systemName: "checkmark.seal.fill")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundColor(todayConfirmedCount > 0 || appState.filterCriteria.useTodayConfirmed ? .green : .secondary)
+                                Text("Today Confirmed (\(todayConfirmedCount))")
+                                    .font(.system(size: 11, weight: appState.filterCriteria.useTodayConfirmed ? .bold : .medium))
+                                    .foregroundColor(appState.filterCriteria.useTodayConfirmed ? .green : (todayConfirmedCount > 0 ? .primary : .secondary))
+                                    .lineLimit(1)
                             }
-                            .padding(.horizontal, 7)
+                            .padding(.horizontal, 6)
                             .padding(.vertical, 3)
-                            .background(Capsule().fill(Color.green))
-                            .foregroundColor(.white)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .fill(appState.filterCriteria.useTodayConfirmed ? Color.green.opacity(0.22) : (todayConfirmedCount > 0 ? Color.green.opacity(0.08) : Color.clear))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .stroke(appState.filterCriteria.useTodayConfirmed ? Color.green : (todayConfirmedCount > 0 ? Color.green.opacity(0.3) : Color.secondary.opacity(0.2)), lineWidth: 1)
+                            )
                         }
                         .buttonStyle(.plain)
-                        .help("Open Today's Confirmed QSL Dispatcher to review, preview, and email QSL card PDFs for \(badgeCount) un-emailed contact(s)")
-                    } else {
-                        Button {
-                            appState.showTodayConfirmedQSLSheet = true
-                        } label: {
-                            HStack(spacing: 3.5) {
-                                Image(systemName: "checkmark.circle.fill")
-                                    .font(.system(size: 8.5))
-                                    .foregroundColor(.green)
-                                Text("QSLs Sent (\(todayConfirmedCount))")
-                                    .font(.system(size: 10.5, weight: .medium))
+                        .fixedSize(horizontal: true, vertical: false)
+                        .help(appState.filterCriteria.useTodayConfirmed ? "Showing only today's confirmed QSOs. Click to reset." : "Filter log table to show confirmed QSOs from today (\(todayConfirmedCount))")
+
+                        if todayConfirmedCount > 0 {
+                            let readyUnsent = appState.todayConfirmedReadyUnsentCount
+                            let totalUnsent = appState.todayConfirmedUnsentCount
+
+                            if readyUnsent > 0 || totalUnsent > 0 {
+                                let badgeCount = readyUnsent > 0 ? readyUnsent : totalUnsent
+                                Button {
+                                    appState.showTodayConfirmedQSLSheet = true
+                                } label: {
+                                    HStack(spacing: 3.5) {
+                                        Image(systemName: "paperplane.fill")
+                                            .font(.system(size: 8.5))
+                                        Text("Send QSLs (\(badgeCount))")
+                                            .font(.system(size: 10.5, weight: .bold))
+                                            .lineLimit(1)
+                                    }
+                                    .padding(.horizontal, 7)
+                                    .padding(.vertical, 3)
+                                    .background(Capsule().fill(Color.green))
+                                    .foregroundColor(.white)
+                                }
+                                .buttonStyle(.plain)
+                                .fixedSize(horizontal: true, vertical: false)
+                                .help("Open Today's Confirmed QSL Dispatcher to review, preview, and email QSL card PDFs for \(badgeCount) un-emailed contact(s)")
+                            } else {
+                                Button {
+                                    appState.showTodayConfirmedQSLSheet = true
+                                } label: {
+                                    HStack(spacing: 3.5) {
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .font(.system(size: 8.5))
+                                            .foregroundColor(.green)
+                                        Text("QSLs Sent (\(todayConfirmedCount))")
+                                            .font(.system(size: 10.5, weight: .medium))
+                                            .foregroundColor(.secondary)
+                                            .lineLimit(1)
+                                    }
+                                    .padding(.horizontal, 7)
+                                    .padding(.vertical, 3)
+                                    .background(Capsule().fill(Color(NSColor.controlBackgroundColor)))
+                                    .overlay(Capsule().stroke(Color.secondary.opacity(0.25), lineWidth: 1))
+                                }
+                                .buttonStyle(.plain)
+                                .fixedSize(horizontal: true, vertical: false)
+                                .help("All confirmed contacts with email from today have been sent QSL card emails. Click to view dispatch records.")
+                            }
+                        }
+
+                        let newConfirmedCount = appState.newlyConfirmedCount
+                        if newConfirmedCount > 0 {
+                            Button {
+                                appState.filterCriteria.useNewlyConfirmed.toggle()
+                            } label: {
+                                HStack(spacing: 3) {
+                                    Image(systemName: "sparkles")
+                                        .font(.system(size: 9, weight: .bold))
+                                        .foregroundColor(.pink)
+                                    Text("New QSL (\(newConfirmedCount))")
+                                        .font(.system(size: 11, weight: appState.filterCriteria.useNewlyConfirmed ? .bold : .medium))
+                                        .foregroundColor(appState.filterCriteria.useNewlyConfirmed ? .pink : .primary)
+                                        .lineLimit(1)
+                                }
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 3)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .fill(appState.filterCriteria.useNewlyConfirmed ? Color.pink.opacity(0.22) : Color.pink.opacity(0.08))
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .stroke(appState.filterCriteria.useNewlyConfirmed ? Color.pink : Color.pink.opacity(0.3), lineWidth: 1)
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .fixedSize(horizontal: true, vertical: false)
+                            .help(appState.filterCriteria.useNewlyConfirmed ? "Showing only newly confirmed QSOs. Click to reset." : "Filter log table to show \(newConfirmedCount) newly confirmed QSOs")
+                        }
+
+                        let emailedCount = appState.emailedQSOCount
+                        if emailedCount > 0 {
+                            Button {
+                                appState.filterCriteria.useSentEmail.toggle()
+                            } label: {
+                                HStack(spacing: 3) {
+                                    Image(systemName: "envelope.fill")
+                                        .font(.system(size: 9))
+                                        .foregroundColor(.cyan)
+                                    Text("Emailed (\(emailedCount))")
+                                        .font(.system(size: 11, weight: appState.filterCriteria.useSentEmail ? .bold : .medium))
+                                        .foregroundColor(appState.filterCriteria.useSentEmail ? .cyan : .primary)
+                                        .lineLimit(1)
+                                }
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 3)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .fill(appState.filterCriteria.useSentEmail ? Color.cyan.opacity(0.22) : Color.cyan.opacity(0.08))
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .stroke(appState.filterCriteria.useSentEmail ? Color.cyan : Color.cyan.opacity(0.3), lineWidth: 1)
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .fixedSize(horizontal: true, vertical: false)
+                            .help(appState.filterCriteria.useSentEmail ? "Showing only QSOs with sent emails. Click to reset." : "Filter log table to show \(emailedCount) QSOs with sent emails")
+                        }
+
+                        let overdueCount = appState.overduePendingCount
+                        if overdueCount > 0 {
+                            Button {
+                                appState.filterCriteria.useOverduePending.toggle()
+                            } label: {
+                                HStack(spacing: 3) {
+                                    Image(systemName: "hourglass.bottomhalf.filled")
+                                        .font(.system(size: 9, weight: .bold))
+                                        .foregroundColor(.orange)
+                                    Text("Overdue >30d (\(overdueCount))")
+                                        .font(.system(size: 11, weight: appState.filterCriteria.useOverduePending ? .bold : .medium))
+                                        .foregroundColor(appState.filterCriteria.useOverduePending ? .orange : .primary)
+                                        .lineLimit(1)
+                                }
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 3)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .fill(appState.filterCriteria.useOverduePending ? Color.orange.opacity(0.22) : Color.orange.opacity(0.08))
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .stroke(appState.filterCriteria.useOverduePending ? Color.orange : Color.orange.opacity(0.3), lineWidth: 1)
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .fixedSize(horizontal: true, vertical: false)
+                            .help(appState.filterCriteria.useOverduePending ? "Showing unconfirmed QSOs pending over 30 days. Click to reset." : "Filter log table to show \(overdueCount) overdue unconfirmed QSOs (>30 days)")
+                        }
+
+                        let unconfCount = appState.unconfirmedCount
+                        if unconfCount > 0 && unconfCount < appState.qsoRecords.count {
+                            Button {
+                                appState.filterCriteria.useUnconfirmedOnly.toggle()
+                            } label: {
+                                HStack(spacing: 3) {
+                                    Image(systemName: "circle.dashed")
+                                        .font(.system(size: 9, weight: .bold))
+                                        .foregroundColor(appState.filterCriteria.useUnconfirmedOnly ? .primary : .secondary)
+                                    Text("Pending (\(unconfCount))")
+                                        .font(.system(size: 11, weight: appState.filterCriteria.useUnconfirmedOnly ? .bold : .medium))
+                                        .foregroundColor(appState.filterCriteria.useUnconfirmedOnly ? .primary : .secondary)
+                                        .lineLimit(1)
+                                }
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 3)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .fill(appState.filterCriteria.useUnconfirmedOnly ? Color.secondary.opacity(0.22) : Color.secondary.opacity(0.08))
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .stroke(appState.filterCriteria.useUnconfirmedOnly ? Color.secondary : Color.secondary.opacity(0.25), lineWidth: 1)
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .fixedSize(horizontal: true, vertical: false)
+                            .help(appState.filterCriteria.useUnconfirmedOnly ? "Showing all unconfirmed contacts. Click to reset." : "Filter to show \(unconfCount) unconfirmed contacts awaiting QSL")
+                        }
+
+                        let lotwWaitCount = appState.lotwWaitingCount
+                        if lotwWaitCount > 0 {
+                            Button {
+                                appState.filterCriteria.useLotwWaiting.toggle()
+                            } label: {
+                                HStack(spacing: 3) {
+                                    Image(systemName: "arrow.up.circle.fill")
+                                        .font(.system(size: 9, weight: .bold))
+                                        .foregroundColor(appState.filterCriteria.useLotwWaiting ? Color(red: 0.25, green: 0.95, blue: 0.45) : .green)
+                                    Text("LoTW Wait (\(lotwWaitCount))")
+                                        .font(.system(size: 11, weight: appState.filterCriteria.useLotwWaiting ? .bold : .medium))
+                                        .foregroundColor(appState.filterCriteria.useLotwWaiting ? Color(red: 0.25, green: 0.95, blue: 0.45) : .primary)
+                                        .lineLimit(1)
+                                }
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 3)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .fill(appState.filterCriteria.useLotwWaiting ? Color.green.opacity(0.22) : Color.green.opacity(0.08))
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .stroke(appState.filterCriteria.useLotwWaiting ? Color.green : Color.green.opacity(0.3), lineWidth: 1)
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .fixedSize(horizontal: true, vertical: false)
+                            .help(appState.filterCriteria.useLotwWaiting ? "Showing contacts sent to LoTW awaiting match. Click to reset." : "Filter log table to show \(lotwWaitCount) contacts sent to LoTW awaiting match")
+                        }
+                        
+                        if appState.isLoading && !appState.qsoRecords.isEmpty {
+                            HStack(spacing: 6) {
+                                ProgressView()
+                                    .controlSize(.small)
+                                Text("Syncing...")
+                                    .font(.caption2)
                                     .foregroundColor(.secondary)
+                                    .lineLimit(1)
                             }
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 3)
-                            .background(Capsule().fill(Color(NSColor.controlBackgroundColor)))
-                            .overlay(Capsule().stroke(Color.secondary.opacity(0.25), lineWidth: 1))
+                            .padding(.horizontal, 6)
+                            .fixedSize(horizontal: true, vertical: false)
                         }
-                        .buttonStyle(.plain)
-                        .help("All confirmed contacts with email from today have been sent QSL card emails. Click to view dispatch records.")
                     }
+                    .padding(.vertical, 1)
                 }
-
-                let newConfirmedCount = appState.newlyConfirmedCount
-                if newConfirmedCount > 0 {
-                    Button {
-                        appState.filterCriteria.useNewlyConfirmed.toggle()
-                    } label: {
-                        HStack(spacing: 3) {
-                            Image(systemName: "sparkles")
-                                .font(.system(size: 9, weight: .bold))
-                                .foregroundColor(.pink)
-                            Text("New QSL (\(newConfirmedCount))")
-                                .font(.system(size: 11, weight: appState.filterCriteria.useNewlyConfirmed ? .bold : .medium))
-                                .foregroundColor(appState.filterCriteria.useNewlyConfirmed ? .pink : .primary)
-                        }
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
-                        .background(
-                            RoundedRectangle(cornerRadius: 6)
-                                .fill(appState.filterCriteria.useNewlyConfirmed ? Color.pink.opacity(0.22) : Color.pink.opacity(0.08))
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 6)
-                                .stroke(appState.filterCriteria.useNewlyConfirmed ? Color.pink : Color.pink.opacity(0.3), lineWidth: 1)
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .help(appState.filterCriteria.useNewlyConfirmed ? "Showing only newly confirmed QSOs. Click to reset." : "Filter log table to show \(newConfirmedCount) newly confirmed QSOs")
-                }
-
-                let emailedCount = appState.emailedQSOCount
-                if emailedCount > 0 {
-                    Button {
-                        appState.filterCriteria.useSentEmail.toggle()
-                    } label: {
-                        HStack(spacing: 3) {
-                            Image(systemName: "envelope.fill")
-                                .font(.system(size: 9))
-                                .foregroundColor(.cyan)
-                            Text("Emailed (\(emailedCount))")
-                                .font(.system(size: 11, weight: appState.filterCriteria.useSentEmail ? .bold : .medium))
-                                .foregroundColor(appState.filterCriteria.useSentEmail ? .cyan : .primary)
-                        }
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
-                        .background(
-                            RoundedRectangle(cornerRadius: 6)
-                                .fill(appState.filterCriteria.useSentEmail ? Color.cyan.opacity(0.22) : Color.cyan.opacity(0.08))
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 6)
-                                .stroke(appState.filterCriteria.useSentEmail ? Color.cyan : Color.cyan.opacity(0.3), lineWidth: 1)
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .help(appState.filterCriteria.useSentEmail ? "Showing only QSOs with sent emails. Click to reset." : "Filter log table to show \(emailedCount) QSOs with sent emails")
-                }
-
-                let overdueCount = appState.overduePendingCount
-                if overdueCount > 0 {
-                    Button {
-                        appState.filterCriteria.useOverduePending.toggle()
-                    } label: {
-                        HStack(spacing: 3) {
-                            Image(systemName: "hourglass.bottomhalf.filled")
-                                .font(.system(size: 9, weight: .bold))
-                                .foregroundColor(.orange)
-                            Text("Overdue >30d (\(overdueCount))")
-                                .font(.system(size: 11, weight: appState.filterCriteria.useOverduePending ? .bold : .medium))
-                                .foregroundColor(appState.filterCriteria.useOverduePending ? .orange : .primary)
-                        }
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
-                        .background(
-                            RoundedRectangle(cornerRadius: 6)
-                                .fill(appState.filterCriteria.useOverduePending ? Color.orange.opacity(0.22) : Color.orange.opacity(0.08))
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 6)
-                                .stroke(appState.filterCriteria.useOverduePending ? Color.orange : Color.orange.opacity(0.3), lineWidth: 1)
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .help(appState.filterCriteria.useOverduePending ? "Showing unconfirmed QSOs pending over 30 days. Click to reset." : "Filter log table to show \(overdueCount) overdue unconfirmed QSOs (>30 days)")
-                }
-
-                let unconfCount = appState.unconfirmedCount
-                if unconfCount > 0 && unconfCount < appState.qsoRecords.count {
-                    Button {
-                        appState.filterCriteria.useUnconfirmedOnly.toggle()
-                    } label: {
-                        HStack(spacing: 3) {
-                            Image(systemName: "circle.dashed")
-                                .font(.system(size: 9, weight: .bold))
-                                .foregroundColor(appState.filterCriteria.useUnconfirmedOnly ? .primary : .secondary)
-                            Text("Pending (\(unconfCount))")
-                                .font(.system(size: 11, weight: appState.filterCriteria.useUnconfirmedOnly ? .bold : .medium))
-                                .foregroundColor(appState.filterCriteria.useUnconfirmedOnly ? .primary : .secondary)
-                        }
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
-                        .background(
-                            RoundedRectangle(cornerRadius: 6)
-                                .fill(appState.filterCriteria.useUnconfirmedOnly ? Color.secondary.opacity(0.22) : Color.secondary.opacity(0.08))
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 6)
-                                .stroke(appState.filterCriteria.useUnconfirmedOnly ? Color.secondary : Color.secondary.opacity(0.25), lineWidth: 1)
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .help(appState.filterCriteria.useUnconfirmedOnly ? "Showing all unconfirmed contacts. Click to reset." : "Filter to show \(unconfCount) unconfirmed contacts awaiting QSL")
-                }
-
-                let lotwWaitCount = appState.lotwWaitingCount
-                if lotwWaitCount > 0 {
-                    Button {
-                        appState.filterCriteria.useLotwWaiting.toggle()
-                    } label: {
-                        HStack(spacing: 3) {
-                            Image(systemName: "arrow.up.circle.fill")
-                                .font(.system(size: 9, weight: .bold))
-                                .foregroundColor(appState.filterCriteria.useLotwWaiting ? Color(red: 0.25, green: 0.95, blue: 0.45) : .green)
-                            Text("LoTW Wait (\(lotwWaitCount))")
-                                .font(.system(size: 11, weight: appState.filterCriteria.useLotwWaiting ? .bold : .medium))
-                                .foregroundColor(appState.filterCriteria.useLotwWaiting ? Color(red: 0.25, green: 0.95, blue: 0.45) : .primary)
-                        }
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
-                        .background(
-                            RoundedRectangle(cornerRadius: 6)
-                                .fill(appState.filterCriteria.useLotwWaiting ? Color.green.opacity(0.22) : Color.green.opacity(0.08))
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 6)
-                                .stroke(appState.filterCriteria.useLotwWaiting ? Color.green : Color.green.opacity(0.3), lineWidth: 1)
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .help(appState.filterCriteria.useLotwWaiting ? "Showing contacts sent to LoTW awaiting match. Click to reset." : "Filter log table to show \(lotwWaitCount) contacts sent to LoTW awaiting match")
-                }
-                
-                if appState.isLoading && !appState.qsoRecords.isEmpty {
-                    HStack(spacing: 6) {
-                        ProgressView()
-                            .controlSize(.small)
-                        Text("Syncing...")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                    }
-                    .padding(.horizontal, 6)
-                }
+                .fixedSize(horizontal: false, vertical: true)
                 
                 Spacer(minLength: 4)
             }

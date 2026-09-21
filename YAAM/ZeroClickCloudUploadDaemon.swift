@@ -736,6 +736,12 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
             guard !cleanVal.isEmpty else { continue }
             // Filter non-standard internal fields
             if key.starts(with: "APP_YAAM_") { continue }
+            if key == "COMMENT" {
+                let sanitized = QSOMetadataFormatter.cleanComment(cleanVal)
+                guard !sanitized.isEmpty else { continue }
+                out += "<\(key):\(sanitized.utf8.count)>\(sanitized) "
+                continue
+            }
             out += "<\(key):\(cleanVal.utf8.count)>\(cleanVal) "
         }
         out += "<EOR>\n"
@@ -748,50 +754,6 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
         stationID: String? = nil,
         stationLocation: String? = nil
     ) async -> (success: Bool, message: String) {
-        let fileManager = FileManager.default
-
-        var scopedURL: URL?
-        var didAccessScopedURL = false
-        if let bookmark = UserDefaults.standard.data(forKey: "tqslExecutableBookmark") {
-            var stale = false
-            scopedURL = try? URL(
-                resolvingBookmarkData: bookmark,
-                options: [.withSecurityScope],
-                relativeTo: nil,
-                bookmarkDataIsStale: &stale
-            )
-            if let scopedURL { didAccessScopedURL = scopedURL.startAccessingSecurityScopedResource() }
-        }
-        defer { if didAccessScopedURL { scopedURL?.stopAccessingSecurityScopedResource() } }
-
-        let customPath = (UserDefaults.standard.string(forKey: "tqslExecutablePath") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        let tqslCandidates = [
-            scopedURL?.path ?? "",
-            customPath,
-            "/Applications/TrustedQSL/tqsl.app/Contents/MacOS/tqsl",
-            "/Applications/tqsl.app/Contents/MacOS/tqsl",
-            "/opt/homebrew/bin/tqsl",
-            "/usr/local/bin/tqsl",
-            "/usr/bin/tqsl"
-        ].filter { !$0.isEmpty }
-
-        guard let tqslPath = tqslCandidates.first(where: { fileManager.isExecutableFile(atPath: $0) }) else {
-            return (false, "TQSL binary not found")
-        }
-
-        let tempAdifURL = fileManager.temporaryDirectory.appendingPathComponent("yaam_lotw_\(UUID().uuidString).adi")
-        let adifContent = buildSingleQSOADIF(record)
-
-        do {
-            try adifContent.write(to: tempAdifURL, atomically: true, encoding: .utf8)
-        } catch {
-            return (false, "Failed to write temp ADIF: \(error.localizedDescription)")
-        }
-
-        defer {
-            try? fileManager.removeItem(at: tempAdifURL)
-        }
-
         var resolvedLocation = (stationLocation ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         if resolvedLocation.isEmpty {
             resolvedLocation = (UserDefaults.standard.string(forKey: "lotwStationLocation") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -813,45 +775,11 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
             }
         }
 
-        return await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                TQSLService.synchronizeTQSLStorage()
-                let process = Process()
-                process.executableURL = URL(fileURLWithPath: tqslPath)
-                process.environment = TQSLService.tqslProcessEnvironment()
-
-                var arguments: [String] = ["-d", "-u", "-x", "-q"]
-                if !resolvedLocation.isEmpty {
-                    arguments.append(contentsOf: ["-l", resolvedLocation])
-                }
-
-                let certPassword = CredentialVault.value(for: .lotwCertificatePassword).trimmingCharacters(in: .whitespacesAndNewlines)
-                if !certPassword.isEmpty {
-                    arguments.append(contentsOf: ["-p", certPassword])
-                }
-
-                arguments.append(tempAdifURL.path)
-                process.arguments = arguments
-
-                let pipe = Pipe()
-                process.standardOutput = pipe
-                process.standardError = pipe
-
-                do {
-                    try process.run()
-                    process.waitUntilExit()
-                    if process.terminationStatus == 0 {
-                        continuation.resume(returning: (true, "Signed & Uploaded"))
-                    } else {
-                        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                        let output = String(data: data, encoding: .utf8) ?? "Exit code \(process.terminationStatus)"
-                        continuation.resume(returning: (false, output.trimmingCharacters(in: .whitespacesAndNewlines)))
-                    }
-                } catch {
-                    continuation.resume(returning: (false, error.localizedDescription))
-                }
-            }
-        }
+        let adifContent = buildSingleQSOADIF(record)
+        return await TQSLCoordinator.shared.execute(
+            adifContent: adifContent,
+            stationLocation: resolvedLocation
+        )
     }
 
     private func urlEncode(_ string: String) -> String {

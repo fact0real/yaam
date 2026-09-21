@@ -417,6 +417,7 @@ public final class DigitalModemEngine: ObservableObject {
     // TX Generation
     private var txTask: Task<Void, Never>?
     private var simulationTimer: Timer?
+    private var simulationPhraseIndex: Int = 0
 
     private enum RTTYRxFSM {
         case idle // Listening for start bit (Space)
@@ -939,15 +940,15 @@ public final class DigitalModemEngine: ObservableObject {
     }
 
     private func synthesizeAndPlay(character: Character) async {
-        let mode = await operatingMode
-        let markF = await effectiveMarkFrequency
-        let spaceF = await effectiveSpaceFrequency
-        let sRate = await sampleRate
+        let mode = operatingMode
+        let markF = effectiveMarkFrequency
+        let spaceF = effectiveSpaceFrequency
+        let sRate = sampleRate
 
         if mode.isRTTY {
-            var state = await baudotState
+            var state = baudotState
             let baudotCodes = BaudotCodec.encode(char: character, currentState: &state)
-            await MainActor.run { self.baudotState = state }
+            self.baudotState = state
 
             for code in baudotCodes {
                 // Sequence of bits: Start (0), Data0..Data4, Stop (1, 1.5 duration)
@@ -998,16 +999,8 @@ public final class DigitalModemEngine: ObservableObject {
             }
         }
 
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            Task { @MainActor in
-                if let player = self.playerNode, player.isPlaying {
-                    player.scheduleBuffer(buffer) {
-                        continuation.resume()
-                    }
-                } else {
-                    continuation.resume()
-                }
-            }
+        if let player = self.playerNode, player.isPlaying {
+            await player.scheduleBuffer(buffer)
         }
     }
 
@@ -1026,16 +1019,8 @@ public final class DigitalModemEngine: ObservableObject {
             }
         }
 
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            Task { @MainActor in
-                if let player = self.playerNode, player.isPlaying {
-                    player.scheduleBuffer(buffer) {
-                        continuation.resume()
-                    }
-                } else {
-                    continuation.resume()
-                }
-            }
+        if let player = self.playerNode, player.isPlaying {
+            await player.scheduleBuffer(buffer)
         }
     }
 
@@ -1064,43 +1049,45 @@ public final class DigitalModemEngine: ObservableObject {
             "UR 599 003 003 TU 73"
         ]
 
-        var phraseIndex = 0
+        simulationPhraseIndex = 0
         simulationTimer = Timer.scheduledTimer(withTimeInterval: 0.12, repeats: true) { [weak self] _ in
-            guard let self else { return }
-            let phrase = simulatedPhrases[phraseIndex % simulatedPhrases.count]
-            phraseIndex += 1
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let phrase = simulatedPhrases[self.simulationPhraseIndex % simulatedPhrases.count]
+                self.simulationPhraseIndex += 1
 
-            // Inject simulated characters into stream
-            for ch in phrase {
-                self.appendDecodedText(String(ch))
+                // Inject simulated characters into stream
+                for ch in phrase {
+                    self.appendDecodedText(String(ch))
+                }
+                self.appendDecodedText("\r\n")
+
+                // Synthesize realistic Lissajous crossed-ellipses coordinates
+                var simScope: [DigitalScopeSample] = []
+                for i in 0..<32 {
+                    let t = Double(i) * 0.2
+                    // Mark produces vertical ellipse with slight phase wobble
+                    let my = Float(sin(t)) * 0.85
+                    // Space produces horizontal ellipse
+                    let sx = Float(cos(t * 1.05)) * 0.82
+                    simScope.append(DigitalScopeSample(x: sx, y: my))
+                }
+
+                self.scopeSamples = simScope
+                self.markLevel = 0.78
+                self.spaceLevel = 0.75
+                self.signalToNoiseRatioDb = 24.5
+                self.audioInputLevel = 0.72
+
+                // Fake waterfall spectrum around center frequency
+                var simSpec = [Float](repeating: 0.05, count: 128)
+                let centerBin = Int((self.centerFrequencyHz - 300.0) / (3200.0 - 300.0) * 128.0)
+                if centerBin >= 5 && centerBin < 123 {
+                    simSpec[centerBin - 3] = 0.90 // Mark
+                    simSpec[centerBin + 3] = 0.88 // Space
+                }
+                self.waterfallSpectrum = simSpec
             }
-            self.appendDecodedText("\r\n")
-
-            // Synthesize realistic Lissajous crossed-ellipses coordinates
-            var simScope: [DigitalScopeSample] = []
-            for i in 0..<32 {
-                let t = Double(i) * 0.2
-                // Mark produces vertical ellipse with slight phase wobble
-                let my = Float(sin(t)) * 0.85
-                // Space produces horizontal ellipse
-                let sx = Float(cos(t * 1.05)) * 0.82
-                simScope.append(DigitalScopeSample(x: sx, y: my))
-            }
-
-            self.scopeSamples = simScope
-            self.markLevel = 0.78
-            self.spaceLevel = 0.75
-            self.signalToNoiseRatioDb = 24.5
-            self.audioInputLevel = 0.72
-
-            // Fake waterfall spectrum around center frequency
-            var simSpec = [Float](repeating: 0.05, count: 128)
-            let centerBin = Int((self.centerFrequencyHz - 300.0) / (3200.0 - 300.0) * 128.0)
-            if centerBin >= 5 && centerBin < 123 {
-                simSpec[centerBin - 3] = 0.90 // Mark
-                simSpec[centerBin + 3] = 0.88 // Space
-            }
-            self.waterfallSpectrum = simSpec
         }
     }
 

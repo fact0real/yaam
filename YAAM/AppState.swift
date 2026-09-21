@@ -1163,7 +1163,8 @@ class QRZWebKitScraper: NSObject, WKNavigationDelegate {
 
     // MARK: - WKNavigationDelegate
     nonisolated func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+            guard let self else { return }
             if self.isDebugFetch {
                 self.runDebugEmailExtraction(in: webView)
                 return
@@ -1205,7 +1206,8 @@ class QRZWebKitScraper: NSObject, WKNavigationDelegate {
                 guard let self else { return }
                 let reveal = revealResult as? [String: Any] ?? [:]
 
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                    guard let self else { return }
                     let afterScript = QRZWebKitScraper.debugSnapshotScript(label: "after")
                     webView.evaluateJavaScript(afterScript) { [weak self] afterResult, afterError in
                         guard let self else { return }
@@ -2055,8 +2057,12 @@ class AppState: NSObject, ObservableObject {
     var loadedWorkspaceProfileID: UUID?
 
     // Operator Desk
-    @Published var operatorDeskSection = min(30, max(0, UserDefaults.standard.integer(forKey: "operatorDeskSection")))
-    @Published var cwWorkstationSection: Int = 0
+    @Published var operatorDeskSection = OperatorDeskDestination.resolve(legacySection: UserDefaults.standard.integer(forKey: "operatorDeskSection")).legacySection {
+        didSet { UserDefaults.standard.set(operatorDeskSection, forKey: "operatorDeskSection") }
+    }
+    @Published var cwWorkstationSection = min(4, max(0, UserDefaults.standard.integer(forKey: "cwWorkstationSection"))) {
+        didSet { UserDefaults.standard.set(cwWorkstationSection, forKey: "cwWorkstationSection") }
+    }
     let cwESM = CWESMEngine.shared
     @Published var quickLogDraft = QuickLogDraft()
     @Published var quickLogLookup: CallsignLookupResult?
@@ -4150,7 +4156,8 @@ class AppState: NSObject, ObservableObject {
                     !(record["CALL"] ?? "").isEmpty && (record["QSO_DATE"] ?? "").filter(\.isNumber).count == 8
                 }
 
-                DispatchQueue.main.async {
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
                     if !self.isMasterMode {
                         self.loadMasterLogbook()
                     }

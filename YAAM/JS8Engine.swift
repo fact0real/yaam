@@ -125,6 +125,7 @@ public final class JS8Engine: ObservableObject {
     private var clockTimer: Timer?
     private var simTimer: Timer?
     private var txTask: Task<Void, Never>?
+    private var simIdx: Int = 0
 
     public init() {
         startSlotClock()
@@ -134,12 +135,14 @@ public final class JS8Engine: ObservableObject {
 
     private func startSlotClock() {
         clockTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
-            guard let self else { return }
-            let now = Date().timeIntervalSince1970
-            let duration = self.speed.frameSeconds
-            let elapsed = now.truncatingRemainder(dividingBy: duration)
-            self.slotProgress = elapsed / duration
-            self.secondsRemaining = duration - elapsed
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let now = Date().timeIntervalSince1970
+                let duration = self.speed.frameSeconds
+                let elapsed = now.truncatingRemainder(dividingBy: duration)
+                self.slotProgress = elapsed / duration
+                self.secondsRemaining = duration - elapsed
+            }
         }
     }
 
@@ -270,14 +273,8 @@ public final class JS8Engine: ObservableObject {
             }
         }
 
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            Task { @MainActor in
-                if let player = self.playerNode, player.isPlaying {
-                    player.scheduleBuffer(buffer) { continuation.resume() }
-                } else {
-                    continuation.resume()
-                }
-            }
+        if let player = self.playerNode, player.isPlaying {
+            await player.scheduleBuffer(buffer)
         }
     }
 
@@ -310,12 +307,12 @@ public final class JS8Engine: ObservableObject {
             ("DL1ABC", "JO42", -6, "@ALLCALL CQ CQ DE DL1ABC")
         ]
 
-        var idx = 0
+        simIdx = 0
         simTimer = Timer.scheduledTimer(withTimeInterval: 4.5, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                let item = sampleTraffic[idx % sampleTraffic.count]
-                idx += 1
+                let item = sampleTraffic[self.simIdx % sampleTraffic.count]
+                self.simIdx += 1
 
                 let entity = DXCCDatabase.resolve(callsign: item.call)
 
@@ -328,7 +325,7 @@ public final class JS8Engine: ObservableObject {
                         countryFlag: entity.flagEmoji,
                         countryName: entity.entityName,
                         lastHeard: Date(),
-                        audioFreqHz: Double(1200 + (idx * 150) % 1400)
+                        audioFreqHz: Double(1200 + (self.simIdx * 150) % 1400)
                     )
                 } else {
                     self.stations.insert(JS8StationEntry(
@@ -338,7 +335,7 @@ public final class JS8Engine: ObservableObject {
                         countryFlag: entity.flagEmoji,
                         countryName: entity.entityName,
                         lastHeard: Date(),
-                        audioFreqHz: Double(1200 + (idx * 150) % 1400)
+                        audioFreqHz: Double(1200 + (self.simIdx * 150) % 1400)
                     ), at: 0)
                 }
 

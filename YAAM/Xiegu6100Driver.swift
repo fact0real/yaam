@@ -117,7 +117,7 @@ public final class Xiegu6100Driver: ObservableObject {
     }
 
     // MARK: - Internal Transport & Polling
-    private let serialPort = SerialPortService()
+    nonisolated private let serialPort = SerialPortService()
     private var rxBuffer = Data()
     private let rxBufferLock = NSLock()
     private var pollingTimer: DispatchSourceTimer?

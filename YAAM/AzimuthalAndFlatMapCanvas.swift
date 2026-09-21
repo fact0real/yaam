@@ -1510,8 +1510,6 @@ public struct AzimuthalAndFlatMapCanvas: View {
         home: GeoCoordinate,
         toScreen: (Double, Double) -> CGPoint
     ) {
-        let homePt = toScreen(home.latitude, home.longitude)
-
         for m in markers.prefix(40) {
             let targetPt = toScreen(m.coordinate.latitude, m.coordinate.longitude)
             let bandColor = WorldVectorGeography.bandColor(for: m.band)

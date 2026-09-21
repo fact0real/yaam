@@ -107,18 +107,29 @@ nonisolated enum LogFileReader {
         }
 
         let parsed = parseADIF(content: content)
-        guard !parsed.records.isEmpty else {
-            throw LogFileReaderError.noQSORecords(.adif)
+        var sanitizedRecords = parsed.records
+        for i in 0..<sanitizedRecords.count {
+            if let comment = sanitizedRecords[i]["COMMENT"], comment.contains("[") && comment.contains("=") {
+                for (key, value) in embeddedADIFFields(in: comment) where sanitizedRecords[i][key] == nil {
+                    sanitizedRecords[i][key] = value
+                }
+                let clean = QSOMetadataFormatter.cleanComment(comment)
+                if clean.isEmpty {
+                    sanitizedRecords[i].removeValue(forKey: "COMMENT")
+                } else {
+                    sanitizedRecords[i]["COMMENT"] = clean
+                }
+            }
         }
 
         return ParsedLogFile(
             sourceURL: sourceURL,
             format: .adif,
             headers: parsed.headers,
-            records: parsed.records,
+            records: sanitizedRecords,
             originalADIFContent: content,
             ignoredDeletedRecordCount: 0,
-            validationIssueCount: parsed.records.filter { !isImportable($0) }.count
+            validationIssueCount: sanitizedRecords.filter { !isImportable($0) }.count
         )
     }
 
@@ -174,6 +185,12 @@ nonisolated enum LogFileReader {
             if let comment = record["COMMENT"] {
                 for (key, value) in embeddedADIFFields(in: comment) where record[key] == nil {
                     record[key] = value
+                }
+                let clean = QSOMetadataFormatter.cleanComment(comment)
+                if clean.isEmpty {
+                    record.removeValue(forKey: "COMMENT")
+                } else {
+                    record["COMMENT"] = clean
                 }
             }
             normalizeSmartSDRConfirmations(in: &record)

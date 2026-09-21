@@ -98,7 +98,7 @@ public final class Lab599TX500Driver: ObservableObject {
     }
 
     // MARK: - Internal Transport & Polling
-    private let serialPort = SerialPortService()
+    nonisolated private let serialPort = SerialPortService()
     private var receiveBuffer = ""
     private var pollingTimer: DispatchSourceTimer?
     private var pttWatchdog: DispatchWorkItem?

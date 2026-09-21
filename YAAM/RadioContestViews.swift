@@ -6,26 +6,16 @@
 import SwiftUI
 
 struct RadioBridgePanel: View {
-    private enum Workspace: String, CaseIterable, Identifiable {
+    enum Workspace: String {
         case bridge = "Hamlib / WSJT-X"
         case flrig = "FLRig"
-        case tci = "TCI (SDR)"
         case rotator = "Rotator"
-        case ft8 = "FT8 Station"
-        case multiRigFT8 = "Multi-Rig Cluster"
-        case digitalModem = "Digital Modes Suite"
-
-        var id: String { rawValue }
 
         var icon: String {
             switch self {
             case .bridge: return "antenna.radiowaves.left.and.right"
             case .flrig: return "slider.horizontal.3"
-            case .tci: return "waveform.path"
             case .rotator: return "location.north.line.fill"
-            case .ft8: return "dot.radiowaves.left.and.right"
-            case .multiRigFT8: return "square.stack.3d.up.fill"
-            case .digitalModem: return "teletype"
             }
         }
     }
@@ -49,41 +39,24 @@ struct RadioBridgePanel: View {
     @State private var targetAzimuthInput = 0.0
 
     @State private var actionStatus = ""
-    @State private var workspace: Workspace = .bridge
+    var workspace: Workspace = .bridge
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
             Divider()
-            if workspace == .ft8 {
-                FT8StationView(
-                    engine: appState.ft8Engine,
-                    radio: appState.icomNetworkRadio,
-                    rig: rig
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if workspace == .multiRigFT8 {
-                MultiRigFT8View(hub: appState.multiRigFT8Hub)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if workspace == .digitalModem {
-                DigitalMasterStationView()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
-                        if workspace == .bridge {
-                            rigSection
-                            Divider()
-                            wsjtxSection
-                            Divider()
-                            pendingSection
-                        } else if workspace == .flrig {
-                            flrigSection
-                        } else if workspace == .tci {
-                            TCIControlView()
-                        } else if workspace == .rotator {
-                            rotatorSection
-                        }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    if workspace == .bridge {
+                        rigSection
+                        Divider()
+                        wsjtxSection
+                        Divider()
+                        pendingSection
+                    } else if workspace == .flrig {
+                        flrigSection
+                    } else if workspace == .rotator {
+                        rotatorSection
                     }
                 }
             }
@@ -92,11 +65,11 @@ struct RadioBridgePanel: View {
 
     private var header: some View {
         HStack(spacing: 14) {
-            Image(systemName: "wave.3.right.circle.fill")
+            Image(systemName: workspace.icon)
                 .font(.system(size: 28))
                 .foregroundStyle(.blue)
             VStack(alignment: .leading, spacing: 2) {
-                Text(workspace == .bridge ? "Radio & Digital Bridge" : workspace.rawValue)
+                Text(workspace == .bridge ? "Radio Bridge · Hamlib & WSJT-X" : workspace.rawValue)
                     .font(.title3.weight(.bold))
                 Text(workspace == .bridge
                      ? "One operating context for your radio, WSJT-X/JTDX, and Quick Log"
@@ -107,43 +80,6 @@ struct RadioBridgePanel: View {
             .layoutPriority(1)
 
             Spacer(minLength: 8)
-
-            // Dynamic, responsive workspace tabs (never clipped or truncated)
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 5) {
-                    ForEach(Workspace.allCases) { item in
-                        let isSelected = workspace == item
-                        Button {
-                            withAnimation(.easeInOut(duration: 0.18)) {
-                                workspace = item
-                            }
-                        } label: {
-                            HStack(spacing: 5) {
-                                Image(systemName: item.icon)
-                                    .font(.system(size: 11, weight: isSelected ? .bold : .medium))
-                                Text(item.rawValue)
-                                    .font(.system(size: 11.5, weight: isSelected ? .bold : .medium))
-                                    .fixedSize(horizontal: true, vertical: false)
-                            }
-                            .padding(.horizontal, 9)
-                            .padding(.vertical, 5)
-                            .background(
-                                isSelected ? Color.accentColor : Color(NSColor.controlBackgroundColor),
-                                in: RoundedRectangle(cornerRadius: 6)
-                            )
-                            .foregroundColor(isSelected ? .white : .primary)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .stroke(isSelected ? Color.clear : Color.primary.opacity(0.12), lineWidth: 1)
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .help("Switch to \(item.rawValue)")
-                    }
-                }
-                .padding(.vertical, 2)
-            }
-            .fixedSize(horizontal: false, vertical: true)
 
             if !actionStatus.isEmpty {
                 Text(actionStatus).font(.caption).foregroundStyle(.secondary).lineLimit(2)
@@ -1517,4 +1453,3 @@ public struct CabrilloInspectorSheet: View {
         .frame(minWidth: 640, idealWidth: 700, minHeight: 500, idealHeight: 600)
     }
 }
-

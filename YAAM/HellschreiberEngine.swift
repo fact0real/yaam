@@ -127,6 +127,8 @@ public final class HellschreiberEngine: ObservableObject {
 
     private var txTask: Task<Void, Never>?
     private var simTimer: Timer?
+    private var simPhraseIdx = 0
+    private var simCharIdx = 0
 
     public init() {
         self.samplesPerPixel = 48000.0 / 245.0
@@ -316,8 +318,8 @@ public final class HellschreiberEngine: ObservableObject {
 
     private func synthesizeAndPlayHellChar(_ char: Character) async {
         let cols = HellFont.getColumns(for: char)
-        let sRate = await sampleRate
-        let freq = await centerFrequencyHz
+        let sRate = sampleRate
+        let freq = centerFrequencyHz
         let pixDuration = 1.0 / 245.0
         let framesPerPixel = Int(pixDuration * sRate)
 
@@ -357,14 +359,8 @@ public final class HellschreiberEngine: ObservableObject {
             }
         }
 
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            Task { @MainActor in
-                if let player = self.playerNode, player.isPlaying {
-                    player.scheduleBuffer(buffer) { continuation.resume() }
-                } else {
-                    continuation.resume()
-                }
-            }
+        if let player = self.playerNode, player.isPlaying {
+            await player.scheduleBuffer(buffer)
         }
     }
 
@@ -378,14 +374,8 @@ public final class HellschreiberEngine: ObservableObject {
             for i in 0..<frameCount { channel[i] = 0.0 }
         }
 
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            Task { @MainActor in
-                if let player = self.playerNode, player.isPlaying {
-                    player.scheduleBuffer(buffer) { continuation.resume() }
-                } else {
-                    continuation.resume()
-                }
-            }
+        if let player = self.playerNode, player.isPlaying {
+            await player.scheduleBuffer(buffer)
         }
     }
 
@@ -409,19 +399,19 @@ public final class HellschreiberEngine: ObservableObject {
             "73 DE DL1XYZ SK "
         ]
 
-        var phraseIdx = 0
-        var charIdx = 0
+        simPhraseIdx = 0
+        simCharIdx = 0
 
         simTimer = Timer.scheduledTimer(withTimeInterval: 0.065, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                let phrase = Array(simPhrases[phraseIdx % simPhrases.count])
+                let phrase = Array(simPhrases[self.simPhraseIdx % simPhrases.count])
                 guard !phrase.isEmpty else { return }
-                let ch = phrase[charIdx % phrase.count]
-                charIdx += 1
-                if charIdx >= phrase.count {
-                    charIdx = 0
-                    phraseIdx += 1
+                let ch = phrase[self.simCharIdx % phrase.count]
+                self.simCharIdx += 1
+                if self.simCharIdx >= phrase.count {
+                    self.simCharIdx = 0
+                    self.simPhraseIdx += 1
                 }
 
                 let fontCols = HellFont.getColumns(for: ch)

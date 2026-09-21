@@ -22,349 +22,78 @@ struct OperatorDeskView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            headerBar
-
+            OperatorDeskNavigationView(
+                selection: appState.operatorDeskDestination,
+                stationCallsign: appState.currentStationCallsign,
+                select: { appState.openOperatorDesk($0) },
+                selectGroup: { appState.openOperatorDeskGroup($0) }
+            )
             Divider()
-
-            deskPanel(for: appState.operatorDeskSection)
+            deskPanel(for: appState.operatorDeskDestination)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .onAppear { appState.rememberOperatorDeskDestination() }
+        .onChange(of: appState.operatorDeskDestination) { _, _ in
+            appState.rememberOperatorDeskDestination()
         }
     }
 
-    private func deskPanel(for section: Int) -> AnyView {
-        switch section {
-        case 1:
-            return AnyView(DXClusterPanel(client: appState.dxClusterClient))
-        case 2:
-            return AnyView(SyncCenterPanel())
-        case 3:
-            return AnyView(RadioBridgePanel(rig: appState.rigControlClient, wsjtx: appState.wsjtxListener))
-        case 4:
-            return AnyView(ContestPanel())
-        case 5:
-            return AnyView(QSLHubPanel())
-        case 6:
-            return AnyView(AwardCenterPanel())
-        case 7:
-            return AnyView(PortableActivitiesPanel())
-        case 8:
-            return AnyView(ConnectivityPanel())
-        case 9:
-            return AnyView(ContestCalendarPanel())
-        case 10:
-            return AnyView(ClubLogSpotsView())
-        case 11:
-            return AnyView(SixMeterWatchView())
-        case 12:
-            return AnyView(GlobeAndGridTrackerWorkspaceView())
-        case 13:
-            return AnyView(BandmapView())
-        case 14:
-            return AnyView(CWKeyerView().padding(20))
-        case 15:
-            return AnyView(ClubMembershipView())
-        case 16:
-            return AnyView(TCIControlView())
-        case 17:
-            return AnyView(ON4KSTView())
-        case 18:
-            return AnyView(WinKeyerView())
-        case 19:
-            return AnyView(QSLLabelDesignerView())
-        case 20:
-            return AnyView(DigitalCallRosterView())
-        case 21:
-            return AnyView(DXNewsAndIntelligenceView())
-        case 22:
-            return AnyView(HamClockShackView(isEmbedded: true))
-        case 23:
-            return AnyView(DigitalMasterStationView())
-        case 24:
-            return AnyView(NetworkTransceiverEmulatorView(emulator: appState.transceiverEmulator))
-        case 25:
-            return AnyView(MultiRigFT8View(hub: appState.multiRigFT8Hub))
-        default:
+    private func deskPanel(for destination: OperatorDeskDestination) -> AnyView {
+        switch destination {
+        case .quickLog:
             return AnyView(QuickLogPanel())
+        case .dxCluster:
+            return AnyView(DXClusterPanel(client: appState.dxClusterClient))
+        case .logSources:
+            return AnyView(SyncCenterPanel())
+        case .radioBridge, .flrig, .rotator:
+            let workspace: RadioBridgePanel.Workspace = destination == .flrig ? .flrig : (destination == .rotator ? .rotator : .bridge)
+            return AnyView(RadioBridgePanel(rig: appState.rigControlClient, wsjtx: appState.wsjtxListener, workspace: workspace))
+        case .ft8:
+            return AnyView(FT8StationView(engine: appState.ft8Engine, radio: appState.icomNetworkRadio, rig: appState.rigControlClient))
+        case .contest:
+            return AnyView(ContestPanel())
+        case .qslHub:
+            return AnyView(QSLHubPanel())
+        case .awards:
+            return AnyView(AwardCenterPanel())
+        case .portable:
+            return AnyView(PortableActivitiesPanel())
+        case .cloudCompanion:
+            return AnyView(ConnectivityPanel())
+        case .calendar:
+            return AnyView(ContestCalendarPanel())
+        case .clubLogSpots:
+            return AnyView(ClubLogSpotsView())
+        case .sixMeter:
+            return AnyView(SixMeterWatchView())
+        case .globeGrids:
+            return AnyView(GlobeAndGridTrackerWorkspaceView())
+        case .bandmap:
+            return AnyView(BandmapView())
+        case .cwKeyer, .cwAcademy, .cwReference, .cwDecoder, .cwPileup, .cwHardware:
+            return AnyView(CWKeyerView(showsHardwareDiagnostics: destination == .cwHardware).padding(12))
+        case .clubs:
+            return AnyView(ClubMembershipView())
+        case .tci:
+            return AnyView(TCIControlView())
+        case .on4kst:
+            return AnyView(ON4KSTView())
+        case .qslLabels:
+            return AnyView(QSLLabelDesignerView())
+        case .callRoster:
+            return AnyView(DigitalCallRosterView())
+        case .dxNews:
+            return AnyView(DXNewsAndIntelligenceView())
+        case .shackClock:
+            return AnyView(HamClockShackView(isEmbedded: true))
+        case .digitalSuite:
+            return AnyView(DigitalMasterStationView())
+        case .emulator:
+            return AnyView(NetworkTransceiverEmulatorView(emulator: appState.transceiverEmulator))
+        case .multiRigFT8:
+            return AnyView(MultiRigFT8View(hub: appState.multiRigFT8Hub))
         }
-    }
-
-    private struct DeskTabItem {
-        let tag: Int
-        let title: String
-        let icon: String
-    }
-
-    private var deskTabs: [DeskTabItem] {
-        [
-            DeskTabItem(tag: 0, title: "Quick Log", icon: "plus.circle.fill"),
-            DeskTabItem(tag: 22, title: "Shack Clock", icon: "deskclock.fill"),
-            DeskTabItem(tag: 20, title: "Call Roster", icon: "waveform.and.person.filled"),
-            DeskTabItem(tag: 21, title: "DX News", icon: "newspaper.fill"),
-            DeskTabItem(tag: 12, title: "Globe & Grids", icon: "globe.americas.fill"),
-            DeskTabItem(tag: 13, title: "Bandmap", icon: "waveform.path.ecg.rectangle"),
-            DeskTabItem(tag: 23, title: "Digital Suite", icon: "teletype"),
-            DeskTabItem(tag: 24, title: "Transceiver Emulator", icon: "server.rack"),
-            DeskTabItem(tag: 25, title: "Multi-Rig FT8", icon: "square.split.3x1.fill"),
-            DeskTabItem(tag: 14, title: "CW Keyer", icon: "tuningfork"),
-            DeskTabItem(tag: 18, title: "WinKeyer", icon: "cable.connector.horizontal"),
-            DeskTabItem(tag: 17, title: "ON4KST Chat", icon: "bubble.left.and.bubble.right.fill"),
-            DeskTabItem(tag: 19, title: "QSL Labels", icon: "printer.fill"),
-            DeskTabItem(tag: 15, title: "Clubs", icon: "person.3.sequence.fill"),
-            DeskTabItem(tag: 16, title: "TCI SDR", icon: "antenna.radiowaves.left.and.right"),
-            DeskTabItem(tag: 1, title: "DX Cluster", icon: "dot.radiowaves.left.and.right"),
-            DeskTabItem(tag: 10, title: "Club Log", icon: "person.3.fill"),
-            DeskTabItem(tag: 2, title: "Sync Center", icon: "arrow.triangle.2.circlepath"),
-            DeskTabItem(tag: 3, title: "Radio Bridge", icon: "wave.3.right.circle"),
-            DeskTabItem(tag: 4, title: "Contest", icon: "flag.checkered"),
-            DeskTabItem(tag: 5, title: "QSL", icon: "arrow.left.arrow.right.circle"),
-            DeskTabItem(tag: 6, title: "Awards", icon: "medal"),
-            DeskTabItem(tag: 7, title: "Portable", icon: "figure.hiking"),
-            DeskTabItem(tag: 8, title: "Connect", icon: "network"),
-            DeskTabItem(tag: 9, title: "Calendar", icon: "calendar"),
-            DeskTabItem(tag: 11, title: "6m Band", icon: "bolt.badge.clock.fill")
-        ]
-    }
-
-    private var headerBar: some View {
-        HStack(spacing: 8) {
-            // Station Callsign & Grid Badge (Fixed layout - Zero Overlap)
-            stationBadge
-                .fixedSize(horizontal: true, vertical: false)
-
-            Divider()
-                .frame(height: 20)
-
-            // Scrollable / Responsive Tab Bar with Left/Right Overflow Indicators & Fast Menu
-            ScrollViewReader { scrollProxy in
-                HStack(spacing: 4) {
-                    // Left Overflow Indicator / Scroll Left Button (•••)
-                    Button {
-                        scrollLeft(proxy: scrollProxy)
-                    } label: {
-                        HStack(spacing: 1.5) {
-                            Image(systemName: "chevron.left")
-                                .font(.system(size: 9.5, weight: .bold))
-                            Image(systemName: "ellipsis")
-                                .font(.system(size: 8, weight: .bold))
-                        }
-                        .foregroundStyle(Color.accentColor)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 4)
-                        .background(Color.accentColor.opacity(0.12), in: Capsule())
-                        .overlay(Capsule().stroke(Color.accentColor.opacity(0.3), lineWidth: 1))
-                    }
-                    .buttonStyle(.plain)
-                    .help("Scroll left to previous Operator Desk panels")
-
-                    // Scrollable Horizontal Tabs
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 4) {
-                            ForEach(deskTabs, id: \.tag) { tab in
-                                Button {
-                                    selectTab(tab.tag, proxy: scrollProxy)
-                                } label: {
-                                    HStack(spacing: 4) {
-                                        Image(systemName: tab.icon)
-                                        Text(tab.title)
-                                    }
-                                    .font(.system(size: 11.5, weight: appState.operatorDeskSection == tab.tag ? .bold : .medium))
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 5)
-                                    .background(
-                                        appState.operatorDeskSection == tab.tag ?
-                                            Color.accentColor.opacity(0.18) : Color.clear,
-                                        in: RoundedRectangle(cornerRadius: 6)
-                                    )
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 6)
-                                            .stroke(appState.operatorDeskSection == tab.tag ? Color.accentColor : Color.clear, lineWidth: 1.0)
-                                    )
-                                    .foregroundStyle(appState.operatorDeskSection == tab.tag ? Color.accentColor : Color.primary)
-                                }
-                                .buttonStyle(.plain)
-                                .id(tab.tag)
-                            }
-                        }
-                        .padding(.vertical, 2)
-                    }
-                    .onAppear {
-                        scrollProxy.scrollTo(appState.operatorDeskSection, anchor: .center)
-                    }
-                    .onChange(of: appState.operatorDeskSection) { _, newSection in
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            scrollProxy.scrollTo(newSection, anchor: .center)
-                        }
-                    }
-
-                    // Right Overflow Indicator / Scroll Right Button (•••)
-                    Button {
-                        scrollRight(proxy: scrollProxy)
-                    } label: {
-                        HStack(spacing: 1.5) {
-                            Image(systemName: "ellipsis")
-                                .font(.system(size: 8, weight: .bold))
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 9.5, weight: .bold))
-                        }
-                        .foregroundStyle(Color.accentColor)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 4)
-                        .background(Color.accentColor.opacity(0.12), in: Capsule())
-                        .overlay(Capsule().stroke(Color.accentColor.opacity(0.3), lineWidth: 1))
-                    }
-                    .buttonStyle(.plain)
-                    .help("Scroll right to more Operator Desk panels")
-
-                    // All Panels Fast Jump Menu (•••)
-                    allPanelsMenu(proxy: scrollProxy)
-                }
-            }
-
-            Spacer(minLength: 4)
-
-            deskStatus
-                .frame(maxWidth: 180, alignment: .trailing)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(Color(nsColor: .controlBackgroundColor))
-    }
-
-    private func allPanelsMenu(proxy: ScrollViewProxy) -> some View {
-        Menu {
-            Section("📻 Live Operating") {
-                Button { selectTab(0, proxy: proxy) } label: { Label("Quick Log", systemImage: "plus.circle.fill") }
-                Button { selectTab(22, proxy: proxy) } label: { Label("Shack Clock", systemImage: "deskclock.fill") }
-                Button { selectTab(20, proxy: proxy) } label: { Label("Call Roster", systemImage: "waveform.and.person.filled") }
-                Button { selectTab(21, proxy: proxy) } label: { Label("DX News", systemImage: "newspaper.fill") }
-                Button { selectTab(12, proxy: proxy) } label: { Label("Globe & Grids", systemImage: "globe.americas.fill") }
-                Button { selectTab(13, proxy: proxy) } label: { Label("Bandmap", systemImage: "waveform.path.ecg.rectangle") }
-                Button { selectTab(23, proxy: proxy) } label: { Label("Digital Suite", systemImage: "teletype") }
-                Button { selectTab(24, proxy: proxy) } label: { Label("Transceiver Emulator", systemImage: "server.rack") }
-                Button { selectTab(25, proxy: proxy) } label: { Label("Multi-Rig FT8", systemImage: "square.split.3x1.fill") }
-                Button { selectTab(14, proxy: proxy) } label: { Label("CW Keyer", systemImage: "tuningfork") }
-                Button { selectTab(18, proxy: proxy) } label: { Label("WinKeyer", systemImage: "cable.connector.horizontal") }
-                Button { selectTab(17, proxy: proxy) } label: { Label("ON4KST Chat", systemImage: "bubble.left.and.bubble.right.fill") }
-                Button { selectTab(16, proxy: proxy) } label: { Label("TCI SDR", systemImage: "antenna.radiowaves.left.and.right") }
-                Button { selectTab(3, proxy: proxy) } label: { Label("Radio Bridge", systemImage: "wave.3.right.circle") }
-            }
-            Section("🌍 DX & Propagation") {
-                Button { selectTab(11, proxy: proxy) } label: { Label("6m Magic Band", systemImage: "bolt.badge.clock.fill") }
-                Button { selectTab(1, proxy: proxy) } label: { Label("DX Cluster", systemImage: "dot.radiowaves.left.and.right") }
-                Button { selectTab(10, proxy: proxy) } label: { Label("Club Log Spots", systemImage: "person.3.fill") }
-            }
-            Section("🏆 Contests & Awards") {
-                Button { selectTab(4, proxy: proxy) } label: { Label("Contest Mode", systemImage: "flag.checkered") }
-                Button { selectTab(9, proxy: proxy) } label: { Label("Contest Calendar", systemImage: "calendar") }
-                Button { selectTab(6, proxy: proxy) } label: { Label("Awards Center", systemImage: "medal") }
-                Button { selectTab(15, proxy: proxy) } label: { Label("Club Memberships", systemImage: "person.3.sequence.fill") }
-            }
-            Section("🔄 QSL & Station Hub") {
-                Button { selectTab(5, proxy: proxy) } label: { Label("QSL Hub", systemImage: "arrow.left.arrow.right.circle") }
-                Button { selectTab(19, proxy: proxy) } label: { Label("QSL Label Designer", systemImage: "printer.fill") }
-                Button { selectTab(2, proxy: proxy) } label: { Label("Sync Center", systemImage: "arrow.triangle.2.circlepath") }
-                Button { selectTab(7, proxy: proxy) } label: { Label("Portable (POTA/SOTA)", systemImage: "figure.hiking") }
-                Button { selectTab(8, proxy: proxy) } label: { Label("Connect & Companion", systemImage: "network") }
-            }
-        } label: {
-            HStack(spacing: 3) {
-                Image(systemName: "square.grid.2x2")
-                    .font(.system(size: 11, weight: .bold))
-                Text("Panels")
-                    .font(.system(size: 11, weight: .semibold))
-            }
-            .foregroundStyle(Color.primary)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 4)
-            .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
-            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.gray.opacity(0.25), lineWidth: 1))
-        }
-        .menuStyle(.borderlessButton)
-        .help("Jump directly to any of the 20 Operator Desk panels")
-    }
-
-    private func selectTab(_ tag: Int, proxy: ScrollViewProxy) {
-        withAnimation(.easeInOut(duration: 0.15)) {
-            appState.operatorDeskSection = tag
-            UserDefaults.standard.set(tag, forKey: "operatorDeskSection")
-            proxy.scrollTo(tag, anchor: .center)
-        }
-    }
-
-    private func scrollLeft(proxy: ScrollViewProxy) {
-        guard let currentIdx = deskTabs.firstIndex(where: { $0.tag == appState.operatorDeskSection }) else { return }
-        let targetIdx = max(0, currentIdx - 1)
-        let targetTag = deskTabs[targetIdx].tag
-        selectTab(targetTag, proxy: proxy)
-    }
-
-    private func scrollRight(proxy: ScrollViewProxy) {
-        guard let currentIdx = deskTabs.firstIndex(where: { $0.tag == appState.operatorDeskSection }) else { return }
-        let targetIdx = min(deskTabs.count - 1, currentIdx + 1)
-        let targetTag = deskTabs[targetIdx].tag
-        selectTab(targetTag, proxy: proxy)
-    }
-
-    private var stationBadge: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "antenna.radiowaves.left.and.right")
-                .foregroundStyle(.green)
-            Text(appState.currentStationCallsign.isEmpty ? "NO CALL" : appState.currentStationCallsign)
-                .font(.system(.subheadline, design: .monospaced).weight(.bold))
-                .foregroundStyle(.green)
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(Color.green.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
-        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.green.opacity(0.3), lineWidth: 1.0))
-    }
-
-    @ViewBuilder
-    private var deskStatus: some View {
-        let status: (Bool, String) = switch appState.operatorDeskSection {
-        case 3:
-            (appState.rigControlClient.state.isConnected || appState.wsjtxListener.state.isListening,
-             appState.rigControlClient.state.isConnected ? appState.rigControlClient.state.title : appState.wsjtxListener.state.title)
-        case 4:
-            (appState.currentContestSession?.isActive == true,
-             appState.currentContestSession?.isActive == true ? "Contest active" : "No active contest")
-        case 5:
-            (!appState.qslQueueJobs.contains(where: { $0.state == .blocked || $0.state == .failed }), appState.qslHubStatus)
-        case 6:
-            (!appState.awardProgress.isEmpty, appState.awardEngineStatus)
-        case 7:
-            (!appState.portableActivitySummaries.isEmpty, "Portable activity log")
-        case 8:
-            (appState.isMobileCompanionRunning || appState.cloudSyncLastRun != nil, appState.isMobileCompanionRunning ? appState.mobileCompanionStatus : appState.cloudSyncStatus)
-        case 9:
-            (!appState.contestCalendarEntries.isEmpty, "\(appState.contestCalendarEntries.count) upcoming contests")
-        case 11:
-            (SixMeterPropagationEngine.shared.assessment.level != .quiet, SixMeterPropagationEngine.shared.assessment.summaryHeadline)
-        case 13:
-            (true, "\(BandmapEngine.shared.spots.count) live spots on \(BandmapEngine.shared.selectedBand)")
-        case 14:
-            (CWKeyerService.shared.isTransmitting, CWKeyerService.shared.isTransmitting ? "TX Morse Active" : "CW Keyer \(CWKeyerService.shared.wpm) WPM")
-        case 15:
-            (true, "\(ClubMembershipEngine.shared.totalMembersIndexed) club members indexed")
-        case 23:
-            (appState.digitalModemEngine.isListening, appState.digitalModemEngine.isListening ? "Digital Suite Active" : "Digital Suite Standby")
-        case 24:
-            (appState.transceiverEmulator.isServerRunning, appState.transceiverEmulator.isServerRunning ? "Transceiver Emulator Online" : "Transceiver Emulator Standby")
-        case 25:
-            (appState.multiRigFT8Hub.slots.contains { $0.isMonitoring }, "Multi-Rig FT8 Cluster (\(appState.multiRigFT8Hub.slots.count) Rigs)")
-        default:
-            (appState.dxClusterClient.state.isConnected, appState.dxClusterClient.state.title)
-        }
-        HStack(spacing: 5) {
-            Circle()
-                .fill(status.0 ? Color.green : Color.secondary.opacity(0.5))
-                .frame(width: 7, height: 7)
-            Text(status.1)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .truncationMode(.tail)
-        }
-        .help(status.1)
     }
 }
 
@@ -3638,6 +3367,7 @@ private struct DXClusterPanel: View {
 
 private struct SyncCenterPanel: View {
     @EnvironmentObject private var appState: AppState
+    @ObservedObject private var confirmationSync = QSLSyncEngine.shared
     @AppStorage("unifiedSyncEnabled") private var automaticSync = false
     @AppStorage("unifiedSyncIntervalMinutes") private var intervalMinutes = 30.0
 
@@ -3646,27 +3376,42 @@ private struct SyncCenterPanel: View {
             VStack(alignment: .leading, spacing: 20) {
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Synchronization Health")
+                        Text("Log Sources & Automation")
                             .font(.title2.weight(.bold))
-                        Text("One place for incoming logs and online confirmation status")
+                        Text("Import logger updates, synchronize Wavelog, and manage scheduled runs")
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
                     if appState.isUnifiedSyncRunning { ProgressView().controlSize(.small) }
                     Button {
-                        appState.runUnifiedSync()
+                        appState.runUnifiedSync(includeConfirmations: false)
                     } label: {
-                        Label("Sync All", systemImage: "arrow.triangle.2.circlepath")
+                        Label("Sync Local Logs", systemImage: "arrow.triangle.2.circlepath")
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(appState.isUnifiedSyncRunning)
+                    .disabled(appState.isUnifiedSyncRunning || appState.isLoading || appState.isSyncingAPI || confirmationSync.isSyncing)
+                    .help("Import updates from configured External ADIF and SDR-Control files")
                 }
 
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: 12)], spacing: 12) {
-                    ForEach(appState.syncServiceStatuses) { status in
+                    ForEach(appState.syncServiceStatuses.filter { $0.source == .externalADIF || $0.source == .sdrControl }) { status in
                         syncCard(status)
                     }
                 }
+
+                HStack(spacing: 12) {
+                    Image(systemName: "checkmark.seal.fill").foregroundStyle(.green)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Online confirmations live in QSL Hub").font(.subheadline.weight(.semibold))
+                        Text("LoTW, QRZ, eQSL, Club Log, received cards, and paper QSL tracking.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button("Open QSL Hub") { appState.openOperatorDesk(.qslHub) }
+                        .buttonStyle(.bordered)
+                }
+                .padding(14)
+                .background(Color.green.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
 
                 // MARK: - Wavelog & Cloudlog Server Card
                 HStack(spacing: 16) {
@@ -3711,7 +3456,7 @@ private struct SyncCenterPanel: View {
                 Divider()
 
                 HStack(spacing: 16) {
-                    Toggle("Automatic sync", isOn: $automaticSync)
+                    Toggle("Scheduled log & confirmation sync", isOn: $automaticSync)
                         .onChange(of: automaticSync) { _, _ in appState.configureUnifiedSyncSchedule() }
                     if automaticSync {
                         Stepper(
@@ -3731,9 +3476,13 @@ private struct SyncCenterPanel: View {
                     }
                 }
 
+                Text("The automatic schedule covers configured External ADIF, SDR-Control, LoTW, and QRZ sources. eQSL and Club Log run from QSL Hub; Wavelog uses its own Sync Wavelog button above.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
                 if !appState.syncHistory.isEmpty {
                     Divider()
-                    Text("Recent Activity")
+                    Text("Log & Confirmation Activity")
                         .font(.headline)
                     VStack(spacing: 0) {
                         ForEach(appState.syncHistory.prefix(20)) { entry in
@@ -3804,7 +3553,7 @@ private struct SyncCenterPanel: View {
                         Image(systemName: "arrow.clockwise")
                     }
                     .buttonStyle(.borderless)
-                    .disabled(!status.configured || appState.isUnifiedSyncRunning)
+                    .disabled(!status.configured || appState.isUnifiedSyncRunning || appState.isSyncingAPI || confirmationSync.isSyncing)
                     .help("Sync \(status.source.title)")
                 }
             }

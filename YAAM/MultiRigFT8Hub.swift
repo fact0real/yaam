@@ -373,7 +373,8 @@ final class MultiRigSlot: ObservableObject, Identifiable {
                 clientName: "YAAM-Slot\(slotIndex)",
                 model: icomModel
             )
-            let pwd = icomPassword.isEmpty ? (CredentialVault.valueIfAvailableWithoutPrompt(for: .icomNetworkPassword) ?? "admin") : icomPassword
+            let vaultPwd = CredentialVault.valueIfAvailableWithoutPrompt(for: .icomNetworkPassword)
+            let pwd = icomPassword.isEmpty ? (vaultPwd.isEmpty ? "admin" : vaultPwd) : icomPassword
             if !radio.state.isConnected {
                 radio.connect(settings: settings, password: pwd)
             }
