@@ -165,10 +165,14 @@ Listening to slow CW (e.g. 5 WPM) encourages mental dot/dash counting, creating 
 ### 3.3 Morse Echo Trainer
 The system sends a random character or callsign; the operator immediately reproduces it using paddles, a serial port key, or the keyboard. YAAM measures reaction latency and accuracy percentage, recycling missed characters into subsequent trials.
 
-### 3.4 Real-Time Goertzel DSP Audio Decoder
-Connect your transceiver’s headphone or line-out audio to your Mac:
-* A tuned **Goertzel Filter** centered at 700 Hz isolates the CW tone from background noise.
-* Real-time **Auto-Track WPM** tracks sender speed fluctuations between 10 and 45 WPM, printing decoded text live onto the display.
+### 3.4 Real-Time Wideband Quadrature DSP Audio & File Decoder
+Connect your transceiver’s headphone/line-out audio to your Mac or import recorded audio files directly:
+* **Wideband Analytic Demodulator (300 Hz – 1800 Hz):** Replaced legacy narrow Goertzel filters with a dual-channel Quadrature I/Q Analytic Demodulator (\(I[n] = x[n] \cos(\omega n)\), \(Q[n] = -x[n] \sin(\omega n)\)) and 65 Hz Butterworth lowpass filter. Completely eliminates high-frequency tone suppression and spectral leakage.
+* **⚡ AUTO-TUNE Pitch Hunting:** Instantly scans the 300–1800 Hz audio spectrum using a Hann-windowed filter bank to lock onto the strongest CW carrier with zero operator calibration.
+* **Continuous Auto-Tracking & AFC:** Dynamically tracks receiver pitch drifting and transmitter offset within \(\pm 60\) Hz.
+* **Adaptive Schmitt Trigger & Leaky Envelope Followers:** Tracks signal peak and noise floor baselines with asymmetric attack/decay, yielding flawless decoding in high-noise environments down to +6 dB SNR.
+* **Audio File Import & Decoding:** Decode pre-recorded Morse transmissions directly from `.m4a`, `.wav`, `.mp3`, or `.aiff` files via the **Decode File...** button.
+* **Real-time Adaptive WPM & Paris Timing:** Accurately adapts between 5 and 50 WPM with real-time Dit/Dah ratio and SNR telemetry.
 
 ### 3.5 K1EL WinKeyer Hardware Drivers & Serial Keying
 * Native USB serial communication with **K1EL WinKeyer** chipsets (WK2, WK3). Microsecond-precision hardware keying eliminates USB jitter.

@@ -24,6 +24,8 @@
 	<array>
 		<string>/.tqsl/</string>
 		<string>/.tqsl</string>
+		<string>/Library/Mobile Documents/</string>
+		<string>/Library/Mobile Documents</string>
 	</array>
 </dict>
 </plist>

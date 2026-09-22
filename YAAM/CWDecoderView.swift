@@ -10,6 +10,7 @@
 import AppKit
 import Combine
 import SwiftUI
+import UniformTypeIdentifiers
 
 public struct CWDecoderView: View {
     @EnvironmentObject private var appState: AppState
@@ -18,6 +19,8 @@ public struct CWDecoderView: View {
     @ObservedObject private var keyer = CWKeyerService.shared
 
     @State private var decoderMode: Int = 0 // 0: Single-Tone AFC Decoder, 1: Multi-Channel Passband Skimmer
+    @State private var isDecodingFile: Bool = false
+    @State private var fileDecodeStatus: String? = nil
 
     public init() {}
 
@@ -86,7 +89,7 @@ public struct CWDecoderView: View {
 
             Divider().frame(height: 20)
 
-            // Center Frequency & AFC Lock
+            // Center Frequency, AFC & Auto-Tune
             HStack(spacing: 5) {
                 Text("TONE:")
                     .font(.caption2.bold())
@@ -114,13 +117,49 @@ public struct CWDecoderView: View {
                 .buttonStyle(.plain)
                 .help("Increase tone pitch by 25 Hz")
 
-                Toggle("AFC Lock", isOn: $decoder.afcEnabled)
+                Button {
+                    decoder.autoTunePitch()
+                } label: {
+                    HStack(spacing: 3) {
+                        Image(systemName: "bolt.badge.automatic.fill")
+                            .foregroundColor(.yellow)
+                        Text("AUTO-TUNE")
+                            .font(.system(size: 9.5, weight: .bold))
+                    }
+                }
+                .buttonStyle(.bordered)
+                .help("Automatically detect and lock onto dominant CW tone across 300 - 1800 Hz.")
+
+                Toggle("Auto-Track", isOn: $decoder.autoTrackPitch)
                     .toggleStyle(.checkbox)
                     .font(.caption)
-                    .help("Automatic Frequency Control: automatically tracks and centers on the incoming CW pitch within +/- 60 Hz.")
+                    .help("Continuously track tone pitch drifting across the spectrum.")
+
+                Toggle("AFC", isOn: $decoder.afcEnabled)
+                    .toggleStyle(.checkbox)
+                    .font(.caption)
+                    .help("Automatic Frequency Control: fine-tunes pitch within ±60 Hz.")
             }
 
             Divider().frame(height: 20)
+
+            // Audio File Decoder Button
+            Button {
+                selectAndDecodeAudioFile()
+            } label: {
+                HStack(spacing: 4) {
+                    if isDecodingFile {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Image(systemName: "folder.badge.waveform")
+                    }
+                    Text(isDecodingFile ? "Decoding..." : "Decode File...")
+                        .font(.caption)
+                }
+            }
+            .buttonStyle(.bordered)
+            .disabled(isDecodingFile)
+            .help("Open and decode an audio file (.m4a, .wav, .mp3, .aiff)")
 
             // Simulation / Practice Feed
             Button {
@@ -162,7 +201,7 @@ public struct CWDecoderView: View {
             // Spectrum Scope Visualizer
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
-                    Text("AUDIO SPECTRUM (400 - 950 Hz):")
+                    Text("AUDIO SPECTRUM (300 - 1800 Hz):")
                         .font(.system(size: 9.5, weight: .bold))
                         .foregroundColor(.secondary)
 
@@ -284,6 +323,27 @@ public struct CWDecoderView: View {
                 .buttonStyle(.plain)
                 .foregroundColor(.secondary)
                 .disabled(decoder.rawDecodedText.isEmpty)
+            }
+
+            if let status = fileDecodeStatus {
+                HStack(spacing: 6) {
+                    Image(systemName: "waveform.circle.fill")
+                        .foregroundColor(.accentColor)
+                    Text(status)
+                        .font(.caption2.bold())
+                        .foregroundColor(.primary)
+                    Spacer()
+                    Button {
+                        fileDecodeStatus = nil
+                    } label: {
+                        Image(systemName: "xmark.circle")
+                            .font(.caption2)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(6)
+                .background(Color.accentColor.opacity(0.12))
+                .cornerRadius(4)
             }
 
             ScrollViewReader { proxy in
@@ -428,6 +488,43 @@ public struct CWDecoderView: View {
         .padding(10)
         .background(Color(NSColor.controlBackgroundColor))
         .cornerRadius(8)
+    }
+
+    // MARK: - Audio File Selection & Decoding
+
+    private func selectAndDecodeAudioFile() {
+        let panel = NSOpenPanel()
+        panel.title = "Select Morse Audio File"
+        panel.prompt = "Decode Audio"
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [
+            .audio,
+            .init(filenameExtension: "m4a") ?? .audio,
+            .init(filenameExtension: "wav") ?? .audio,
+            .init(filenameExtension: "mp3") ?? .audio,
+            .init(filenameExtension: "aiff") ?? .audio
+        ]
+
+        if panel.runModal() == .OK, let url = panel.url {
+            isDecodingFile = true
+            fileDecodeStatus = "Decoding \(url.lastPathComponent)..."
+            Task {
+                do {
+                    let text = try await decoder.decodeAudioFile(at: url)
+                    await MainActor.run {
+                        self.isDecodingFile = false
+                        self.fileDecodeStatus = text.isEmpty ? "Decoded file: No clear Morse detected." : "Decoded: \(text)"
+                    }
+                } catch {
+                    await MainActor.run {
+                        self.isDecodingFile = false
+                        self.fileDecodeStatus = "Decode error: \(error.localizedDescription)"
+                    }
+                }
+            }
+        }
     }
 }
 

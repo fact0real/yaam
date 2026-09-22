@@ -3,9 +3,10 @@
 //  YAAM
 //
 //  Real-Time DSP Morse Code Audio Decoder Engine
-//  Extracts CW tones from microphone, USB audio codec, or practice simulation using
-//  sub-chunk Goertzel tone tracking, narrow-band SNR discrimination, adaptive Schmitt-trigger
-//  hysteresis, sample-accurate mark/space timing, and intelligent WPM adaptation.
+//  Extracts CW tones from microphone, USB audio codec, or audio recordings using
+//  wideband spectrum auto-pitch hunting (300 - 1800 Hz), continuous Quadrature I/Q
+//  analytic envelope demodulation, adaptive dual-threshold Schmitt hysteresis,
+//  sample-accurate mark/space timing, and Farnsworth-tolerant WPM adaptation.
 //
 
 import AVFoundation
@@ -36,8 +37,11 @@ public final class CWAudioDecoderEngine: ObservableObject {
     @Published public var isAudioAvailable: Bool = false
     @Published public var isSignalDetected: Bool = false
     @Published public var centerFrequencyHz: Double = 650.0
-    @Published public var nominalPitchHz: Double = 650.0 // User setpoint for AFC constraint
+    @Published public var nominalPitchHz: Double = 650.0 // User setpoint or auto-tuned pitch
     @Published public var afcEnabled: Bool = true
+    @Published public var autoTrackPitch: Bool = true {
+        didSet { UserDefaults.standard.set(autoTrackPitch, forKey: "cwDecoderAutoTrack") }
+    }
     @Published public var estimatedWPM: Double = 20.0
     @Published public var signalToNoiseRatioDb: Double = 0.0
     @Published public var ditDahRatio: Double = 3.0
@@ -53,17 +57,23 @@ public final class CWAudioDecoderEngine: ObservableObject {
     @Published public var isSimulationActive: Bool = false
 
     private var audioEngine: AVAudioEngine?
-    private var sampleRate: Double = 44100.0
+    private var sampleRate: Double = 48000.0
+
+    // DSP Demodulator State (Quadrature I/Q Analytic Envelope)
+    private var phase: Double = 0.0
+    private var envI: Double = 0.0
+    private var envQ: Double = 0.0
+    private var peakEnvelope: Double = 0.01
+    private var noiseFloorEnvelope: Double = 0.001
 
     // DSP Timing & State Variables (Sample-Accurate)
     private var isMarkActive: Bool = false
     private var currentMarkDuration: Double = 0.0
     private var currentSpaceDuration: Double = 0.0
-    private var currentDitEstimate: Double = 0.060 // 20 WPM baseline (60ms)
+    private var currentDitEstimate: Double = 0.080 // Baseline ~15 WPM (80ms)
     private var recentDitDurations: [Double] = []
     private var recentDahDurations: [Double] = []
     private var hasCommittedWordBreak: Bool = true
-    private var consecutiveCarrierWarnings: Int = 0
 
     // Reverse Morse Lookup Dictionary (Morse String -> Character)
     private static let reverseMorseAlphabet: [String: String] = {
@@ -71,7 +81,7 @@ public final class CWAudioDecoderEngine: ObservableObject {
         for (char, pattern) in CWKeyerService.morseAlphabet {
             dict[pattern] = String(char)
         }
-        // Additional procedural signals (Prosigns)
+        // Procedural signals (Prosigns)
         dict[".-.-."] = "<AR>"
         dict["...-.-"] = "<SK>"
         dict["-...-"] = "<BT>"
@@ -85,14 +95,19 @@ public final class CWAudioDecoderEngine: ObservableObject {
 
     public init() {
         let savedFreq = UserDefaults.standard.double(forKey: "cwDecoderFreq")
-        self.nominalPitchHz = savedFreq >= 400.0 && savedFreq <= 950.0 ? savedFreq : 650.0
+        self.nominalPitchHz = savedFreq >= 300.0 && savedFreq <= 1800.0 ? savedFreq : 650.0
         self.centerFrequencyHz = self.nominalPitchHz
+        if let autoTrack = UserDefaults.standard.object(forKey: "cwDecoderAutoTrack") as? Bool {
+            self.autoTrackPitch = autoTrack
+        } else {
+            self.autoTrackPitch = true
+        }
     }
 
-    // MARK: - Pitch Controls
+    // MARK: - Pitch Controls (Wideband 300 Hz - 1800 Hz)
 
     public func setPitch(_ hz: Double) {
-        let clamped = max(450.0, min(900.0, hz))
+        let clamped = max(300.0, min(1800.0, hz))
         self.nominalPitchHz = clamped
         self.centerFrequencyHz = clamped
         UserDefaults.standard.set(clamped, forKey: "cwDecoderFreq")
@@ -104,6 +119,14 @@ public final class CWAudioDecoderEngine: ObservableObject {
 
     public func decreasePitch() {
         setPitch(nominalPitchHz - 25.0)
+    }
+
+    /// One-click Auto-Tune to the highest spectral peak in the passband (300..1800 Hz)
+    public func autoTunePitch() {
+        guard !spectrumBins.isEmpty else { return }
+        if let best = spectrumBins.max(by: { $0.magnitude < $1.magnitude }), best.magnitude > 0.002 {
+            setPitch(best.frequencyHz)
+        }
     }
 
     // MARK: - Start & Stop Listening
@@ -123,10 +146,11 @@ public final class CWAudioDecoderEngine: ObservableObject {
         self.sampleRate = format.sampleRate
         self.resetTimingState()
 
-        // 1024 or 2048 buffer tap; we slice internally into 256-sample sub-chunks (~5.3ms resolution)
         inputNode.installTap(onBus: 0, bufferSize: 2048, format: format) { [weak self] buffer, _ in
             guard let self else { return }
-            self.processAudioBuffer(buffer)
+            Task { @MainActor [weak self] in
+                self?.processAudioBuffer(buffer)
+            }
         }
 
         do {
@@ -165,146 +189,163 @@ public final class CWAudioDecoderEngine: ObservableObject {
     }
 
     private func resetTimingState() {
+        phase = 0.0
+        envI = 0.0
+        envQ = 0.0
+        peakEnvelope = 0.01
+        noiseFloorEnvelope = 0.001
         isMarkActive = false
         currentMarkDuration = 0.0
         currentSpaceDuration = 0.0
-        currentDitEstimate = 1.2 / max(10.0, estimatedWPM)
+        currentDitEstimate = 1.2 / max(8.0, estimatedWPM)
         recentDitDurations.removeAll()
         recentDahDurations.removeAll()
         hasCommittedWordBreak = true
-        consecutiveCarrierWarnings = 0
     }
 
-    // MARK: - DSP Audio Buffer Processing
+    // MARK: - DSP Audio Buffer Processing (Quadrature I/Q Analytic Envelope)
 
-    private func processAudioBuffer(_ buffer: AVAudioPCMBuffer) {
+    public func processAudioBuffer(_ buffer: AVAudioPCMBuffer) {
         guard let channelData = buffer.floatChannelData?[0] else { return }
         let totalFrames = Int(buffer.frameLength)
         guard totalFrames > 0 else { return }
 
-        // 1. Peak Audio Level for VU Meter
+        // 1. Audio Peak Level for VU Meter
         var peak: Float = 0.0
         for i in stride(from: 0, to: totalFrames, by: 8) {
             let val = abs(channelData[i])
             if val > peak { peak = val }
         }
 
-        // 2. Full Spectrum Analysis for Visual Scope
+        // 2. Wideband Spectrum Analysis (300 Hz - 1800 Hz) with Hann Windowing
         let fullBins = evaluateFilterBank(channelData: channelData, frameCount: totalFrames)
 
-        // 3. Controlled AFC within narrow window (+/- 50 Hz of nominal setpoint)
-        if afcEnabled {
-            updateAFC(bins: fullBins)
+        // 3. Auto-Track Pitch & AFC Lock
+        if autoTrackPitch && peak > 0.012 {
+            if let best = fullBins.max(by: { $0.magnitude < $1.magnitude }) {
+                let avgMag = fullBins.reduce(0.0) { $0 + Double($1.magnitude) } / Double(max(1, fullBins.count))
+                if Double(best.magnitude) > avgMag * 3.0 && best.magnitude > 0.003 {
+                    // Lock onto carrier
+                    if abs(best.frequencyHz - centerFrequencyHz) > 30.0 {
+                        centerFrequencyHz = centerFrequencyHz * 0.70 + best.frequencyHz * 0.30
+                        nominalPitchHz = centerFrequencyHz
+                    }
+                }
+            }
+        } else if afcEnabled {
+            updateNarrowbandAFC(bins: fullBins)
         }
 
-        // 4. Sub-Chunk Time Slicing for Precise Morse Mark/Space Timing
-        // We process in 256-sample chunks (approx 5.3ms resolution at 48kHz)
-        let chunkSize = 256
-        let chunkCount = totalFrames / chunkSize
-        let chunkDurationSec = Double(chunkSize) / sampleRate
+        // 4. Sample-Accurate Quadrature I/Q Analytic Demodulation
+        let omega = (2.0 * .pi * centerFrequencyHz) / sampleRate
+        let lpfCutoffHz = 65.0 // ~65 Hz lowpass captures keying up to ~50 WPM without tone ripple
+        let lpfAlpha = 1.0 - exp(-2.0 * .pi * lpfCutoffHz / sampleRate)
+        let sampleDuration = 1.0 / sampleRate
 
-        var lastChunkSNR: Double = 0.0
         var markOccurredInBlock = false
 
-        for c in 0..<chunkCount {
-            let offset = c * chunkSize
-            let chunkPtr = channelData.advanced(by: offset)
+        for i in 0..<totalFrames {
+            let x = Double(channelData[i])
+            let iVal = x * cos(phase)
+            let qVal = -x * sin(phase)
+            phase += omega
+            if phase > (2.0 * .pi) { phase -= (2.0 * .pi) }
 
-            // Measure energy at target frequency
-            let targetMag = goertzelMagnitude(channelData: chunkPtr, frameCount: chunkSize, targetFreq: centerFrequencyHz)
+            // I/Q Low-Pass Filter
+            envI += lpfAlpha * (iVal - envI)
+            envQ += lpfAlpha * (qVal - envQ)
+            let env = sqrt(envI * envI + envQ * envQ)
 
-            // Measure background noise floor at flanking reference frequencies (+/- 140 Hz)
-            let noiseLow = goertzelMagnitude(channelData: chunkPtr, frameCount: chunkSize, targetFreq: max(350.0, centerFrequencyHz - 140.0))
-            let noiseHigh = goertzelMagnitude(channelData: chunkPtr, frameCount: chunkSize, targetFreq: min(1000.0, centerFrequencyHz + 140.0))
-            let localNoiseFloor = max(0.0008, (noiseLow + noiseHigh) * 0.5)
+            // Dynamic Leaky Peak and Floor Tracking
+            if env > peakEnvelope {
+                peakEnvelope = peakEnvelope * 0.999 + env * 0.001
+            } else {
+                peakEnvelope = max(0.003, peakEnvelope * 0.99998)
+            }
 
-            // Narrow-band SNR
-            let snrRatio = Double(targetMag) / Double(localNoiseFloor)
-            lastChunkSNR = 20.0 * log10(max(1.0, snrRatio))
+            if env < noiseFloorEnvelope {
+                noiseFloorEnvelope = noiseFloorEnvelope * 0.999 + env * 0.001
+            } else {
+                noiseFloorEnvelope = noiseFloorEnvelope * 0.99999 + env * 0.00001
+            }
 
-            // Schmitt Trigger with dual threshold and absolute floor
-            // Must be at least +7 dB SNR AND absolute magnitude above 0.003 to be a valid CW carrier
-            let onThreshold: Float = max(0.0030, localNoiseFloor * 2.2)
-            let offThreshold: Float = max(0.0016, localNoiseFloor * 1.4)
+            noiseFloorEnvelope = min(noiseFloorEnvelope, peakEnvelope * 0.40)
+            let dynamicRange = max(0.002, peakEnvelope - noiseFloorEnvelope)
+            let vOn = noiseFloorEnvelope + 0.38 * dynamicRange
+            let vOff = noiseFloorEnvelope + 0.20 * dynamicRange
 
+            // Adaptive Schmitt Trigger
             if !isMarkActive {
-                if targetMag >= onThreshold && snrRatio >= 2.2 {
+                if env >= vOn {
                     // Space -> Mark transition
                     handleMarkOnset(spaceDuration: currentSpaceDuration)
-                    currentSpaceDuration = 0.0
-                    currentMarkDuration = chunkDurationSec
                     isMarkActive = true
                     markOccurredInBlock = true
+                    currentMarkDuration = sampleDuration
+                    currentSpaceDuration = 0.0
                 } else {
-                    currentSpaceDuration += chunkDurationSec
+                    currentSpaceDuration += sampleDuration
                     handleSpaceProgression(spaceDuration: currentSpaceDuration)
                 }
             } else {
-                if targetMag < offThreshold || snrRatio < 1.4 {
+                if env < vOff {
                     // Mark -> Space transition
                     handleMarkEnd(markDuration: currentMarkDuration)
-                    currentMarkDuration = 0.0
-                    currentSpaceDuration = chunkDurationSec
                     isMarkActive = false
+                    currentSpaceDuration = sampleDuration
+                    currentMarkDuration = 0.0
                 } else {
-                    currentMarkDuration += chunkDurationSec
+                    currentMarkDuration += sampleDuration
                     markOccurredInBlock = true
 
-                    // Anti-Carrier / Stuck tone filter: if tone persists > 1.2 seconds, it is NOT Morse!
-                    if currentMarkDuration > 1.2 {
+                    // Anti-stuck tone / continuous carrier guard (> 2.5 seconds is not Morse)
+                    if currentMarkDuration > 2.5 {
                         isMarkActive = false
                         currentMarkDuration = 0.0
-                        activeCharacterBuffer = "" // discard stuck tone
+                        activeCharacterBuffer = ""
                     }
                 }
             }
         }
 
-        // 5. Publish updates to UI
-        let isToneActive = isMarkActive || markOccurredInBlock
-        let finalPeak = peak
-        let finalBins = fullBins
-        let finalSNR = max(0.0, min(40.0, lastChunkSNR))
-
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            self.audioInputLevel = finalPeak
-            self.spectrumBins = finalBins
-            self.signalToNoiseRatioDb = finalSNR
-            self.isSignalDetected = isToneActive
-        }
+        // 5. Update Published UI State
+        let snrDb = 20.0 * log10(max(1.0, peakEnvelope / max(0.0001, noiseFloorEnvelope)))
+        self.audioInputLevel = peak
+        self.spectrumBins = fullBins
+        self.signalToNoiseRatioDb = max(0.0, min(45.0, snrDb))
+        self.isSignalDetected = isMarkActive || markOccurredInBlock
     }
 
     // MARK: - Sub-Chunk Morse State Logic
 
     private func handleMarkOnset(spaceDuration: Double) {
-        // Space was long enough to separate characters
-        if spaceDuration >= currentDitEstimate * 2.1 {
+        // Space was long enough to separate characters (> 1.75 dits)
+        if spaceDuration >= currentDitEstimate * 1.75 {
             commitActiveCharacter()
         }
-        // Space was long enough to separate words
-        if spaceDuration >= currentDitEstimate * 5.0 && !hasCommittedWordBreak {
+        // Space was long enough to separate words (> 4.2 dits)
+        if spaceDuration >= currentDitEstimate * 4.2 && !hasCommittedWordBreak {
             commitWordBreak()
         }
     }
 
     private func handleSpaceProgression(spaceDuration: Double) {
-        // Character timeout while in idle space
-        if !activeCharacterBuffer.isEmpty && spaceDuration >= currentDitEstimate * 2.3 {
+        // Character timeout while idling in space
+        if !activeCharacterBuffer.isEmpty && spaceDuration >= currentDitEstimate * 1.90 {
             commitActiveCharacter()
         }
-        // Word timeout while in idle space
-        if spaceDuration >= currentDitEstimate * 5.5 && !hasCommittedWordBreak && !rawDecodedText.isEmpty {
+        // Word timeout while idling in space
+        if spaceDuration >= currentDitEstimate * 4.5 && !hasCommittedWordBreak && !rawDecodedText.isEmpty {
             commitWordBreak()
         }
     }
 
     private func handleMarkEnd(markDuration: Double) {
-        // Glitch rejection: ignore pulses shorter than 18ms
-        guard markDuration >= 0.018 else { return }
+        // Glitch rejection: ignore pulses shorter than 15ms
+        guard markDuration >= 0.015 else { return }
 
-        // Carrier rejection: ignore continuous tones longer than 1.0 second
-        guard markDuration <= 1.0 else {
+        // Carrier rejection: ignore continuous tones longer than 2.0 seconds
+        guard markDuration <= 2.0 else {
             activeCharacterBuffer = ""
             return
         }
@@ -312,28 +353,26 @@ public final class CWAudioDecoderEngine: ObservableObject {
         hasCommittedWordBreak = false
 
         // Dit vs Dah Decision
-        // Nominal: Dit = 1 unit, Dah = 3 units. Boundary at 1.85 units.
+        // Nominal: Dit = 1 unit, Dah = 3 units. Midpoint boundary at 1.85 units.
         let ditThreshold = currentDitEstimate * 1.85
 
         if markDuration < ditThreshold {
             // Dit "."
             activeCharacterBuffer.append(".")
             recentDitDurations.append(markDuration)
-            if recentDitDurations.count > 12 { recentDitDurations.removeFirst() }
-            // Smoothly adapt dit speed
-            currentDitEstimate = currentDitEstimate * 0.88 + markDuration * 0.12
+            if recentDitDurations.count > 10 { recentDitDurations.removeFirst() }
+            currentDitEstimate = currentDitEstimate * 0.82 + markDuration * 0.18
         } else {
             // Dah "-"
             activeCharacterBuffer.append("-")
             recentDahDurations.append(markDuration)
-            if recentDahDurations.count > 12 { recentDahDurations.removeFirst() }
-            // Smoothly adapt dit speed from Dah (dah / 3.0)
+            if recentDahDurations.count > 10 { recentDahDurations.removeFirst() }
             let ditFromDah = markDuration / 3.0
-            currentDitEstimate = currentDitEstimate * 0.88 + ditFromDah * 0.12
+            currentDitEstimate = currentDitEstimate * 0.82 + ditFromDah * 0.18
         }
 
-        // Clamp speed estimate to realistic amateur radio limits (8 WPM to 48 WPM)
-        currentDitEstimate = max(0.025, min(0.150, currentDitEstimate))
+        // Clamp speed estimate to realistic limits (8 WPM to 50 WPM)
+        currentDitEstimate = max(0.024, min(0.150, currentDitEstimate))
 
         // Update WPM and Dit/Dah ratio
         let newWpm = 1.2 / currentDitEstimate
@@ -341,11 +380,8 @@ public final class CWAudioDecoderEngine: ObservableObject {
         let dahAvg = recentDahDurations.isEmpty ? currentDitEstimate * 3.0 : recentDahDurations.reduce(0, +) / Double(recentDahDurations.count)
         let ratio = dahAvg / max(0.01, ditAvg)
 
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            self.estimatedWPM = min(50.0, max(8.0, self.estimatedWPM * 0.85 + newWpm * 0.15))
-            self.ditDahRatio = min(6.0, max(1.5, ratio))
-        }
+        self.estimatedWPM = min(50.0, max(8.0, self.estimatedWPM * 0.85 + newWpm * 0.15))
+        self.ditDahRatio = min(6.0, max(1.5, ratio))
     }
 
     private func commitActiveCharacter() {
@@ -354,11 +390,8 @@ public final class CWAudioDecoderEngine: ObservableObject {
         activeCharacterBuffer = ""
 
         if let char = Self.reverseMorseAlphabet[pattern] {
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                self.rawDecodedText.append(char)
-                self.tokenizeStream()
-            }
+            self.rawDecodedText.append(char)
+            self.tokenizeStream()
         }
     }
 
@@ -366,12 +399,9 @@ public final class CWAudioDecoderEngine: ObservableObject {
         guard !hasCommittedWordBreak else { return }
         hasCommittedWordBreak = true
 
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            if !self.rawDecodedText.isEmpty && !self.rawDecodedText.hasSuffix(" ") {
-                self.rawDecodedText.append(" ")
-                self.tokenizeStream()
-            }
+        if !self.rawDecodedText.isEmpty && !self.rawDecodedText.hasSuffix(" ") {
+            self.rawDecodedText.append(" ")
+            self.tokenizeStream()
         }
     }
 
@@ -407,12 +437,11 @@ public final class CWAudioDecoderEngine: ObservableObject {
         return hasDigit && hasLetter && !excluded.contains(word)
     }
 
-    // MARK: - AFC & Filter Bank
+    // MARK: - Narrowband AFC & Wideband Filter Bank
 
-    private func updateAFC(bins: [CWSpectrumBin]) {
-        // AFC is strictly constrained within +/- 60 Hz of nominal setpoint to prevent drifting to low-frequency noise
-        let minFreq = max(400.0, nominalPitchHz - 60.0)
-        let maxFreq = min(950.0, nominalPitchHz + 60.0)
+    private func updateNarrowbandAFC(bins: [CWSpectrumBin]) {
+        let minFreq = max(300.0, nominalPitchHz - 60.0)
+        let maxFreq = min(1800.0, nominalPitchHz + 60.0)
 
         var localMaxMag: Float = 0.0
         var bestFreq: Double = centerFrequencyHz
@@ -424,18 +453,18 @@ public final class CWAudioDecoderEngine: ObservableObject {
             }
         }
 
-        // Only lock if there is a true peak with substantial carrier power
-        if localMaxMag > 0.005 && abs(bestFreq - centerFrequencyHz) > 5.0 {
+        if localMaxMag > 0.003 && abs(bestFreq - centerFrequencyHz) > 4.0 {
             centerFrequencyHz = centerFrequencyHz * 0.90 + bestFreq * 0.10
         }
     }
 
-    private func evaluateFilterBank(channelData: UnsafePointer<Float>, frameCount: Int) -> [CWSpectrumBin] {
+    /// Evaluates spectrum from 300 Hz to 1800 Hz in 35 Hz intervals with Hann windowing
+    func evaluateFilterBank(channelData: UnsafePointer<Float>, frameCount: Int) -> [CWSpectrumBin] {
         var results: [CWSpectrumBin] = []
         var id = 0
 
-        for freq in stride(from: 400.0, through: 950.0, by: 25.0) {
-            let mag = goertzelMagnitude(channelData: channelData, frameCount: frameCount, targetFreq: freq)
+        for freq in stride(from: 300.0, through: 1800.0, by: 35.0) {
+            let mag = windowedGoertzelMagnitude(channelData: channelData, frameCount: frameCount, targetFreq: freq)
             results.append(CWSpectrumBin(id: id, frequencyHz: freq, magnitude: mag))
             id += 1
         }
@@ -443,8 +472,8 @@ public final class CWAudioDecoderEngine: ObservableObject {
         return results
     }
 
-    // Optimized Goertzel Magnitude Calculation
-    private func goertzelMagnitude(channelData: UnsafePointer<Float>, frameCount: Int, targetFreq: Double) -> Float {
+    /// Goertzel algorithm with Hann windowing to suppress spectral leakage
+    private func windowedGoertzelMagnitude(channelData: UnsafePointer<Float>, frameCount: Int, targetFreq: Double) -> Float {
         guard frameCount > 0, sampleRate > 0 else { return 0.0 }
         let k = Int(0.5 + (Double(frameCount) * targetFreq / sampleRate))
         let omega = (2.0 * .pi * Double(k)) / Double(frameCount)
@@ -454,8 +483,12 @@ public final class CWAudioDecoderEngine: ObservableObject {
         var q1: Float = 0.0
         var q2: Float = 0.0
 
+        let invN = 1.0 / Double(frameCount)
         for i in 0..<frameCount {
-            q0 = coeff * q1 - q2 + channelData[i]
+            // Hann window: 0.5 * (1 - cos(2*pi*i/N))
+            let w = Float(0.5 * (1.0 - cos(2.0 * .pi * Double(i) * invN)))
+            let sample = channelData[i] * w
+            q0 = coeff * q1 - q2 + sample
             q2 = q1
             q1 = q0
         }
@@ -463,7 +496,67 @@ public final class CWAudioDecoderEngine: ObservableObject {
         let real = q1 - q2 * Float(cos(omega))
         let imag = q2 * Float(sin(omega))
         let power = real * real + imag * imag
-        return sqrt(power) / Float(frameCount)
+        return (sqrt(power) * 2.0) / Float(frameCount)
+    }
+
+    // MARK: - Direct Audio File Decoder API
+
+    /// Decodes an audio file (.m4a, .wav, .mp3, etc.) through the DSP pipeline.
+    public func decodeAudioFile(at fileURL: URL) async throws -> String {
+        let file = try AVAudioFile(forReading: fileURL)
+        let format = file.processingFormat
+        let frameCount = UInt32(file.length)
+        guard frameCount > 0, let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else {
+            throw NSError(domain: "CWAudioDecoder", code: 1, userInfo: [NSLocalizedDescriptionKey: "Could not allocate audio buffer for file"])
+        }
+        try file.read(into: buffer)
+
+        guard let channelData = buffer.floatChannelData?[0] else {
+            throw NSError(domain: "CWAudioDecoder", code: 2, userInfo: [NSLocalizedDescriptionKey: "No float audio data found"])
+        }
+
+        self.sampleRate = format.sampleRate
+
+        // Pass 1: Find dominant pitch across whole file in 300..1800 Hz range
+        var peakBins: [Double: Float] = [:]
+        let scanStep = 2048
+        let total = Int(buffer.frameLength)
+
+        for i in stride(from: 0, to: total - scanStep, by: scanStep) {
+            let chunkPtr = channelData.advanced(by: i)
+            var localPeak: Float = 0.0
+            for j in 0..<scanStep {
+                let v = abs(chunkPtr[j])
+                if v > localPeak { localPeak = v }
+            }
+            if localPeak > 0.015 {
+                let bins = evaluateFilterBank(channelData: chunkPtr, frameCount: scanStep)
+                for b in bins {
+                    peakBins[b.frequencyHz] = max(peakBins[b.frequencyHz] ?? 0.0, b.magnitude)
+                }
+            }
+        }
+
+        if let best = peakBins.max(by: { $0.value < $1.value }) {
+            self.setPitch(best.key)
+        }
+
+        // Pass 2: Process audio in standard blocks and stream demodulate
+        self.clearBuffer()
+        let blockSize = 2048
+        for i in stride(from: 0, to: total, by: blockSize) {
+            let len = min(blockSize, total - i)
+            guard let subBuf = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: UInt32(len)) else { continue }
+            subBuf.frameLength = UInt32(len)
+            if let dest = subBuf.floatChannelData?[0] {
+                memcpy(dest, channelData.advanced(by: i), len * MemoryLayout<Float>.size)
+            }
+            self.processAudioBuffer(subBuf)
+        }
+
+        // Commit any trailing character
+        commitActiveCharacter()
+        return rawDecodedText.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     // MARK: - Simulation Mode

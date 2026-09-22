@@ -3894,7 +3894,7 @@ class AppState: NSObject, ObservableObject {
         // the keyed merge decide whether anything is new.
         isSDRControlSyncRunning = true
 
-        mergeSDRControlLogbook(from: source, allowPermissionPrompt: !isAutomatic) { result in
+        mergeSDRControlLogbook(from: source, isAutomatic: isAutomatic, allowPermissionPrompt: !isAutomatic) { result in
             self.isSDRControlSyncRunning = false
             if case .success = result {
                 if let lastModified {
@@ -3923,7 +3923,12 @@ class AppState: NSObject, ObservableObject {
                     relativeTo: nil,
                     bookmarkDataIsStale: &isStale
                 )
-                if FileManager.default.fileExists(atPath: url.path) {
+                let didAccess = url.startAccessingSecurityScopedResource()
+                let exists = FileManager.default.fileExists(atPath: url.path)
+                if didAccess {
+                    url.stopAccessingSecurityScopedResource()
+                }
+                if exists {
                     if isStale {
                         saveSDRControlSecurityBookmark(for: url)
                     }
@@ -4129,6 +4134,7 @@ class AppState: NSObject, ObservableObject {
 
     private func mergeSDRControlLogbook(
         from source: SDRControlLogbookSource,
+        isAutomatic: Bool = false,
         allowPermissionPrompt: Bool = true,
         completion: ((Result<MergeSummary, Error>) -> Void)? = nil
     ) {
@@ -4232,11 +4238,20 @@ class AppState: NSObject, ObservableObject {
             } catch {
                 DispatchQueue.main.async {
                     self.isLoading = false
-                    if allowPermissionPrompt, self.isFilePermissionError(error), !source.securityScoped {
+                    if isAutomatic {
+                        // Background automatic sync must NEVER show blocking modal alert popups
+                        self.appendLog("SDR-Control background sync paused: \(error.localizedDescription)")
+                        completion?(.failure(error))
+                        return
+                    }
+
+                    if allowPermissionPrompt, self.isFilePermissionError(error) {
                         UserDefaults.standard.removeObject(forKey: "sdrControlLogbookPath")
+                        UserDefaults.standard.removeObject(forKey: "sdrControlLogbookBookmark")
                         if let selectedSource = self.promptForSDRControlLogbookSource() {
                             self.mergeSDRControlLogbook(
                                 from: selectedSource,
+                                isAutomatic: false,
                                 allowPermissionPrompt: false,
                                 completion: completion
                             )
