@@ -2098,6 +2098,7 @@ class AppState: NSObject, ObservableObject {
     let multiRigFT8Hub = MultiRigFT8Hub()
     let digitalModemEngine = DigitalModemEngine.shared
     let transceiverEmulator = NetworkTransceiverEmulatorEngine()
+    let waitAndPounce = WaitAndPounceEngine.shared
     var operatorFeatureCancellables: Set<AnyCancellable> = []
     var cloudSyncTimer: Timer?
 

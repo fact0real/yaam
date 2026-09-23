@@ -345,17 +345,29 @@ public struct OnTheAirHUDPopoverView: View {
 
             // Bottom Actions & External Map Launcher
             HStack {
-                Link(destination: personalPSKMapURL) {
+                Button {
+                    NotificationCenter.default.post(name: .init("OpenSignalFootprintConsole"), object: nil)
+                } label: {
                     HStack(spacing: 4) {
-                        Image(systemName: "map.fill")
-                        Text("Open My Live PSKMap")
-                        Image(systemName: "arrow.up.right.square")
+                        Image(systemName: "dot.radiowaves.left.and.right")
+                        Text("Footprint Console")
                     }
                     .font(.caption.weight(.semibold))
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
-                .tint(.blue)
+                .tint(.purple)
+
+                Link(destination: personalPSKMapURL) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "map.fill")
+                        Text("Web PSKMap")
+                        Image(systemName: "arrow.up.right.square")
+                    }
+                    .font(.caption.weight(.semibold))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
 
                 Spacer()
 

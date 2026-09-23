@@ -44,6 +44,44 @@ extension AppState {
                 let currentBand = self.wsjtxListener.lastStatus?.band ?? "20M"
                 DigitalCallRosterEngine.shared.processDecodes(decodes, activeBand: currentBand)
                 TacticalBandAdvisor.shared.recordDecodes(decodes, onBand: currentBand)
+                self.waitAndPounce.updateStationContext(
+                    callsign: self.currentStationCallsign,
+                    grid: self.activeStationProfile?.grid ?? "",
+                    band: currentBand
+                )
+                self.waitAndPounce.processDecodes(decodes, activeBand: currentBand)
+            }
+            .store(in: &operatorFeatureCancellables)
+
+        // Wait & Pounce Dispatch Bridges
+        NotificationCenter.default.publisher(for: .init("WaitAndPounceSendWSJTXReply"))
+            .receive(on: RunLoop.main)
+            .sink { [weak self] notif in
+                if let decode = notif.userInfo?["decode"] as? WSJTXLiveDecode {
+                    self?.wsjtxListener.sendReply(to: decode)
+                }
+            }
+            .store(in: &operatorFeatureCancellables)
+
+        NotificationCenter.default.publisher(for: .init("WaitAndPounceHaltTx"))
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.wsjtxListener.sendHaltTx()
+                self?.ft8Engine.transmitArmed = false
+            }
+            .store(in: &operatorFeatureCancellables)
+
+        NotificationCenter.default.publisher(for: .init("WaitAndPounceDidTriggerPounce"))
+            .receive(on: RunLoop.main)
+            .sink { [weak self] notif in
+                guard let self else { return }
+                if let call = notif.userInfo?["callsign"] as? String,
+                   let hz = notif.userInfo?["deltaHz"] as? UInt32 {
+                    if self.ft8Engine.transmitArmed {
+                        self.ft8Engine.txText = "\(call) \(self.currentStationCallsign) \(self.activeStationProfile?.grid ?? "")"
+                        self.ft8Engine.txAudioFrequencyHz = Float(hz)
+                    }
+                }
             }
             .store(in: &operatorFeatureCancellables)
 

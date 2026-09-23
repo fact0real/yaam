@@ -10,6 +10,7 @@ extension OperatorDeskDestination {
         case .cwReference: KeyboardShortcut("q", modifiers: [.command, .shift])
         case .cwDecoder: KeyboardShortcut("d", modifiers: [.command, .shift])
         case .globeGrids: KeyboardShortcut("g", modifiers: .command)
+        case .signalFootprint: KeyboardShortcut("f", modifiers: [.command, .option])
         case .sixMeter: KeyboardShortcut("6", modifiers: .command)
         case .contest: KeyboardShortcut("4", modifiers: .command)
         case .bandmap: KeyboardShortcut("b", modifiers: [.command, .option])

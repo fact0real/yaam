@@ -18,11 +18,13 @@ public struct DigitalCallRosterView: View {
     @ObservedObject private var roster = DigitalCallRosterEngine.shared
     @ObservedObject private var audioAlerts = DigitalAudioAlertEngine.shared
     @ObservedObject private var targetQueue = DigitalTargetQueueEngine.shared
+    @ObservedObject private var waitAndPounce = WaitAndPounceEngine.shared
 
     @State private var filterMode: RosterFilterMode = .neededOnly
     @State private var selectedSlice: String = "All"
     @State private var minSNRFilter: Int = -30
     @State private var searchText: String = ""
+    @State private var manualSnipeInput: String = ""
     @State private var selectedEntryID: UUID? = nil
     @State private var showingAudioSettings = false
     @State private var showingUDPConfigPopover = false
@@ -94,6 +96,11 @@ public struct DigitalCallRosterView: View {
             TacticalPilotHUDView()
                 .padding(.horizontal, 14)
                 .padding(.vertical, 8)
+            Divider()
+
+            waitAndPounceSniperHUD
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
             Divider()
 
             if targetQueue.activeTarget != nil || !targetQueue.queue.isEmpty {
@@ -170,6 +177,296 @@ public struct DigitalCallRosterView: View {
             )
         }
         roster.processDecodes(liveDecodes, activeBand: activeBand)
+    }
+
+    // MARK: - Wait & Pounce Sniper Console HUD
+
+    // MARK: - Wait & Pounce Sniper Console HUD
+
+    private var waitAndPounceSniperHUD: some View {
+        VStack(spacing: 8) {
+            waitAndPounceTopControlRow
+            waitAndPounceCycleBar
+            waitAndPounceBottomTelemetryRow
+        }
+        .padding(8)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color(NSColor.controlBackgroundColor).opacity(0.5))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(waitAndPounce.status.isArmedOrTracking ? waitAndPounce.status.badgeColor.opacity(0.5) : Color.secondary.opacity(0.15), lineWidth: 1)
+        )
+    }
+
+    private var waitAndPounceTopControlRow: some View {
+        HStack(spacing: 10) {
+            Button {
+                waitAndPounce.isEnabled.toggle()
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "scope")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(waitAndPounce.isEnabled ? Color.red : Color.secondary)
+                    Text(waitAndPounce.isEnabled ? "SNIPER ACTIVE" : "Wait & Pounce Standby")
+                        .font(.system(size: 10, weight: .black))
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(waitAndPounce.isEnabled ? Color.red.opacity(0.18) : Color.gray.opacity(0.12))
+                .clipShape(Capsule())
+            }
+            .buttonStyle(.plain)
+
+            Menu {
+                ForEach(TargetHuntMode.allCases) { mode in
+                    Button {
+                        waitAndPounce.huntMode = mode
+                    } label: {
+                        Label(mode.rawValue, systemImage: mode.iconName)
+                    }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: waitAndPounce.huntMode.iconName)
+                        .font(.system(size: 10))
+                    Text(waitAndPounce.huntMode.shortLabel)
+                        .font(.system(size: 10, weight: .semibold))
+                }
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+            }
+            .menuStyle(.borderedButton)
+            .fixedSize()
+
+            Menu {
+                ForEach(PounceFrequencyMode.allCases) { fq in
+                    Button(fq.rawValue) {
+                        waitAndPounce.frequencyMode = fq
+                    }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.triangle.swap")
+                        .font(.system(size: 9))
+                    Text(waitAndPounce.frequencyMode == .simplex ? "Simplex" : "Split")
+                        .font(.system(size: 10, weight: .semibold))
+                }
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+            }
+            .menuStyle(.borderedButton)
+            .fixedSize()
+
+            HStack(spacing: 4) {
+                Text("Tries:")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(.secondary)
+                Text("\(waitAndPounce.maxAttempts)")
+                    .font(.system(size: 10, weight: .heavy, design: .monospaced))
+                Stepper("", value: $waitAndPounce.maxAttempts, in: 1...5)
+                    .labelsHidden()
+                    .controlSize(.mini)
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 1)
+            .background(Color(NSColor.controlBackgroundColor))
+            .clipShape(RoundedRectangle(cornerRadius: 4))
+
+            HStack(spacing: 4) {
+                TextField("Snipe Call...", text: $manualSnipeInput)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .frame(width: 80)
+                    .onSubmit {
+                        quickSnipeInputTarget()
+                    }
+                Button("Snipe") {
+                    quickSnipeInputTarget()
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.mini)
+                .tint(.red)
+                .disabled(manualSnipeInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Color(NSColor.controlBackgroundColor))
+            .clipShape(RoundedRectangle(cornerRadius: 4))
+
+            Spacer()
+
+            HStack(spacing: 4) {
+                Image(systemName: "timer")
+                    .font(.system(size: 9))
+                Text(String(format: "Cycle: %.1fs", waitAndPounce.secondsRemainingInCycle))
+                    .font(.system(size: 10, weight: .heavy, design: .monospaced))
+            }
+            .foregroundStyle(waitAndPounce.secondsRemainingInCycle <= 2.0 ? Color.orange : Color.secondary)
+
+            if waitAndPounce.status.isArmedOrTracking || waitAndPounce.status.isActivelyCalling {
+                Button {
+                    waitAndPounce.haltAndDisarm()
+                } label: {
+                    HStack(spacing: 3) {
+                        Image(systemName: "xmark.octagon.fill")
+                            .font(.system(size: 9))
+                        Text("HALT TX")
+                            .font(.system(size: 9, weight: .heavy))
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.red)
+                    .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private var waitAndPounceCycleBar: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                RoundedRectangle(cornerRadius: 3)
+                    .fill(Color.secondary.opacity(0.15))
+                    .frame(height: 6)
+
+                RoundedRectangle(cornerRadius: 3)
+                    .fill(cycleBarColor)
+                    .frame(width: max(0, min(geo.size.width, geo.size.width * waitAndPounce.cycleProgressPercentage)), height: 6)
+            }
+        }
+        .frame(height: 6)
+    }
+
+    private var waitAndPounceBottomTelemetryRow: some View {
+        HStack(spacing: 10) {
+            HStack(spacing: 4) {
+                Image(systemName: waitAndPounce.status.badgeIcon)
+                    .font(.system(size: 10))
+                Text(waitAndPounce.status.title)
+                    .font(.system(size: 10, weight: .bold))
+            }
+            .foregroundColor(waitAndPounce.status == .idle ? Color.secondary : Color.white)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(waitAndPounce.status.badgeColor)
+            .clipShape(RoundedRectangle(cornerRadius: 4))
+
+            if let target = waitAndPounce.activeTarget {
+                HStack(spacing: 6) {
+                    Text(target.flagEmoji)
+                        .font(.system(size: 12))
+                    Text(target.callsign)
+                        .font(.system(size: 11, weight: .heavy, design: .monospaced))
+                        .foregroundStyle(Color.red)
+                    if !target.countryName.isEmpty {
+                        Text(target.countryName)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    Text("(\(target.snr >= 0 ? "+\(target.snr)" : "\(target.snr)") dB • \(target.deltaFrequencyHz) Hz)")
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(.secondary)
+
+                    Button {
+                        waitAndPounce.clearTarget()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Clear sniper target")
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 2)
+                .background(Color(NSColor.controlBackgroundColor).opacity(0.7))
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+            } else {
+                Text(waitAndPounce.lastEventMessage)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer()
+
+            Button("Test W&P Simulation") {
+                runWaitAndPounceSimulation()
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
+            .font(.system(size: 9))
+            .help("Simulate a DX target ending a QSO with RR73 to test W&P reaction")
+        }
+    }
+
+    private var cycleBarColor: Color {
+        let sec = waitAndPounce.secondsRemainingInCycle
+        if waitAndPounce.status.isActivelyCalling {
+            return .red
+        } else if sec <= 0.4 {
+            return .yellow
+        } else if sec <= 2.5 {
+            return .orange
+        } else {
+            return .accentColor
+        }
+    }
+
+    private func quickSnipeInputTarget() {
+        let clean = manualSnipeInput.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard !clean.isEmpty else { return }
+        waitAndPounce.setTarget(callsign: clean)
+        manualSnipeInput = ""
+    }
+
+    private func runWaitAndPounceSimulation() {
+        let dxCall = "3D2RR"
+        waitAndPounce.setTarget(callsign: dxCall, grid: "RH42", deltaHz: 1420, mode: "FT8")
+
+        // Feed cycle 1: Target in QSO with W1AW
+        let dec1 = WSJTXLiveDecode(
+            sourceID: "Simulation",
+            isNew: true,
+            timeMillis: 120000,
+            snr: 12,
+            deltaTimeSec: 0.1,
+            deltaFrequencyHz: 1420,
+            mode: "FT8",
+            message: "W1AW 3D2RR -12",
+            lowConfidence: false,
+            offAir: false,
+            callerCallsign: "3D2RR",
+            targetCallsign: "W1AW",
+            grid: "RH42",
+            report: "-12"
+        )
+        waitAndPounce.processDecodes([dec1], activeBand: activeBand)
+
+        // After 2.5 seconds, simulate target sending RR73!
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+            let dec2 = WSJTXLiveDecode(
+                sourceID: "Simulation",
+                isNew: true,
+                timeMillis: 135000,
+                snr: 14,
+                deltaTimeSec: 0.1,
+                deltaFrequencyHz: 1420,
+                mode: "FT8",
+                message: "W1AW 3D2RR RR73",
+                lowConfidence: false,
+                offAir: false,
+                callerCallsign: "3D2RR",
+                targetCallsign: "W1AW",
+                grid: "RH42",
+                report: "RR73"
+            )
+            waitAndPounce.processDecodes([dec2], activeBand: activeBand)
+        }
     }
 
     // MARK: - Smart Target Auto-Pilot Queue Strip
@@ -558,6 +855,17 @@ public struct DigitalCallRosterView: View {
                             callStation(entry)
                         }
                         .contextMenu {
+                            Button("🎯 Wait & Pounce on \(entry.callsign)") {
+                                waitAndPounce.setTarget(
+                                    callsign: entry.callsign,
+                                    grid: entry.grid,
+                                    deltaHz: entry.deltaFrequencyHz,
+                                    mode: entry.mode,
+                                    interlocutor: entry.targetCallsign,
+                                    snr: entry.snr,
+                                    rawDecode: entry.rawDecode
+                                )
+                            }
                             Button("Call \(entry.callsign) (Reply)") {
                                 callStation(entry)
                             }
@@ -618,7 +926,7 @@ public struct DigitalCallRosterView: View {
                 .font(.caption2)
                 .fontWeight(.bold)
                 .foregroundColor(.secondary)
-                .frame(width: 75, alignment: .trailing)
+                .frame(width: 110, alignment: .trailing)
         }
     }
 
@@ -647,6 +955,12 @@ public struct DigitalCallRosterView: View {
                         Text(entry.callsign)
                             .font(.system(.body, design: .monospaced))
                             .fontWeight(.bold)
+                        if waitAndPounce.activeTarget?.callsign == entry.callsign {
+                            Image(systemName: "scope")
+                                .font(.system(size: 10, weight: .black))
+                                .foregroundColor(.red)
+                                .help("Active Wait & Pounce Sniper Target")
+                        }
                         if SuperCheckPartialEngine.shared.isKnownContestCallsign(entry.callsign) {
                             Image(systemName: "checkmark.shield.fill")
                                 .font(.system(size: 9))
@@ -716,7 +1030,7 @@ public struct DigitalCallRosterView: View {
                 .lineLimit(1)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            // Action: 1-Click Tune Rig, Smart Queue & Call Reply
+            // Action: 1-Click Tune Rig, Smart Queue, Wait & Pounce Snipe & Call Reply
             HStack(spacing: 4) {
                 Button {
                     let dialHz = appState.wsjtxListener.lastStatus?.dialFrequencyHz ?? 14074000
@@ -745,6 +1059,28 @@ public struct DigitalCallRosterView: View {
                 .help("Add to Smart Auto-Sequence Target Queue")
 
                 Button {
+                    if waitAndPounce.activeTarget?.callsign == entry.callsign {
+                        waitAndPounce.clearTarget()
+                    } else {
+                        waitAndPounce.setTarget(
+                            callsign: entry.callsign,
+                            grid: entry.grid,
+                            deltaHz: entry.deltaFrequencyHz,
+                            mode: entry.mode,
+                            interlocutor: entry.targetCallsign,
+                            snr: entry.snr,
+                            rawDecode: entry.rawDecode
+                        )
+                    }
+                } label: {
+                    Image(systemName: "scope")
+                        .font(.system(size: 9, weight: .bold))
+                }
+                .buttonStyle(.bordered)
+                .foregroundStyle(waitAndPounce.activeTarget?.callsign == entry.callsign ? Color.red : Color.secondary)
+                .help(waitAndPounce.activeTarget?.callsign == entry.callsign ? "Disarm Wait & Pounce Target" : "Snipe with Wait & Pounce")
+
+                Button {
                     callStation(entry)
                 } label: {
                     HStack(spacing: 2) {
@@ -758,7 +1094,7 @@ public struct DigitalCallRosterView: View {
                 .buttonStyle(.borderedProminent)
                 .tint(entry.status.isNeeded ? .purple : .accentColor)
             }
-            .frame(width: 135, alignment: .trailing)
+            .frame(width: 165, alignment: .trailing)
         }
     }
 

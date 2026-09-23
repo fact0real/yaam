@@ -218,14 +218,14 @@ struct YAAMApp: App {
             SettingsView()
                 .environmentObject(appState)
                 .frame(
-                    minWidth: 1200,
-                    idealWidth: 1360,
+                    minWidth: 1080,
+                    idealWidth: 1280,
                     maxWidth: .infinity,
-                    minHeight: 640,
+                    minHeight: 620,
                     idealHeight: 740,
                     maxHeight: .infinity
                 )
-                .resizablePresentation(minWidth: 1200, minHeight: 640)
+                .resizablePresentation(minWidth: 1080, minHeight: 620)
         }
         #endif
 

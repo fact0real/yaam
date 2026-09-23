@@ -891,6 +891,13 @@ final class DXClusterClient: ObservableObject {
 
         for spot in batch {
             receivedSpotCount += 1
+            SignalFootprintEngine.shared.ingestRBNSpot(
+                callsign: spot.callsign,
+                spotter: spot.spotter,
+                freqKHz: spot.frequencyKHz,
+                comment: spot.comment,
+                time: spot.spottedAt
+            )
             // P0-A: Smart deduplication within ±2.0 kHz window on the same band & callsign
             let matchIndex = indexByID[spot.id] ?? updated.firstIndex(where: {
                 $0.callsign == spot.callsign && $0.band == spot.band && abs($0.frequencyKHz - spot.frequencyKHz) <= 2.0

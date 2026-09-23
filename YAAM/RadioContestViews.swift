@@ -898,6 +898,16 @@ struct ContestPanel: View {
                 Spacer()
             }
 
+            // Intelligent Busted Callsign Warning & Instant Correction HUD
+            BustedCallsignHUDView(
+                targetCallsign: $inputCall,
+                activeMode: inputMode,
+                activeBand: inputBand,
+                logRecords: appState.qsoRecords
+            ) { corrected in
+                inputCall = corrected
+            }
+
             // Real-Time Dupe & Super Check Partial Pill
             HStack(spacing: 8) {
                 if inputCall.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {

@@ -14,7 +14,7 @@ import SwiftUI
 
 public enum MapActivityLayer: String, CaseIterable, Identifiable, Sendable {
     case all = "🌟 All Activity"
-    case onTheAir = "📡 PSK Reporter (Heatmap)"
+    case onTheAir = "📡 PSK & RBN Footprint"
     case recentQSOs = "📻 Recent Logged QSOs"
     case liveTraffic = "⚡️ WSJT-X & Cluster"
 
@@ -23,7 +23,7 @@ public enum MapActivityLayer: String, CaseIterable, Identifiable, Sendable {
     public var shortTitle: String {
         switch self {
         case .all: return "All Activity"
-        case .onTheAir: return "PSK Heatmap"
+        case .onTheAir: return "Footprint"
         case .recentQSOs: return "Log QSOs"
         case .liveTraffic: return "WSJT-X"
         }
@@ -884,14 +884,26 @@ public struct GlobeAndGridTrackerWorkspaceView: View {
         var list: [Globe3DMarker] = []
         var seenCalls = Set<String>()
 
-        // Layer 1: Live On-The-Air Telemetry (PSK Reporter signals hearing YOU)
+        // Layer 1: Live On-The-Air Telemetry (PSK Reporter & RBN signals hearing YOU)
         if selectedActivityLayer == .all || selectedActivityLayer == .onTheAir {
-            for spot in onAirService.spots {
-                let call = spot.listenerCall.uppercased()
+            let combinedSpots: [(call: String, flag: String, grid: String, band: String, mode: String, snr: Int?, timestamp: Date)] = {
+                if !SignalFootprintEngine.shared.spots.isEmpty {
+                    return SignalFootprintEngine.shared.spots.map {
+                        ($0.listenerCall, $0.flag, $0.listenerGrid, $0.band, $0.mode, $0.snr, $0.timestamp)
+                    }
+                } else {
+                    return onAirService.spots.map {
+                        ($0.listenerCall, $0.countryFlag, $0.listenerGrid, $0.band, $0.mode, $0.snr, $0.timestamp)
+                    }
+                }
+            }()
+
+            for spot in combinedSpots {
+                let call = spot.call.uppercased()
                 guard !call.isEmpty, !seenCalls.contains(call) else { continue }
 
                 let coord: GeoCoordinate
-                if !spot.listenerGrid.isEmpty, let box = MaidenheadGridEngine.boundingBox(for: spot.listenerGrid) {
+                if !spot.grid.isEmpty, let box = MaidenheadGridEngine.boundingBox(for: spot.grid) {
                     coord = box.center
                 } else {
                     coord = GeoCoordinate(latitude: 45.0, longitude: 10.0)
@@ -900,9 +912,9 @@ public struct GlobeAndGridTrackerWorkspaceView: View {
                 seenCalls.insert(call)
                 list.append(Globe3DMarker(
                     callsign: call,
-                    flag: spot.countryFlag,
+                    flag: spot.flag,
                     coordinate: coord,
-                    grid: spot.listenerGrid,
+                    grid: spot.grid,
                     band: spot.band,
                     mode: spot.mode,
                     snr: spot.snr,

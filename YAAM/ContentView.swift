@@ -560,6 +560,9 @@ struct ContentView: View {
                 try? appState.persistCurrentWorkspace(reason: "Application exit")
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .init("OpenSignalFootprintConsole"))) { _ in
+            appState.openOperatorDesk(.signalFootprint)
+        }
         .onChange(of: appState.showStatsSheet) { _, shouldOpen in
             guard shouldOpen else { return }
             appState.showStatsSheet = false

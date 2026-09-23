@@ -518,6 +518,13 @@ extension AppState {
             latitude: Double(profile.latitude),
             longitude: Double(profile.longitude)
         )
+
+        SignalFootprintEngine.shared.setStation(
+            callsign: profile.normalizedCallsign,
+            grid: profile.normalizedGrid,
+            latitude: Double(profile.latitude),
+            longitude: Double(profile.longitude)
+        )
     }
 
     private func migrateLegacyMasterLogsIfNeeded(using database: LogbookDatabase) throws {

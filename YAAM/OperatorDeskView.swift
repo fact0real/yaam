@@ -69,6 +69,8 @@ struct OperatorDeskView: View {
             return AnyView(SixMeterWatchView())
         case .globeGrids:
             return AnyView(GlobeAndGridTrackerWorkspaceView())
+        case .signalFootprint:
+            return AnyView(SignalFootprintWorkspaceView())
         case .bandmap:
             return AnyView(BandmapView())
         case .cwKeyer, .cwAcademy, .cwReference, .cwDecoder, .cwPileup, .cwHardware:
@@ -687,6 +689,19 @@ private struct QuickLogPanel: View {
                                 .buttonStyle(.plain)
                                 .help("Click to insert \(match.club.rawValue) #\(match.memberNumber) into exchange")
                             }
+                        }
+                    }
+
+                    // Intelligent Busted Callsign Warning & Instant Correction HUD
+                    BustedCallsignHUDView(
+                        targetCallsign: $appState.quickLogDraft.callsign,
+                        activeMode: appState.quickLogDraft.mode,
+                        activeBand: appState.quickLogDraft.band,
+                        logRecords: appState.qsoRecords
+                    ) { correctedCall in
+                        appState.quickLogDraft.callsign = correctedCall
+                        if let hist = CallHistoryLookupEngine.shared.lookup(callsign: correctedCall) {
+                            prefillCallHistory(hist)
                         }
                     }
 

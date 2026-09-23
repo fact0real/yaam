@@ -43,7 +43,7 @@ nonisolated enum OperatorDeskGroup: String, CaseIterable, Identifiable {
     var destinations: [OperatorDeskDestination] {
         switch self {
         case .operating: [.quickLog, .shackClock, .portable]
-        case .dxActivity: [.dxCluster, .clubLogSpots, .bandmap, .callRoster, .globeGrids, .sixMeter, .dxNews, .on4kst]
+        case .dxActivity: [.dxCluster, .clubLogSpots, .bandmap, .callRoster, .globeGrids, .signalFootprint, .sixMeter, .dxNews, .on4kst]
         case .radioDigital: [.radioBridge, .flrig, .tci, .rotator, .ft8, .multiRigFT8, .digitalSuite, .emulator]
         case .cw: [.cwKeyer, .cwAcademy, .cwReference, .cwDecoder, .cwPileup, .cwHardware]
         case .contests: [.contest, .calendar, .awards, .clubs]
@@ -62,7 +62,7 @@ nonisolated enum OperatorDeskGroup: String, CaseIterable, Identifiable {
 
 nonisolated enum OperatorDeskDestination: String, CaseIterable, Identifiable {
     case quickLog, shackClock, portable
-    case dxCluster, clubLogSpots, bandmap, callRoster, globeGrids, sixMeter, dxNews, on4kst
+    case dxCluster, clubLogSpots, bandmap, callRoster, globeGrids, signalFootprint, sixMeter, dxNews, on4kst
     case radioBridge, flrig, tci, rotator, ft8, multiRigFT8, digitalSuite, emulator
     case cwKeyer, cwAcademy, cwReference, cwDecoder, cwPileup, cwHardware
     case contest, calendar, awards, clubs
@@ -73,7 +73,7 @@ nonisolated enum OperatorDeskDestination: String, CaseIterable, Identifiable {
     var group: OperatorDeskGroup {
         switch self {
         case .quickLog, .shackClock, .portable: .operating
-        case .dxCluster, .clubLogSpots, .bandmap, .callRoster, .globeGrids, .sixMeter, .dxNews, .on4kst: .dxActivity
+        case .dxCluster, .clubLogSpots, .bandmap, .callRoster, .globeGrids, .signalFootprint, .sixMeter, .dxNews, .on4kst: .dxActivity
         case .radioBridge, .flrig, .tci, .rotator, .ft8, .multiRigFT8, .digitalSuite, .emulator: .radioDigital
         case .cwKeyer, .cwAcademy, .cwReference, .cwDecoder, .cwPileup, .cwHardware: .cw
         case .contest, .calendar, .awards, .clubs: .contests
@@ -91,6 +91,7 @@ nonisolated enum OperatorDeskDestination: String, CaseIterable, Identifiable {
         case .bandmap: "Bandmap"
         case .callRoster: "Call Roster"
         case .globeGrids: "Globe & Grids"
+        case .signalFootprint: "Signal Footprint (PSK & RBN)"
         case .sixMeter: "6m Watch"
         case .dxNews: "DX News"
         case .on4kst: "ON4KST Chat"
@@ -129,6 +130,7 @@ nonisolated enum OperatorDeskDestination: String, CaseIterable, Identifiable {
         case .bandmap: "View spots by frequency, tune your radio, and inspect the spectrum."
         case .callRoster: "Prioritize needed FT8/FT4 decodes from WSJT-X and the internal modem."
         case .globeGrids: "Explore live activity, grid squares, and antenna bearings."
+        case .signalFootprint: "Live PSKReporter & RBN telemetry, global footprint map & polar beam pattern."
         case .sixMeter: "Monitor 6-meter openings, propagation evidence, and alerts."
         case .dxNews: "DXpeditions, live news, and weekly bulletins in one place."
         case .on4kst: "Chat with operators and coordinate on-air skeds."
@@ -167,6 +169,7 @@ nonisolated enum OperatorDeskDestination: String, CaseIterable, Identifiable {
         case .bandmap: "waveform.path.ecg.rectangle"
         case .callRoster: "waveform.and.person.filled"
         case .globeGrids: "globe.americas.fill"
+        case .signalFootprint: "dot.radiowaves.left.and.right"
         case .sixMeter: "bolt.badge.clock.fill"
         case .dxNews: "newspaper.fill"
         case .on4kst: "bubble.left.and.bubble.right.fill"
@@ -226,6 +229,7 @@ nonisolated enum OperatorDeskDestination: String, CaseIterable, Identifiable {
         case .ft8: 26
         case .flrig: 27
         case .rotator: 28
+        case .signalFootprint: 29
         }
     }
 
@@ -260,6 +264,7 @@ nonisolated enum OperatorDeskDestination: String, CaseIterable, Identifiable {
         case .awards: "Awards Center"
         case .shackClock: "HamClock Mission Control"
         case .globeGrids: "3D Globe Grid Tracker GridTracker"
+        case .signalFootprint: "PSKReporter RBN Reverse Beacon Network Signal Footprint Where Am I Heard Propagation"
         default: ""
         }
         let text = "\(title) \(detail) \(group.title) \(aliases)"

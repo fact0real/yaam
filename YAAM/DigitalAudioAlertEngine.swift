@@ -197,6 +197,35 @@ public final class DigitalAudioAlertEngine: NSObject, ObservableObject, AVSpeech
         enqueueAlert(priority: 1, message: phrase, callsign: caller)
     }
 
+    /// Dispatches an alert when Wait & Pounce acquires a target
+    public func announceWaitAndPounceTargetAcquired(callsign: String, country: String) {
+        guard isEnabled else { return }
+        let entity = country.isEmpty ? "" : "in \(country)"
+        let phrase = "Wait and Pounce targeting \(formatCallsignForSpeech(callsign)) \(entity)"
+        enqueueAlert(priority: 2, message: phrase, callsign: "WP_\(callsign)")
+    }
+
+    /// Dispatches an alert when Wait & Pounce arms to transmit on the next slot
+    public func announceWaitAndPounceArmed(callsign: String, band: String) {
+        guard isEnabled else { return }
+        let phrase = "Armed to pounce on \(formatCallsignForSpeech(callsign)) on \(band)"
+        enqueueAlert(priority: 1, message: phrase, callsign: "WP_ARM_\(callsign)")
+    }
+
+    /// Dispatches an alert when target responds to our pounce (contact established!)
+    public func announceWaitAndPounceEngaged(callsign: String) {
+        guard isEnabled else { return }
+        let phrase = "Contact established with \(formatCallsignForSpeech(callsign))! Auto-sequence engaged."
+        enqueueAlert(priority: 1, message: phrase, callsign: "WP_ENGAGED_\(callsign)")
+    }
+
+    /// Dispatches an alert when target did not respond after max attempts
+    public func announceWaitAndPounceExhausted(callsign: String) {
+        guard isEnabled else { return }
+        let phrase = "Wait and Pounce paused for \(formatCallsignForSpeech(callsign)). Maximum attempts reached."
+        enqueueAlert(priority: 3, message: phrase, callsign: "WP_EXHAUSTED_\(callsign)")
+    }
+
     /// Triggers a test voice announcement
     public func testVoiceAlert() {
         let voiceName: String
