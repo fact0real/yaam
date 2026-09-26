@@ -668,6 +668,33 @@ Located at the bottom of the console, the **Cross-Band DX Opportunity Radar** co
 
 ---
 
+## 26. POTA & SOTA Field Operations Hub
+
+Located under **Operator Desk → Operating → Portable** (or accessible by searching "POTA", "SOTA", or "Field Activation"), the **Field Operations Hub** provides a native macOS tactical companion for operators taking MacBook and QRP rigs (such as Lab599 Discovery TX-500, Elecraft KX2/KX3, FX-4CR, Xiegu X6100, and Icom IC-705) into the field.
+
+### 26.1 Rapid Pileup Logger & HUD
+* **Keyboard-First Ergonomics:** Full operation with keyboard only (`Space` for next field, `Enter` to log and auto-clear for next caller).
+* **Outdoor Sunlight High-Contrast Mode:** Switchable high-visibility theme with large monospaced fonts and intense contrast designed for operation in glaring outdoor daylight.
+* **10-QSO Milestone Dial:** Circular progress dial tracking contacts toward the official 10-QSO qualification threshold for POTA activations (or 4 QSOs for SOTA), complete with celebratory milestone banner and sound cues upon qualifying.
+* **Real-Time CAT Sync:** Displays live transceiver VFO frequency, band, and mode from `RigControlEngine` and automatically stamps accurate RF telemetry into each QSO.
+
+### 26.2 Live Spots & Park-to-Park (P2P) Radar
+* **Direct API Feeds:** Ingests live spots from official POTA (`api.pota.app/spot/activator`) and SOTAwatch (`api2.sota.org.uk/api/spots`) with customizable auto-refresh.
+* **Park-to-Park (P2P) Opportunities:** Automatically badges stations when you are in an active activation session, identifying mutual activation opportunities.
+* **1-Click CAT QSY:** Instantly commands the connected transceiver (TX-500, IC-705, FX-4CR, Xiegu, FLRig, or Hamlib) to jump directly to any spotted station's exact frequency and mode.
+
+### 26.3 Offline Park & Summit Directory with Native MapKit
+* **Zero-Internet Dependency:** Bundles an offline curated database of international parks and summits with instant sub-millisecond search by reference (e.g. `EP-0005`, `K-0001`, `W6/NC-423`), name, or country.
+* **Proximity Calculation:** Automatically calculates distance in kilometers from your current station or Rover GPS coordinates.
+* **MapKit Visual Explorer:** Interactive Apple Maps pins showing park boundaries and operator location with 1-click activation session launcher.
+
+### 26.4 Official POTA & SOTA Log Export
+* **Strict Filename Compliance:** Automatically formats export filenames adhering to official POTA rules: `[CALL]@[MY_POTA_REF]-[YYYYMMDD].adi`.
+* **Mandatory ADIF Tags:** Automatically injects `MY_SIG=POTA`, `MY_SIG_INFO=[REF]`, `MY_POTA_REF=[REF]`, `POTA_REF=[CONTACTED_REF]`, `STATION_CALLSIGN`, and `OPERATOR`.
+* **SOTA CSV v2 Support:** Generates valid SOTA Database CSV v2 records (`V2,MyCall,MySummit,DD/MM/YY,HHMM,Band,Mode,HisCall,HisSummit,Comment`) ready for upload to `sotadata.org.uk`.
+
+---
+
 > **Support & Feedback:**  
 > Press `Cmd + Shift + F` anywhere within YAAM to open the feedback panel to submit suggestions, bug reports, or feature requests directly to the development team.
 

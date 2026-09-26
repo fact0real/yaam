@@ -55,9 +55,8 @@ public struct Lab599TX500SetupView: View {
     // MARK: - Header Banner
     private var headerBanner: some View {
         HStack(spacing: 14) {
-            Image(systemName: "bolt.horizontal.fill")
-                .font(.system(size: 32))
-                .foregroundColor(.accentColor)
+            Lab599LogoView(height: 28)
+                .frame(width: 76)
 
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 8) {

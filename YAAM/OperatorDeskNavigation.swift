@@ -124,7 +124,7 @@ nonisolated enum OperatorDeskDestination: String, CaseIterable, Identifiable {
         switch self {
         case .quickLog: "Enter contacts, review worked history, and use contest ESM."
         case .shackClock: "Station clocks, propagation, satellites, and mission control."
-        case .portable: "Review POTA, SOTA, IOTA, and VUCC activities; export ADIF."
+        case .portable: "POTA/SOTA field activations, rapid pileup logging, live spots, and offline park directory."
         case .dxCluster: "Connect to DX nodes and discover live spots."
         case .clubLogSpots: "Personal Club Log spots and band opportunities."
         case .bandmap: "View spots by frequency, tune your radio, and inspect the spectrum."
@@ -262,6 +262,7 @@ nonisolated enum OperatorDeskDestination: String, CaseIterable, Identifiable {
         case .multiRigFT8: "Multi-Rig Cluster SO2R SO3R"
         case .digitalSuite: "Digital Modes Suite"
         case .awards: "Awards Center"
+        case .portable: "POTA SOTA Parks Summits Field Activation Pileup Rover QRP"
         case .shackClock: "HamClock Mission Control"
         case .globeGrids: "3D Globe Grid Tracker GridTracker"
         case .signalFootprint: "PSKReporter RBN Reverse Beacon Network Signal Footprint Where Am I Heard Propagation"

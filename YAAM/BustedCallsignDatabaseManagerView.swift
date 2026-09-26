@@ -48,10 +48,8 @@ struct BustedCallsignDatabaseManagerView: View {
     // MARK: - 1. Header Banner
     private var headerBanner: some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 8) {
-                Image(systemName: "checkmark.shield.badge.exclamationmark.fill")
-                    .font(.title2)
-                    .foregroundStyle(Color.orange)
+            HStack(spacing: 10) {
+                BustedCallsignIconView(size: 24, isSelected: true)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Busted Callsign Intelligence & Verification Databases")

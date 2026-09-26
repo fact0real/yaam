@@ -66,6 +66,22 @@ struct YAAMApp: App {
                 Button("Export Database Logs...") { appState.openDatabaseExport() }
                     .keyboardShortcut("e", modifiers: [.command, .shift])
             }
+
+            // MARK: - Edit Menu Selection Commands
+            CommandGroup(after: .pasteboard) {
+                Divider()
+                Button("Select All QSOs") {
+                    appState.selectAllRecords()
+                }
+                .keyboardShortcut("a", modifiers: .command)
+                .disabled(appState.qsoRecords.isEmpty)
+
+                Button("Deselect All") {
+                    appState.clearSelection()
+                }
+                .keyboardShortcut("d", modifiers: [.command, .shift])
+                .disabled(appState.selectedRecordIDs.isEmpty)
+            }
             
             // MARK: - Log & QSL Operations Menu
             CommandMenu("Log") {
@@ -100,6 +116,14 @@ struct YAAMApp: App {
                 Button("Backfill Missing QRZ Names & Emails") {
                     appState.backfillMissingQRZEmailsNow()
                 }
+
+                Button("Enrich All Contacts (QRZ Emails)...") {
+                    if !appState.isBulkQRZEnriching {
+                        appState.bulkQRZCompleted = false
+                    }
+                    appState.showBulkQRZEnrichmentSheet = true
+                }
+                .disabled(appState.qsoRecords.isEmpty || appState.isEnriching)
 
                 Button("Daily Rank Backfill") {
                     appState.fetchDailyQRZRankBackfill()

@@ -58,7 +58,7 @@ struct OperatorDeskView: View {
         case .awards:
             return AnyView(AwardCenterPanel())
         case .portable:
-            return AnyView(PortableActivitiesPanel())
+            return AnyView(FieldOperationsWorkspaceView())
         case .cloudCompanion:
             return AnyView(ConnectivityPanel())
         case .calendar:

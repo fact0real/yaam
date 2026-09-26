@@ -822,7 +822,7 @@ private enum QRCodeRenderer {
     }
 }
 
-private struct OperationsMetric: View {
+struct OperationsMetric: View {
     var title: String
     var value: Int
     var icon: String

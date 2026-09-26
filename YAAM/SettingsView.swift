@@ -121,7 +121,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .assistant: return "sparkles"
         case .audioAlerts: return "speaker.wave.2.fill"
         case .waitAndPounce: return "scope"
-        case .bustedCallsigns: return "checkmark.shield.badge.exclamationmark.fill"
+        case .bustedCallsigns: return "shield.lefthalf.filled.badge.checkmark"
         }
     }
 
@@ -337,9 +337,8 @@ struct SettingsView: View {
     @ViewBuilder
     private func sidebarRow(for tab: SettingsTab) -> some View {
         HStack(spacing: 8) {
-            Image(systemName: tab.icon)
-                .foregroundColor(tab == currentTab ? Color.accentColor : Color.secondary)
-                .frame(width: 20)
+            tabIcon(for: tab)
+                .frame(width: 22)
             Text(tab.title)
                 .font(.system(size: 13))
                 .lineLimit(1)
@@ -353,15 +352,26 @@ struct SettingsView: View {
         }
     }
 
+    @ViewBuilder
+    private func tabIcon(for tab: SettingsTab) -> some View {
+        switch tab {
+        case .tx500:
+            Lab599LogoView(height: 11)
+        case .bustedCallsigns:
+            BustedCallsignIconView(size: 15, isSelected: tab == currentTab)
+        default:
+            Image(systemName: tab.icon)
+                .foregroundColor(tab == currentTab ? Color.accentColor : Color.secondary)
+        }
+    }
+
     // MARK: - Detail View
     private var detailPane: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Header
             HStack(spacing: 12) {
-                Image(systemName: currentTab.icon)
-                    .font(.system(size: 22))
-                    .foregroundColor(.accentColor)
-                    .frame(width: 32, height: 32)
+                tabHeaderIcon(for: currentTab)
+                    .frame(width: 36, height: 32)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(currentTab.title)
@@ -384,6 +394,20 @@ struct SettingsView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    @ViewBuilder
+    private func tabHeaderIcon(for tab: SettingsTab) -> some View {
+        switch tab {
+        case .tx500:
+            Lab599LogoView(height: 24)
+        case .bustedCallsigns:
+            BustedCallsignIconView(size: 26, isSelected: true)
+        default:
+            Image(systemName: tab.icon)
+                .font(.system(size: 22))
+                .foregroundColor(.accentColor)
+        }
     }
 
     // MARK: - Tab Content Dispatcher
@@ -679,6 +703,30 @@ struct SettingsView: View {
                     }
                     .buttonStyle(.bordered)
                     .tint(.blue)
+                }
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Bulk Email & Contact Enrichment")
+                        .font(.subheadline.weight(.semibold))
+
+                    Text("Enrich all contacts across your Master Log with email addresses and names from QRZ.com / HAMQTH in a controlled batch process.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Button {
+                        if !appState.isBulkQRZEnriching {
+                            appState.bulkQRZCompleted = false
+                        }
+                        appState.showBulkQRZEnrichmentSheet = true
+                    } label: {
+                        Label("Enrich All Contacts (QRZ)...", systemImage: "sparkles.rectangle.stack")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.indigo)
+                    .disabled(appState.qsoRecords.isEmpty || appState.isEnriching)
                 }
 
                 Divider()

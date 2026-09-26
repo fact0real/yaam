@@ -2002,6 +2002,13 @@ class AppState: NSObject, ObservableObject {
     @Published var showConfirmationReconciliationSheet = false
     @Published var confirmationReconciliation = ConfirmationReconciliationSnapshot.empty
     @Published var showLogAssistantSheet = false
+    @Published var showBulkQRZEnrichmentSheet = false
+    @Published var isBulkQRZEnriching = false
+    @Published var bulkQRZProgress: (current: Int, total: Int) = (0, 0)
+    @Published var bulkQRZCurrentCallsign = ""
+    @Published var bulkQRZStats: (emailsFound: Int, namesFound: Int, notFound: Int) = (0, 0, 0)
+    @Published var bulkQRZCompleted = false
+    private var bulkQRZTask: Task<Void, Never>? = nil
 
     private let trackedRankCallsignsKey = "trackedRankCallsigns"
     private let qrzRankHistorySnapshotsKey = "qrzRankHistorySnapshots"
@@ -2315,6 +2322,18 @@ class AppState: NSObject, ObservableObject {
         Set(qsoRecords.compactMap { $0["CALL"].isEmpty ? nil : $0["CALL"].uppercased() }).count
     }
 
+    var callsignsWithEmailCount: Int {
+        Set(qsoRecords.compactMap {
+            let c = $0["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            let e = $0["EMAIL"].trimmingCharacters(in: .whitespacesAndNewlines)
+            return (!c.isEmpty && !e.isEmpty) ? c : nil
+        }).count
+    }
+
+    var callsignsMissingEmailCount: Int {
+        max(0, uniqueCallsignCount - callsignsWithEmailCount)
+    }
+
     var totalConfirmedCount: Int {
         qsoRecords.filter { $0.isConfirmed }.count
     }
@@ -2599,6 +2618,11 @@ class AppState: NSObject, ObservableObject {
     
     func clearSelection() {
         selectedRecordIDs.removeAll()
+    }
+
+    func selectAllRecords() {
+        selectedRecordIDs = Set(qsoRecords.map(\.id))
+        objectWillChange.send()
     }
     
     func enrichSelectedRecords() {
@@ -4997,6 +5021,10 @@ class AppState: NSObject, ObservableObject {
         let wasDailyRankBackfill = isDailyRankBackfillRunning
         enrichmentTask?.cancel()
         enrichmentTask = nil
+        bulkQRZTask?.cancel()
+        bulkQRZTask = nil
+        isBulkQRZEnriching = false
+        bulkQRZCurrentCallsign = ""
         isEnriching = false
         isDailyRankBackfillRunning = false
         if wasDailyRankBackfill {
@@ -5608,6 +5636,232 @@ class AppState: NSObject, ObservableObject {
         }
 
         return callsigns
+    }
+
+    func bulkQRZCandidates(
+        onlyMissingEmail: Bool = true,
+        forceRecheck: Bool = true
+    ) -> [String] {
+        var callsignsWithEmail = Set<String>()
+        var callsignsWithChecked = Set<String>()
+        var allUniqueCallsigns = Set<String>()
+
+        for record in qsoRecords {
+            let call = record["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            guard !call.isEmpty else { continue }
+            allUniqueCallsigns.insert(call)
+
+            let email = record["EMAIL"].trimmingCharacters(in: .whitespacesAndNewlines)
+            if !email.isEmpty {
+                callsignsWithEmail.insert(call)
+            }
+
+            let checked = record["APP_YAAM_EMAIL_CHECKED"].trimmingCharacters(in: .whitespacesAndNewlines)
+            if !checked.isEmpty {
+                callsignsWithChecked.insert(call)
+            }
+        }
+
+        var candidateSet = onlyMissingEmail ? allUniqueCallsigns.subtracting(callsignsWithEmail) : allUniqueCallsigns
+
+        if !forceRecheck {
+            candidateSet.subtract(callsignsWithChecked)
+        }
+
+        return candidateSet.sorted()
+    }
+
+    func bulkQRZCandidateCount(
+        onlyMissingEmail: Bool = true,
+        forceRecheck: Bool = true
+    ) -> Int {
+        bulkQRZCandidates(onlyMissingEmail: onlyMissingEmail, forceRecheck: forceRecheck).count
+    }
+
+    @MainActor
+    func startBulkQRZEnrichment(
+        onlyMissingEmail: Bool = true,
+        allowHAMQTH: Bool = true,
+        forceRecheck: Bool = true
+    ) {
+        guard !qsoRecords.isEmpty, !isBulkQRZEnriching else { return }
+
+        for header in ["NAME", "EMAIL", "QRZ_URL", "APP_YAAM_ENRICHED", "APP_YAAM_EMAIL_CHECKED"] where !tableHeaders.contains(header) {
+            tableHeaders.append(header)
+        }
+
+        // 1. First, propagate known emails within the logbook across duplicate callsign QSOs
+        var internalEmailByCall: [String: String] = [:]
+        for rec in qsoRecords {
+            let call = rec["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            let email = rec["EMAIL"].trimmingCharacters(in: .whitespacesAndNewlines)
+            if !call.isEmpty && !email.isEmpty && internalEmailByCall[call] == nil {
+                internalEmailByCall[call] = email
+            }
+        }
+
+        var propagatedCount = 0
+        if !internalEmailByCall.isEmpty {
+            for idx in qsoRecords.indices {
+                let call = qsoRecords[idx]["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+                let email = qsoRecords[idx]["EMAIL"].trimmingCharacters(in: .whitespacesAndNewlines)
+                if email.isEmpty, let known = internalEmailByCall[call] {
+                    qsoRecords[idx].fields["EMAIL"] = known
+                    qsoRecords[idx].fields["APP_YAAM_ENRICHED"] = "Y"
+                    propagatedCount += 1
+                }
+            }
+            if propagatedCount > 0 {
+                appendLog("ℹ️ Auto-propagated \(propagatedCount) known email address(es) across duplicate QSOs in your logbook.")
+                autoSaveActiveWorkspace()
+            }
+        }
+
+        // 2. Identify candidate callsigns
+        let candidates = bulkQRZCandidates(
+            onlyMissingEmail: onlyMissingEmail,
+            forceRecheck: forceRecheck
+        )
+
+        guard !candidates.isEmpty else {
+            appendLog("ℹ️ No candidate callsigns match your selected enrichment criteria.")
+            return
+        }
+
+        isBulkQRZEnriching = true
+        isEnriching = true
+        bulkQRZCompleted = false
+        bulkQRZProgress = (0, candidates.count)
+        bulkQRZStats = (0, 0, 0)
+        bulkQRZCurrentCallsign = candidates.first ?? ""
+
+        appendLog("🚀 Bulk QRZ Enrichment started for \(candidates.count) callsign(s)...")
+
+        bulkQRZTask = Task { @MainActor in
+            let baseRecords = self.qsoRecords
+            var workingRecords = baseRecords
+            var publishedRecords = baseRecords
+            var recordIndicesByCallsign: [String: [Int]] = [:]
+            for index in workingRecords.indices {
+                let callsign = workingRecords[index]["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+                if !callsign.isEmpty { recordIndicesByCallsign[callsign, default: []].append(index) }
+            }
+
+            var emailsFound = 0
+            var namesFound = 0
+            var notFound = 0
+            var hasUnsavedChanges = false
+            let checkedMarker = Self.adifDateFormatter.string(from: Date())
+
+            for (idx, callsign) in candidates.enumerated() {
+                if Task.isCancelled || !self.isBulkQRZEnriching { break }
+
+                self.bulkQRZProgress = (idx + 1, candidates.count)
+                self.bulkQRZCurrentCallsign = callsign
+
+                let contact: QRZEmailFetchResult
+                if allowHAMQTH {
+                    contact = await self.fetchContactInfo(
+                        for: callsign,
+                        allowQRZWebKitFallback: true,
+                        allowCredentialPrompt: false
+                    )
+                } else {
+                    contact = await self.fetchQRZContactInfo(
+                        for: callsign,
+                        allowWebKitFallback: true,
+                        allowCredentialPrompt: false
+                    )
+                }
+
+                if Task.isCancelled || !self.isBulkQRZEnriching { break }
+
+                let matchingIndices = recordIndicesByCallsign[callsign] ?? []
+                var gotEmail = false
+                var gotName = false
+
+                if let email = contact.email, !email.isEmpty {
+                    gotEmail = true
+                    emailsFound += 1
+                }
+
+                if let name = contact.name, !name.isEmpty {
+                    gotName = true
+                    namesFound += 1
+                }
+
+                if !gotEmail && !gotName {
+                    notFound += 1
+                }
+
+                for index in matchingIndices where workingRecords.indices.contains(index) {
+                    workingRecords[index].fields["QRZ_URL"] = "https://www.qrz.com/db/\(callsign)"
+                    workingRecords[index].fields["APP_YAAM_EMAIL_CHECKED"] = checkedMarker
+
+                    if let email = contact.email, !email.isEmpty {
+                        workingRecords[index].fields["EMAIL"] = email
+                        workingRecords[index].fields["APP_YAAM_ENRICHED"] = "Y"
+                    }
+
+                    if let name = contact.name, !name.isEmpty {
+                        let currentName = workingRecords[index]["NAME"].trimmingCharacters(in: .whitespacesAndNewlines)
+                        let newName = currentName.isEmpty || self.isGenericQRZName(currentName)
+                            ? name
+                            : self.appendedDistinctValue(currentName, newValue: name)
+                        if newName != currentName {
+                            workingRecords[index].fields["NAME"] = newName
+                        }
+                    }
+                    hasUnsavedChanges = true
+                }
+
+                self.bulkQRZStats = (emailsFound, namesFound, notFound)
+
+                let completed = idx + 1
+                if completed.isMultiple(of: 25) || completed == candidates.count {
+                    if hasUnsavedChanges {
+                        self.applySafeFieldDeltas(from: publishedRecords, to: workingRecords)
+                        publishedRecords = workingRecords
+                        self.autoSaveActiveWorkspace()
+                        hasUnsavedChanges = false
+                    }
+                }
+
+                if idx < candidates.count - 1 {
+                    try? await Task.sleep(nanoseconds: 350_000_000)
+                }
+            }
+
+            if hasUnsavedChanges {
+                self.applySafeFieldDeltas(from: publishedRecords, to: workingRecords)
+                self.autoSaveActiveWorkspace()
+            }
+
+            let wasCancelled = Task.isCancelled || !self.isBulkQRZEnriching
+            self.isBulkQRZEnriching = false
+            self.isEnriching = false
+            self.bulkQRZTask = nil
+            self.bulkQRZCurrentCallsign = ""
+
+            if wasCancelled {
+                self.appendLog("🛑 Bulk QRZ Enrichment stopped by user. Progress saved.")
+            } else {
+                self.bulkQRZCompleted = true
+                self.appendLog("✅ Bulk QRZ Enrichment complete! Processed \(candidates.count) callsigns: \(emailsFound) emails found, \(namesFound) names found.")
+                self.playActivitySound(.success)
+            }
+        }
+    }
+
+    @MainActor
+    func stopBulkQRZEnrichment() {
+        bulkQRZTask?.cancel()
+        bulkQRZTask = nil
+        isBulkQRZEnriching = false
+        isEnriching = false
+        bulkQRZCurrentCallsign = ""
+        autoSaveActiveWorkspace()
+        appendLog("🛑 Bulk QRZ Enrichment stopped.")
     }
     
     private func fetchQRZContactInfo(

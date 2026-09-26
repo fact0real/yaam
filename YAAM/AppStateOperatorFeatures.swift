@@ -255,6 +255,25 @@ extension AppState {
     }
 
     @MainActor
+    func addFieldQSO(_ record: QSORecordModel) {
+        var rec = record
+        rec.index = qsoRecords.count + 1
+        qsoRecords.append(rec)
+        quickLogLastSaved = rec
+        persistQuickLog(rec)
+        appendLog("Field Ops: Logged \(rec["CALL"]) · \(rec["FREQ"]) MHz · \(rec["MODE"]).")
+        enqueueAutomaticQSL(for: rec)
+        ZeroClickCloudUploadDaemon.shared.dispatch(
+            record: rec,
+            stationID: activeStationProfileID?.uuidString,
+            stationLocation: activeStationProfile?.lotwStationLocation,
+            qrzKeyOverride: activeQRZAPIKey
+        )
+        refreshAwardProgress()
+        updateMobileCompanionSnapshot()
+    }
+
+    @MainActor
     func prepareQuickLog(from spot: DXSpot) {
         var draft = quickLogDraft
         draft.callsign = spot.callsign

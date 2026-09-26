@@ -555,6 +555,10 @@ struct ContentView: View {
             FeedbackView()
                 .environmentObject(appState)
         }
+        .sheet(isPresented: $appState.showBulkQRZEnrichmentSheet) {
+            BulkQRZEnrichmentView()
+                .environmentObject(appState)
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
             if appState.isMasterMode {
                 try? appState.persistCurrentWorkspace(reason: "Application exit")
