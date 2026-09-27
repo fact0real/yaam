@@ -371,6 +371,13 @@ struct LogTableView: View {
                             Label("Remind Recent Unconfirmed (\(reminderCount))", systemImage: "bell.badge")
                         }
                         .disabled(reminderCount == 0 || appState.isSendingBatchMail)
+
+                        Button {
+                            appState.showFilteredBulkEmailSheet = true
+                        } label: {
+                            Label(appState.filterCriteria.isActive ? "Email Filtered Contacts (\(appState.filteredUniqueEmailCount))..." : "Bulk Email Contacts...", systemImage: "envelope.badge")
+                        }
+                        .disabled(appState.filteredUniqueEmailCount == 0 || appState.isSendingBatchMail)
                     }
 
                     Divider()
@@ -429,9 +436,9 @@ struct LogTableView: View {
                         }
                         
                         Button {
-                            appState.openBatchEmailComposerForSelected()
+                            appState.showFilteredBulkEmailSheet = true
                         } label: {
-                            Label("Batch Email Selected (\(appState.selectedRecordIDs.count))...", systemImage: "paperplane.fill")
+                            Label("Bulk Email Selected (\(appState.selectedRecordIDs.count))...", systemImage: "paperplane.fill")
                         }
                         
                         Button {
@@ -611,6 +618,17 @@ struct LogTableView: View {
                                 .fontWeight(.bold)
                         }
                     }
+
+                    Button(action: { appState.showFilteredBulkEmailSheet = true }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "envelope.badge.fill").foregroundColor(.blue)
+                            Text("Email (\(appState.filteredUniqueEmailCount))")
+                                .font(.caption)
+                                .fontWeight(.bold)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .help("Open Bulk Email Dispatcher for filtered contacts with custom templates")
                 }
                 
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -749,6 +767,36 @@ struct LogTableView: View {
                             .buttonStyle(.plain)
                             .fixedSize(horizontal: true, vertical: false)
                             .help(appState.filterCriteria.useSentEmail ? "Showing only QSOs with sent emails. Click to reset." : "Filter log table to show \(emailedCount) QSOs with sent emails")
+                        }
+
+                        let newBandCount = appState.newBandCount
+                        if newBandCount > 0 {
+                            Button {
+                                appState.filterCriteria.useNewBand.toggle()
+                            } label: {
+                                HStack(spacing: 3) {
+                                    Image(systemName: "antenna.radiowaves.left.and.right")
+                                        .font(.system(size: 9, weight: .bold))
+                                        .foregroundColor(.blue)
+                                    Text("New Band (\(newBandCount))")
+                                        .font(.system(size: 11, weight: appState.filterCriteria.useNewBand ? .bold : .medium))
+                                        .foregroundColor(appState.filterCriteria.useNewBand ? .blue : .primary)
+                                        .lineLimit(1)
+                                }
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 3)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .fill(appState.filterCriteria.useNewBand ? Color.blue.opacity(0.22) : Color.blue.opacity(0.08))
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .stroke(appState.filterCriteria.useNewBand ? Color.blue : Color.blue.opacity(0.3), lineWidth: 1)
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .fixedSize(horizontal: true, vertical: false)
+                            .help(appState.filterCriteria.useNewBand ? "Showing only QSOs with NEW BAND tag. Click to reset." : "Filter log table to show \(newBandCount) QSOs with NEW BAND tag")
                         }
 
                         let overdueCount = appState.overduePendingCount

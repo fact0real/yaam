@@ -547,6 +547,10 @@ struct ContentView: View {
             TodayConfirmedQSLDispatchView()
                 .environmentObject(appState)
         }
+        .sheet(isPresented: $appState.showFilteredBulkEmailSheet) {
+            FilteredBulkEmailView()
+                .environmentObject(appState)
+        }
         .sheet(isPresented: $appState.showLogAssistantSheet) {
             LogAssistantView()
                 .environmentObject(appState)

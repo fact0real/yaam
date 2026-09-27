@@ -232,6 +232,35 @@ struct FilterSheetView: View {
                         .cornerRadius(8)
                     }
                     
+                    // Email Address Availability Card
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Toggle("Filter by Email Address", isOn: $tempCriteria.useEmailPresence)
+                                .font(.headline)
+
+                            Spacer()
+
+                            if tempCriteria.useEmailPresence {
+                                let withEmailCount = appState.callsignsWithEmailCount
+                                Text(tempCriteria.emailPresenceState == "Has Email" ? "\(withEmailCount) with email" : "Without email")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+
+                        HStack(spacing: 12) {
+                            Picker("", selection: $tempCriteria.emailPresenceState) {
+                                Text("Has Email (@)").tag("Has Email")
+                                Text("No Email / Missing").tag("No Email")
+                            }
+                            .pickerStyle(.segmented)
+                            .disabled(!tempCriteria.useEmailPresence)
+                        }
+                    }
+                    .padding(12)
+                    .background(Color(NSColor.controlBackgroundColor).opacity(0.6))
+                    .cornerRadius(8)
+                    
                     // Confirmation Status Card
                     VStack(alignment: .leading, spacing: 8) {
                         Toggle("Filter Confirmation / Verification Status", isOn: $tempCriteria.useConfirmation)
@@ -272,6 +301,18 @@ struct FilterSheetView: View {
                                 
                                 Toggle("✉️ Has Sent Email", isOn: $tempCriteria.useSentEmail)
                                     .font(.subheadline)
+                            }
+
+                            HStack(spacing: 16) {
+                                Toggle(isOn: $tempCriteria.useNewBand) {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: "antenna.radiowaves.left.and.right")
+                                            .foregroundColor(.blue)
+                                        Text("📡 New Band Tag Only (\(appState.newBandCount))")
+                                            .font(.subheadline)
+                                    }
+                                }
+                                .help("Filter contacts with NEW BAND tag (earns a new DXCC band credit for that entity)")
                             }
                         }
                     }
@@ -343,6 +384,27 @@ struct FilterSheetView: View {
                     tempCriteria.reset()
                 }
                 .foregroundColor(.red)
+
+                Menu {
+                    let templatesWithFilters = BulkEmailTemplateStore.shared.templates.filter { $0.savedFilterCriteria != nil }
+                    ForEach(templatesWithFilters) { template in
+                        if let criteria = template.savedFilterCriteria {
+                            Button {
+                                tempCriteria = criteria
+                                appState.appendLog("Loaded filter criteria from template '\(template.name)': \(criteria.activeFilterSummary)")
+                            } label: {
+                                Text("\(template.name) (\(criteria.activeFilterSummary))")
+                            }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "tray.and.arrow.down")
+                        Text("Template Filter")
+                    }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
                 
                 Spacer()
                 
@@ -350,6 +412,23 @@ struct FilterSheetView: View {
                     dismiss()
                 }
                 
+                Button {
+                    appState.filterCriteria = tempCriteria
+                    appState.sortHeader = "QSO_DATE"
+                    appState.sortAscending = false
+                    appState.appendLog("Applied active filters and opened Bulk Email Dispatcher.")
+                    dismiss()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                        appState.showFilteredBulkEmailSheet = true
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "envelope.badge")
+                        Text("Apply & Email Contacts")
+                    }
+                }
+                .buttonStyle(.bordered)
+
                 Button("Apply Filters") {
                     appState.filterCriteria = tempCriteria
                     appState.sortHeader = "QSO_DATE"

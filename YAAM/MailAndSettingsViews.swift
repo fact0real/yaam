@@ -539,7 +539,8 @@ Warm 73,
             grid: profile?.normalizedGrid ?? "",
             radio: profile?.radioModel ?? "",
             antenna: profile?.antennaDescription ?? "",
-            powerWatts: profile?.powerWatts ?? 100
+            powerWatts: profile?.powerWatts ?? 100,
+            antennaHeightMeters: profile?.antennaHeightMeters ?? 10
         )
         
         var attachmentData: Data? = nil

@@ -124,19 +124,31 @@ nonisolated enum KeychainStore {
 
             // 2. Read and decrypt vault file if present
             if let fileData = try? Data(contentsOf: vaultFileURL), !fileData.isEmpty {
-                if let sealedBox = try? AES.GCM.SealedBox(combined: fileData),
-                   let decryptedData = try? AES.GCM.open(sealedBox, using: key),
-                   let dictionary = try? JSONDecoder().decode([String: Data].self, from: decryptedData) {
-                    self.memoryVault = dictionary
+                var decryptedDict: [String: Data]?
+                if let sealedBox = try? AES.GCM.SealedBox(combined: fileData) {
+                    if let decryptedData = try? AES.GCM.open(sealedBox, using: key),
+                       let dictionary = try? JSONDecoder().decode([String: Data].self, from: decryptedData) {
+                        decryptedDict = dictionary
+                    } else if let altKey = deriveAlternateHardwareBoundKey(),
+                              let decryptedData = try? AES.GCM.open(sealedBox, using: altKey),
+                              let dictionary = try? JSONDecoder().decode([String: Data].self, from: decryptedData) {
+                        decryptedDict = dictionary
+                    }
+                }
+                if let decryptedDict {
+                    self.memoryVault = decryptedDict
+                    importSiblingVaultIfNeeded()
                     migrateFromUserDefaultsSilently()
                     if !isLegacyMigrationFinished() {
                         migrateFromLegacyKeychainSilently()
                     }
+                    _ = persistVault()
                     return
                 }
             }
 
             // 3. Fallback migrations if fresh or empty
+            importSiblingVaultIfNeeded()
             migrateFromUserDefaultsSilently()
             if !isLegacyMigrationFinished() {
                 migrateFromLegacyKeychainSilently()
@@ -197,6 +209,87 @@ nonisolated enum KeychainStore {
                 return nil
             }
             return property.takeRetainedValue() as? String
+        }
+
+        private func deriveAlternateHardwareBoundKey() -> SymmetricKey? {
+            let hwUUID = getHardwareUUID() ?? "YAAM-FALLBACK-MAC-UUID"
+            let bundleID = Bundle.main.bundleIdentifier ?? "ASIS.YAAM"
+            let userHome = FileManager.default.homeDirectoryForCurrentUser.path
+            let isSandboxed = ProcessInfo.processInfo.environment["APP_SANDBOX_CONTAINER_ID"] != nil
+                || NSHomeDirectory().contains("/Library/Containers/")
+            let altHome = isSandboxed ? userHome : "\(userHome)/Library/Containers/\(bundleID)/Data"
+            let ikmString = "\(hwUUID):\(altHome):\(bundleID)"
+            guard let ikmData = ikmString.data(using: .utf8) else { return nil }
+            guard let salt = try? Data(contentsOf: saltFileURL), salt.count >= 32 else { return nil }
+            let inputKey = SymmetricKey(data: ikmData)
+            return HKDF<SHA256>.deriveKey(
+                inputKeyMaterial: inputKey,
+                salt: salt,
+                info: "ASIS.YAAM.HardwareBoundVault.v3".data(using: .utf8)!,
+                outputByteCount: 32
+            )
+        }
+
+        private func importSiblingVaultIfNeeded() {
+            let fm = FileManager.default
+            let bundleID = Bundle.main.bundleIdentifier ?? "ASIS.YAAM"
+            let userHome = fm.homeDirectoryForCurrentUser.path
+            let isSandboxed = ProcessInfo.processInfo.environment["APP_SANDBOX_CONTAINER_ID"] != nil
+                || NSHomeDirectory().contains("/Library/Containers/")
+
+            let siblingDir: URL
+            let siblingHome: String
+            if isSandboxed {
+                siblingDir = URL(fileURLWithPath: userHome).appendingPathComponent("Library/Application Support/ASIS.YAAM", isDirectory: true)
+                siblingHome = userHome
+            } else {
+                let containerData = URL(fileURLWithPath: userHome).appendingPathComponent("Library/Containers/\(bundleID)/Data", isDirectory: true)
+                siblingDir = containerData.appendingPathComponent("Library/Application Support/ASIS.YAAM", isDirectory: true)
+                siblingHome = containerData.path
+            }
+
+            let siblingVaultFile = siblingDir.appendingPathComponent("secure_vault.dat")
+            let siblingSaltFile = siblingDir.appendingPathComponent(".vault_salt")
+
+            guard fm.fileExists(atPath: siblingVaultFile.path),
+                  let siblingSalt = try? Data(contentsOf: siblingSaltFile),
+                  let siblingVaultData = try? Data(contentsOf: siblingVaultFile) else {
+                return
+            }
+
+            let hwUUID = getHardwareUUID() ?? "YAAM-FALLBACK-MAC-UUID"
+            let ikmString = "\(hwUUID):\(siblingHome):\(bundleID)"
+            guard let ikmData = ikmString.data(using: .utf8) else { return }
+            let inputKey = SymmetricKey(data: ikmData)
+            let siblingKey = HKDF<SHA256>.deriveKey(
+                inputKeyMaterial: inputKey,
+                salt: siblingSalt,
+                info: "ASIS.YAAM.HardwareBoundVault.v3".data(using: .utf8)!,
+                outputByteCount: 32
+            )
+
+            guard let sealedBox = try? AES.GCM.SealedBox(combined: siblingVaultData),
+                  let decrypted = try? AES.GCM.open(sealedBox, using: siblingKey),
+                  let siblingDict = try? JSONDecoder().decode([String: Data].self, from: decrypted) else {
+                return
+            }
+
+            let currentModDate = (try? fm.attributesOfItem(atPath: vaultFileURL.path)[.modificationDate] as? Date) ?? .distantPast
+            let siblingModDate = (try? fm.attributesOfItem(atPath: siblingVaultFile.path)[.modificationDate] as? Date) ?? .distantPast
+
+            var changed = false
+            for (key, val) in siblingDict {
+                if self.memoryVault[key] == nil || siblingModDate > currentModDate {
+                    if self.memoryVault[key] != val {
+                        self.memoryVault[key] = val
+                        changed = true
+                    }
+                }
+            }
+
+            if changed {
+                _ = persistVault()
+            }
         }
 
         private func migrateFromUserDefaultsSilently() {

@@ -206,15 +206,24 @@ struct ConfirmationSyncRegression {
     private static func testQRZCountChangeTriggersFullReconciliation() {
         let checkpoint = Date(timeIntervalSince1970: 1_787_472_000)
 
+        // Count increase is handled incrementally via MODSINCE, not full reconciliation
         precondition(
-            ConfirmationSyncPolicy.needsQRZFullReconciliation(
+            !ConfirmationSyncPolicy.needsQRZFullReconciliation(
                 modifiedSince: checkpoint,
                 knownConfirmedCount: 120,
                 serverConfirmedCount: 121
             )
         )
+        // Count reduction means records were deleted/revoked on QRZ, requiring full reconciliation
         precondition(
             ConfirmationSyncPolicy.needsQRZFullReconciliation(
+                modifiedSince: checkpoint,
+                knownConfirmedCount: 120,
+                serverConfirmedCount: 119
+            )
+        )
+        precondition(
+            !ConfirmationSyncPolicy.needsQRZFullReconciliation(
                 modifiedSince: checkpoint,
                 knownConfirmedCount: nil,
                 serverConfirmedCount: 121

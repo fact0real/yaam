@@ -60,8 +60,8 @@ nonisolated enum ConfirmationSyncPolicy {
         knownConfirmedCount: Int?,
         serverConfirmedCount: Int?
     ) -> Bool {
-        guard modifiedSince != nil, let serverConfirmedCount else { return false }
-        return knownConfirmedCount != serverConfirmedCount
+        guard modifiedSince != nil, let serverConfirmedCount, let knownConfirmedCount else { return false }
+        return serverConfirmedCount < knownConfirmedCount
     }
 
     private static func parseLoTWCursor(_ value: String) -> Date? {
@@ -196,14 +196,13 @@ nonisolated enum ConfirmationDownloadService {
             let fetched = try await fetchQRZ(
                 apiKey: apiKey,
                 modifiedSince: requestedModifiedSince,
+                expectedTotalCount: requestedModifiedSince == nil ? serverConfirmedCount : nil,
                 userAgent: userAgent
             )
             let detail = reconcileFullHistory
                 ? "QRZ now reports \(serverConfirmedCount ?? fetched.reportedCount ?? fetched.records.count) confirmed record(s); YAAM reconciled the full QRZ confirmation history in \(fetched.pageCount) page(s)."
                 : fetched.detail
-            let accountConfirmedCount = requestedModifiedSince == nil
-                ? (fetched.reportedCount ?? serverConfirmedCount)
-                : serverConfirmedCount
+            let accountConfirmedCount = serverConfirmedCount ?? fetched.reportedCount ?? fetched.records.count
             return ConfirmationFetchAttempt(
                 outcome: ConfirmationFetchOutcome(
                     source: fetched.source,
@@ -284,6 +283,7 @@ nonisolated enum ConfirmationDownloadService {
     static func fetchQRZ(
         apiKey: String,
         modifiedSince: Date?,
+        expectedTotalCount: Int? = nil,
         userAgent: String
     ) async throws -> ConfirmationFetchOutcome {
         guard let endpoint = URL(string: "https://logbook.qrz.com/api") else {
@@ -293,7 +293,6 @@ nonisolated enum ConfirmationDownloadService {
         var allRecords: [[String: String]] = []
         var afterLogID = 0
         var page = 0
-        var totalReportedCount: Int?
         let modifiedSinceValue = modifiedSince.map(qrzDateFormatter.string(from:))
 
         while page < 2_000 {
@@ -325,9 +324,6 @@ nonisolated enum ConfirmationDownloadService {
             let result = parsedResponse.result
             let count = parsedResponse.count
             let reason = parsedResponse.reason
-            if totalReportedCount == nil, result == "OK" {
-                totalReportedCount = count
-            }
 
             if result != "OK" {
                 let noRecords = count == 0 && (
@@ -336,7 +332,6 @@ nonisolated enum ConfirmationDownloadService {
                     (reason.isEmpty && parsedResponse.adif.isEmpty)
                 )
                 if noRecords {
-                    totalReportedCount = 0
                     break
                 }
                 throw ConfirmationDownloadError.service(
@@ -353,16 +348,17 @@ nonisolated enum ConfirmationDownloadService {
             }
             allRecords.append(contentsOf: pageRecords)
 
-            if let totalReportedCount, allRecords.count >= totalReportedCount {
+            if let expectedTotalCount, allRecords.count >= expectedTotalCount {
+                break
+            }
+
+            guard pageRecords.count >= qrzPageSize else {
                 break
             }
 
             let logIDs = pageRecords.compactMap { record -> Int? in
                 let rawValue = record["APP_QRZLOG_LOGID"] ?? record["APP_QRZ_LOGID"] ?? record["LOGID"]
                 return rawValue.flatMap { Int($0.filter(\.isNumber)) }
-            }
-            guard pageRecords.count >= qrzPageSize else {
-                break
             }
             guard let highestLogID = logIDs.max(), highestLogID >= afterLogID else {
                 throw ConfirmationDownloadError.invalidResponse(
@@ -375,9 +371,9 @@ nonisolated enum ConfirmationDownloadService {
         if page >= 2_000 {
             throw ConfirmationDownloadError.invalidResponse("QRZ confirmation paging exceeded the safety limit.")
         }
-        if let totalReportedCount, allRecords.count < totalReportedCount {
+        if let expectedTotalCount, allRecords.count < expectedTotalCount {
             throw ConfirmationDownloadError.invalidResponse(
-                "QRZ reported \(totalReportedCount) matching record(s), but only \(allRecords.count) were downloaded. The baseline was not saved as complete."
+                "QRZ reported \(expectedTotalCount) matching record(s), but only \(allRecords.count) were downloaded. The baseline was not saved as complete."
             )
         }
 
@@ -385,8 +381,8 @@ nonisolated enum ConfirmationDownloadService {
             source: .qrz,
             records: allRecords,
             nextCursor: nil,
-            reportedCount: totalReportedCount,
-            accountConfirmedCount: modifiedSince == nil ? totalReportedCount : nil,
+            reportedCount: expectedTotalCount ?? allRecords.count,
+            accountConfirmedCount: expectedTotalCount ?? (modifiedSince == nil ? allRecords.count : nil),
             pageCount: page,
             detail: "QRZ returned \(allRecords.count) confirmed logbook record(s) in \(page) page(s)."
         )
@@ -771,9 +767,11 @@ extension AppState {
             return
         }
         guard let profileID = activeStationProfileID else {
-            alertTitle = "Station Required"
-            alertMessage = "Choose an active station profile before syncing confirmations."
-            showAlert = true
+            if showCompletionAlert {
+                alertTitle = "Station Required"
+                alertMessage = "Choose an active station profile before syncing confirmations."
+                showAlert = true
+            }
             completion?(ConfirmationSyncSummary())
             return
         }
@@ -788,10 +786,14 @@ extension AppState {
         let syncQRZ = requestedQRZ && !qrzAPIKey.isEmpty
 
         guard syncLoTW || syncQRZ else {
-            alertTitle = "Credentials Required"
-            alertMessage = "Configure LoTW or QRZ Logbook credentials for the selected source in Settings."
-            showAlert = true
-            playActivitySound(.failure)
+            if showCompletionAlert {
+                alertTitle = "Credentials Required"
+                alertMessage = "Configure LoTW or QRZ Logbook credentials for the selected source in Settings."
+                showAlert = true
+                playActivitySound(.failure)
+            } else {
+                appendLog("Confirmation sync skipped: neither LoTW credentials nor QRZ Logbook API Key are configured in Settings.")
+            }
             completion?(ConfirmationSyncSummary())
             return
         }

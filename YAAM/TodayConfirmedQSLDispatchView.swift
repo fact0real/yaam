@@ -1171,6 +1171,9 @@ Warm 73,
         DispatchQueue.global(qos: .userInitiated).async {
             var sentCount = 0
             var failedCount = 0
+            var successfullySentIDs: [UUID] = []
+            var sentDetailsList: [(call: String, email: String, subject: String)] = []
+            var failedDetailsList: [(call: String, email: String, subject: String)] = []
 
             for (index, record) in finalRecordsToSend.enumerated() {
                 if self.cancelRequested { break }
@@ -1184,26 +1187,34 @@ Warm 73,
                     self.dispatchStatusMap[record.id] = .renderingPDF
                 }
 
-                // 1. Render PDF
-                let tempURL = FileManager.default.temporaryDirectory
-                    .appendingPathComponent(UUID().uuidString)
-                    .appendingPathExtension("pdf")
+                // 1. Render PDF inside autoreleasepool to instantly release graphics memory
+                var attachmentData: Data? = nil
+                var renderErrorMsg: String? = nil
 
-                var pdfData: Data? = nil
-                do {
-                    try QSLCardRenderer.exportPDF(record: record, station: station, to: tempURL)
-                    pdfData = try Data(contentsOf: tempURL)
-                    try? FileManager.default.removeItem(at: tempURL)
-                } catch {
-                    try? FileManager.default.removeItem(at: tempURL)
+                autoreleasepool {
+                    let tempURL = FileManager.default.temporaryDirectory
+                        .appendingPathComponent(UUID().uuidString)
+                        .appendingPathExtension("pdf")
+
+                    do {
+                        try QSLCardRenderer.exportPDF(record: record, station: station, to: tempURL)
+                        attachmentData = try Data(contentsOf: tempURL)
+                        try? FileManager.default.removeItem(at: tempURL)
+                    } catch {
+                        try? FileManager.default.removeItem(at: tempURL)
+                        renderErrorMsg = error.localizedDescription
+                    }
+                }
+
+                if let renderErrorMsg {
                     DispatchQueue.main.async {
-                        self.dispatchStatusMap[record.id] = .failed(error.localizedDescription)
+                        self.dispatchStatusMap[record.id] = .failed(renderErrorMsg)
                     }
                     failedCount += 1
                     continue
                 }
 
-                guard let attachmentData = pdfData else {
+                guard let finalAttachmentData = attachmentData else {
                     DispatchQueue.main.async {
                         self.dispatchStatusMap[record.id] = .failed("Could not read rendered PDF")
                     }
@@ -1239,7 +1250,7 @@ Warm 73,
                     to: recipientEmail,
                     subject: sub,
                     body: body,
-                    attachmentData: attachmentData,
+                    attachmentData: finalAttachmentData,
                     attachmentName: attachmentName,
                     playSound: false
                 ) { ok, _ in
@@ -1252,9 +1263,11 @@ Warm 73,
                 DispatchQueue.main.async {
                     if successResult {
                         sentCount += 1
+                        successfullySentIDs.append(record.id)
+                        sentDetailsList.append((call, recipientEmail, sub))
                         self.dispatchStatusMap[record.id] = .sent
-                        self.appState.markRecordAsQSLSent(id: record.id, via: "E", autoSave: false)
-                        self.appState.recordEmailHistory(callsign: call, email: recipientEmail, subject: sub, status: "Sent")
+
+                        // Only update local view state during the run to preserve smooth 60fps scrolling
                         if let lIdx = self.localRecords.firstIndex(where: { $0.id == record.id }) {
                             self.localRecords[lIdx].fields["QSL_SENT"] = "Y"
                             self.localRecords[lIdx].fields["QSLSDATE"] = AppState.adifDateFormatter.string(from: Date())
@@ -1263,8 +1276,8 @@ Warm 73,
                         }
                     } else {
                         failedCount += 1
+                        failedDetailsList.append((call, recipientEmail, sub))
                         self.dispatchStatusMap[record.id] = .failed("SMTP delivery failed")
-                        self.appState.recordEmailHistory(callsign: call, email: recipientEmail, subject: sub, status: "Failed")
                     }
                 }
 
@@ -1274,9 +1287,37 @@ Warm 73,
 
             DispatchQueue.main.async {
                 self.isDispatching = false
-                // Single autoSave and notification at the end of the batch!
-                self.appState.autoSaveActiveWorkspace()
-                self.appState.objectWillChange.send()
+
+                let todayStr = AppState.adifDateFormatter.string(from: Date())
+                let sentIDSet = Set(successfullySentIDs)
+
+                // 1. Commit email histories without repeated full-workspace saves
+                for item in sentDetailsList {
+                    self.appState.recordEmailHistory(
+                        callsign: item.call,
+                        email: item.email,
+                        subject: item.subject,
+                        status: "Sent",
+                        updateLogbookRows: false,
+                        autoSave: false
+                    )
+                }
+
+                for item in failedDetailsList {
+                    self.appState.recordEmailHistory(
+                        callsign: item.call,
+                        email: item.email,
+                        subject: item.subject,
+                        status: "Failed",
+                        updateLogbookRows: false,
+                        autoSave: false
+                    )
+                }
+
+                // 2. Commit all sent records in AppState and trigger exactly ONE workspace save & UI refresh!
+                if !sentIDSet.isEmpty {
+                    self.appState.batchMarkRecordsAsQSLSent(ids: sentIDSet, via: "E", autoSave: true)
+                }
 
                 self.appState.playActivitySound(failedCount == 0 ? .success : .failure)
                 self.alertTitle = "Dispatch Complete 🎉"

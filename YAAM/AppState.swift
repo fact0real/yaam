@@ -694,7 +694,7 @@ nonisolated struct CountryStatModel: Identifiable, Sendable {
 // Note: Country and DXCC flag lookup engine is implemented in CountryFlagEngine.swift
 
 // MARK: - Filter Criteria Model
-struct FilterCriteria {
+struct FilterCriteria: Codable, Equatable, Hashable {
     var useDate: Bool = false
     var startDate: Date = Date()
     var endDate: Date = Date()
@@ -736,9 +736,47 @@ struct FilterCriteria {
     var useOverduePending: Bool = false
     var useUnconfirmedOnly: Bool = false
     var useLotwWaiting: Bool = false
+    var useEmailPresence: Bool = false
+    var emailPresenceState: String = "Has Email" // "Has Email" or "No Email"
+    var useNewBand: Bool = false
     
     var isActive: Bool {
-        useDate || useBand || useMode || useCallsign || useOperator || useZone || useCountry || useQSLSent || useQSLRcvd || useConfirmation || useContinent || useNewlyConfirmed || useSentEmail || useTodayConfirmed || useOverduePending || useUnconfirmedOnly || useLotwWaiting
+        useDate || useBand || useMode || useCallsign || useOperator || useZone || useCountry || useQSLSent || useQSLRcvd || useConfirmation || useContinent || useNewlyConfirmed || useSentEmail || useTodayConfirmed || useOverduePending || useUnconfirmedOnly || useLotwWaiting || useEmailPresence || useNewBand
+    }
+    
+    var activeFilterSummary: String {
+        var parts: [String] = []
+        if useCountry && !selectedCountries.isEmpty {
+            parts.append("Country: \(selectedCountries.joined(separator: ", "))")
+        }
+        if useConfirmation {
+            parts.append(confirmationState)
+        }
+        if useEmailPresence {
+            parts.append(emailPresenceState)
+        }
+        if useNewBand {
+            parts.append("New Band Tag")
+        }
+        if useBand && band != "All" {
+            parts.append("Band: \(band)")
+        }
+        if useMode && mode != "All" {
+            parts.append("Mode: \(mode)")
+        }
+        if useZone && !zone.isEmpty {
+            parts.append("Zone: \(zone)")
+        }
+        if useContinent && !selectedContinents.isEmpty {
+            parts.append("Continent: \(selectedContinents.joined(separator: ", "))")
+        }
+        if useTodayConfirmed {
+            parts.append("Today Confirmed")
+        }
+        if parts.isEmpty {
+            return "All Contacts"
+        }
+        return parts.joined(separator: " · ")
     }
     
     mutating func reset() {
@@ -1913,6 +1951,7 @@ class AppState: NSObject, ObservableObject {
     @Published var isSendingBatchMail: Bool = false
     @Published var batchMailStatus: String = ""
     @Published var showTodayConfirmedQSLSheet: Bool = false
+    @Published var showFilteredBulkEmailSheet: Bool = false
 
     func openEmailComposer(for record: QSORecordModel, email: String? = nil) {
         let cleanEmail = (email ?? record["EMAIL"]).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -2540,6 +2579,17 @@ class AppState: NSObject, ObservableObject {
                 if filterCriteria.useLotwWaiting {
                     if record.isLotwConfirmed || !record.isLotwSent { return false }
                 }
+                if filterCriteria.useEmailPresence {
+                    let rawEmail = record["EMAIL"].trimmingCharacters(in: .whitespacesAndNewlines)
+                    let hasEmail = !rawEmail.isEmpty && rawEmail != "-"
+                    if filterCriteria.emailPresenceState == "Has Email" && !hasEmail { return false }
+                    if filterCriteria.emailPresenceState == "No Email" && hasEmail { return false }
+                }
+                if filterCriteria.useNewBand {
+                    if self.confirmationOpportunityIndex.opportunity(for: record.id)?.addsCountryBandCredit != true {
+                        return false
+                    }
+                }
                 return true
             }
         }
@@ -2598,6 +2648,21 @@ class AppState: NSObject, ObservableObject {
 
         filteredRecordsCache = records
         return records
+    }
+
+    var filteredUniqueEmailCount: Int {
+        let records = filterCriteria.isActive ? filteredRecords : qsoRecords
+        var seen = Set<String>()
+        var count = 0
+        for r in records {
+            let call = r["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            let email = r["EMAIL"].trimmingCharacters(in: .whitespacesAndNewlines)
+            if !call.isEmpty && email.contains("@") && email.contains(".") && !seen.contains(call) {
+                seen.insert(call)
+                count += 1
+            }
+        }
+        return count
     }
 
     func filteredChronologicalOrdinal(for recordID: UUID) -> Int? {
@@ -3447,19 +3512,70 @@ class AppState: NSObject, ObservableObject {
 
     private func loadRankHistory() {
         var seen = Set<String>()
-        trackedRankCallsigns = (UserDefaults.standard.stringArray(forKey: trackedRankCallsignsKey) ?? [])
+        var loadedTracked = (UserDefaults.standard.stringArray(forKey: trackedRankCallsignsKey) ?? [])
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() }
             .filter { !$0.isEmpty && seen.insert($0).inserted }
             .prefix(8)
             .map { $0 }
+
+        var allSnapshots: [QRZRankHistorySnapshot] = []
         if let data = UserDefaults.standard.data(forKey: qrzRankHistorySnapshotsKey),
            let snapshots = try? JSONDecoder().decode([QRZRankHistorySnapshot].self, from: data) {
-            rankHistorySnapshots = snapshots.sorted { $0.date < $1.date }
+            allSnapshots.append(contentsOf: snapshots)
         }
+
+        // Bridge snapshots and tracked rivals from companion container/user preferences if present
+        let fm = FileManager.default
+        let bundleID = Bundle.main.bundleIdentifier ?? "ASIS.YAAM"
+        let userHome = fm.homeDirectoryForCurrentUser.path
+        let isSandboxed = ProcessInfo.processInfo.environment["APP_SANDBOX_CONTAINER_ID"] != nil
+            || NSHomeDirectory().contains("/Library/Containers/")
+
+        let siblingPlistURL: URL
+        if isSandboxed {
+            siblingPlistURL = URL(fileURLWithPath: userHome).appendingPathComponent("Library/Preferences/\(bundleID).plist")
+        } else {
+            siblingPlistURL = URL(fileURLWithPath: userHome).appendingPathComponent("Library/Containers/\(bundleID)/Data/Library/Preferences/\(bundleID).plist")
+        }
+
+        if fm.fileExists(atPath: siblingPlistURL.path),
+           let plistData = try? Data(contentsOf: siblingPlistURL),
+           let plist = try? PropertyListSerialization.propertyList(from: plistData, format: nil) as? [String: Any] {
+            if let siblingSnapshotsData = plist[qrzRankHistorySnapshotsKey] as? Data,
+               let siblingSnapshots = try? JSONDecoder().decode([QRZRankHistorySnapshot].self, from: siblingSnapshotsData) {
+                allSnapshots.append(contentsOf: siblingSnapshots)
+            }
+            if let siblingTracked = plist[trackedRankCallsignsKey] as? [String] {
+                for call in siblingTracked {
+                    let norm = call.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+                    if !norm.isEmpty && seen.insert(norm).inserted && loadedTracked.count < 8 {
+                        loadedTracked.append(norm)
+                    }
+                }
+            }
+        }
+
+        // Deduplicate snapshots by (callsign, dayKey), retaining the latest for each day
+        var deduplicated: [String: QRZRankHistorySnapshot] = [:]
+        for snapshot in allSnapshots {
+            let key = "\(snapshot.callsign)|\(QRZRankHistorySnapshot.dayKey(for: snapshot.date))"
+            if let existing = deduplicated[key] {
+                if snapshot.date >= existing.date {
+                    deduplicated[key] = snapshot
+                }
+            } else {
+                deduplicated[key] = snapshot
+            }
+        }
+
+        trackedRankCallsigns = loadedTracked
+        rankHistorySnapshots = deduplicated.values.sorted { $0.date < $1.date }
+
         if !trackedRankCallsigns.isEmpty {
             leaderboardSearchCallsign = trackedRankCallsigns.joined(separator: ", ")
         }
         hydrateLeaderboardFromSavedRankHistory()
+        saveRankHistorySnapshots()
     }
 
     private func saveTrackedRankCallsigns() {
@@ -7127,12 +7243,14 @@ class AppState: NSObject, ObservableObject {
         let radio = profile?.radioModel ?? ""
         let antenna = profile?.antennaDescription ?? ""
         let power = profile?.powerWatts ?? 100
+        let antennaHeight = profile?.antennaHeightMeters ?? 10
         return QSLCardStationInfo(
             callsign: stationCallsign,
             grid: grid,
             radio: radio,
             antenna: antenna,
-            powerWatts: power
+            powerWatts: power,
+            antennaHeightMeters: antennaHeight > 0 ? antennaHeight : 10
         )
     }
 
@@ -7406,10 +7524,24 @@ class AppState: NSObject, ObservableObject {
         refreshEmailHistoryColumns()
     }
 
-    func recordEmailHistory(callsign: String, email: String, subject: String, status: String) {
+    func recordEmailHistory(
+        callsign: String,
+        email: String,
+        subject: String,
+        status: String,
+        updateLogbookRows: Bool = true,
+        autoSave: Bool = true
+    ) {
         guard Thread.isMainThread else {
             DispatchQueue.main.async { [weak self] in
-                self?.recordEmailHistory(callsign: callsign, email: email, subject: subject, status: status)
+                self?.recordEmailHistory(
+                    callsign: callsign,
+                    email: email,
+                    subject: subject,
+                    status: status,
+                    updateLogbookRows: updateLogbookRows,
+                    autoSave: autoSave
+                )
             }
             return
         }
@@ -7430,7 +7562,9 @@ class AppState: NSObject, ObservableObject {
             emailHistoryByCallsign[norm] = entry
         }
         saveEmailHistory()
-        updateEmailHistoryColumn(with: entry)
+        if updateLogbookRows {
+            updateEmailHistoryColumn(with: entry, autoSave: autoSave)
+        }
     }
 
     func latestEmailHistory(for callsign: String) -> EmailHistoryEntry? {
@@ -7476,7 +7610,7 @@ class AppState: NSObject, ObservableObject {
         }
     }
 
-    private func updateEmailHistoryColumn(with entry: EmailHistoryEntry) {
+    private func updateEmailHistoryColumn(with entry: EmailHistoryEntry, autoSave: Bool = true) {
         let normalizedCallsign = entry.callsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         guard !normalizedCallsign.isEmpty else { return }
 
@@ -7493,7 +7627,7 @@ class AppState: NSObject, ObservableObject {
             updatedRows += 1
         }
 
-        if updatedRows > 0 {
+        if updatedRows > 0 && autoSave {
             objectWillChange.send()
             autoSaveActiveWorkspace()
         }
@@ -7593,6 +7727,11 @@ class AppState: NSObject, ObservableObject {
 
     var newlyConfirmedCount: Int {
         allNewlyConfirmedRecordIDs.count
+    }
+
+    var newBandCount: Int {
+        let index = confirmationOpportunityIndex
+        return qsoRecords.filter { index.opportunity(for: $0.id)?.addsCountryBandCredit == true }.count
     }
 
     // MARK: - Today's Confirmed QSOs
@@ -7726,6 +7865,31 @@ class AppState: NSObject, ObservableObject {
         if via == "E" {
             qsoRecords[idx].fields["APP_YAAM_EMAIL_SENT_DATE"] = todayStr
         }
+        filteredRecordsCache = nil
+        cachedTodayConfirmedRecords = nil
+        cachedTodayConfirmedIDs = nil
+        if autoSave {
+            objectWillChange.send()
+            autoSaveActiveWorkspace()
+        }
+    }
+
+    func batchMarkRecordsAsQSLSent(ids: Set<UUID>, via: String = "E", autoSave: Bool = true) {
+        guard !ids.isEmpty else { return }
+        let todayStr = Self.adifDateFormatter.string(from: Date())
+        var changed = false
+        for idx in qsoRecords.indices {
+            if ids.contains(qsoRecords[idx].id) {
+                qsoRecords[idx].fields["QSL_SENT"] = "Y"
+                qsoRecords[idx].fields["QSLSDATE"] = todayStr
+                qsoRecords[idx].fields["QSL_SENT_VIA"] = via
+                if via == "E" {
+                    qsoRecords[idx].fields["APP_YAAM_EMAIL_SENT_DATE"] = todayStr
+                }
+                changed = true
+            }
+        }
+        guard changed else { return }
         filteredRecordsCache = nil
         cachedTodayConfirmedRecords = nil
         cachedTodayConfirmedIDs = nil

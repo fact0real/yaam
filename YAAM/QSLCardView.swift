@@ -16,6 +16,7 @@ struct QSLCardStationInfo {
     let radio: String
     let antenna: String
     let powerWatts: Int
+    var antennaHeightMeters: Int = 10
 }
 
 enum QSLCardRenderer {
@@ -41,7 +42,7 @@ enum QSLCardRenderer {
         }
 
         drawStationFlag(in: CGRect(origin: .zero, size: size))
-        drawQSOFields(record: record, in: CGRect(origin: .zero, size: size))
+        drawQSOFields(record: record, station: station, in: CGRect(origin: .zero, size: size))
         image.unlockFocus()
 
         return image
@@ -75,7 +76,7 @@ enum QSLCardRenderer {
                 drawFallbackTemplate(in: rect, station: station)
             }
             drawStationFlag(in: rect)
-            drawQSOFields(record: record, in: rect)
+            drawQSOFields(record: record, station: station, in: rect)
         }
 
         guard writeCompressedPDF(images: [frontImage, backImage], pageSize: pageSize, to: url) else {
@@ -98,7 +99,7 @@ enum QSLCardRenderer {
         return document.page(at: templatePageIndex)
     }
 
-    fileprivate static func drawQSOFields(record: QSORecordModel, in rect: CGRect) {
+    fileprivate static func drawQSOFields(record: QSORecordModel, station: QSLCardStationInfo, in rect: CGRect) {
         let qso = QSLCardQSO(record: record)
         let height = rect.height
         let rowY: CGFloat = 0.500
@@ -124,11 +125,20 @@ enum QSLCardRenderer {
         // Signal RST
         draw(qso.rst, x: 0.820, y: rowY, width: 0.115, height: 0.060, in: rect, size: (height * 0.030) + 2, weight: .bold)
 
-        // Station Details (Shifted right and +3 size bigger)
+        // Station Details (Dynamically populated from Station Profile)
         let infoFontSize = (height * 0.020) + 6
-        draw("ICOM-7300", x: 0.170, y: 0.345, width: 0.250, height: 0.040, in: rect, size: infoFontSize, weight: .bold, alignment: .left)
-        draw("Fan Dipole @7m", x: 0.100, y: 0.305, width: 0.300, height: 0.040, in: rect, size: infoFontSize, weight: .bold, alignment: .left)
-        draw("25W", x: 0.480, y: 0.305, width: 0.150, height: 0.040, in: rect, size: infoFontSize, weight: .bold, alignment: .left)
+        let radioClean = station.radio.trimmingCharacters(in: .whitespacesAndNewlines)
+        let radioText = radioClean.isEmpty ? "ICOM-7300" : radioClean
+
+        let antennaClean = station.antenna.trimmingCharacters(in: .whitespacesAndNewlines)
+        let antennaBase = antennaClean.isEmpty ? "Fan Dipole" : antennaClean
+        let antennaText = station.antennaHeightMeters > 0 ? "\(antennaBase) @\(station.antennaHeightMeters)m" : antennaBase
+
+        let powerText = "\(station.powerWatts > 0 ? station.powerWatts : 25)W"
+
+        draw(radioText, x: 0.170, y: 0.345, width: 0.250, height: 0.040, in: rect, size: infoFontSize, weight: .bold, alignment: .left)
+        draw(antennaText, x: 0.100, y: 0.305, width: 0.300, height: 0.040, in: rect, size: infoFontSize, weight: .bold, alignment: .left)
+        draw(powerText, x: 0.480, y: 0.305, width: 0.150, height: 0.040, in: rect, size: infoFontSize, weight: .bold, alignment: .left)
     }
 
     fileprivate static func drawStationFlag(in rect: CGRect) {
@@ -401,7 +411,8 @@ struct QSLCardComposerView: View {
             grid: profile?.normalizedGrid ?? stationGrid,
             radio: profile?.radioModel ?? radioModel,
             antenna: profile?.antennaDescription ?? antennaDescription,
-            powerWatts: profile?.powerWatts ?? radioPowerWatts
+            powerWatts: profile?.powerWatts ?? radioPowerWatts,
+            antennaHeightMeters: profile?.antennaHeightMeters ?? 10
         )
     }
 
@@ -552,7 +563,7 @@ class QSLBackPage: PDFPage {
         let nsContext = NSGraphicsContext(cgContext: context, flipped: false)
         NSGraphicsContext.current = nsContext
         
-        QSLCardRenderer.drawQSOFields(record: record, in: originalPage.bounds(for: box))
+        QSLCardRenderer.drawQSOFields(record: record, station: station, in: originalPage.bounds(for: box))
         QSLCardRenderer.drawStationFlag(in: originalPage.bounds(for: box))
         
         NSGraphicsContext.current = previousContext
@@ -581,7 +592,7 @@ class QSLFallbackBackPage: PDFPage {
         let rect = bounds(for: box)
         QSLCardRenderer.drawFallbackTemplate(in: rect, station: station)
         QSLCardRenderer.drawStationFlag(in: rect)
-        QSLCardRenderer.drawQSOFields(record: record, in: rect)
+        QSLCardRenderer.drawQSOFields(record: record, station: station, in: rect)
         
         NSGraphicsContext.current = previousContext
     }
