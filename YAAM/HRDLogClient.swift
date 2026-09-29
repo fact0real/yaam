@@ -69,7 +69,15 @@ public final class HRDLogClient: ObservableObject {
     // MARK: - HTTP Form POST Execution
 
     private func uploadADIFString(_ adifData: String, callsign: String?) async -> Bool {
-        let call = callsign ?? UserDefaults.standard.string(forKey: "hrdlogCallsign") ?? "EP2AES"
+        let storedCall = UserDefaults.standard.string(forKey: "hrdlogCallsign")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let explicitCall = callsign?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let call = (explicitCall?.isEmpty == false) ? explicitCall! : storedCall
+
+        guard !call.isEmpty else {
+            self.lastError = "HRDLog Callsign not configured"
+            return false
+        }
+
         let code = CredentialVault.value(for: .hrdlogCode)
 
         guard !code.isEmpty else {

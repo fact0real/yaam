@@ -145,13 +145,13 @@ The internal SQLite database uses Write-Ahead Logging (`PRAGMA journal_mode=WAL;
 
 Key Tables:
 - `qsos`: Primary logbook records indexed on `qso_date`, `time_on`, `call`, `band`, `mode`, and `unique_key`.
-- `qsl_upload_queue`: Durable queue for asynchronous cloud uploads with retry counters and exponential backoff.
+- `qsl_jobs`: Durable queue for asynchronous cloud uploads with retry counters and exponential backoff.
 - `restore_points`: Snapshots of log states prior to bulk merges or cloud syncs.
 
 ### 5.2 Composite Unique Key (`QSOIdentity.swift`)
 To prevent duplicate records while supporting multiple QSOs with the same station on different bands/modes:
-$$\text{UniqueKey} = \text{CALL} \parallel \text{QSO\_DATE} \parallel \text{NORMALIZED\_TIME\_4DIGIT} \parallel \text{BAND} \parallel \text{MODE}$$
-- Time is normalized to 4-digit UTC (`HHmm`), absorbing 1–2 minute logging discrepancies from logging software.
+$$\text{UniqueKey} = \text{CALL} \parallel \text{QSO\_DATE} \parallel \text{NORMALIZED\_TIME\_6DIGIT} \parallel \text{BAND} \parallel \text{MODE}$$
+- Time is normalized to 6-digit UTC (`HHmmss`), padding 4-digit input (`HHmm`) with `00`.
 
 ---
 
@@ -197,9 +197,12 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -scheme YAAM
 ```
 
 ### 8.2 Running Unit & Regression Tests
-YAAM includes 21 dedicated test suites in `Tests/`:
+YAAM includes standalone regression test suites in `Tests/`. Run individual test suites using `swiftc`, for example:
 ```bash
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -scheme YAAM -destination 'platform=macOS' test
+swiftc -D STANDALONE_ADIF -parse-as-library Tests/ADIFLengthRegression.swift YAAM/ADIFParser.swift -o /tmp/adif && /tmp/adif
+swiftc -parse-as-library Tests/PendingQueueCredentialRegression.swift YAAM/KeychainStore.swift -o /tmp/pqcr && /tmp/pqcr
+swiftc -parse-as-library Tests/WavelogPushOutcomeRegression.swift YAAM/WavelogPushOutcome.swift -o /tmp/wpo && /tmp/wpo
+swiftc -parse-as-library Tests/WavelogDownloadDedupRegression.swift YAAM/QSOIdentity.swift -o /tmp/wdd && /tmp/wdd
 ```
 
 ### 8.3 Key Regression Suites to Check Before Commits:

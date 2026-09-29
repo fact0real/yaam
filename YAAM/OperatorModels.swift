@@ -135,7 +135,7 @@ nonisolated enum AmateurBandPlan {
             }
         }
 
-        return upperMode.isEmpty ? "SSB" : upperMode
+        return upperMode
     }
 
     /// Automatically normalizes Mode and Submode to prevent logical contradictions (e.g., Mode=SSB with Submode=FT8).

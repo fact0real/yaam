@@ -35,7 +35,6 @@ public struct PendingCloudUploadItem: Codable, Identifiable, Sendable, Equatable
     public var recordFields: [String: String]
     public let stationID: String?
     public let stationLocation: String?
-    public let qrzKeyOverride: String?
     public var pendingServices: [String]
     public var attemptCount: Int
     public var lastAttemptDate: Date?
@@ -47,7 +46,6 @@ public struct PendingCloudUploadItem: Codable, Identifiable, Sendable, Equatable
         recordFields: [String: String],
         stationID: String? = nil,
         stationLocation: String? = nil,
-        qrzKeyOverride: String? = nil,
         pendingServices: [String],
         attemptCount: Int = 0,
         lastAttemptDate: Date? = nil,
@@ -58,7 +56,6 @@ public struct PendingCloudUploadItem: Codable, Identifiable, Sendable, Equatable
         self.recordFields = recordFields
         self.stationID = stationID
         self.stationLocation = stationLocation
-        self.qrzKeyOverride = qrzKeyOverride
         self.pendingServices = pendingServices
         self.attemptCount = attemptCount
         self.lastAttemptDate = lastAttemptDate
@@ -139,6 +136,10 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
             let items = try decoder.decode([PendingCloudUploadItem].self, from: data)
             self.pendingQueue = items
             self.pendingQueueCount = items.count
+            // Older builds stored the QRZ API key in this file; rewrite it without the key.
+            if data.range(of: Data("qrzKeyOverride".utf8)) != nil {
+                savePendingQueueToDisk()
+            }
         } catch {
             print("⚠️ [ZeroClickDaemon] Failed to load PendingCloudUploads: \(error.localizedDescription)")
         }
@@ -203,6 +204,9 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
     }
 
     // MARK: - Active Services Helper
+    /// True when `dispatch` will push Wavelog itself, so callers must not push it again.
+    public var ownsWavelogPush: Bool { isEnabled && uploadToWavelog }
+
     public func enabledServices() -> [String] {
         var services: [String] = []
         if uploadToQRZ { services.append("QRZ") }
@@ -234,7 +238,6 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
                 record: record,
                 stationID: stationID,
                 stationLocation: stationLocation,
-                qrzKeyOverride: qrzKeyOverride,
                 targetServices: activeServices,
                 errorReason: "Internet disconnected (Offline)"
             )
@@ -258,7 +261,6 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
         record: QSORecordModel,
         stationID: String?,
         stationLocation: String?,
-        qrzKeyOverride: String?,
         targetServices: [String],
         errorReason: String?
     ) {
@@ -283,7 +285,6 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
                 recordFields: record.fields,
                 stationID: stationID,
                 stationLocation: stationLocation,
-                qrzKeyOverride: qrzKeyOverride,
                 pendingServices: targetServices,
                 attemptCount: 0,
                 lastAttemptDate: Date(),
@@ -291,6 +292,9 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
                 enqueuedAt: Date()
             )
             pendingQueue.append(newItem)
+            if pendingQueue.count > 500 {
+                pendingQueue.removeFirst(pendingQueue.count - 500)
+            }
         }
 
         savePendingQueueToDisk()
@@ -391,8 +395,17 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
 
         // 4. Wavelog / Cloudlog
         if targetServices.contains("Wavelog") {
-            WavelogSyncEngine.shared.autoPushSingleQSO(record: record)
-            successfulServices.append("Wavelog")
+            let wavelogOutcome = await WavelogSyncEngine.shared.pushSingleQSO(record: record)
+            switch wavelogOutcome {
+            case .success, .duplicate:
+                successfulServices.append("Wavelog")
+            case .networkError:
+                networkFailedServices.append("Wavelog")
+            case .rejected(let reason):
+                configErrors.append("Wavelog: \(reason)")
+            case .notConfigured:
+                break
+            }
         }
 
         // 5. ARRL LoTW via TQSL CLI
@@ -424,7 +437,6 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
                 record: record,
                 stationID: stationID,
                 stationLocation: stationLocation,
-                qrzKeyOverride: qrzKeyOverride,
                 targetServices: networkFailedServices,
                 errorReason: "Connection failed during upload"
             )
@@ -500,8 +512,7 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
                 case "QRZ":
                     let outcome = await uploadToQRZLogbook(
                         record: record,
-                        stationID: item.stationID,
-                        keyOverride: item.qrzKeyOverride
+                        stationID: item.stationID
                     )
                     success = outcome.success
                     networkFailure = isNetworkFailure(outcome.message)
@@ -514,8 +525,10 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
                     success = outcome.success
                     networkFailure = isNetworkFailure(outcome.message)
                 case "Wavelog":
-                    WavelogSyncEngine.shared.autoPushSingleQSO(record: record)
-                    success = true
+                    // Only transport trouble is retried; any other answer leaves the outbox as before
+                    // (the reason is kept in WavelogSyncEngine.lastError).
+                    let outcome = await WavelogSyncEngine.shared.pushSingleQSO(record: record)
+                    if case .networkError = outcome { networkFailure = true } else { success = true }
                 case "LoTW":
                     let outcome = await uploadToLoTWViaTQSL(
                         record: record,
@@ -536,7 +549,10 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
                     item.lastErrorMessage = "Network connection failed during sync"
                     break
                 } else {
-                    item.lastErrorMessage = "Service configuration error"
+                    // Non-network failure (e.g. unconfigured credentials or permanent rejection).
+                    // Drop service from pending item to prevent infinite retry loops.
+                    servicesToRemove.append(service)
+                    item.lastErrorMessage = "Service configuration error: \(service)"
                 }
             }
 
@@ -545,7 +561,7 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
             item.lastAttemptDate = Date()
             pendingQueue[index] = item
 
-            if item.pendingServices.isEmpty {
+            if item.pendingServices.isEmpty || item.attemptCount >= 15 {
                 fullyCompletedIndices.append(index)
             }
         }
@@ -596,14 +612,11 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
     }
 
     // MARK: - 1. QRZ Logbook Real-Time Insert
-    private func uploadToQRZLogbook(record: QSORecordModel, stationID: String?, keyOverride: String?) async -> (success: Bool, message: String) {
-        // Find QRZ API Key from override, vault, or preferences
+    private func uploadToQRZLogbook(record: QSORecordModel, stationID: String?, keyOverride: String? = nil) async -> (success: Bool, message: String) {
+        // Live uploads pass the active key; queued retries resolve it from the vault (never stored in the outbox)
         var apiKey = (keyOverride ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        if apiKey.isEmpty, let sid = stationID, !sid.isEmpty {
-            apiKey = KeychainStore.string(for: "qrz_api_key_\(sid)")
-        }
         if apiKey.isEmpty {
-            apiKey = CredentialVault.value(for: .qrzPassword).trimmingCharacters(in: .whitespacesAndNewlines)
+            apiKey = CredentialVault.qrzLogbookKey(stationID: stationID)
         }
         guard !apiKey.isEmpty else {
             return (false, "No QRZ API Key configured")

@@ -219,8 +219,14 @@ extension AppState {
                 since: lastSync
             )
             var updated = 0
+            var unmatched = 0
+            var claimed = Set<Int>()
+            let candidates = qsoRecords.map(\.fields)
             for fields in incoming {
-                guard let index = qslConfirmationMatchIndex(fields) else { continue }
+                guard let index = eqslConfirmationMatchIndex(fields, candidates: candidates, claimed: &claimed) else {
+                    unmatched += 1
+                    continue
+                }
                 qsoRecords[index].fields = ImportReviewAnalyzer.mergeUpdate(incoming: fields, into: qsoRecords[index].fields)
                 qsoRecords[index].fields["EQSL_QSL_RCVD"] = "Y"
                 newlyConfirmedRecordIDs.insert(qsoRecords[index].id)
@@ -228,7 +234,9 @@ extension AppState {
             }
             if updated > 0 { autoSaveActiveWorkspace() }
             UserDefaults.standard.set(Date(), forKey: "eqslLastInboxSync")
-            qslHubStatus = "Matched \(updated) eQSL confirmation(s)"
+            qslHubStatus = unmatched == 0
+                ? "Matched \(updated) eQSL confirmation(s)"
+                : "Matched \(updated) eQSL confirmation(s); \(unmatched) not found in the log"
             refreshAwardProgress()
             playActivitySound(.success)
         } catch {
@@ -386,6 +394,19 @@ extension AppState {
         formatter.dateFormat = "yyyyMMdd"
         qsoRecords[index].fields[dateField] = formatter.string(from: Date())
         for header in [provider.sentField, dateField] where !tableHeaders.contains(header) { tableHeaders.append(header) }
+    }
+
+    /// eQSL confirmation -> local QSO, with eQSL's own one-hour window. `candidates` is a snapshot of
+    /// qsoRecords' fields taken before the loop; a matched QSO is claimed so it takes one confirmation per download.
+    func eqslConfirmationMatchIndex(_ incoming: [String: String], candidates: [[String: String]], claimed: inout Set<Int>) -> Int? {
+        guard let index = QSOIdentity.bestToleranceMatch(
+            incoming: incoming,
+            candidates: candidates,
+            claimed: claimed,
+            toleranceSeconds: QSOIdentity.eqslTimeToleranceSeconds
+        ) else { return nil }
+        claimed.insert(index)
+        return index
     }
 
     func qslConfirmationMatchIndex(_ incoming: [String: String]) -> Int? {

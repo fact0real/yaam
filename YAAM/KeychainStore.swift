@@ -549,14 +549,17 @@ nonisolated enum KeychainStore {
     }
 
     public static func data(for account: String) -> Data? {
-        vault.data(for: account)
+        guard isVaultSessionUnlocked else { return nil }
+        return vault.data(for: account)
     }
 
     public static func dataIfAvailableWithoutPrompt(for account: String) -> Data? {
-        vault.data(for: account)
+        guard isVaultSessionUnlocked else { return nil }
+        return vault.data(for: account)
     }
 
     public static func string(for account: String) -> String {
+        guard isVaultSessionUnlocked else { return "" }
         guard let d = vault.data(for: account) else { return "" }
         return String(data: d, encoding: .utf8) ?? ""
     }
@@ -699,6 +702,20 @@ nonisolated enum CredentialVault {
         let result = KeychainStore.delete(account)
         if result { setPresence(false, account: account) }
         return result
+    }
+
+    /// QRZ Logbook API key for a station profile (`stationID` is `activeStationProfileID.uuidString`):
+    /// the profile's own key, else the global one. Resolved at send time, never persisted in queues.
+    static func qrzLogbookKey(
+        stationID: String?,
+        stationKey: (UUID) -> String = { stationQRZAPIKey(profileID: $0) },
+        globalKey: () -> String = { value(for: .qrzAPIKey) }
+    ) -> String {
+        if let sid = stationID, let profileID = UUID(uuidString: sid) {
+            let profileKey = stationKey(profileID).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !profileKey.isEmpty { return profileKey }
+        }
+        return globalKey().trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     static func hasStoredValueHint(for credential: SecureCredential) -> Bool {

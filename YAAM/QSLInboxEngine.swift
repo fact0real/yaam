@@ -314,7 +314,7 @@ public final class QSLInboxEngine: ObservableObject {
         let data = try Data(contentsOf: url)
         guard let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) else { return }
 
-        let records = parseADIFText(text)
+        let records = parseADIF(content: text).records
         for rec in records {
             let call = rec["CALL"] ?? ""
             let date = rec["QSO_DATE"] ?? ""
@@ -683,38 +683,5 @@ public final class QSLInboxEngine: ObservableObject {
         }
 
         return (body, attachmentData, filename)
-    }
-
-    // MARK: - Basic ADIF Parser Helper
-
-    private func parseADIFText(_ text: String) -> [[String: String]] {
-        var records: [[String: String]] = []
-        let upper = text.uppercased()
-        guard let eohRange = upper.range(of: "<EOH>") else {
-            return []
-        }
-
-        let body = text[eohRange.upperBound...]
-        let rawRecords = body.components(separatedBy: "<EOR>")
-
-        for raw in rawRecords {
-            var record: [String: String] = [:]
-            let tags = raw.components(separatedBy: "<")
-            for tag in tags where tag.contains(":") && tag.contains(">") {
-                let parts = tag.components(separatedBy: ">")
-                guard parts.count >= 2 else { continue }
-                let tagHeader = parts[0]
-                let tagValue = parts[1]
-                let tagHeaderParts = tagHeader.components(separatedBy: ":")
-                let fieldName = tagHeaderParts[0].trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).uppercased()
-                if let len = Int(tagHeaderParts[1]) {
-                    record[fieldName] = String(tagValue.prefix(len)).trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
-                }
-            }
-            if !record.isEmpty {
-                records.append(record)
-            }
-        }
-        return records
     }
 }

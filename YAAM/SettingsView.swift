@@ -1156,6 +1156,12 @@ struct SettingsView: View {
                     Text(wavelogEngine.lastStatusMessage)
                         .font(.caption)
                         .foregroundColor(.secondary)
+
+                    if let wavelogError = wavelogEngine.lastError {
+                        Text(wavelogError)
+                            .font(.caption)
+                            .foregroundColor(.red)
+                    }
                 }
             }
             .padding()

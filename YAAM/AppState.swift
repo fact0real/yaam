@@ -2085,6 +2085,7 @@ class AppState: NSObject, ObservableObject {
     // Workspace File Tracking
     @Published var loadedFileURL: URL? = nil
     @Published var loadedFileName: String = ""
+    var loadedFileOriginalContent: String? = nil
     @Published var isMasterMode: Bool = true
 
     var logbookDatabase: LogbookDatabase?
@@ -3926,7 +3927,8 @@ class AppState: NSObject, ObservableObject {
         DispatchQueue.global(qos: .background).async { [weak self] in
             guard let self = self else { return }
             let recordsDicts = self.qsoRecords.map { $0.fields }
-            let adifOutput = generateADIF(originalContent: "", records: recordsDicts)
+            let original = self.loadedFileOriginalContent ?? ""
+            let adifOutput = generateADIF(originalContent: original, records: recordsDicts)
             try? adifOutput.write(to: url, atomically: true, encoding: .utf8)
         }
     }
@@ -4437,6 +4439,7 @@ class AppState: NSObject, ObservableObject {
 
                 isMasterMode = false
                 loadedFileURL = parsed.format == .adif ? url : nil
+                loadedFileOriginalContent = parsed.originalADIFContent
                 loadedFileName = parsed.format == .adif
                     ? "Guest: \(url.lastPathComponent)"
                     : "Guest: \(url.deletingPathExtension().lastPathComponent) (SDR Control)"
@@ -8728,7 +8731,8 @@ class AppState: NSObject, ObservableObject {
                     }
                 }
             } else {
-                let adifOutput = generateADIF(originalContent: "", records: records)
+                let original = (url == self.loadedFileURL) ? (self.loadedFileOriginalContent ?? "") : ""
+                let adifOutput = generateADIF(originalContent: original, records: records)
                 do {
                     try adifOutput.write(to: url, atomically: true, encoding: .utf8)
                     DispatchQueue.main.async {

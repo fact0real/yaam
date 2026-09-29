@@ -352,6 +352,8 @@ public final class EQSLService: ObservableObject {
 
         var downloadedCount = 0
         let totalCount = parsed.count
+        var claimed = Set<Int>()
+        let candidates = appState.qsoRecords.map(\.fields)
 
         for (index, record) in parsed.enumerated() {
             if isCancelled {
@@ -371,7 +373,8 @@ public final class EQSLService: ObservableObject {
             statusMessage = "Card \(index + 1) of \(totalCount): \(call)..."
 
             // Link in local log
-            if let localIdx = appState.qslConfirmationMatchIndex(record) {
+            let localIdx = appState.eqslConfirmationMatchIndex(record, candidates: candidates, claimed: &claimed)
+            if let localIdx {
                 appState.qsoRecords[localIdx].fields["EQSL_QSL_RCVD"] = "Y"
                 if let cached = cachedCardURL(callsign: call, date: date, band: band, mode: mode) {
                     appState.qsoRecords[localIdx].fields["QSL_MEDIA_PATH"] = cached.path
@@ -395,7 +398,7 @@ public final class EQSLService: ObservableObject {
                 )
                 downloadedCount += 1
 
-                if let localIdx = appState.qslConfirmationMatchIndex(record) {
+                if let localIdx {
                     appState.qsoRecords[localIdx].fields["QSL_MEDIA_PATH"] = cardURL.path
                 }
 

@@ -45,6 +45,44 @@ nonisolated enum QSOIdentity {
         return "\(call)|\(date)|\(band)"
     }
 
+    /// eQSL matches two logs when the QSO times are within one hour (eQSL FAQ, topic 1058).
+    static let eqslTimeToleranceSeconds = 3_600
+
+    /// Index of the closest unclaimed candidate for `incoming`: same CALL and DATE, compatible band and mode,
+    /// TIME_ON within `toleranceSeconds` (nearest first, lowest index on ties). A missing time or band on either
+    /// side still matches, as before, but only after every timed candidate. Without CALL and an 8-digit date
+    /// nothing matches.
+    static func bestToleranceMatch(
+        incoming: [String: String],
+        candidates: [[String: String]],
+        claimed: Set<Int> = [],
+        toleranceSeconds: Int
+    ) -> Int? {
+        let call = clean(incoming["CALL"] ?? "")
+        let date = normalizedDate(incoming["QSO_DATE"] ?? "")
+        guard !call.isEmpty, date.count == 8 else { return nil }
+        let band = resolvedBand(incoming)
+        let mode = effectiveMode(incoming)
+        let seconds = secondsFromMidnight(incoming)
+        var best: (index: Int, delta: Int)?
+        for (index, candidate) in candidates.enumerated() where !claimed.contains(index) {
+            guard clean(candidate["CALL"] ?? "") == call,
+                  normalizedDate(candidate["QSO_DATE"] ?? "") == date else { continue }
+            let candidateBand = resolvedBand(candidate)
+            guard band.isEmpty || candidateBand.isEmpty || band == candidateBand,
+                  areModesCompatible(mode, effectiveMode(candidate)) else { continue }
+            let delta: Int
+            if let a = seconds, let b = secondsFromMidnight(candidate) {
+                delta = abs(a - b)
+                guard delta <= toleranceSeconds else { continue }
+            } else {
+                delta = Int.max
+            }
+            if best == nil || delta < best!.delta { best = (index, delta) }
+        }
+        return best?.index
+    }
+
     /// Returns true if two modes are equal, or if either mode is missing/empty, or if they represent compatible digital modes.
     static func areModesCompatible(_ mode1: String, _ mode2: String) -> Bool {
         let m1 = clean(mode1)
@@ -87,6 +125,29 @@ nonisolated enum QSOIdentity {
         return abs(sec1 - sec2) <= timeToleranceSeconds
     }
 
+    /// Incoming records that are not already in `existing`: same CALL, DATE and BAND, compatible mode and
+    /// TIME_ON within `toleranceSeconds` count as the same QSO (a missing time counts as a match, as before).
+    /// Accepted records join the comparison set, so two different QSOs in one download are both kept.
+    static func newRecords(_ incoming: [[String: String]], existing: [[String: String]], toleranceSeconds: Int) -> [[String: String]] {
+        var buckets: [String: [[String: String]]] = [:]
+        for record in existing { buckets[callDateBandKey(fields: record), default: []].append(record) }
+        var result: [[String: String]] = []
+        for record in incoming {
+            let key = callDateBandKey(fields: record)
+            guard !key.isEmpty else { continue }
+            let known = (buckets[key] ?? []).contains { other in
+                guard areModesCompatible(effectiveMode(record), effectiveMode(other)) else { return false }
+                guard let a = secondsFromMidnight(record), let b = secondsFromMidnight(other) else { return true }
+                return abs(a - b) <= toleranceSeconds
+            }
+            if !known {
+                buckets[key, default: []].append(record)
+                result.append(record)
+            }
+        }
+        return result
+    }
+
     static func normalizedTime(_ value: String) -> String {
         let digits = String(value.filter(\.isNumber))
         if digits.count == 4 { return digits + "00" }
@@ -119,7 +180,7 @@ nonisolated enum QSOIdentity {
         return submode.isEmpty ? clean(fields["MODE"] ?? "") : submode
     }
 
-    private static func normalizedDate(_ value: String) -> String {
+    static func normalizedDate(_ value: String) -> String {
         String(value.filter(\.isNumber).prefix(8))
     }
 
@@ -132,7 +193,7 @@ nonisolated enum QSOIdentity {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private static func clean(_ value: String) -> String {
+    static func clean(_ value: String) -> String {
         value.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
     }
 

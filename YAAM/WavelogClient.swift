@@ -146,11 +146,12 @@ public final class WavelogClient: Sendable {
         baseURL: String,
         apiKey: String,
         stationProfileID: String
-    ) async throws -> Bool {
-        guard !apiKey.isEmpty else { throw WavelogError.missingAPIKey }
+    ) async -> WavelogPushOutcome {
+        guard !apiKey.isEmpty else { return .notConfigured }
 
         let adifString = formatSingleADIF(record)
         let endpoints = ["api/qso", "index.php/api/qso"]
+        var outcome = WavelogPushOutcome.rejected(WavelogError.invalidURL.errorDescription ?? "Invalid server URL")
 
         for endpoint in endpoints {
             guard let url = buildEndpointURL(baseURL: baseURL, path: endpoint) else { continue }
@@ -171,20 +172,17 @@ public final class WavelogClient: Sendable {
 
             do {
                 let (data, response) = try await urlSession.data(for: request)
-                guard let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else { continue }
-
-                if let res = try? JSONDecoder().decode(WavelogAPIResponse.self, from: data) {
-                    if res.status?.lowercased() == "successful" || res.status?.lowercased() == "created" {
-                        return true
-                    }
+                guard let httpResponse = response as? HTTPURLResponse else { continue }
+                outcome = WavelogPushOutcome.classify(statusCode: httpResponse.statusCode, body: data)
+                if !WavelogPushOutcome.shouldTryFallbackEndpoint(statusCode: httpResponse.statusCode) {
+                    return outcome
                 }
-                return true
             } catch {
-                continue
+                outcome = .networkError(error.localizedDescription)
             }
         }
 
-        throw WavelogError.serverRejected(reason: "Failed to push QSO to Wavelog.")
+        return outcome
     }
 
     // MARK: - Batch ADIF Upload

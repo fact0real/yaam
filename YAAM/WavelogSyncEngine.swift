@@ -29,12 +29,19 @@ public final class WavelogSyncEngine: ObservableObject {
     private var radioBroadcastTimer: Timer?
 
     public init() {
-        self.serverURL = UserDefaults.standard.string(forKey: "wavelogServerURL") ?? ""
-        self.selectedStationProfileID = UserDefaults.standard.string(forKey: "wavelogStationProfileID") ?? "1"
-        self.isAutoPushEnabled = UserDefaults.standard.bool(forKey: "wavelogAutoPushEnabled")
+        reloadSettings()
         self.isLiveRadioBroadcastEnabled = UserDefaults.standard.bool(forKey: "wavelogLiveRadioBroadcastEnabled")
 
         startRadioBroadcastTimer()
+    }
+
+    /// Settings writes these keys through @AppStorage only, so read them again before each use.
+    /// Auto-push uses the same default as the Settings toggle (ON) when the key has never been written.
+    func reloadSettings() {
+        let defaults = UserDefaults.standard
+        serverURL = defaults.string(forKey: "wavelogServerURL") ?? ""
+        selectedStationProfileID = defaults.string(forKey: "wavelogStationProfileID") ?? "1"
+        isAutoPushEnabled = defaults.object(forKey: "wavelogAutoPushEnabled") as? Bool ?? true
     }
 
     public var isConfigured: Bool {
@@ -45,6 +52,7 @@ public final class WavelogSyncEngine: ObservableObject {
     // MARK: - Station Profiles Discovery
 
     public func discoverStationProfiles() async {
+        reloadSettings()
         let key = CredentialVault.value(for: .wavelogAPIKey)
         guard !serverURL.isEmpty, !key.isEmpty else {
             self.lastError = "Please enter Server URL and API Key"
@@ -73,31 +81,43 @@ public final class WavelogSyncEngine: ObservableObject {
 
     // MARK: - Real-Time Live Auto-Push (Single QSO)
 
-    func autoPushSingleQSO(record: QSORecordModel) {
-        guard isConfigured, isAutoPushEnabled else { return }
-        let key = CredentialVault.value(for: .wavelogAPIKey)
-        let url = serverURL
-        let stationID = selectedStationProfileID
+    /// Pushes one QSO and reports what really happened (the zero-click daemon awaits this).
+    func pushSingleQSO(record: QSORecordModel) async -> WavelogPushOutcome {
+        reloadSettings()
+        guard isConfigured, isAutoPushEnabled else { return .notConfigured }
+        let outcome = await WavelogClient.shared.pushQSO(
+            record: record,
+            baseURL: serverURL,
+            apiKey: CredentialVault.value(for: .wavelogAPIKey),
+            stationProfileID: selectedStationProfileID
+        )
+        switch outcome {
+        case .success:
+            syncedQSOsCount += 1
+            lastStatusMessage = "Pushed \(record["CALL"]) to Wavelog."
+            lastError = nil
+        case .duplicate:
+            lastStatusMessage = "\(record["CALL"]) is already in Wavelog."
+            lastError = nil
+        case .notConfigured:
+            break
+        case .rejected, .networkError:
+            lastError = "Auto-push failed for \(record["CALL"]): \(outcome.message)"
+        }
+        return outcome
+    }
 
+    /// Fire-and-forget push for logging paths that do not go through the zero-click daemon.
+    func autoPushSingleQSO(record: QSORecordModel) {
         Task { @MainActor [weak self] in
-            do {
-                _ = try await WavelogClient.shared.pushQSO(
-                    record: record,
-                    baseURL: url,
-                    apiKey: key,
-                    stationProfileID: stationID
-                )
-                self?.syncedQSOsCount += 1
-                self?.lastStatusMessage = "Pushed \(record["CALL"]) to Wavelog."
-            } catch {
-                self?.lastError = "Auto-push failed for \(record["CALL"]): \(error.localizedDescription)"
-            }
+            _ = await self?.pushSingleQSO(record: record)
         }
     }
 
     // MARK: - Two-Way Batch Synchronization
 
     func performFullSync(appState: AppState) async {
+        reloadSettings()
         guard isConfigured else {
             self.lastError = "Wavelog is not configured in Settings."
             return
@@ -143,23 +163,16 @@ public final class WavelogSyncEngine: ObservableObject {
                 let (_, parsedRecords) = parseADIF(content: remoteADIF)
                 var newImportedCount = 0
 
-                for remoteRec in parsedRecords {
-                    let call = remoteRec["CALL", default: ""].uppercased()
-                    let date = remoteRec["QSO_DATE", default: ""]
-                    let band = remoteRec["BAND", default: ""].uppercased()
-
-                    // Check if already in local log
-                    let exists = appState.qsoRecords.contains {
-                        $0["CALL"].uppercased() == call &&
-                        $0["QSO_DATE"] == date &&
-                        $0["BAND"].uppercased() == band
-                    }
-
-                    if !exists && !call.isEmpty {
-                        let newModel = QSORecordModel(index: appState.qsoRecords.count + 1, fields: remoteRec)
-                        appState.qsoRecords.append(newModel)
-                        newImportedCount += 1
-                    }
+                // Same station, day, band and mode within 5 minutes is the same QSO (the import review uses the same window)
+                let freshRecords = QSOIdentity.newRecords(
+                    parsedRecords,
+                    existing: appState.qsoRecords.map(\.fields),
+                    toleranceSeconds: 300
+                )
+                for remoteRec in freshRecords {
+                    let newModel = QSORecordModel(index: appState.qsoRecords.count + 1, fields: remoteRec)
+                    appState.qsoRecords.append(newModel)
+                    newImportedCount += 1
                 }
 
                 if newImportedCount > 0 {

@@ -177,6 +177,45 @@ nonisolated struct ADIFConversionFilter: Equatable, Sendable {
     }
 }
 
+/// End of an ADIF field value. Once text is not plain ASCII, writers disagree on what LENGTH counts:
+/// UTF-8 bytes (YAAM's upload and POTA writers), UTF-16 units (WSJT-X), Unicode characters (Wavelog,
+/// and CR LF as two, as the spec's MultilineString does) or Swift Characters (files saved by earlier
+/// YAAM builds, where CR LF counted as one). The readings are tried from the shortest to the longest
+/// and the first one that ends right before a real tag (or the end of the text) is used.
+nonisolated private func adifValueEnd(in body: String, from valueStart: String.Index, length len: Int) -> String.Index {
+    let characterEnd = body.index(valueStart, offsetBy: len, limitedBy: body.endIndex) ?? body.endIndex
+    let readings: [String.Index?] = [
+        body.utf8.index(valueStart, offsetBy: len, limitedBy: body.endIndex),
+        body.utf16.index(valueStart, offsetBy: len, limitedBy: body.endIndex),
+        body.unicodeScalars.index(valueStart, offsetBy: len, limitedBy: body.endIndex),
+        characterEnd
+    ]
+    for case let end? in readings where adifValueEndsBeforeTag(body, at: end) {
+        return end
+    }
+    return characterEnd
+}
+
+/// True when only whitespace separates `end` from the end of the text or from a tag parseADIF
+/// understands: <EOR>, <EOH> or <FIELD:LENGTH[:TYPE]>.
+nonisolated private func adifValueEndsBeforeTag(_ body: String, at end: String.Index) -> Bool {
+    let scalars = body.unicodeScalars
+    guard var probe = end.samePosition(in: scalars) else { return false }
+    while probe < scalars.endIndex, scalars[probe].properties.isWhitespace {
+        probe = scalars.index(after: probe)
+    }
+    if probe == scalars.endIndex { return true }
+    guard scalars[probe] == "<",
+          let close = scalars[probe...].firstIndex(of: ">") else { return false }
+    let tag = String(scalars[scalars.index(after: probe)..<close])
+    if ["EOR", "EOH"].contains(tag.uppercased()) { return true }
+    let parts = tag.split(separator: ":", omittingEmptySubsequences: false)
+    guard parts.count >= 2, let name = parts.first, !name.isEmpty,
+          name.unicodeScalars.allSatisfy({ $0.isASCII && ($0.properties.isAlphabetic || ("0"..."9").contains($0) || $0 == "_") })
+    else { return false }
+    return Int(parts[1]) != nil
+}
+
 nonisolated func parseADIF(content: String) -> (headers: [String], records: [[String: String]]) {
     var records: [[String: String]] = []
     var allKeys = Set<String>()
@@ -209,12 +248,7 @@ nonisolated func parseADIF(content: String) -> (headers: [String], records: [[St
                 let fieldName = String(parts[0]).uppercased()
                 let valueStart = body.index(after: closeBracket)
                 
-                var valueEnd = valueStart
-                var charsCount = 0
-                while valueEnd < body.endIndex && charsCount < len {
-                    valueEnd = body.index(after: valueEnd)
-                    charsCount += 1
-                }
+                let valueEnd = adifValueEnd(in: body, from: valueStart, length: len)
                 
                 let value = String(body[valueStart..<valueEnd]).trimmingCharacters(in: .whitespacesAndNewlines)
                 currentRecord[fieldName] = value
@@ -279,10 +313,10 @@ nonisolated func generateADIF(originalContent: String, records: [[String: String
                 if key == "COMMENT" {
                     let sanitized = QSOMetadataFormatter.cleanComment(val)
                     if !sanitized.isEmpty {
-                        recordStr += "<\(key):\(sanitized.utf8.count)>\(sanitized)"
+                        recordStr += "<\(key):\(sanitized.unicodeScalars.count)>\(sanitized)"
                     }
                 } else {
-                    recordStr += "<\(key):\(val.count)>\(val)"
+                    recordStr += "<\(key):\(val.unicodeScalars.count)>\(val)"
                 }
                 remainingKeys.remove(key)
             }
@@ -290,7 +324,7 @@ nonisolated func generateADIF(originalContent: String, records: [[String: String
         
         for key in remainingKeys.sorted() {
             if let val = rec[key], !val.isEmpty {
-                recordStr += "<\(key):\(val.count)>\(val)"
+                recordStr += "<\(key):\(val.unicodeScalars.count)>\(val)"
             }
         }
         

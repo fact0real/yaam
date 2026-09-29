@@ -238,7 +238,9 @@ extension AppState {
             stationLocation: activeStationProfile?.lotwStationLocation,
             qrzKeyOverride: activeQRZAPIKey
         )
-        WavelogSyncEngine.shared.autoPushSingleQSO(record: record)
+        if !ZeroClickCloudUploadDaemon.shared.ownsWavelogPush {
+            WavelogSyncEngine.shared.autoPushSingleQSO(record: record)
+        }
         if HRDLogClient.shared.autoUploadEnabled {
             Task {
                 _ = await HRDLogClient.shared.uploadSingleQSO(record: record)

@@ -163,8 +163,14 @@ public final class QSLSyncEngine: ObservableObject {
             appendLog(level: .info, service: "eQSL.cc", message: "Downloaded \(incoming.count) inbox confirmations from eQSL.cc")
 
             var updated = 0
+            var unmatched = 0
+            var claimed = Set<Int>()
+            let candidates = appState.qsoRecords.map(\.fields)
             for fields in incoming {
-                guard let index = appState.qslConfirmationMatchIndex(fields) else { continue }
+                guard let index = appState.eqslConfirmationMatchIndex(fields, candidates: candidates, claimed: &claimed) else {
+                    unmatched += 1
+                    continue
+                }
                 appState.qsoRecords[index].fields = ImportReviewAnalyzer.mergeUpdate(incoming: fields, into: appState.qsoRecords[index].fields)
                 appState.qsoRecords[index].fields["EQSL_QSL_RCVD"] = "Y"
                 updated += 1
@@ -199,6 +205,9 @@ public final class QSLSyncEngine: ObservableObject {
             totalUpdatedCount += updated
             UserDefaults.standard.set(Date(), forKey: "eqslLastInboxSync")
             appendLog(level: .success, service: "eQSL.cc", message: "✅ eQSL sync finished: \(updated) record(s) merged into local log.")
+            if unmatched > 0 {
+                appendLog(level: .warning, service: "eQSL.cc", message: "⚠️ \(unmatched) eQSL confirmation(s) did not match any QSO in the local log.")
+            }
 
         } catch let error as QSLHubError {
             appendLog(level: .error, service: "eQSL.cc", message: "❌ eQSL API Error: \(error.localizedDescription)")

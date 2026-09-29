@@ -203,7 +203,15 @@ extension AppState {
 
         qsoRecords.append(newRecord)
         persistQuickLog(newRecord)
-        WavelogSyncEngine.shared.autoPushSingleQSO(record: newRecord)
+        ZeroClickCloudUploadDaemon.shared.dispatch(
+            record: newRecord,
+            stationID: activeStationProfileID?.uuidString,
+            stationLocation: activeStationProfile?.lotwStationLocation,
+            qrzKeyOverride: activeQRZAPIKey
+        )
+        if !ZeroClickCloudUploadDaemon.shared.ownsWavelogPush {
+            WavelogSyncEngine.shared.autoPushSingleQSO(record: newRecord)
+        }
         if HRDLogClient.shared.autoUploadEnabled {
             Task { _ = await HRDLogClient.shared.uploadSingleQSO(record: newRecord) }
         }
@@ -258,7 +266,15 @@ extension AppState {
 
         qsoRecords.append(newRecord)
         persistQuickLog(newRecord)
-        WavelogSyncEngine.shared.autoPushSingleQSO(record: newRecord)
+        ZeroClickCloudUploadDaemon.shared.dispatch(
+            record: newRecord,
+            stationID: activeStationProfileID?.uuidString,
+            stationLocation: activeStationProfile?.lotwStationLocation,
+            qrzKeyOverride: activeQRZAPIKey
+        )
+        if !ZeroClickCloudUploadDaemon.shared.ownsWavelogPush {
+            WavelogSyncEngine.shared.autoPushSingleQSO(record: newRecord)
+        }
         if HRDLogClient.shared.autoUploadEnabled {
             Task { _ = await HRDLogClient.shared.uploadSingleQSO(record: newRecord) }
         }
@@ -479,7 +495,15 @@ extension AppState {
 
         qsoRecords.append(newRecord)
         persistQuickLog(newRecord)
-        WavelogSyncEngine.shared.autoPushSingleQSO(record: newRecord)
+        ZeroClickCloudUploadDaemon.shared.dispatch(
+            record: newRecord,
+            stationID: activeStationProfileID?.uuidString,
+            stationLocation: activeStationProfile?.lotwStationLocation,
+            qrzKeyOverride: activeQRZAPIKey
+        )
+        if !ZeroClickCloudUploadDaemon.shared.ownsWavelogPush {
+            WavelogSyncEngine.shared.autoPushSingleQSO(record: newRecord)
+        }
         if HRDLogClient.shared.autoUploadEnabled {
             Task {
                 _ = await HRDLogClient.shared.uploadSingleQSO(record: newRecord)
