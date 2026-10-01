@@ -234,9 +234,9 @@ struct VisualAnalyticsView: View {
 
         VStack(spacing: 12) {
             // Top Controls & Mode Switcher Bar
-            HStack(spacing: 12) {
+            WrappingControlsLayout(spacing: 12) {
                 // Sub-Tab Switcher Capsule
-                HStack(spacing: 3) {
+                WrappingControlsLayout(spacing: 3) {
                     ForEach(VisualAnalyticsTab.allCases) { tab in
                         Button {
                             selectedTab = tab
@@ -265,10 +265,6 @@ struct VisualAnalyticsView: View {
                         .stroke(Color.primary.opacity(0.12), lineWidth: 1)
                         .allowsHitTesting(false)
                 )
-
-                Divider()
-                    .frame(height: 20)
-                    .padding(.horizontal, 4)
 
                 // Filter Menus Group
                 HStack(spacing: 8) {
@@ -308,8 +304,6 @@ struct VisualAnalyticsView: View {
                     .menuStyle(.borderedButton)
                     .fixedSize()
                 }
-
-                Spacer(minLength: 16)
 
                 // Total Filtered Count Pill
                 HStack(spacing: 5) {
@@ -534,15 +528,13 @@ struct VisualAnalyticsView: View {
         let canPanLeft = true
         let canPanRight = rateWindowOffsetHours > 0
 
-        return HSplitView {
+        return AnalyticsPanelsLayout {
             // Left: Hourly Velocity Chart
             VStack(alignment: .leading, spacing: 10) {
                 // Header with Title & Zoom/Navigation Toolbar
-                HStack(spacing: 8) {
+                WrappingControlsLayout(spacing: 8) {
                     Label("Hourly QSO Rate & Operating Velocity", systemImage: "chart.line.uptrend.xyaxis")
                         .font(.headline)
-
-                    Spacer()
 
                     // Time Window Presets (Zoom presets)
                     HStack(spacing: 2) {
@@ -809,7 +801,7 @@ struct VisualAnalyticsView: View {
             .padding(12)
             .background(Color(NSColor.windowBackgroundColor))
             .cornerRadius(8)
-            .frame(minWidth: 440)
+            .frame(maxWidth: .infinity)
 
             // Right: Recent Run Log & Rate Table (Synchronized with current view window)
             VStack(alignment: .leading, spacing: 8) {
@@ -848,14 +840,14 @@ struct VisualAnalyticsView: View {
             .padding(12)
             .background(Color(NSColor.controlBackgroundColor))
             .cornerRadius(8)
-            .frame(minWidth: 260, maxWidth: 360)
+            .frame(maxWidth: .infinity)
         }
     }
 
     // MARK: - Tab 2: 360° Polar Azimuth Radar
 
     private func polarAzimuthRadarView(sectors: [AzimuthSectorData], peakSector: AzimuthSectorData?) -> some View {
-        HSplitView {
+        AnalyticsPanelsLayout {
             // Left: High-DPI Polar Radar Canvas
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
@@ -921,7 +913,7 @@ struct VisualAnalyticsView: View {
             .padding(12)
             .background(Color(NSColor.windowBackgroundColor))
             .cornerRadius(8)
-            .frame(minWidth: 460)
+            .frame(maxWidth: .infinity)
 
             // Right: Sector Inspection Table & Country List
             VStack(alignment: .leading, spacing: 10) {
@@ -967,14 +959,14 @@ struct VisualAnalyticsView: View {
             .padding(12)
             .background(Color(NSColor.controlBackgroundColor))
             .cornerRadius(8)
-            .frame(minWidth: 300, maxWidth: 420)
+            .frame(maxWidth: .infinity)
         }
     }
 
     // MARK: - Tab 3: Signal SNR & Quality Spectrum
 
     private func snrAndSignalSpectrumView(buckets: [SNRBucketData], bandSummaries: [BandSNRSummary]) -> some View {
-        HSplitView {
+        AnalyticsPanelsLayout {
             // Left: SNR Histogram Distribution
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
@@ -1072,7 +1064,7 @@ struct VisualAnalyticsView: View {
             .padding(12)
             .background(Color(NSColor.windowBackgroundColor))
             .cornerRadius(8)
-            .frame(minWidth: 440)
+            .frame(maxWidth: .infinity)
 
             // Right: Band Average SNR Table
             VStack(alignment: .leading, spacing: 10) {
@@ -1115,7 +1107,7 @@ struct VisualAnalyticsView: View {
             .padding(12)
             .background(Color(NSColor.controlBackgroundColor))
             .cornerRadius(8)
-            .frame(minWidth: 280, maxWidth: 360)
+            .frame(maxWidth: .infinity)
         }
     }
 

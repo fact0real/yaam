@@ -44,14 +44,14 @@ struct ContentView: View {
     var body: some View {
         VStack(spacing: 0) {
             // MARK: - Top Global Tab Navigation Selector & Station Weather Radar HUD
-            ZStack {
+            WrappingControlsLayout(spacing: 8) {
                 TopNavigationTabBar(selectedTab: $appState.selectedTab)
 
                 HStack(spacing: 8) {
-                    Spacer()
                     RoverModePillView()
                     StationWeatherPillView()
                 }
+                .fixedSize(horizontal: true, vertical: false)
             }
             .padding(.vertical, 8)
             .padding(.horizontal, 12)
@@ -1242,7 +1242,7 @@ struct TopNavigationTabBar: View {
     ]
 
     var body: some View {
-        HStack(spacing: 4) {
+        WrappingControlsLayout(spacing: 4) {
             ForEach(tabs) { tab in
                 TabButton(
                     item: tab,
@@ -1330,16 +1330,85 @@ struct MainWindowFrameConfigurator: NSViewRepresentable {
         let targetWidth = min(screenFrame.width - 40, max(1560, screenFrame.width * 0.94))
         let targetHeight = min(screenFrame.height - 40, max(880, screenFrame.height * 0.90))
 
-        window.contentMinSize = NSSize(width: 1000, height: 600)
+        window.contentMinSize = NSSize(width: 760, height: 500)
 
-        let adaptationKey = "hasAdaptedMainWindowToScreenWidth_v4"
-        if !UserDefaults.standard.bool(forKey: adaptationKey) || window.frame.width < targetWidth - 60 {
+        let adaptationKey = "hasAdaptedMainWindowToScreenWidth_v5"
+        if !UserDefaults.standard.bool(forKey: adaptationKey) {
             UserDefaults.standard.set(true, forKey: adaptationKey)
             var newFrame = window.frame
             newFrame.size.width = targetWidth
-            newFrame.size.height = max(newFrame.size.height, targetHeight)
+            newFrame.size.height = targetHeight
             window.setFrame(newFrame, display: true, animate: false)
             window.center()
+        }
+    }
+}
+
+/// Wrap controls at their natural widths while keeping every control inside its container.
+struct WrappingControlsLayout: Layout {
+    var spacing: CGFloat = 10
+
+    private func arrangement(width: CGFloat, subviews: Subviews) -> (CGSize, [CGRect]) {
+        var frames: [CGRect] = []
+        var x: CGFloat = 0
+        var y: CGFloat = 0
+        var rowHeight: CGFloat = 0
+        for view in subviews {
+            let ideal = view.sizeThatFits(.unspecified)
+            let itemWidth = min(width, ceil(ideal.width) + 1)
+            let size = view.sizeThatFits(ProposedViewSize(width: itemWidth, height: nil))
+            if x > 0 && x + itemWidth > width {
+                x = 0
+                y += rowHeight + spacing
+                rowHeight = 0
+            }
+            frames.append(CGRect(x: x, y: y, width: itemWidth, height: size.height))
+            x += itemWidth + spacing
+            rowHeight = max(rowHeight, size.height)
+        }
+        return (CGSize(width: width, height: y + rowHeight), frames)
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let naturalWidth = subviews.reduce(CGFloat.zero) { $0 + ceil($1.sizeThatFits(.unspecified).width) + 1 }
+            + CGFloat(max(0, subviews.count - 1)) * spacing
+        return arrangement(width: max(1, proposal.width ?? naturalWidth), subviews: subviews).0
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let frames = arrangement(width: max(1, bounds.width), subviews: subviews).1
+        for (view, frame) in zip(subviews, frames) {
+            view.place(at: CGPoint(x: bounds.minX + frame.minX, y: bounds.minY + frame.minY),
+                       anchor: .topLeading, proposal: ProposedViewSize(frame.size))
+        }
+    }
+}
+
+/// Chart and detail panels share a row on wide windows and stack on smaller windows.
+struct AnalyticsPanelsLayout: Layout {
+    private func frames(width: CGFloat, subviews: Subviews) -> [CGRect] {
+        let wide = width >= 1000
+        var y: CGFloat = 0
+        var x: CGFloat = 0
+        return subviews.enumerated().map { index, view in
+            let panelWidth = wide ? (width - 12) * (index == 0 ? 0.7 : 0.3) : width
+            let height = max(420, view.sizeThatFits(ProposedViewSize(width: panelWidth, height: nil)).height)
+            let frame = CGRect(x: x, y: y, width: panelWidth, height: height)
+            if wide { x += panelWidth + 12 } else { y += height + 12 }
+            return frame
+        }
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = max(1, proposal.width ?? 1000)
+        let panels = frames(width: width, subviews: subviews)
+        return CGSize(width: width, height: panels.map(\.maxY).max() ?? 0)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        for (view, frame) in zip(subviews, frames(width: bounds.width, subviews: subviews)) {
+            view.place(at: CGPoint(x: bounds.minX + frame.minX, y: bounds.minY + frame.minY),
+                       anchor: .topLeading, proposal: ProposedViewSize(frame.size))
         }
     }
 }

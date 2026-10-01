@@ -29,10 +29,10 @@ struct YAAMApp: App {
             ContentView()
                 .environmentObject(appState)
                 .frame(
-                    minWidth: 1000,
+                    minWidth: 760,
                     idealWidth: 1620,
                     maxWidth: .infinity,
-                    minHeight: 620,
+                    minHeight: 500,
                     idealHeight: 940,
                     maxHeight: .infinity
                 )

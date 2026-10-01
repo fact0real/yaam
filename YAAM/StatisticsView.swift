@@ -109,9 +109,10 @@ struct StatisticsView: View {
     var body: some View {
         let stats = currentSnapshot
 
+        ScrollView {
         VStack(spacing: 14) {
             // Header Bar
-            HStack(spacing: 10) {
+            WrappingControlsLayout(spacing: 10) {
                 Image(systemName: "chart.bar.doc.horizontal.fill")
                     .font(.title)
                     .foregroundColor(.accentColor)
@@ -124,8 +125,6 @@ struct StatisticsView: View {
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
-                Spacer()
-
                 Button {
                     refreshSnapshot(force: true)
                 } label: {
@@ -198,19 +197,16 @@ struct StatisticsView: View {
                 StatBadgeCard(title: "Active Modes", value: "\(stats.uniqueModeCount)", icon: "waveform", color: .pink)
             }
             
-            Picker("", selection: $selectedTab) {
-                Text("Action Center").tag(0)
-                Text("Band Breakdown").tag(1)
-                Text("Country Breakdown").tag(2)
-                Text("Unconfirmed DXCC").tag(3)
-                Text("Country Bands").tag(4)
-                Text("Progress").tag(5)
-                Text("Activity Matrix").tag(6)
-                Text("Visual Analytics").tag(7)
+            ViewThatFits(in: .horizontal) {
+                statisticsTabPicker
+                    .pickerStyle(.segmented)
+                    .fixedSize(horizontal: true, vertical: false)
+                statisticsTabPicker
+                    .pickerStyle(.menu)
             }
-            .pickerStyle(.segmented)
             .padding(.vertical, 2)
-            
+
+            Group {
             // Tab 0: actionable confirmation workbench
             if selectedTab == 0 {
                 actionCenterView
@@ -510,6 +506,9 @@ struct StatisticsView: View {
                 )
             }
             
+            }
+            .frame(minHeight: 520)
+
             if !isEmbeddedInTab {
                 Spacer()
                 Divider()
@@ -523,8 +522,9 @@ struct StatisticsView: View {
             }
         }
         .padding(16)
+        }
         .frame(
-            minWidth: isEmbeddedInTab ? 0 : 900,
+            minWidth: isEmbeddedInTab ? 0 : 760,
             idealWidth: 1180,
             maxWidth: .infinity,
             minHeight: isEmbeddedInTab ? 0 : 620,
@@ -556,6 +556,20 @@ struct StatisticsView: View {
         .onReceive(NotificationCenter.default.publisher(for: .amateurBandsConfigurationDidChange)) { _ in
             refreshSnapshot(force: true)
         }
+    }
+
+    private var statisticsTabPicker: some View {
+        Picker("Statistics section", selection: $selectedTab) {
+            Text("Action Center").tag(0)
+            Text("Band Breakdown").tag(1)
+            Text("Country Breakdown").tag(2)
+            Text("Unconfirmed DXCC").tag(3)
+            Text("Country Bands").tag(4)
+            Text("Progress").tag(5)
+            Text("Activity Matrix").tag(6)
+            Text("Visual Analytics").tag(7)
+        }
+        .labelsHidden()
     }
 
     private var actionCenterView: some View {

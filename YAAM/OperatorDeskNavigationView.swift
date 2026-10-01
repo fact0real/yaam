@@ -49,7 +49,7 @@ struct OperatorDeskNavigationView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 6) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: 6)], spacing: 6) {
                 ForEach(OperatorDeskGroup.allCases) { group in
                     groupButton(group)
                 }

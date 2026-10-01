@@ -457,7 +457,7 @@ private struct QuickLogPanel: View {
 
     var body: some View {
         GeometryReader { geometry in
-            if geometry.size.width >= 960 {
+            if geometry.size.width >= 1180 {
                 HSplitView {
                     ScrollView {
                         entryFields
@@ -633,7 +633,7 @@ private struct QuickLogPanel: View {
 
             esmContestToolbar
 
-            HStack(alignment: .bottom, spacing: 12) {
+            WrappingControlsLayout(spacing: 12) {
                 // CALLSIGN
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 4) {
@@ -663,7 +663,7 @@ private struct QuickLogPanel: View {
                                 RoundedRectangle(cornerRadius: 6)
                                     .stroke(isDupe ? Color.red : Color.clear, lineWidth: 2)
                             )
-                            .frame(minWidth: 230)
+                            .frame(minWidth: 230, idealWidth: 300, maxWidth: 340)
 
                         if appState.isLookingUpQuickLogCallsign {
                             ProgressView().controlSize(.small)
@@ -836,8 +836,6 @@ private struct QuickLogPanel: View {
                     .foregroundStyle(Color.accentColor)
                 }
 
-                Spacer()
-
                 // LOG & CLEAR ACTION BUTTONS
                 HStack(spacing: 6) {
                     Button {
@@ -906,7 +904,7 @@ private struct QuickLogPanel: View {
                 }
             }
 
-            HStack(alignment: .top, spacing: 10) {
+            WrappingControlsLayout(spacing: 10) {
                 // FREQUENCY
                 compactField("Frequency (MHz)", width: 125) {
                     TextField("14.074", text: $appState.quickLogDraft.frequencyMHz)
@@ -1027,7 +1025,7 @@ private struct QuickLogPanel: View {
         let isContestActive = session?.isActive == true
 
         DisclosureGroup(isExpanded: $showContestFields) {
-            HStack(spacing: 10) {
+            WrappingControlsLayout(spacing: 10) {
                 if let activeSession = session, activeSession.isActive {
                     compactValue("Serial", value: String(ContestWorkspaceLogic.nextSerial(in: activeSession, records: appState.qsoRecords)))
                     compactValue("Sent Exch", value: activeSession.sentExchange.isEmpty ? "--" : activeSession.sentExchange)
@@ -1342,6 +1340,7 @@ private struct QuickLogPanel: View {
                 }
                 let recents = Array(filtered.suffix(recentLimit).reversed())
 
+                ScrollView(.horizontal) {
                 VStack(alignment: .leading, spacing: 0) {
                     // Table Column Headers
                     HStack(spacing: 8) {
@@ -1377,6 +1376,8 @@ private struct QuickLogPanel: View {
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(minWidth: 760)
+                }
                 .padding(4)
                 .background(Color(nsColor: .controlBackgroundColor).opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
                 .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.15), lineWidth: 1))
@@ -1719,7 +1720,7 @@ private struct QuickLogPanel: View {
     }
 
     private var esmContestToolbar: some View {
-        HStack(spacing: 8) {
+        WrappingControlsLayout(spacing: 8) {
             // ESM On/Off Toggle Button
             Button {
                 esm.isEnabled.toggle()
@@ -1733,6 +1734,7 @@ private struct QuickLogPanel: View {
                     Text("ESM")
                         .font(.system(size: 11, weight: .bold))
                     Text(esm.isEnabled ? "ACTIVE" : "OFF")
+                        .fixedSize(horizontal: true, vertical: false)
                         .font(.system(size: 9.5, weight: .black, design: .monospaced))
                         .padding(.horizontal, 4)
                         .padding(.vertical, 1)
@@ -1783,7 +1785,6 @@ private struct QuickLogPanel: View {
                 .overlay(RoundedRectangle(cornerRadius: 6).stroke(action.badgeColor.opacity(0.28), lineWidth: 1))
                 .foregroundColor(action.badgeColor)
 
-                Spacer()
 
                 // Fast CW WPM quick stepper
                 HStack(spacing: 4) {
@@ -1810,8 +1811,6 @@ private struct QuickLogPanel: View {
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2.5)
                 .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 5))
-            } else {
-                Spacer()
             }
 
             // Paddle Break-in indicator
