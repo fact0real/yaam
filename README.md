@@ -1,235 +1,178 @@
-# YAAM (Yet Another ADIF Manager)
+<div align="center">
+  <img src="Design/AppIcon/YAAM-AppIcon-1024.png" alt="YAAM app icon: a logbook, antenna, and radio waves" width="144" height="144">
+  <h1>YAAM</h1>
+  <p><strong>Yet Another ADIF Manager</strong></p>
+  <p>A native macOS logbook and operating desk for amateur radio.</p>
 
-[![macOS](https://img.shields.io/badge/macOS-14.0%2B%20%7C%2015.0%2B-blue?logo=apple&style=flat-square)](https://apple.com/macos)
-[![Swift](https://img.shields.io/badge/Swift-6.0-orange?logo=swift&style=flat-square)](https://swift.org)
-[![SwiftUI](https://img.shields.io/badge/UI-SwiftUI%20Native-indigo?style=flat-square)](https://developer.apple.com/xcode/swiftui/)
-[![SQLite](https://img.shields.io/badge/Storage-SQLite%203%20%28WAL%29-003B57?logo=sqlite&style=flat-square)](https://sqlite.org)
-[![ADIF](https://img.shields.io/badge/Format-ADIF%203.1.4-green?style=flat-square)](https://adif.org)
+  <p>
+    <a href="#features">Features</a> ·
+    <a href="#operator-desk">Operator Desk</a> ·
+    <a href="#build-from-source">Build from source</a> ·
+    <a href="#documentation">Documentation</a> ·
+    <a href="USER_MANUAL_FA.md">راهنمای فارسی</a>
+  </p>
 
-**YAAM** is a modern, high-performance, native macOS amateur-radio logbook and operating workstation designed from the ground up for serious DXers, contesters, and everyday operators. Built purely in SwiftUI and Swift concurrency, YAAM unifies log management, QSL synchronization, radio CAT/DSP control, award tracking, contest execution, and operator outreach into a responsive desktop experience.
+  <a href="#build-from-source"><img src="https://img.shields.io/badge/macOS-15.6%2B-007AFF?logo=apple&amp;logoColor=white&amp;style=flat-square" alt="macOS 15.6 or later"></a>
+  <a href="#under-the-hood"><img src="https://img.shields.io/badge/Swift-SwiftUI-F05138?logo=swift&amp;logoColor=white&amp;style=flat-square" alt="Built with Swift and SwiftUI"></a>
+  <a href="#features"><img src="https://img.shields.io/badge/Logbook-ADIF-009B83?style=flat-square" alt="ADIF logbook"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPL--3.0-5865F2?style=flat-square" alt="GNU GPL version 3"></a>
+</div>
 
----
+<br>
 
-## Table of Contents
+**Log contacts. Find your next DX. Keep track of every confirmation.**
 
-- [Key Highlights](#key-highlights)
-- [Feature Breakdown](#feature-breakdown)
-  - [1. High-Performance Logbook & Filtering](#1-high-performance-logbook--filtering)
-  - [2. Bulk Email Outreach & Template Engine](#2-bulk-email-outreach--template-engine)
-  - [3. QRZ Rank Intelligence & Rival Tracking](#3-qrz-rank-intelligence--rival-tracking)
-  - [4. Confirmation Opportunity & Award Intelligence](#4-confirmation-opportunity--award-intelligence)
-  - [5. Unified QSL Hub (LoTW, QRZ, eQSL, Club Log)](#5-unified-qsl-hub-lotw-qrz-eqsl-club-log)
-  - [6. Operator Desk (6 Specialized Workspaces)](#6-operator-desk-6-specialized-workspaces)
-  - [7. Radio Bridge & Built-In FT8 Modem](#7-radio-bridge--built-in-ft8-modem)
-  - [8. Network-Attached Transceiver Emulator (NTE)](#8-network-attached-transceiver-emulator-nte)
-  - [9. Hardware-Bound Secure Vault & Data Safety](#9-hardware-bound-secure-vault--data-safety)
-- [Operator Desk Workspaces](#operator-desk-workspaces)
-- [Architecture & Tech Stack](#architecture--tech-stack)
-- [Getting Started & Build Instructions](#getting-started--build-instructions)
-- [Documentation & User Guides](#documentation--user-guides)
-- [Privacy & Security](#privacy--security)
+YAAM brings your logbook, DX activity, radio controls, contests, and QSL workflows into one Mac app. Use it to organize ADIF logs, explore worked countries and grids, follow award opportunities, and move from a spot to a contact without switching between separate tools.
 
----
+## A look inside
 
-## Key Highlights
+<p align="center">
+  <img src="YAAM/Assets.xcassets/help_globe.imageset/help_globe.png" alt="YAAM Globe &amp; Grids: worked stations, Maidenhead grids, and great-circle paths on a world map" width="1100">
+  <br>
+  <em>Globe &amp; Grids — see your contacts, grids, and great-circle paths on the map.</em>
+</p>
 
-- **Blazing Fast Local Database**: Backed by a multithreaded SQLite engine with Write-Ahead Logging (WAL) and memory caching, effortlessly handling 50,000+ QSOs with sub-millisecond search and instant sorting.
-- **Smart Filtering & Tagging**: Multi-criteria search with real-time tags, including **Has Email** (with format validation) and **New Band Tag** (contacts that grant new country-band confirmation credits).
-- **Custom Bulk Email Outreach**: Filter targeted operators (e.g. unconfirmed states or new bands), compose messages with dynamic tags (`{CALL}`, `{NAME}`, `{STATE}`), manage reusable named templates, and dispatch safely via SMTP with rate-limiting and instant stop control.
-- **QRZ Rank Intelligence**: Track personal standings across QSO, Bands, and DXCC leaderboards; monitor up to 8 rivals with multi-week trend charts; and backfill historical rank standings.
-- **Operator Desk Ecosystem**: Six dedicated workspaces covering Quick Log, DX Clusters, CW Workstation with Koch pileup trainer, Bandmap, 6m Magic Band watch, and Contest operations.
-- **Rig Integration & Software Defined Radio**: Native Hamlib `rigctld`, FLRig, and TCI protocol client support; built-in FT8 modem with multi-rig reception; and a comprehensive Icom IC-705/7300/7610 hardware emulator.
-- **Hardware-Bound AES-256-GCM Vault**: Eliminates macOS Keychain prompts by deriving machine-tied 256-bit encryption keys with automatic App Sandbox cross-container migration.
+<details>
+<summary><strong>View the statistics and confirmation dashboard</strong></summary>
 
----
+<br>
 
-## Feature Breakdown
+![YAAM statistics dashboard with confirmation sources and award follow-up opportunities](YAAM/Assets.xcassets/help_statistics.imageset/help_statistics.png)
 
-### 1. High-Performance Logbook & Filtering
+**Turn your log into a plan.** Review confirmation sources, country-band coverage, grid progress, and contacts worth following up on.
 
-- **Full ADIF 3.1.4 Compliance**: Import and export standard ADIF files, SmartSDR exports, and WSJT-X logs with conflict detection, duplicate resolution, and field-level preservation.
-- **Multi-Station Profiles**: Manage distinct profiles for Home, Rover, Club, Portable, and Contest setups, each maintaining unique callsigns, grids, DXCC codes, and equipment details.
-- **Advanced Query Engine**:
-  - Live full-text search across Call, Operator Name, QTH, State, County, Grid, and Notes.
-  - Multi-select filters for Band, Mode, DXCC Entity, Continent, and Custom Date ranges.
-  - Dedicated boolean toggles: **Has Email**, **New Band Only**, **Unconfirmed Only**, and **Confirmed (LoTW / QRZ / eQSL / Card)**.
-  - One-click toolbar pill buttons for rapid toggling without opening modal sheets.
-- **Bulk Operations**: Bulk edit, delete, re-enrich via QRZ XML, export selections, or send targeted emails.
+</details>
 
-### 2. Bulk Email Outreach & Template Engine
+<sub>Screenshots come from the bundled user guide. Controls and layout may differ between releases.</sub>
 
-Designed specifically for award hunting (such as ARRL Worked All States or DXCC band filling) and scheduling skeds:
+## Features
 
-- **Saved Bulk Email Templates**:
-  - Save complete email drafts with a custom title, subject line, body text, and embedded filter criteria.
-  - Quick action toolbar: **Save As...**, **Update**, **Duplicate**, and **Delete**.
-  - **⚡️ Apply Filter**: Instantly reapplies the template's saved filter criteria to the main logbook table with a single click.
-  - Access saved template filters directly from within the main Log Filter dialog.
-- **Dynamic Variable Interpolation**: Use `{CALL}`, `{NAME}`, `{COUNTRY}`, `{STATE}`, `{BAND}`, `{MODE}`, `{FREQ}`, `{DATE}`, and `{TIME}` tags for personalized messaging.
-- **Safe SMTP Dispatcher**:
-  - Supports Secure SMTP (SSL/TLS on port 465 and STARTTLS on port 587).
-  - Configurable dispatch delay between messages (throttle control to respect provider rate limits).
-  - Prominent emergency **[ 🛑 Stop Dispatch ]** button for immediate pause/cancellation.
-  - Non-blocking asynchronous dispatch: UI remains 60fps fluid, and database saves occur in a single batch upon completion.
-
-### 3. QRZ Rank Intelligence & Rival Tracking
-
-- **Real-Time Standings**: Direct API integration with `qrz-rank.asis.sh` to retrieve national and worldwide rankings in **QSO Rank**, **Bands Rank**, and **DXCC Rank**.
-- **Head-to-Head Rival Tracking**: Track up to 8 customizable competitor callsigns simultaneously.
-- **Historical Trend Charting**: Continuous daily rank trajectory with multi-week trend visualization, zoom controls, and momentum metrics (daily delta, positions gained/lost).
-- **Daily Rank Backfill Engine**: Automatically scans unchecked contacts in the log and enriches them with QRZ rank snapshots in background batches without exceeding API rate limits.
-- **Cross-Environment Sync**: Automatically bridges and preserves daily snapshot history across macOS sandboxed containers and host environments.
-
-### 4. Confirmation Opportunity & Award Intelligence
-
-- **Confirmation Opportunity Index**: Continuously analyzes unconfirmed QSOs and highlights those that would yield:
-  - A brand-new DXCC entity confirmation.
-  - A new Band credit for an existing country (5B-DXCC progress).
-  - A new 4-character Maidenhead grid square.
-- **Awards Tracking Engine**:
-  - **DXCC**: Mixed, CW, Phone, Digital, and per-band breakdown (160m through 6m).
-  - **WAS**: Worked All States tracking with confirmed vs. worked matrix.
-  - **VHF/UHF & 6m Magic Band**: Grid locators worked and confirmed.
-  - **Club Memberships**: Track eligibility and member numbers for FOC, CWops, SKCC, etc.
-- **Country-by-Band Matrix**: Visual heatmap in Statistics showing which bands are worked, confirmed, or needed per DXCC entity.
-
-### 5. Unified QSL Hub (LoTW, QRZ, eQSL, Club Log)
-
-- **ARRL Logbook of the World (LoTW)**: Seamless digital signing using local `tqsl` binaries, automatic `.tq8` generation, secure upload, and automated download of confirmation reports.
-- **QRZ Logbook**: Direct API integration for bidirectional sync of QSO records and confirmation statuses.
-- **eQSL.cc & Club Log**: Automated logbook upload, confirmation fetching, and Club Log OQRS spot tracking.
-- **QSL Printing & Label Studio**: Design custom printable QSL cards and label sheets (standard Avery formats) with customizable typography, layouts, and compact QSO tables.
-
-### 6. Operator Desk (6 Specialized Workspaces)
-
-The Operator Desk provides six dedicated workspaces with persistent layout memory and quick switcher shortcuts (**⌘1** through **⌘6**):
-
-| Workspace | Included Tools & Modules |
+| | What you can do |
 | :--- | :--- |
-| **1. Operating** | **Quick Log HUD** (instant QSO logging with auto-lookup), **Shack Clock** (multi-zone UTC/Local with Solar Grayline), **Tactical Rover** (GPS grid calculation, field day operation). |
-| **2. DX Activity** | **Telnet DX Cluster** (auto-reconnect, spot filtering), **Club Log Live Spots**, **Spectrum Bandmap** (spot decay, mode filters), **3D Globe & Grids**, **6m Magic Band Watch** (PSK Reporter live opening analysis), **DX News Feed**, **ON4KST Chat**. |
-| **3. Radio & Digital** | **Radio Bridge** (Hamlib `rigctld`, FLRig, TCI for Expert SDRs), **Antenna Rotator Control** (gs-232, rotctld), **FT8 Station & Multi-Rig**, **Digital Suite**, **NTE Hardware Emulator**. |
-| **4. CW Workstation** | **WinKeyer Hardware Support** (K1EL WK2/WK3), **Keyer Macros & Memories**, **CW Academy** (Koch method trainer with Farnsworth timing), **Audio CW Decoder** (FFT peak tracking), **Pileup Simulator**. |
-| **5. Contest & Awards** | **Contest Engine** (ESM mode, automatic serials, multiplier tracking, Cabrillo 3.0 export), **WA7BNM Live Contest Calendar**, **Awards Progress & Claims Manager**. |
-| **6. QSL & Data** | **QSL Hub** (LoTW/QRZ/eQSL/Club Log), **Labels & Printing Studio**, **External Log Sync** (SDR-Control, Wavelog, folder watcher), **Cloud Sync & Mobile Companion**. |
+| **📒 Logbook** | Import and export ADIF, search and filter contacts, manage station profiles, and edit records in bulk. |
+| **🌍 DX activity** | Follow cluster spots, inspect the Bandmap, explore countries and grids, and monitor callsigns and band openings. |
+| **📻 Radio & digital** | Connect through Hamlib, FLRig, or TCI; operate the built-in FT8 station and work with multiple receivers. |
+| **🏆 Awards & statistics** | Track DXCC, WAS, and grids; compare worked and confirmed totals; find contacts that can add award credit. |
+| **✉️ QSL & outreach** | Work with LoTW, QRZ, eQSL, and Club Log; prepare labels and cards; compose follow-up messages from saved templates. |
+| **⚡ Contest & CW** | Use contest exchanges, serials, ESM, and Cabrillo export alongside keyer tools, CW training, and pileup practice. |
 
-### 7. Radio Bridge & Built-In FT8 Modem
+### Built for the operating desk
 
-- **Universal CAT Control**: Integrates directly with transceivers via Hamlib (`rigctld`), FLRig, or TCI protocol, providing real-time VFO frequency tracking, mode synchronization, and PTT control.
-- **Native FT8/FT4 DSP Modem**: Integrated DSP soundcard modem (via `ft8-808` engine) enabling decoding and encoding directly within the app without requiring third-party software.
-- **Multi-Rig Reception**: Monitor multiple receivers or digital slices simultaneously across different bands.
+- **Quick Log:** callsign lookup, worked history, keyboard shortcuts, and contest exchanges in one form.
+- **Bandmap Studio:** a frequency ruler, spectrum and waterfall views, spot filters, and a station inspector.
+- **Confirmation opportunities:** identify unconfirmed contacts that could add a country, band, or grid credit.
+- **Multiple station profiles:** keep home, portable, rover, club, and contest setups organized.
+- **Flexible window layouts:** controls wrap and panels adapt as the available space changes.
 
-### 8. Network-Attached Transceiver Emulator (NTE)
+<details>
+<summary><strong>Explore more capabilities</strong></summary>
 
-For software testing, demonstrations, or operating without physical hardware:
+### Log management
 
-- **Complete Icom Transceiver Emulation**: Emulates IC-705, IC-7300, IC-7610, and IC-9700 over UDP/IP with CI-V MK2 registers, LAN broadcast discovery, and full command response fidelity.
-- **Real-Time 48 kHz Audio Streaming**: Low-latency bi-directional LPCM16 audio streaming matching real Icom network behavior.
-- **Synthetic RF Channel Simulator**: Generates realistic digital signals (FT8, FT4, CW) with configurable channel impairments: Additive White Gaussian Noise (AWGN), Rayleigh and Rician ionospheric fading, Doppler shift, and atmospheric QRN bursts.
+Search across callsigns, names, QTH, states, counties, grids, and notes. Combine band, mode, DXCC, continent, date, and confirmation filters. Import ADIF and supported radio-software logs, review duplicates, and bulk edit or export selected contacts.
 
-### 9. Hardware-Bound Secure Vault & Data Safety
+### QSL workflows
 
-- **No More Keychain Popups**: Uses an AES-256-GCM cryptographic vault keyed directly to local hardware (`IOPlatformUUID` + HKDF-SHA256), eliminating macOS Keychain authorization dialogs.
-- **Sandbox-Aware Vault Synchronization**: Automatically detects whether the application is running inside the macOS App Sandbox container or on the host filesystem, migrating and synchronizing credentials seamlessly with timestamp-aware updates.
-- **Automated SQLite Backups**: Automatic checkpointing and timestamped SQLite database backups before major sync or import operations.
+Use LoTW signing through TQSL, QRZ logbook synchronization, eQSL and Club Log integrations, and the QSL card and label tools. Service accounts, credentials, and external tools may be required for individual integrations.
 
----
+### Operator outreach
 
-## Operator Desk Workspaces
+Save reusable email templates with filter criteria and tags such as `{CALL}`, `{NAME}`, `{BAND}`, and `{DATE}`. Use SMTP dispatch controls to set message delays and stop a batch when needed.
 
+### Rank and award tracking
+
+Review QRZ ranking history and tracked competitors, country-by-band coverage, and worked or confirmed award progress. Use confirmation opportunities to prioritize useful follow-ups.
+
+### Radio and digital modes
+
+Connect radio services through Hamlib `rigctld`, FLRig, or TCI. The built-in FT8/FT4 modem uses the `ft8-808` engine; additional workspaces support multi-rig reception, rotator control, and digital operating tools.
+
+### Practice and simulation
+
+Use CW training, audio decoding, pileup practice, and WinKeyer tools. The network transceiver emulator provides Icom-style network radio simulation for development and demonstrations without physical radio hardware.
+
+</details>
+
+## Operator Desk
+
+Six groups organize the tools around the way you operate. **All tools** lets you search for a destination by name, mode, or task.
+
+| Workspace | Tools and workflows |
+| :--- | :--- |
+| **Operating** | Quick Log, Shack Clock, portable and rover operations |
+| **DX Activity** | DX Cluster, Club Log Spots, Bandmap, Call Roster, Digital Callsign Monitor, Globe & Grids, Signal Footprint, 6m Watch, DX News, ON4KST |
+| **Radio & Digital** | Radio Bridge, FLRig, rotator control, FT8, multi-rig FT8, Digital Suite, TCI, transceiver emulator |
+| **CW Workstation** | Keyer, CW Academy, reference tools, audio decoder, pileup simulator, hardware diagnostics |
+| **Contest & Awards** | Contest sessions, calendar, awards, club memberships |
+| **QSL & Data** | QSL Hub, card and label design, log sources, cloud companion |
+
+## Build from source
+
+### Requirements
+
+- **macOS 15.6 or later**, matching the app target's deployment setting.
+- A recent **Xcode** with Command Line Tools and support for the project's Swift package dependencies.
+- **Optional:** [ARRL TQSL](https://www.arrl.org/tqsl-download) for LoTW signing and upload.
+
+### Clone and build
+
+```bash
+git clone https://github.com/fact0real/yaam.git
+cd yaam
+open YAAM.xcodeproj
 ```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                              YAAM OPERATOR DESK                                 │
-├──────────────┬──────────────┬──────────────┬──────────────┬──────────────┬──────┤
-│ 1. OPERATING │ 2. DX ACTIVE │ 3. RADIO/DIG │ 4. CW WORKST │ 5. CONTEST   │6. QSL│
-├──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────┤
-│ • Quick Log  │ • DX Cluster │ • Radio CAT  │ • WinKeyer   │ • Contest Ops│• QSL │
-│ • Shack Clock│ • Club Log   │ • TCI / FLRig│ • Keyer Macro│ • Cabrillo   │  Hub │
-│ • Rover GPS  │ • Bandmap    │ • Native FT8 │ • CW Academy │ • Calendar   │• Print│
-│              │ • 6m Watch   │ • Emulator   │ • Pileup Sim │ • Awards     │• Sync│
-└──────────────┴──────────────┴──────────────┴──────────────┴──────────────┴──────┘
+
+Build the Release app from Terminal:
+
+```bash
+xcodebuild -project YAAM.xcodeproj \
+           -scheme YAAM \
+           -configuration Release \
+           -derivedDataPath build/DerivedData \
+           build
 ```
 
----
+The app bundle is created at `build/DerivedData/Build/Products/Release/YAAM.app`.
 
-## Architecture & Tech Stack
+<details>
+<summary><strong>Sign and install a local build</strong></summary>
 
-- **Language**: Swift 6.0 with strict concurrency checks (`Sendable`, `@MainActor`, Task groups).
-- **UI Framework**: SwiftUI (100% native declarative UI).
-- **Persistence**: SQLite 3 with WAL (Write-Ahead Logging), multi-reader concurrency, and foreign-key constraints.
-- **Audio & DSP**: Apple `AVAudioEngine`, `Accelerate` framework (vDSP for FFT and spectral rendering).
-- **Networking**: `URLSession` with HTTP/2 and modern `NWConnection` / `NWListener` (Network framework) for low-latency UDP/TCP streams.
-- **Security**: Apple `CryptoKit` (AES-GCM, HKDF, SHA-256).
+For a local build, sign with the project's sandbox entitlements:
 
----
+```bash
+codesign --force --deep --sign - \
+         --entitlements YAAM/YAAM.entitlements \
+         build/DerivedData/Build/Products/Release/YAAM.app
+```
 
-## Getting Started & Build Instructions
+Quit YAAM before replacing an existing installation. Copy the built app to `/Applications`:
 
-### Prerequisites
+```bash
+ditto build/DerivedData/Build/Products/Release/YAAM.app /Applications/YAAM.app
+codesign --verify --deep --strict /Applications/YAAM.app
+```
 
-- macOS 14.0 (Sonoma) or macOS 15.0+ (Sequoia).
-- Xcode 16.0+ with Command Line Tools installed.
-- *(Optional)* [ARRL TQSL](https://www.arrl.org/tqsl-download) for LoTW digital signing.
+</details>
 
-### Building from Source
+## Documentation
 
-1. **Clone the repository**:
-   ```bash
-   git clone https://github.com/fact0real/yaam.git
-   cd yaam
-   ```
+| Guide | Start here for… |
+| :--- | :--- |
+| [English user manual](USER_MANUAL.md) | Station setup, logging, QSL services, radio tools, and day-to-day operation |
+| [راهنمای کاربری فارسی](USER_MANUAL_FA.md) | راه‌اندازی ایستگاه، ثبت تماس‌ها، سرویس‌های QSL و ابزارهای رادیویی |
+| [Developer documentation](DEVELOPER_DOCUMENTATION.md) | Application architecture, modules, storage, networking, and implementation details |
+| [App icon assets](Design/AppIcon/README.md) | Production artwork, icon sizes, and asset-catalog maintenance |
 
-2. **Open the project in Xcode**:
-   ```bash
-   open YAAM.xcodeproj
-   ```
+## Under the hood
 
-3. **Build the Release binary via Terminal**:
-   ```bash
-   xcodebuild -project YAAM.xcodeproj \
-              -scheme YAAM \
-              -configuration Release \
-              -derivedDataPath build/DerivedData \
-              build
-   ```
+YAAM uses **Swift and SwiftUI**, **SQLite with WAL**, and Apple's **AVAudioEngine**, **Accelerate**, **Network**, and **CryptoKit** frameworks. Swift concurrency supports background work across log processing, service integrations, and radio workflows.
 
-4. **Sign with App Sandbox entitlements**:
-   ```bash
-   codesign --force --deep --sign - \
-            --entitlements YAAM/YAAM.entitlements \
-            ./build/DerivedData/Build/Products/Release/YAAM.app
-   ```
+## Your data and connected services
 
-5. **Install to `/Applications`**:
-   ```bash
-   rm -rf /Applications/YAAM.app
-   cp -R ./build/DerivedData/Build/Products/Release/YAAM.app /Applications/YAAM.app
-   xattr -cr /Applications/YAAM.app
-   ```
+Logbooks and station data are stored locally. Credentials are encrypted using the app's hardware-bound vault. Connected features exchange data with the services you configure; some monitoring and synchronization features can run in the background when enabled. Local logbook work remains available without those services.
 
----
+## License & credits
 
-## Documentation & User Guides
+Developed by **EP2AES** for the amateur radio community. Licensed under the **[GNU General Public License, version 3](LICENSE)**.
 
-Comprehensive manuals and developer documentation are included in the repository:
-
-- 📖 **[English Comprehensive User Manual](USER_MANUAL.md)**: Detailed operational guide covering all 17 chapters (Station profiles, TQSL, QSL Card studio, Digital modes, and Contests).
-- 📖 **[Persian Comprehensive User Manual (راهنمای جامع کاربری فارسی)](USER_MANUAL_FA.md)**: راهنمای کامل گام‌به‌گام برای کاربران به زبان فارسی شامل مدهای مورس، امضای لاگ با TQSL، و تنظیمات کامل ایستگاه.
-- 🛠 **[English Developer & Architecture Guide](DEVELOPER_DOCUMENTATION.md)**: Technical breakdown of internal modules, CI-V protocol handling, SQLite schema migrations, and concurrency architecture.
-- 🛠 **[Persian Developer Guide (راهنمای معماری و توسعه به فارسی)](DEVELOPER_GUIDE_FA.md)**: مستندات فنی و ساختار معماری نرم‌افزار برای توسعه‌دهندگان.
-- 📊 **[Competitive Analysis](COMPETITIVE_ANALYSIS_FA.md)**: تحلیل جامع و مقایسه امکانات YAAM با نرم‌افزارهای نام‌آشنای لاگینگ بین‌المللی.
-
----
-
-## Privacy & Security
-
-- **Local-First Architecture**: Your logbook data, station notes, and database reside strictly on your local Mac.
-- **Secure Credential Storage**: All passwords, API keys (QRZ, LoTW, eQSL, Club Log, SMTP), and tokens are encrypted with hardware-bound AES-256-GCM. No credentials are ever sent to third parties other than the explicitly configured ham radio services.
-- **Full Offline Operation**: YAAM functions fully offline. Internet access is only utilized when you explicitly trigger cloud QSL synchronization, QRZ lookups, cluster connects, or bulk email dispatch.
-
----
-
-## License & Credits
-
-Developed with passion for the amateur radio community by **EP2AES**.  
-All rights reserved. Released under the project's designated open/source-available licensing terms.
+<p align="center"><sub>73 — see you on the bands.</sub></p>
