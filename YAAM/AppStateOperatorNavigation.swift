@@ -23,4 +23,12 @@ extension AppState {
         let destination = operatorDeskDestination
         UserDefaults.standard.set(destination.rawValue, forKey: "operatorDesk.last.\(destination.group.rawValue)")
     }
+
+    func openHamTracker(callsign: String? = nil) {
+        if let callsign, !callsign.isEmpty {
+            HamTrackerEngine.shared.setTarget(callsign)
+            HamTrackerEngine.shared.startMonitoring()
+        }
+        openOperatorDesk(.hamTracker)
+    }
 }

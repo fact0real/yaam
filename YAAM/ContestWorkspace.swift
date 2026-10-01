@@ -732,6 +732,7 @@ public enum CabrilloExporter {
         guard let mhz = AmateurBandPlan.normalizedMHz(record["FREQ"]) else {
             // Fallback frequency by band
             let band = record["BAND"].uppercased()
+            if let designator = CabrilloFrequency.designator(forBand: band) { return designator }
             switch band {
             case "160M": return "1850"
             case "80M": return "3550"
@@ -739,16 +740,10 @@ public enum CabrilloExporter {
             case "20M": return "14050"
             case "15M": return "21050"
             case "10M": return "28050"
-            case "6M": return "50050"
             default: return "14000"
             }
         }
-        if mhz >= 1_000 {
-            let ghz = mhz / 1_000
-            if ghz >= 10 { return "\(Int(ghz.rounded()))G" }
-            return String(format: "%.1fG", ghz)
-        }
-        return String(Int((mhz * 1_000).rounded()))
+        return CabrilloFrequency.field(mhz: mhz)
     }
 
     private static func combinedExchange(number: String, text: String, fallback: String) -> String {

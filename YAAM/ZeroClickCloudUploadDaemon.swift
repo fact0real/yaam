@@ -39,6 +39,7 @@ public struct PendingCloudUploadItem: Codable, Identifiable, Sendable, Equatable
     public var attemptCount: Int
     public var lastAttemptDate: Date?
     public var lastErrorMessage: String?
+    public var pausedServices: [String]?
     public let enqueuedAt: Date
 
     public init(
@@ -50,6 +51,7 @@ public struct PendingCloudUploadItem: Codable, Identifiable, Sendable, Equatable
         attemptCount: Int = 0,
         lastAttemptDate: Date? = nil,
         lastErrorMessage: String? = nil,
+        pausedServices: [String]? = nil,
         enqueuedAt: Date = Date()
     ) {
         self.id = id
@@ -60,6 +62,7 @@ public struct PendingCloudUploadItem: Codable, Identifiable, Sendable, Equatable
         self.attemptCount = attemptCount
         self.lastAttemptDate = lastAttemptDate
         self.lastErrorMessage = lastErrorMessage
+        self.pausedServices = pausedServices
         self.enqueuedAt = enqueuedAt
     }
 
@@ -107,6 +110,7 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
     private var retryTimerTask: Task<Void, Never>?
     private var pathMonitor: NWPathMonitor?
     private let monitorQueue = DispatchQueue(label: "org.yaam.cloudUpload.networkMonitor", qos: .utility)
+    private let persistenceQueue = DispatchQueue(label: "org.yaam.cloudUpload.persistence", qos: .utility)
 
     private var queueFileURL: URL {
         let dir = LogbookDatabase.canonicalDataDirectory()
@@ -149,7 +153,7 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
         self.pendingQueueCount = self.pendingQueue.count
         let url = queueFileURL
         let items = self.pendingQueue
-        Task.detached(priority: .utility) {
+        persistenceQueue.async {
             do {
                 let dir = url.deletingLastPathComponent()
                 if !FileManager.default.fileExists(atPath: dir.path) {
@@ -244,6 +248,18 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
             return
         }
 
+        // With the Touch ID lock on, credentials read as empty until the user unlocks; keep the QSO in the outbox
+        if !CredentialVault.isVaultSessionUnlocked {
+            enqueue(
+                record: record,
+                stationID: stationID,
+                stationLocation: stationLocation,
+                targetServices: activeServices,
+                errorReason: "Credential vault locked (Touch ID)"
+            )
+            return
+        }
+
         Task { [weak self] in
             guard let self = self else { return }
             await self.executeUpload(
@@ -262,10 +278,12 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
         stationID: String?,
         stationLocation: String?,
         targetServices: [String],
-        errorReason: String?
+        errorReason: String?,
+        pausedServices: [String] = []
     ) {
         let call = record["CALL"].uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
         guard !targetServices.isEmpty else { return }
+        var evictedCount = 0
 
         if let existingIdx = pendingQueue.firstIndex(where: {
             let existingCall = ($0.recordFields["CALL"] ?? "").uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
@@ -280,6 +298,9 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
             pendingQueue[existingIdx].pendingServices = Array(current)
             pendingQueue[existingIdx].lastErrorMessage = errorReason
             pendingQueue[existingIdx].lastAttemptDate = Date()
+            var paused = Set(pendingQueue[existingIdx].pausedServices ?? [])
+            paused.formUnion(pausedServices)
+            pendingQueue[existingIdx].pausedServices = Array(paused)
         } else {
             let newItem = PendingCloudUploadItem(
                 recordFields: record.fields,
@@ -289,18 +310,31 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
                 attemptCount: 0,
                 lastAttemptDate: Date(),
                 lastErrorMessage: errorReason,
+                pausedServices: pausedServices,
                 enqueuedAt: Date()
             )
             pendingQueue.append(newItem)
+            // Keep the existing storage bound; surface any upload intents displaced by a full outbox.
             if pendingQueue.count > 500 {
-                pendingQueue.removeFirst(pendingQueue.count - 500)
+                evictedCount = pendingQueue.count - 500
+                pendingQueue.removeFirst(evictedCount)
             }
         }
 
         savePendingQueueToDisk()
 
         let serviceNames = targetServices.joined(separator: ", ")
-        let statusText = "📦 Offline Outbox: \(call) queued for upload (\(serviceNames))"
+        var statusText: String
+        if !CredentialVault.isVaultSessionUnlocked {
+            statusText = "📦 Outbox: \(call) waits until YAAM is unlocked with Touch ID (\(serviceNames))"
+        } else if !pausedServices.isEmpty {
+            statusText = "📦 Outbox: \(call) needs cloud settings checked, then retry manually (\(serviceNames))"
+        } else {
+            statusText = "📦 Offline Outbox: \(call) queued for upload (\(serviceNames))"
+        }
+        if evictedCount > 0 {
+            statusText += " — Outbox full: \(evictedCount) oldest upload request(s) removed"
+        }
         self.lastUploadStatus = statusText
         triggerToast()
 
@@ -315,6 +349,18 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
             message: "Queued in offline outbox (\(serviceNames)): \(errorReason ?? "Network offline")"
         )
         appendRecentLog(logItem)
+        if evictedCount > 0 {
+            appendRecentLog(CloudUploadLogItem(
+                callsign: call,
+                band: record["BAND"],
+                mode: record["MODE"],
+                services: [],
+                timestamp: Date(),
+                latencyMs: 0,
+                success: false,
+                message: "Outbox limit reached; \(evictedCount) oldest upload request(s) removed"
+            ))
+        }
     }
 
     // MARK: - Network Error Detection
@@ -343,6 +389,16 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
                lower.contains("upload failed")
     }
 
+    private static func httpFailureMessage(_ response: URLResponse) -> String {
+        guard let code = (response as? HTTPURLResponse)?.statusCode else {
+            return "HTTP error: invalid response"
+        }
+        if code >= 500 || code == 408 || code == 429 {
+            return "HTTP error \(code)"
+        }
+        return "Rejected with HTTP status \(code)"
+    }
+
     // MARK: - Upload Worker
     private func executeUpload(
         record: QSORecordModel,
@@ -357,6 +413,7 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
 
         var successfulServices: [String] = []
         var networkFailedServices: [String] = []
+        var manualRetryServices: [String] = []
         var configErrors: [String] = []
 
         // 1. QRZ Logbook (ACTION=INSERT)
@@ -367,6 +424,7 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
             } else if isNetworkFailure(qrzOutcome.message) {
                 networkFailedServices.append("QRZ")
             } else if !qrzOutcome.message.isEmpty {
+                manualRetryServices.append("QRZ")
                 configErrors.append("QRZ: \(qrzOutcome.message)")
             }
         }
@@ -379,6 +437,7 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
             } else if isNetworkFailure(clubLogOutcome.message) {
                 networkFailedServices.append("Club Log")
             } else if !clubLogOutcome.message.isEmpty {
+                manualRetryServices.append("Club Log")
                 configErrors.append("ClubLog: \(clubLogOutcome.message)")
             }
         }
@@ -390,6 +449,9 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
                 successfulServices.append("eQSL")
             } else if isNetworkFailure(eqslOutcome.message) {
                 networkFailedServices.append("eQSL")
+            } else {
+                manualRetryServices.append("eQSL")
+                configErrors.append("eQSL: \(eqslOutcome.message)")
             }
         }
 
@@ -402,9 +464,11 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
             case .networkError:
                 networkFailedServices.append("Wavelog")
             case .rejected(let reason):
+                manualRetryServices.append("Wavelog")
                 configErrors.append("Wavelog: \(reason)")
             case .notConfigured:
-                break
+                manualRetryServices.append("Wavelog")
+                configErrors.append("Wavelog: not configured")
             }
         }
 
@@ -419,7 +483,8 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
                 successfulServices.append("LoTW")
             } else if isNetworkFailure(lotwOutcome.message) {
                 networkFailedServices.append("LoTW")
-            } else if !lotwOutcome.message.isEmpty && !lotwOutcome.message.contains("not found") {
+            } else {
+                manualRetryServices.append("LoTW")
                 configErrors.append("LoTW: \(lotwOutcome.message)")
             }
         }
@@ -432,21 +497,22 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
         let mode = record["MODE"]
 
         // If any service failed due to network / connectivity issues, buffer in offline outbox!
-        if !networkFailedServices.isEmpty {
+        if !networkFailedServices.isEmpty || !manualRetryServices.isEmpty {
             enqueue(
                 record: record,
                 stationID: stationID,
                 stationLocation: stationLocation,
-                targetServices: networkFailedServices,
-                errorReason: "Connection failed during upload"
+                targetServices: networkFailedServices + manualRetryServices,
+                errorReason: configErrors.isEmpty ? "Connection failed during upload" : "Upload rejected or service not configured; retry manually",
+                pausedServices: manualRetryServices
             )
         }
 
         if !successfulServices.isEmpty {
             let serviceList = successfulServices.joined(separator: " & ")
             var statusText = "☁️ Instant Upload: \(call) (\(band)/\(mode)) → \(serviceList) [\(latency)ms]"
-            if !networkFailedServices.isEmpty {
-                statusText += " (Queued: \(networkFailedServices.joined(separator: ", ")))"
+            if !networkFailedServices.isEmpty || !manualRetryServices.isEmpty {
+                statusText += " (Queued: \((networkFailedServices + manualRetryServices).joined(separator: ", ")))"
             }
             self.lastUploadStatus = statusText
             triggerToast()
@@ -489,24 +555,38 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
         guard !isFlushingQueue else { return }
         guard !pendingQueue.isEmpty else { return }
         guard isNetworkConnected else { return }
+        // Locked vault: every service would look unconfigured and be dropped; wait for the unlock
+        guard CredentialVault.isVaultSessionUnlocked else {
+            lastUploadStatus = "📦 Outbox paused until YAAM is unlocked with Touch ID"
+            if triggerReason == "Manual Sync" { triggerToast() }
+            return
+        }
 
         isFlushingQueue = true
         defer { isFlushingQueue = false }
 
+        let manualRetry = triggerReason == "Manual Sync"
+        let maxAutomaticRetryAge: TimeInterval = 7 * 24 * 60 * 60
         var fullyCompletedIndices: [Int] = []
         var totalUploadedServices = 0
-        var encounteredNetworkFailure = false
+        var unavailableServices = Set<String>()
 
         for index in pendingQueue.indices {
-            if encounteredNetworkFailure { break }
+            if !CredentialVault.isVaultSessionUnlocked { break }
 
             var item = pendingQueue[index]
+            if !manualRetry && Date().timeIntervalSince(item.enqueuedAt) > maxAutomaticRetryAge { continue }
             let record = QSORecordModel(fields: item.recordFields)
             var servicesToRemove: [String] = []
+            var pausedServices = Set(item.pausedServices ?? [])
+            var attempted = false
 
             for service in item.pendingServices {
+                if !CredentialVault.isVaultSessionUnlocked { break }
+                if unavailableServices.contains(service) || (!manualRetry && pausedServices.contains(service)) { continue }
                 var success = false
                 var networkFailure = false
+                attempted = true
 
                 switch service {
                 case "QRZ":
@@ -525,10 +605,12 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
                     success = outcome.success
                     networkFailure = isNetworkFailure(outcome.message)
                 case "Wavelog":
-                    // Only transport trouble is retried; any other answer leaves the outbox as before
-                    // (the reason is kept in WavelogSyncEngine.lastError).
                     let outcome = await WavelogSyncEngine.shared.pushSingleQSO(record: record)
-                    if case .networkError = outcome { networkFailure = true } else { success = true }
+                    switch outcome {
+                    case .success, .duplicate: success = true
+                    case .networkError: networkFailure = true
+                    case .rejected, .notConfigured: break
+                    }
                 case "LoTW":
                     let outcome = await uploadToLoTWViaTQSL(
                         record: record,
@@ -538,30 +620,33 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
                     success = outcome.success
                     networkFailure = isNetworkFailure(outcome.message)
                 default:
-                    success = true
+                    break
                 }
 
                 if success {
                     servicesToRemove.append(service)
+                    pausedServices.remove(service)
                     totalUploadedServices += 1
                 } else if networkFailure {
-                    encounteredNetworkFailure = true
-                    item.lastErrorMessage = "Network connection failed during sync"
-                    break
+                    unavailableServices.insert(service)
+                    item.lastErrorMessage = "Network failure for \(service)"
                 } else {
-                    // Non-network failure (e.g. unconfigured credentials or permanent rejection).
-                    // Drop service from pending item to prevent infinite retry loops.
-                    servicesToRemove.append(service)
-                    item.lastErrorMessage = "Service configuration error: \(service)"
+                    // Preserve rejected and unconfigured QSOs for an explicit retry after settings are fixed.
+                    pausedServices.insert(service)
+                    unavailableServices.insert(service)
+                    item.lastErrorMessage = "\(service): rejected, unsupported or not configured; retry manually"
                 }
             }
 
             item.pendingServices.removeAll { servicesToRemove.contains($0) }
-            item.attemptCount += 1
-            item.lastAttemptDate = Date()
+            item.pausedServices = Array(pausedServices)
+            if attempted {
+                item.attemptCount += 1
+                item.lastAttemptDate = Date()
+            }
             pendingQueue[index] = item
 
-            if item.pendingServices.isEmpty || item.attemptCount >= 15 {
+            if item.pendingServices.isEmpty {
                 fullyCompletedIndices.append(index)
             }
         }
@@ -586,9 +671,11 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
 
         savePendingQueueToDisk()
 
-        if totalUploadedServices > 0 {
+        if totalUploadedServices > 0 || (manualRetry && !pendingQueue.isEmpty) {
             let reasonStr = triggerReason.isEmpty ? "" : " (\(triggerReason))"
-            let statusText = "☁️ Outbox Synced: \(fullyCompletedIndices.count) QSO(s) uploaded successfully\(reasonStr)"
+            let pausedCount = pendingQueue.filter { !($0.pausedServices ?? []).isEmpty }.count
+            var statusText = "☁️ Outbox: \(fullyCompletedIndices.count) QSO(s) completed, \(pendingQueue.count) waiting\(reasonStr)"
+            if pausedCount > 0 { statusText += "; \(pausedCount) need settings checked" }
             self.lastUploadStatus = statusText
             triggerToast()
         }
@@ -638,7 +725,7 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
             guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-                return (false, "HTTP error")
+                return (false, Self.httpFailureMessage(response))
             }
             let responseText = String(data: data, encoding: .utf8) ?? ""
             if responseText.contains("RESULT=OK") {
@@ -681,7 +768,7 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
             guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-                return (false, "HTTP error")
+                return (false, Self.httpFailureMessage(response))
             }
             let resText = String(data: data, encoding: .utf8) ?? ""
             if resText.contains("OK") || resText.isEmpty {
@@ -718,7 +805,7 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
             guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-                return (false, "HTTP error")
+                return (false, Self.httpFailureMessage(response))
             }
             let resText = String(data: data, encoding: .utf8) ?? ""
             if resText.localizedCaseInsensitiveContains("Success") || resText.localizedCaseInsensitiveContains("Result: 1") {

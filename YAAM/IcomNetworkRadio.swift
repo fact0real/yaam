@@ -141,6 +141,7 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
     @MainActor @Published private(set) var snapshot: IcomNetworkSnapshot?
     @MainActor @Published private(set) var lastMessage = "Direct Icom LAN is offline"
     @MainActor @Published private(set) var radioName = ""
+    @MainActor @Published private(set) var selectedModel: IcomNetworkModel?
     @MainActor @Published private(set) var isTransmitting = false
     @MainActor @Published private(set) var receivedAudioPackets = 0
     @MainActor @Published private(set) var lastAudioAt: Date?
@@ -318,6 +319,7 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
         pttWatchdog = nil
         isTransmitting = false
         transmitArmed = false
+        selectedModel = clean.model
         state = .connecting
         lastMessage = "Opening \(clean.host):\(clean.controlPort)..."
 
@@ -370,6 +372,7 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
         }
         isTransmitting = false
         transmitArmed = false
+        selectedModel = nil
         state = .disconnected
         lastMessage = "Direct Icom LAN disconnected; original settings restored"
     }
@@ -612,15 +615,15 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
             if isTransmitActive {
                 let meterStep = sessionTicks % 3
                 if meterStep == 0 {
-                    sendCIV(command: [0x15, 0x02]) // Po (RF Power Meter)
+                    sendCIV(command: [0x15, 0x11]) // Po (RF Power Meter)
                 } else if meterStep == 1 {
-                    sendCIV(command: [0x15, 0x11]) // SWR Meter
+                    sendCIV(command: [0x15, 0x12]) // SWR Meter
                 } else {
-                    sendCIV(command: [0x15, 0x12]) // ALC Meter
+                    sendCIV(command: [0x15, 0x13]) // ALC Meter
                 }
             } else {
                 if sessionTicks.isMultiple(of: 10) { sendCIV(command: [0x03]) } // Frequency
-                if sessionTicks % 10 == 5 { sendCIV(command: [0x15, 0x01]) } // S-Meter during RX
+                if sessionTicks % 10 == 5 { sendCIV(command: [0x15, 0x02]) } // S-Meter during RX
             }
         }
     }
@@ -1245,16 +1248,16 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 switch subCmd {
-                case 0x01: // S-meter
+                case 0x02: // S-meter
                     if raw <= 120 {
                         self.sMeterUnits = (Double(raw) / 120.0) * 9.0
                     } else {
                         self.sMeterUnits = 9.0 + (Double(raw - 120) / 121.0) * 60.0
                     }
-                case 0x02: // Po (RF Power Meter)
+                case 0x11: // Po (RF Power Meter)
                     let watts = min(100.0, max(0.0, (Double(raw) / 143.0) * 100.0))
                     self.rfPowerWatts = round(watts * 10) / 10.0
-                case 0x11: // SWR Meter
+                case 0x12: // SWR Meter
                     let swrCalc: Double
                     if raw <= 0 {
                         swrCalc = 1.0
@@ -1268,7 +1271,7 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
                         swrCalc = 3.0 + Double(raw - 120) * 0.05
                     }
                     self.swr = round(swrCalc * 10) / 10.0
-                case 0x12: // ALC Meter
+                case 0x13: // ALC Meter
                     let alc = min(100.0, max(0.0, (Double(raw) / 120.0) * 100.0))
                     self.alcLevel = round(alc)
                 default:

@@ -420,7 +420,17 @@ final class ClubLogSpotsService: ObservableObject {
     }
 
     nonisolated static func bandFromFrequencyKHz(_ khz: Double) -> String {
-        switch khz {
+        guard khz.isFinite, khz > 0 else { return "" }
+        let normKHz: Double
+        if khz >= 1_000_000 {
+            normKHz = khz / 1000.0
+        } else if khz < 1000.0 {
+            normKHz = khz * 1000.0
+        } else {
+            normKHz = khz
+        }
+
+        switch normKHz {
         case 1800...2000: return "160M"
         case 3500...4000: return "80M"
         case 5300...5500: return "60M"
@@ -432,12 +442,12 @@ final class ClubLogSpotsService: ObservableObject {
         case 24890...24990: return "12M"
         case 28000...29700: return "10M"
         case 50000...54000: return "6M"
+        case 70000...70500: return "4M"
         case 144000...148000: return "2M"
+        case 222000...225000: return "1.25M"
         case 430000...450000: return "70CM"
+        case 1240000...1300000: return "23CM"
         default:
-            if khz < 1000 {
-                return bandFromFrequencyKHz(khz * 1000)
-            }
             return ""
         }
     }

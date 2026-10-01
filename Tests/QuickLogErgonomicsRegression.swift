@@ -14,6 +14,7 @@ struct QuickLogErgonomicsRegression {
     static func main() {
         testModeSubmodeConflictResolution()
         testSmartFrequencyInference()
+        testMicrowaveFrequencyInMHz()
         testQuickLogDraftStateTransitions()
         testTimeOffAndDates()
         print("All Quick Log ergonomics regression tests passed successfully.")
@@ -52,6 +53,17 @@ struct QuickLogErgonomicsRegression {
         let ssbSubmodes = AmateurBandPlan.submodes(forMode: "SSB")
         precondition(ssbSubmodes.contains("USB") && ssbSubmodes.contains("LSB") && !ssbSubmodes.contains("FT8"),
                      "SSB submodes must not include FT8")
+    }
+
+    private static func testMicrowaveFrequencyInMHz() {
+        // kHz entries keep working as before
+        precondition(AmateurBandPlan.normalizedMHz("14074") == 14.074, "14074 kHz is 20m")
+        precondition(AmateurBandPlan.normalizedMHz("3500") == 3.5, "3500 kHz stays on 80m")
+        precondition(AmateurBandPlan.normalizedMHz("10120") == 10.12, "10120 kHz stays on 30m")
+        // Microwave frequencies typed in MHz are no longer divided by 1000
+        precondition(AmateurBandPlan.band(for: "1296.2") == "23cm", "1296.2 MHz is 23cm")
+        precondition(AmateurBandPlan.band(for: "2400.1") == "13cm", "2400.1 MHz is 13cm")
+        precondition(AmateurBandPlan.band(for: "10368.1") == "3cm", "10368.1 MHz is 3cm")
     }
 
     private static func testSmartFrequencyInference() {

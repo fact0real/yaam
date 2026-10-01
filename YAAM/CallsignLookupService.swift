@@ -256,11 +256,9 @@ actor CallsignLookupService {
     }
 
     private func formBody(_ values: [String: String]) -> Data? {
-        var components = URLComponents()
-        components.queryItems = values.sorted(by: { $0.key < $1.key }).map {
+        FormURLEncoding.body(values.sorted(by: { $0.key < $1.key }).map {
             URLQueryItem(name: $0.key, value: $0.value)
-        }
-        return components.percentEncodedQuery?.data(using: .utf8)
+        })
     }
 
     private func xmlValue(_ tag: String, in xml: String) -> String? {

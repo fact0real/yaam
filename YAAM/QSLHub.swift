@@ -195,7 +195,7 @@ actor QSLHubClient {
             formatter.dateFormat = "yyyyMMdd"
             items.append(URLQueryItem(name: "RcvdSince", value: formatter.string(from: since)))
         }
-        components.queryItems = items
+        FormURLEncoding.setQuery(items, on: &components)
         guard let url = components.url else { throw QSLHubError.invalidResponse("Unable to create the eQSL Inbox request.") }
         let (data, response) = try await session.data(from: url)
         let text = Self.responseText(data)
@@ -233,7 +233,7 @@ actor QSLHubClient {
                 URLQueryItem(name: "startday", value: String(date.dropFirst(6).prefix(2)))
             ]
         }
-        components.queryItems = items
+        FormURLEncoding.setQuery(items, on: &components)
         guard let url = components.url else {
             throw QSLHubError.invalidResponse("Unable to create the Club Log LoTW-state request.")
         }
@@ -395,9 +395,7 @@ actor QSLHubClient {
     }
 
     private static func formBody(_ items: [URLQueryItem]) -> Data? {
-        var components = URLComponents()
-        components.queryItems = items
-        return components.percentEncodedQuery?.data(using: .utf8)
+        FormURLEncoding.body(items)
     }
 
     private static func multipart(fields: [String: String], fileName: String, fileData: Data, boundary: String) -> Data {

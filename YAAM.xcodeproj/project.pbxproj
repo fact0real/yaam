@@ -9,10 +9,12 @@
 /* Begin PBXBuildFile section */
 		A18000000000000000000001 /* FT8Codec in Frameworks */ = {isa = PBXBuildFile; productRef = A18000000000000000000004 /* FT8Codec */; };
 		A18000000000000000000002 /* FT8808Engine in Frameworks */ = {isa = PBXBuildFile; productRef = A18000000000000000000005 /* FT8808Engine */; };
+		A19000000000000000000001 /* ham_tracker.py in Resources */ = {isa = PBXBuildFile; fileRef = A19000000000000000000002 /* ham_tracker.py */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		4C688219301A0511009C4F92 /* YAAM.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = YAAM.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A19000000000000000000002 /* ham_tracker.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = ham_tracker.py; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -40,6 +42,7 @@
 			isa = PBXGroup;
 			children = (
 				4C68821B301A0511009C4F92 /* YAAM */,
+				A19000000000000000000002 /* ham_tracker.py */,
 				4C68821A301A0511009C4F92 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -121,6 +124,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A19000000000000000000001 /* ham_tracker.py in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -265,7 +269,7 @@
 				CODE_SIGN_ENTITLEMENTS = YAAM/YAAM.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 148;
+				CURRENT_PROJECT_VERSION = 161;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_FILE_ACCESS_DOWNLOADS_FOLDER = readwrite;
 				ENABLE_INCOMING_NETWORK_CONNECTIONS = YES;
@@ -281,16 +285,18 @@
 				ENABLE_RESOURCE_ACCESS_USB = NO;
 				ENABLE_USER_SELECTED_FILES = readwrite;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = AppInfo.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = YAAM;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "YAAM needs radio receive audio to decode FT8 signals.";
+				INFOPLIST_KEY_NSScreenCaptureUsageDescription = "YAAM captures system playback audio to decode WebSDR FT8 signals without using the microphone.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 15.6;
-				MARKETING_VERSION = 1.35.5;
+				MARKETING_VERSION = 1.37.11;
 				PRODUCT_BUNDLE_IDENTIFIER = ASIS.YAAM;
 				PRODUCT_NAME = YAAM;
 				REGISTER_APP_GROUPS = YES;
@@ -313,7 +319,7 @@
 				CODE_SIGN_ENTITLEMENTS = YAAM/YAAM.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 148;
+				CURRENT_PROJECT_VERSION = 161;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_FILE_ACCESS_DOWNLOADS_FOLDER = readwrite;
 				ENABLE_INCOMING_NETWORK_CONNECTIONS = YES;
@@ -329,16 +335,18 @@
 				ENABLE_RESOURCE_ACCESS_USB = NO;
 				ENABLE_USER_SELECTED_FILES = readwrite;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = AppInfo.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = YAAM;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "YAAM needs radio receive audio to decode FT8 signals.";
+				INFOPLIST_KEY_NSScreenCaptureUsageDescription = "YAAM captures system playback audio to decode WebSDR FT8 signals without using the microphone.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 15.6;
-				MARKETING_VERSION = 1.35.5;
+				MARKETING_VERSION = 1.37.11;
 				PRODUCT_BUNDLE_IDENTIFIER = ASIS.YAAM;
 				PRODUCT_NAME = YAAM;
 				REGISTER_APP_GROUPS = YES;

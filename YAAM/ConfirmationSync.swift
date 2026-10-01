@@ -243,7 +243,7 @@ nonisolated enum ConfirmationDownloadService {
         if !normalizedOwnCallsign.isEmpty {
             queryItems.append(URLQueryItem(name: "qso_owncall", value: normalizedOwnCallsign))
         }
-        components.queryItems = queryItems
+        FormURLEncoding.setQuery(queryItems, on: &components)
         guard let url = components.url else { throw ConfirmationDownloadError.invalidEndpoint }
 
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: 90)
@@ -442,9 +442,7 @@ nonisolated enum ConfirmationDownloadService {
     }
 
     private static func formBody(_ items: [URLQueryItem]) -> Data? {
-        var components = URLComponents()
-        components.queryItems = items
-        return components.percentEncodedQuery?.data(using: .utf8)
+        FormURLEncoding.body(items)
     }
 
     private static func formValues(_ raw: String) -> [String: String] {

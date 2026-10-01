@@ -427,7 +427,7 @@ actor ClubLogAwardsService {
         if !password.isEmpty { items.append(URLQueryItem(name: "password", value: password)) }
 
         var components = URLComponents(string: "https://clublog.org/json_dxccchart.php")!
-        components.queryItems = items
+        FormURLEncoding.setQuery(items, on: &components)
 
         guard let url = components.url else {
             throw ClubLogAwardsError.networkError("Could not build request URL")

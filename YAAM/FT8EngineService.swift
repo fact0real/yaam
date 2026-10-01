@@ -542,6 +542,42 @@ final class FT8EngineService: ObservableObject {
         contestEngine.configureContest(type: contestEngine.contestType, myCall: myCall, myGrid: myGrid)
     }
 
+    /// Uses the already connected IC-7300MK2 path and the operator's established
+    /// TX parity/audio routing. Receive-side WebSDR timestamps are not used for TX.
+    func prepareWebSDRReply(_ text: String, targetCallsign: String, grid: String,
+                            dialHz: UInt64, radio: IcomNetworkRadio,
+                            usbOutputUID: String?) -> String? {
+        guard operatingProtocol == .ft8 else { return "Select FT8 in Radio & Digital first." }
+        guard !isTransmitScheduled else {
+            return "A transmission is already queued; finish or cancel it first."
+        }
+        let lanReady = radio.state.isConnected && radio.selectedModel == .ic7300MK2
+        let usbReady = IcomUSBRadioDriver.shared.isConnected &&
+            IcomUSBRadioDriver.shared.model == .ic7300MK2
+        if audioPath == .icomLAN && lanReady || (!usbReady && lanReady) {
+            audioPath = .icomLAN
+            activeIcom = radio
+        } else if usbReady {
+            let uid = cleanDevice(inputDevice: usbOutputUID) ?? activeOutputDevice
+            refreshAudioDevices()
+            guard let uid, outputDevices.contains(where: { $0.uid == uid }) else {
+                return "Choose the IC-7300MK2 USB Audio output in FT8 Station before transmitting."
+            }
+            audioPath = .icomUSB
+            activeOutputDevice = uid
+        } else {
+            return "Connect and select IC-7300MK2 over Icom LAN or USB CI-V in FT8 Station."
+        }
+        configureStation(callsign: targetCallsign, grid: grid)
+        dialFrequencyHz = dialHz
+        autoSequenceEnabled = false
+        txText = text.uppercased()
+        status = "WebSDR reply prepared. Check TX parity and arm TX before sending."
+        return nil
+    }
+
+    var isTransmitScheduled: Bool { transmitTask != nil }
+
     func setOperatingProtocol(_ proto: FT8Protocol) {
         guard operatingProtocol != proto else { return }
         operatingProtocol = proto

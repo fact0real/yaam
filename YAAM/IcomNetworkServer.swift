@@ -838,10 +838,10 @@ nonisolated final class IcomNetworkServer: @unchecked Sendable {
                 let subCmd = payload[0]
                 let bcd: [UInt8]
                 switch subCmd {
-                case 0x01: bcd = getSMeterBCD?() ?? [0x00, 0x80] // S-Meter
-                case 0x02: bcd = getPowerMeterBCD?() ?? [0x00, 0x00] // Po
-                case 0x11: bcd = getSWRMeterBCD?() ?? [0x00, 0x10] // SWR
-                case 0x12: bcd = getALCMeterBCD?() ?? [0x00, 0x00] // ALC
+                case 0x02: bcd = getSMeterBCD?() ?? [0x00, 0x80] // S-Meter
+                case 0x11: bcd = getPowerMeterBCD?() ?? [0x00, 0x00] // Po
+                case 0x12: bcd = getSWRMeterBCD?() ?? [0x00, 0x10] // SWR
+                case 0x13: bcd = getALCMeterBCD?() ?? [0x00, 0x00] // ALC
                 case 0x15: bcd = [0x00, 0x00] // COMP
                 case 0x16: bcd = [0x01, 0x38] // VD (13.8 V)
                 case 0x17: bcd = [0x00, 0x50] // Id (0.5 A)

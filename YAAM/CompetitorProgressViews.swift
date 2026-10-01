@@ -328,6 +328,7 @@ struct MultiStationConfirmedProgressChart: View {
 // MARK: - Competitor Velocity & Head-to-Head Comparison Table
 
 struct CompetitorVelocityComparisonTable: View {
+    @EnvironmentObject var appState: AppState
     let ownerCallsign: String
     let ownerConfirmedCount: Int
     let ownerMonthlyRate: Double
@@ -538,6 +539,16 @@ struct CompetitorVelocityComparisonTable: View {
 
             HStack(spacing: 4) {
                 Button {
+                    appState.openHamTracker(callsign: comp.callsign)
+                } label: {
+                    Image(systemName: "waveform.badge.magnifyingglass")
+                        .font(.caption2)
+                        .foregroundStyle(.cyan)
+                }
+                .buttonStyle(.plain)
+                .help("Track \(comp.callsign)'s live digital transmissions (FT8/FT4)")
+
+                Button {
                     competitorStore.toggleVisibility(id: comp.id)
                 } label: {
                     Image(systemName: comp.isEnabled ? "eye.fill" : "eye.slash")
@@ -567,7 +578,7 @@ struct CompetitorVelocityComparisonTable: View {
                 .buttonStyle(.plain)
                 .help("Delete competitor")
             }
-            .frame(width: 65, alignment: .trailing)
+            .frame(width: 85, alignment: .trailing)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 7)

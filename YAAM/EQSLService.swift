@@ -169,12 +169,12 @@ public final class EQSLService: ObservableObject {
             throw URLError(.badURL)
         }
 
-        components.queryItems = [
+        FormURLEncoding.setQuery([
             URLQueryItem(name: "UserName", value: username),
             URLQueryItem(name: "Password", value: password),
             URLQueryItem(name: "RcvdSince", value: "20000101"),
             URLQueryItem(name: "XML", value: "0")
-        ]
+        ], on: &components)
 
         guard let url = components.url else { throw URLError(.badURL) }
 
@@ -225,7 +225,7 @@ public final class EQSLService: ObservableObject {
         let minute = String(cleanTime.suffix(2))
 
         var components = URLComponents(string: "https://www.eqsl.cc/qslcard/GeteQSL.cfm")!
-        components.queryItems = [
+        FormURLEncoding.setQuery([
             URLQueryItem(name: "SubMode", value: mode),
             URLQueryItem(name: "UserName", value: username),
             URLQueryItem(name: "Password", value: password),
@@ -235,7 +235,7 @@ public final class EQSLService: ObservableObject {
             URLQueryItem(name: "QSODay", value: day),
             URLQueryItem(name: "QSOHour", value: hour),
             URLQueryItem(name: "QSOMinute", value: minute)
-        ]
+        ], on: &components)
 
         guard let imageFetchURL = components.url else {
             throw URLError(.badURL)
@@ -327,7 +327,7 @@ public final class EQSLService: ObservableObject {
         if let nick = qthNickname, !nick.isEmpty {
             queryItems.append(URLQueryItem(name: "QTHNickname", value: nick))
         }
-        components.queryItems = queryItems
+        FormURLEncoding.setQuery(queryItems, on: &components)
 
         guard let inboxURL = components.url else { throw URLError(.badURL) }
 

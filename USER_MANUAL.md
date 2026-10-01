@@ -144,6 +144,7 @@ Whenever you add a new location or renew a certificate inside the official TQSL 
 
 ### 2.6 Zero-Click Cloud Upload Background Daemon
 Enable **Zero-Click LoTW Upload** in settings. Whenever a QSO is finalized in Quick Log or via FT8, the background daemon bundles the contact, cryptographically signs it with TQSL, and uploads it to ARRL servers without requiring manual button clicks. Successfully uploaded QSOs are marked with `LOTW_QSL_SENT = Y`.
+* **Outbox:** Pending uploads wait while the Touch ID credential vault is locked. Network failures retry automatically for up to seven days; older items remain in the outbox for a manual **Upload Outbox Now** attempt. Rejected or unconfigured services also retain their QSO and wait for a manual retry after settings are corrected. The outbox holds at most 500 upload requests and warns when an older request is displaced.
 
 ### 2.7 Bi-Directional Reconciliation in QSL Hub
 In the **QSL Hub** workspace, click **Fetch LoTW Confirmations** to download matched confirmations. The reconciliation engine uses a 30-minute matching window for time drift tolerance. Verified contacts turn bright green in your log table with `LOTW_QSL_RCVD = Y`.
@@ -262,6 +263,7 @@ A dynamic matrix displays worked vs. needed Maidenhead field multipliers (e.g. J
 
 ### 8.4 Pre-Submission Validation & Cabrillo 3.0 Generation
 Runs syntax and scoring checks before generating the final Cabrillo 3.0 `.log` file, ensuring error-free robot acceptance.
+From 50 MHz upward, the Cabrillo frequency field uses a band designator such as `50`, `144`, or `1.2G`; lower frequencies use kHz.
 
 ### 8.5 Interactive Super Check Partial (SCP) & Contest Intelligence HUD
 As you type callsigns into QuickLog, the CW Keyer, or the CW Pileup Simulator (after 2 or more characters), YAAM queries the bundled `Master.scp` database in real time with sub-millisecond latency.
@@ -695,6 +697,56 @@ Located under **Operator Desk → Operating → Portable** (or accessible by sea
 
 ---
 
+## 27. Digital Callsign Monitor & Real-Time Activity Tracker (HamTracker)
+
+Located under **Operator Desk → DX Activity → Digital Callsign Monitor** (or accessible via shortcut from Quick Log, Call Intelligence, or Competitor Watch), the **Digital Callsign Monitor (HamTracker)** is a workstation-grade tracking console based on the `ham_tracker.py` engine. It monitors real-time digital radio transmissions (FT8, FT4, JS8) and contact history for any amateur radio callsign worldwide.
+
+### 27.1 Real-Time PSKReporter MQTT 3.1.1 Stream
+* **Sub-Second Transmission Detection:** Directly connects to `mqtt.pskreporter.info:1883` over native Apple `Network.framework` TCP sockets, subscribing to `pskr/filter/v2/+/+/[CALLSIGN]/#`.
+* **Zero Delay:** Catches new FT8/FT4 transmissions as soon as listening stations decode them, bypassing REST polling delays.
+* **Instant Sliding-Window Catch-Up:** Automatically fetches historical reports from the PSKReporter REST API for the past 15 to 120 minutes so you never wait with an empty screen.
+* **Flashing Live Transmission HUD:** Displays a pulsing neon `TRANSMITTING NOW` banner with subtle audio alert chimes when a transmission is detected within the current 15-second cycle.
+
+### 27.2 FT8 15-Second Cycle Synchronization & Cadence Radar
+* **Even vs. Odd Cycle Determination:** Analyzes timestamp seconds (`t_tx % 60`) across spots to classify whether the target station transmits on **Even cycles (:00 / :30)** or **Odd cycles (:15 / :45)**.
+* **Real-Time Countdown Ring:** Synchronized circular countdown gauge displaying seconds remaining in the current 15s FT8 slot.
+* **Smart Operating Advisory:** Automatically advises the optimal calling cycle (e.g. *"Target transmits on EVEN; Call on ODD (:15 / :45)"*) to eliminate self-interference and guarantee high QSO rates.
+
+### 27.3 360-Degree Polar Radiation Radar
+* **Antenna Pattern Visualization:** Plots reporting stations at their exact great-circle bearing azimuth (0° to 360°) and distance (up to 16,000 km) from the target transmitter.
+* **SNR Heatmap Coding:** Points are color-coded by reception strength: Green for positive SNR, Cyan for -1 to -10 dB, Orange for -11 to -18 dB, and Purple for weak signals (<-18 dB).
+* **Interactive Inspection:** Hovering or clicking any spotter displays receiver callsign, country flag, grid locator, signal strength, and distance.
+
+### 27.4 DX Cluster Spot History & Telnet Integration
+* **Automated Cluster Query:** Directly queries public DX cluster nodes (e.g. `dxc.w3lpl.net:7373`) using `sh/dx 15 [CALLSIGN]` to retrieve recent cluster spots, frequencies, spotter remarks, and Zulu timestamps.
+
+### 27.5 Station Automation & Cross-Desk Integration
+* **1-Click QSY Radio (CAT):** Instantly commands connected transceivers via Hamlib `rigctld`, FLRig, or TCI to tune to the monitored frequency.
+* **1-Click Rotator Steering:** Directs your antenna rotator to point directly at the target station's bearing.
+* **Quick Log Transfer:** Pre-fills the Quick Log HUD with the target callsign, band, frequency, and mode for effortless logging.
+* **Diagnostic Python CLI Runner:** Embedded terminal runner allowing one-click execution of the original `ham_tracker.py` script for verification and terminal output inspection.
+
+### 27.6 Active QSO Partner Detection (Cross-Cycle Frequency Correlation)
+* **Possible Partner Inference:** YAAM monitors full-band PSK Reporter activity via MQTT on the active band and mode (e.g. `pskr/filter/v2/15m/FT8/#`) to suggest stations that may be exchanging messages with the target.
+* **Cross-Cycle Cadence & Co-Channel Frequency Matching:** Analyzes stations reported within $\pm 45\text{ Hz}$ on complementary/opposite cycle parity (Odd vs. Even). Alternating reports are correlated as candidate partners; the spots do not contain the exchanged message text.
+* **Spot Correlation Score:** Computes a ranking from repeated timing and frequency matches. This score cannot confirm message text or a completed QSO.
+* **Dedicated Hero Partner HUD Banner:** Prominently displays the detected QSO partner station with country flag, DXCC entity, Maidenhead grid, frequency offset ($\Delta\text{Hz}$), matched exchanges counter, inter-station geodesic distance, and direct path bearing.
+* **Partner Actions:** Open WebSDR receive to check decoded messages, inspect a partner in Call Intelligence, or switch the active target (`Switch Tracker`).
+* **Live Radar QSO Vector:** Plots a glowing dashed link vector on the 360° Polar Radar between the Target transmitter and the active Partner, complete with a golden diamond node and callsign banner.
+* **Partners Stream Tab:** A dedicated ranked list of all correlated partner candidates with exchanges, confidence meters, and context menus.
+* **CLI Partner Diagnostic:** Supports executing `python3 ham_tracker.py [CALLSIGN] --partner` with full real-time terminal output in the diagnostic sheet.
+
+### 27.7 WebSDR FT8 Receive
+* Choose **WebSDR RX · FT8** at the top of Digital Callsign Monitor for a dedicated full-width view. The active Yaam station profile supplies the initial callsign, and 20 m FT8 (14.074 MHz) is selected by default. The profile grid is shown; LM55rr is the fallback.
+* Compatible classic WebSDRs open in the background, tune FT8 USB with a roughly 3 kHz passband, and decode receiver audio without a microphone. They include DF0HTE, Twente, Utah, KFS, NA5B, both Maasbree receivers, SO8OO, DK0TE, K3FEF, Bordeaux, Paraibuna, and Poços de Caldas. Site WAV recording is a fallback when continuous audio is unavailable. Additional receiver links include TU Graz, PI4VNW, Ambientscape, and KC4MCQ; use System Audio for these other interfaces. Availability and propagation depend on each operator. Utah offers only antennas covering the selected band (10 m: servers 2, 4, and 5). Select any number of compatible receivers in **Parallel WebSDRs**, including **Select every compatible WebSDR**; adding or removing one does not restart the others. **Listen to primary receiver** optionally plays its signal. Large selections use more CPU, memory, and network bandwidth.
+* The receiver menu shows country flags. The decoded list defaults to the target callsign, groups messages by receive cycle, colors even and odd groups pale green and blue, and displays cycle times on 00/15/30/45 second boundaries. Consecutive `:15` and `:45` groups are separate odd cycles. Identical messages heard by multiple selected receivers appear once with all receiver names; a majority has a purple highlight. The flag beside the message identifies its transmitting callsign, while flags beside receiver names identify listening sites. The per-signal **dBFS** is estimated audio level, not calibrated RF SNR.
+* Automatic WebSDR audio does not use macOS Screen Recording permission. Other receiver links use **System Audio** or a virtual loopback input. System Audio permission is requested only by its explicit button. Reopen Yaam after granting it. Ad-hoc signed development builds may need a new grant after each installation.
+* Select **All** to see every decoded FT8 message or the target callsign to filter the list. Messages mentioning the target are highlighted; messages actually addressed to it are labeled separately. PSK Reporter spots remain separate from decoded radio text.
+* Yaam estimates the audio phase from decoded FT8 timing and checks the Mac clock against an Internet time response. The phase estimate is modulo 15 seconds; FT8 text cannot reveal how many whole cycles a WebSDR stream is delayed.
+* Automatic receive scans overlapping 13.5-second windows of continuous audio so both FT8 cycles can be decoded. It keeps browser audio interruptions on the timeline rather than treating short recordings as complete cycles. A fallback WAV is ignored if its audio duration differs substantially from its recording time. Late decodes and cross-receiver time alignment can add to or regroup a cycle after its first display; the cycle header indicates when collection is active.
+* Clicking a directed message addressed to the target prepares the expected next FT8 reply. Enter an actual local RF report where prompted; WebSDR dBFS cannot supply one. For IC-7300MK2 USB or LAN transmission, connect and configure that radio in FT8 Station, verify the own TX parity and audio path, arm TX, and queue the next slot explicitly. WebSDR timing alone cannot establish the opposite parity because its delay can span whole cycles. The view does not transmit or log automatically.
+
+---
+
 > **Support & Feedback:**  
 > Press `Cmd + Shift + F` anywhere within YAAM to open the feedback panel to submit suggestions, bug reports, or feature requests directly to the development team.
-

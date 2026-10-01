@@ -49,7 +49,12 @@ nonisolated enum AmateurBandPlan {
         guard let value = Double(clean), value > 0 else { return nil }
 
         if value >= 1_000_000 { return value / 1_000_000 }
-        if value >= 1_000 { return value / 1_000 }
+        if value >= 1_000 {
+            let kHzReading = value / 1_000
+            // Microwave frequencies typed in MHz (1296.2 for 23 cm) are not a band when read as kHz
+            if band(forMHz: kHzReading) == nil, band(forMHz: value) != nil { return value }
+            return kHzReading
+        }
         return value
     }
 

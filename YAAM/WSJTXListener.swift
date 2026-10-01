@@ -898,7 +898,8 @@ nonisolated public enum WSJTXPacketParser {
             var report = ""
             if tokens.count >= 3 {
                 let third = tokens[2].uppercased()
-                if isMaidenheadGrid(third) {
+                // "RR73" ends a QSO; it is also a valid-looking locator, so never take it as a grid
+                if isMaidenheadGrid(third) && third != "RR73" {
                     grid = third
                 } else {
                     report = third

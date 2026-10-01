@@ -515,13 +515,9 @@ public enum LogExportEngine {
 
     private static func cabrilloFrequency(freqStr: String, band: String) -> String {
         if let mhz = Double(freqStr.trimmingCharacters(in: .whitespacesAndNewlines)), mhz > 0 {
-            if mhz >= 1_000 {
-                let ghz = mhz / 1_000
-                if ghz >= 10 { return "\(Int(ghz.rounded()))G" }
-                return String(format: "%.1fG", ghz)
-            }
-            return String(Int((mhz * 1_000).rounded()))
+            return CabrilloFrequency.field(mhz: mhz)
         }
+        if let designator = CabrilloFrequency.designator(forBand: band) { return designator }
         switch band.uppercased() {
         case "160M": return "1850"
         case "80M": return "3550"
@@ -529,7 +525,6 @@ public enum LogExportEngine {
         case "20M": return "14050"
         case "15M": return "21050"
         case "10M": return "28050"
-        case "6M": return "50050"
         default: return "14000"
         }
     }

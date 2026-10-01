@@ -2705,6 +2705,7 @@ class AppState: NSObject, ObservableObject {
 
     func deleteSelectedRecords() {
         guard !selectedRecordIDs.isEmpty else { return }
+        guard createDestructiveCheckpointIfNeeded(reason: "Before deleting QSO records") else { return }
         let idsToDelete = selectedRecordIDs
         let count = idsToDelete.count
         qsoRecords.removeAll { idsToDelete.contains($0.id) }
@@ -2713,7 +2714,11 @@ class AppState: NSObject, ObservableObject {
         AuditLogger.shared.log(action: "DELETE_QSOS", details: "Deleted \(count) selected QSO record(s)", station: currentStationCallsign)
         appendLog("Deleted \(count) selected QSO record(s).")
         objectWillChange.send()
-        autoSaveActiveWorkspace()
+        // Like deleteRecord(id:): without replaceMissingRecords the database keeps the deleted rows
+        autoSaveActiveWorkspace(
+            allowEmptyReplacement: qsoRecords.isEmpty,
+            replaceMissingRecords: true
+        )
     }
 
     func exportSelectedRecordsAs() {
@@ -5074,8 +5079,8 @@ class AppState: NSObject, ObservableObject {
         }
         appendLog("☁️ Connecting to ARRL LoTW servers for Full Historical Cloud Download...")
         
-        guard let encodedUser = lotwUser.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
-              let encodedPass = lotwPass.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+        guard let encodedUser = FormURLEncoding.encodeValue(lotwUser),
+              let encodedPass = FormURLEncoding.encodeValue(lotwPass),
               let endpoint = URL(string: "https://lotw.arrl.org/lotwuser/lotwreport.adi?login=\(encodedUser)&password=\(encodedPass)&qso_query=1&qso_qsosince=1900-01-01") else {
             self.isLoading = false
             self.appendLog("Error: Invalid LoTW query URL.")
@@ -6101,11 +6106,11 @@ class AppState: NSObject, ObservableObject {
         guard !username.isEmpty, !password.isEmpty else { return nil }
 
         guard var components = URLComponents(string: "https://www.hamqth.com/xml.php") else { return nil }
-        components.queryItems = [
+        FormURLEncoding.setQuery([
             URLQueryItem(name: "u", value: username),
             URLQueryItem(name: "p", value: password),
             URLQueryItem(name: "prg", value: "YAAM")
-        ]
+        ], on: &components)
         guard let url = components.url else { return nil }
 
         do {
@@ -8182,8 +8187,8 @@ class AppState: NSObject, ObservableObject {
             
             if syncLoTW {
                 group.enter()
-                if let encodedUser = lotwUser.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
-                   let encodedPass = lotwPass.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+                if let encodedUser = FormURLEncoding.encodeValue(lotwUser),
+                   let encodedPass = FormURLEncoding.encodeValue(lotwPass),
                    let lotwEndpoint = URL(string: "https://lotw.arrl.org/lotwuser/lotwreport.adi?login=\(encodedUser)&password=\(encodedPass)&qso_query=1&qso_qslsince=\(lotwSinceDateString)") {
                     
                     var request = URLRequest(url: lotwEndpoint, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: 45)

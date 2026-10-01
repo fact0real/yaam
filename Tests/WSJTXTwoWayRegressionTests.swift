@@ -214,6 +214,11 @@ struct WSJTXTwoWayRegressionTests {
         precondition(r7.caller == "DL1ABC", "Expected caller DL1ABC, got \(r7.caller)")
         precondition(r7.report == "73", "Expected report 73, got \(r7.report)")
 
+        // 8. RR73 closes a QSO; it is not the locator RR73
+        let r8 = WSJTXPacketParser.parseMessageTokens("EP2LMA DL1ABC RR73")
+        precondition(r8.grid.isEmpty, "RR73 must not be read as a grid, got \(r8.grid)")
+        precondition(r8.report == "RR73", "Expected report RR73, got \(r8.report)")
+
         print("  ✓ Message token parsing verified.")
     }
 

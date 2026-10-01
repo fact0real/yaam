@@ -71,6 +71,8 @@ struct OperatorDeskView: View {
             return AnyView(GlobeAndGridTrackerWorkspaceView())
         case .signalFootprint:
             return AnyView(SignalFootprintWorkspaceView())
+        case .hamTracker:
+            return AnyView(HamTrackerWorkspaceView())
         case .bandmap:
             return AnyView(BandmapView())
         case .cwKeyer, .cwAcademy, .cwReference, .cwDecoder, .cwPileup, .cwHardware:

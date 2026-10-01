@@ -11,6 +11,7 @@ struct PendingCloudUploadItem: Codable, Identifiable, Equatable {
     var attemptCount: Int
     var lastAttemptDate: Date?
     var lastErrorMessage: String?
+    var pausedServices: [String]?
     let enqueuedAt: Date
 }
 
@@ -28,6 +29,7 @@ struct PendingQueueCredentialRegression {
         let dec = JSONDecoder(); dec.dateDecodingStrategy = .iso8601
         let items = try dec.decode([PendingCloudUploadItem].self, from: legacy)
         precondition(items.count == 1 && items[0].attemptCount == 2 && items[0].pendingServices == ["QRZ"])
+        precondition(items[0].pausedServices == nil, "Older queue files must decode without pausedServices")
         // scrub trigger used by loadPendingQueueFromDisk
         precondition(legacy.range(of: Data("qrzKeyOverride".utf8)) != nil)
 

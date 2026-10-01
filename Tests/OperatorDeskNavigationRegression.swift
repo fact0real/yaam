@@ -31,7 +31,8 @@ struct OperatorDeskNavigationRegression {
         }
 
         // Corrupt, removed, or cross-group preferences must never land on an unrelated tool.
-        precondition(OperatorDeskDestination.resolve(legacySection: 30) == .quickLog)
+        precondition(OperatorDeskDestination.resolve(legacySection: 30) == .hamTracker)
+        precondition(OperatorDeskDestination.resolve(legacySection: 999) == .quickLog)
         precondition(OperatorDeskDestination.resolve(legacySection: -1) == .quickLog)
         precondition(OperatorDeskDestination.resolve(legacySection: 14, cwSection: 99) == .cwKeyer)
         precondition(OperatorDeskGroup.cw.restoredDestination("deleted-tool") == .cwKeyer)
@@ -48,6 +49,8 @@ struct OperatorDeskNavigationRegression {
         precondition(OperatorDeskDestination.clubs.matches("Clubs"))
         precondition(OperatorDeskDestination.multiRigFT8.matches("Multi-Rig Cluster"))
         precondition(OperatorDeskDestination.digitalSuite.matches("Digital Modes Suite"))
+        precondition(OperatorDeskDestination.hamTracker.matches("HamTracker"))
+        precondition(OperatorDeskDestination.hamTracker.matches("PSKReporter"))
         precondition(!OperatorDeskDestination.ft8.matches("zzzz no match"))
         precondition(destinations.allSatisfy { $0.matches("  ") })
         print("Operator Desk regression passed: 26 legacy routes, CW shortcuts, \(destinations.count) unique tools, restoration, and search aliases.")

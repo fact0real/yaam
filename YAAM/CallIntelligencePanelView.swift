@@ -384,6 +384,24 @@ struct CallIntelligencePanelView: View {
             .buttonStyle(.plain)
             .help("Open \(report.callsign) profile on HamQTH.com")
 
+            // Live Digital Track (HamTracker) Button
+            Button {
+                appState.openHamTracker(callsign: report.callsign)
+            } label: {
+                HStack(spacing: 3) {
+                    Image(systemName: "waveform.badge.magnifyingglass")
+                        .font(.system(size: 9.5))
+                    Text("HamTracker")
+                        .font(.system(size: 10.5, weight: .bold))
+                }
+                .padding(.horizontal, 7)
+                .padding(.vertical, 4)
+                .background(Color.cyan.opacity(0.16), in: RoundedRectangle(cornerRadius: 6))
+                .foregroundStyle(.cyan)
+            }
+            .buttonStyle(.plain)
+            .help("Monitor \(report.callsign)'s live digital transmissions (FT8/FT4) via PSKReporter MQTT & Cluster")
+
             // QSL Photo & Route Inspector Button
             if report.imageURL != nil || report.qslManager != nil || (report.lookupData?.address1.isEmpty == false) {
                 Button {

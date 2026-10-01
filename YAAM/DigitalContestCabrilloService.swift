@@ -307,9 +307,12 @@ public enum DigitalContestCabrilloService {
 
     public static func formatFrequencyKHz(frequencyHz: UInt64, band: String) -> String {
         if frequencyHz > 0 {
+            let mhz = Double(frequencyHz) / 1_000_000
+            if mhz >= 50 { return CabrilloFrequency.field(mhz: mhz) }
             let khz = Int(frequencyHz / 1000)
             return String(khz)
         }
+        if let designator = CabrilloFrequency.designator(forBand: band) { return designator }
         let b = band.lowercased().replacingOccurrences(of: "m", with: "").trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
         switch b {
         case "160": return "1840"
@@ -318,7 +321,6 @@ public enum DigitalContestCabrilloService {
         case "20": return "14074"
         case "15": return "21074"
         case "10": return "28074"
-        case "6": return "50313"
         default: return "14074"
         }
     }
