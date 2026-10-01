@@ -1513,6 +1513,8 @@ struct VisualMetricCard: View {
                 Text(title.uppercased())
                     .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .frame(height: 24, alignment: .topLeading)
 
                 Text(value)
                     .font(.system(size: 14, weight: .heavy, design: .rounded))
@@ -1526,6 +1528,7 @@ struct VisualMetricCard: View {
             Spacer()
         }
         .padding(8)
+        .frame(maxWidth: .infinity, minHeight: 84, maxHeight: 84, alignment: .leading)
         .background(Color(NSColor.controlBackgroundColor))
         .cornerRadius(8)
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.15), lineWidth: 1))

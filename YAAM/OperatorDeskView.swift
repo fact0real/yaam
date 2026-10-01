@@ -654,9 +654,11 @@ private struct QuickLogPanel: View {
                     }
 
                     HStack(spacing: 6) {
-                        TextField("DX Callsign (Space to advance)", text: $appState.quickLogDraft.callsign)
+                        TextField("DX callsign", text: $appState.quickLogDraft.callsign)
                             .textFieldStyle(.roundedBorder)
-                            .font(.system(size: 22, weight: .bold, design: .monospaced))
+                            .font(.system(size: 18, weight: .semibold, design: .monospaced))
+                            .accessibilityLabel("Callsign")
+                            .help("Enter a DX callsign. Press Space to advance to the next field.")
                             .focused($focusedField, equals: .callsign)
                             .onSubmit { moveAfterCallsign() }
                             .overlay(
@@ -2113,36 +2115,51 @@ private struct DXClusterPanel: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            clusterToolbar
-            Divider()
-            smartBanners
-            columnHeader
-            Divider()
+        GeometryReader { geometry in
+            // The outer scroll also keeps filters reachable in short windows.
+            ScrollView {
+                VStack(spacing: 0) {
+                    clusterToolbar
+                    Divider()
+                    smartBanners
 
-            if client.spots.isEmpty && client.pausedBufferCount == 0 {
-                ContentUnavailableView(
-                    client.state.isConnected ? "Waiting for DX Spots" : "DX Cluster Offline",
-                    systemImage: "dot.radiowaves.left.and.right",
-                    description: Text(client.lastMessage)
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if filteredSpots.isEmpty {
-                ContentUnavailableView.search(text: searchText.isEmpty ? needFilter : searchText)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                ScrollView {
-                    LazyVStack(spacing: 0) {
-                        ForEach(filteredSpots) { spot in
-                            spotRow(spot)
+                    // Spot columns have fixed meanings and scroll together with their header.
+                    ScrollView(.horizontal) {
+                        VStack(spacing: 0) {
+                            columnHeader
                             Divider()
+                            if client.spots.isEmpty && client.pausedBufferCount == 0 {
+                                ContentUnavailableView(
+                                    client.state.isConnected ? "Waiting for DX Spots" : "DX Cluster Offline",
+                                    systemImage: "dot.radiowaves.left.and.right",
+                                    description: Text(client.lastMessage)
+                                )
+                                .frame(width: geometry.size.width)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                            } else if filteredSpots.isEmpty {
+                                ContentUnavailableView.search(text: searchText.isEmpty ? needFilter : searchText)
+                                    .frame(width: geometry.size.width)
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                            } else {
+                                ScrollView {
+                                    LazyVStack(spacing: 0) {
+                                        ForEach(filteredSpots) { spot in
+                                            spotRow(spot)
+                                            Divider()
+                                        }
+                                    }
+                                }
+                            }
                         }
+                        .frame(width: max(1160, geometry.size.width))
                     }
-                }
-            }
+                    .frame(height: max(240, geometry.size.height - 180))
 
-            Divider()
-            statusBar
+                    Divider()
+                    statusBar
+                }
+                .frame(minHeight: geometry.size.height, alignment: .top)
+            }
         }
         .onAppear {
             rebuildWorkIndex()
@@ -2178,7 +2195,7 @@ private struct DXClusterPanel: View {
     // MARK: - Toolbar
 
     private var clusterToolbar: some View {
-        HStack(spacing: 8) {
+        WrappingControlsLayout(spacing: 8) {
             connectionButton
 
             // Pause / Resume Display button
@@ -2202,7 +2219,6 @@ private struct DXClusterPanel: View {
 
             searchControl
 
-            Spacer()
 
             // Quick Actions
             Button {
@@ -2612,7 +2628,7 @@ private struct DXClusterPanel: View {
             Text("All Bands").tag("All")
             ForEach(AmateurBandPlan.commonBands, id: \.self) { Text($0).tag($0) }
         }
-        .frame(width: 110)
+        .frame(width: 155)
     }
 
     private var modePicker: some View {
@@ -2623,7 +2639,7 @@ private struct DXClusterPanel: View {
             Text("SSB Only").tag("SSB")
             Text("Digital Only").tag("Digital")
         }
-        .frame(width: 130)
+        .frame(width: 165)
     }
 
     private var needPicker: some View {
@@ -2634,7 +2650,7 @@ private struct DXClusterPanel: View {
             Text("Watchlist").tag("Watchlist")
             Text("LoTW Active").tag("LoTW Active")
         }
-        .frame(width: 125)
+        .frame(width: 165)
     }
 
     private var distancePicker: some View {
@@ -2644,7 +2660,7 @@ private struct DXClusterPanel: View {
             Text("< 2,500 km").tag(2500.0)
             Text("< 5,000 km").tag(5000.0)
         }
-        .frame(width: 110)
+        .frame(width: 190)
         .help("Filter spots by maximum distance from your station grid to the spotter")
     }
 
@@ -2657,7 +2673,7 @@ private struct DXClusterPanel: View {
             Text("4h").tag(240.0)
             Text("12h").tag(720.0)
         }
-        .frame(width: 80)
+        .frame(width: 100)
         .help("Spot Retention / Age Cutoff — only display spots heard within this time window")
     }
 
@@ -2676,7 +2692,7 @@ private struct DXClusterPanel: View {
         .padding(.vertical, 4)
         .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
         .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.25)))
-        .frame(minWidth: 160)
+        .frame(width: 220)
     }
 
     // MARK: - Table Header & Rows
@@ -2853,7 +2869,7 @@ private struct DXClusterPanel: View {
     // MARK: - Status Bar
 
     private var statusBar: some View {
-        HStack {
+        WrappingControlsLayout(spacing: 8) {
             Label(
                 client.lastMessage,
                 systemImage: client.state.isConnected ? (client.activeNodeRole == .backup ? "exclamationmark.triangle.fill" : "checkmark.circle.fill") : "info.circle"
@@ -2866,7 +2882,6 @@ private struct DXClusterPanel: View {
                     .foregroundStyle(.orange)
             }
 
-            Spacer()
 
             if lotwDB.isLoaded {
                 Text("LoTW: \(lotwDB.userCount) users")

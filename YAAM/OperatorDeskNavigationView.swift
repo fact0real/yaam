@@ -49,31 +49,16 @@ struct OperatorDeskNavigationView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: 6)], spacing: 6) {
-                ForEach(OperatorDeskGroup.allCases) { group in
-                    groupButton(group)
-                }
-
-                Button { showingFinder.toggle() } label: {
-                    VStack(spacing: 5) {
-                        Image(systemName: "square.grid.2x2")
-                            .font(.system(size: 15, weight: .medium))
-                        Text("All tools").font(.system(size: 10, weight: .medium))
-                    }
-                    .frame(width: 57, height: 52)
-                    .contentShape(RoundedRectangle(cornerRadius: 10))
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .help("Find any Operator Desk tool by name or task")
-                .accessibilityIdentifier("operatorDesk.allTools")
-                .popover(isPresented: $showingFinder, arrowEdge: .bottom) {
-                    OperatorDeskToolFinder(selection: selection) { destination in
-                        showingFinder = false
-                        select(destination)
+            HStack(alignment: .top, spacing: 10) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: 6)], spacing: 6) {
+                    ForEach(OperatorDeskGroup.allCases) { group in
+                        groupButton(group)
                     }
                 }
+                .frame(maxWidth: .infinity)
+                allToolsButton
             }
+            .frame(maxWidth: .infinity)
             .padding(.horizontal, 12)
             .padding(.vertical, 9)
 
@@ -121,6 +106,28 @@ struct OperatorDeskNavigationView: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Operator Desk navigation")
+    }
+
+    private var allToolsButton: some View {
+        Button { showingFinder.toggle() } label: {
+            VStack(spacing: 5) {
+                Image(systemName: "square.grid.2x2")
+                    .font(.system(size: 15, weight: .medium))
+                Text("All tools").font(.system(size: 10, weight: .medium))
+            }
+            .frame(width: 57, height: 52)
+            .contentShape(RoundedRectangle(cornerRadius: 10))
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+        .help("Find any Operator Desk tool by name or task")
+        .accessibilityIdentifier("operatorDesk.allTools")
+        .popover(isPresented: $showingFinder, arrowEdge: .bottom) {
+            OperatorDeskToolFinder(selection: selection) { destination in
+                showingFinder = false
+                select(destination)
+            }
+        }
     }
 
     private func groupButton(_ group: OperatorDeskGroup) -> some View {

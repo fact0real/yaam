@@ -41,17 +41,35 @@ struct ContentView: View {
     @State private var conversionBands: [String] = [ADIFConversionFilter.allBands] + ADIFConversionFilter.defaultBands
     @State private var conversionModes: [String] = [ADIFConversionFilter.allModes] + ADIFConversionFilter.defaultModes
     
+    private var stationStatusPills: some View {
+        HStack(spacing: 8) {
+            RoverModePillView()
+            StationWeatherPillView()
+        }
+        .fixedSize(horizontal: true, vertical: false)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             // MARK: - Top Global Tab Navigation Selector & Station Weather Radar HUD
-            WrappingControlsLayout(spacing: 8) {
-                TopNavigationTabBar(selectedTab: $appState.selectedTab)
-
-                HStack(spacing: 8) {
-                    RoverModePillView()
-                    StationWeatherPillView()
+            ViewThatFits(in: .horizontal) {
+                // Matching space on both sides keeps the navigation centered in the window.
+                HStack(spacing: 12) {
+                    stationStatusPills.hidden().accessibilityHidden(true)
+                    Spacer(minLength: 0)
+                    TopNavigationTabBar(selectedTab: $appState.selectedTab)
+                        .fixedSize(horizontal: true, vertical: false)
+                    Spacer(minLength: 0)
+                    stationStatusPills
                 }
-                .fixedSize(horizontal: true, vertical: false)
+
+                VStack(spacing: 8) {
+                    TopNavigationTabBar(selectedTab: $appState.selectedTab)
+                    HStack {
+                        Spacer(minLength: 0)
+                        stationStatusPills
+                    }
+                }
             }
             .padding(.vertical, 8)
             .padding(.horizontal, 12)
@@ -1242,7 +1260,7 @@ struct TopNavigationTabBar: View {
     ]
 
     var body: some View {
-        WrappingControlsLayout(spacing: 4) {
+        WrappingControlsLayout(spacing: 4, centersRows: true) {
             ForEach(tabs) { tab in
                 TabButton(
                     item: tab,
@@ -1347,6 +1365,7 @@ struct MainWindowFrameConfigurator: NSViewRepresentable {
 /// Wrap controls at their natural widths while keeping every control inside its container.
 struct WrappingControlsLayout: Layout {
     var spacing: CGFloat = 10
+    var centersRows = false
 
     private func arrangement(width: CGFloat, subviews: Subviews) -> (CGSize, [CGRect]) {
         var frames: [CGRect] = []
@@ -1365,6 +1384,14 @@ struct WrappingControlsLayout: Layout {
             frames.append(CGRect(x: x, y: y, width: itemWidth, height: size.height))
             x += itemWidth + spacing
             rowHeight = max(rowHeight, size.height)
+        }
+        if centersRows {
+            for rowY in Set(frames.map(\.minY)) {
+                let indices = frames.indices.filter { frames[$0].minY == rowY }
+                let rowWidth = indices.map { frames[$0].maxX }.max() ?? 0
+                let offset = max(0, (width - rowWidth) / 2)
+                for index in indices { frames[index].origin.x += offset }
+            }
         }
         return (CGSize(width: width, height: y + rowHeight), frames)
     }

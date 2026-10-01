@@ -67,10 +67,6 @@ public struct BandmapView: View {
     @State private var quickToastMessage: String? = nil
     @State private var showCATPopover: Bool = false
 
-    // Animation timer for SDR noise and waterfall phase
-    @State private var animationPhase: Double = 0.0
-    private static let animationTimer = Timer.publish(every: 0.1, on: .main, in: .common).autoconnect()
-
     private static let availableBands = ["160M", "80M", "60M", "40M", "30M", "20M", "17M", "15M", "12M", "10M", "6M", "2M"]
     private static let panoramaBands = ["40M", "20M", "15M", "10M"]
 
@@ -87,22 +83,37 @@ public struct BandmapView: View {
             GeometryReader { geo in
                 switch studioMode {
                 case .studio:
-                    HStack(spacing: 0) {
-                        // Left Pane: Bandmap Ruler & Plotted Spots
-                        verticalRulerPane(size: geo.size)
-                            .frame(width: max(280, min(330, geo.size.width * 0.28)))
-
-                        Divider()
-
-                        // Center Pane: Live SDR Spectrum & Waterfall Studio
-                        liveSpectrumWaterfallPane(size: geo.size)
-                            .frame(maxWidth: .infinity)
-
-                        Divider()
-
-                        // Right Pane: Active DX Spot Hunter Table & Inspector
-                        spotHunterTablePane(size: geo.size)
-                            .frame(width: max(320, min(380, geo.size.width * 0.32)))
+                    if geo.size.width >= 1280 {
+                        let rulerWidth = min(330, geo.size.width * 0.23)
+                        let hunterWidth = min(380, geo.size.width * 0.26)
+                        let centerSize = CGSize(width: geo.size.width - rulerWidth - hunterWidth - 2,
+                                                height: geo.size.height)
+                        HStack(spacing: 0) {
+                            verticalRulerPane(size: CGSize(width: rulerWidth, height: geo.size.height))
+                                .frame(width: rulerWidth)
+                            Divider()
+                            liveSpectrumWaterfallPane(size: centerSize)
+                                .frame(maxWidth: .infinity)
+                            Divider()
+                            spotHunterTablePane(size: CGSize(width: hunterWidth, height: geo.size.height))
+                                .frame(width: hunterWidth)
+                        }
+                    } else {
+                        ScrollView {
+                            VStack(spacing: 0) {
+                                liveSpectrumWaterfallPane(size: CGSize(width: geo.size.width, height: 600))
+                                    .frame(height: 600)
+                                Divider()
+                                HStack(spacing: 0) {
+                                    verticalRulerPane(size: CGSize(width: geo.size.width / 2, height: 480))
+                                        .frame(maxWidth: .infinity)
+                                    Divider()
+                                    spotHunterTablePane(size: CGSize(width: geo.size.width / 2, height: 480))
+                                        .frame(maxWidth: .infinity)
+                                }
+                                .frame(height: 480)
+                            }
+                        }
                     }
 
                 case .rulerOnly:
@@ -147,15 +158,12 @@ public struct BandmapView: View {
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
-        .onReceive(Self.animationTimer) { _ in
-            animationPhase += 0.2
-        }
     }
 
     // MARK: - Floating Glassmorphism HUD Header
 
     private var hudHeaderBar: some View {
-        HStack(spacing: 12) {
+        WrappingControlsLayout(spacing: 12) {
             // App Branding & Title
             HStack(spacing: 8) {
                 Image(systemName: "waveform.path.ecg.rectangle")
@@ -170,8 +178,7 @@ public struct BandmapView: View {
                         .foregroundColor(.secondary)
                 }
             }
-
-            Spacer()
+            .fixedSize(horizontal: true, vertical: false)
 
             // Band Pills Selector
             ScrollView(.horizontal, showsIndicators: false) {
@@ -198,9 +205,8 @@ public struct BandmapView: View {
                     }
                 }
             }
-            .frame(maxWidth: 420)
+            .frame(width: 420, height: 28)
 
-            Divider().frame(height: 20)
 
             // IARU Region Selector
             Menu {
@@ -233,6 +239,7 @@ public struct BandmapView: View {
                 )
             }
             .menuStyle(.borderlessButton)
+            .fixedSize(horizontal: true, vertical: false)
 
             // License Class Selector
             Menu {
@@ -265,17 +272,15 @@ public struct BandmapView: View {
                 )
             }
             .menuStyle(.borderlessButton)
+            .fixedSize(horizontal: true, vertical: false)
 
-            Divider().frame(height: 20)
 
-            // View Mode Picker
-            Picker("", selection: $studioMode) {
-                ForEach(BandmapStudioMode.allCases) { mode in
-                    Label(mode.rawValue, systemImage: mode.icon).tag(mode)
-                }
-            }
-            .pickerStyle(.segmented)
-            .frame(width: 330)
+            BandmapModeSelector(
+                values: BandmapStudioMode.allCases,
+                selection: $studioMode,
+                segmentWidth: 140,
+                title: { $0.rawValue }
+            )
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
@@ -635,6 +640,7 @@ public struct BandmapView: View {
         let segments = bandmap.bandPlanSegments(for: bandmap.selectedBand, region: bandmap.iaruRegion, license: bandmap.licenseClass)
         let spectrumH = max(160, min(240, size.height * 0.36))
 
+        ScrollView {
         VStack(spacing: 0) {
             // 1. Center Header with Status, Rig Control Widget, Dial readout, and Deck Mode Picker
             centerHUDHeader(vfoAKHz: vfoAKHz, vfoBKHz: vfoBKHz)
@@ -652,15 +658,18 @@ public struct BandmapView: View {
             // 4. Lower Deck: Either Radar & Activity + Inspector OR Smooth Waterfall
             if centerDeckMode == .radar {
                 centerRadarAndInspectorView(bandRange: bandRange, activeSpots: activeSpots, size: size)
+                    .frame(minHeight: 240)
             } else {
                 smoothWaterfallView(bandRange: bandRange, activeSpots: activeSpots, vfoAKHz: vfoAKHz, vfoBKHz: vfoBKHz)
+                    .frame(height: max(240, size.height - 320))
             }
+        }
         }
     }
 
     @ViewBuilder
     private func centerHUDHeader(vfoAKHz: Double, vfoBKHz: Double) -> some View {
-        HStack(spacing: 10) {
+        WrappingControlsLayout(spacing: 10) {
             HStack(spacing: 6) {
                 Circle()
                     .fill(isCATConnected ? Color.green : Color.orange)
@@ -668,6 +677,7 @@ public struct BandmapView: View {
                 Text(isCATConnected ? "LIVE SDR SPECTRUM & PANADAPTER" : "DX CLUSTER SPECTRUM PANADAPTER · STANDBY")
                     .font(.system(size: 10.5, weight: .bold))
                     .foregroundColor(.primary)
+                    .lineLimit(2)
 
                 if !isCATConnected {
                     Text("(CAT OFFLINE)")
@@ -678,8 +688,7 @@ public struct BandmapView: View {
                         .background(Color.orange.opacity(0.15), in: RoundedRectangle(cornerRadius: 3))
                 }
             }
-
-            Spacer()
+            .frame(width: 280, height: 32, alignment: .leading)
 
             // Direct CAT Hardware Quick-Connect / Setup button
             Button {
@@ -702,25 +711,23 @@ public struct BandmapView: View {
                 .overlay(RoundedRectangle(cornerRadius: 5).stroke(isCATConnected ? Color.green.opacity(0.3) : Color.orange.opacity(0.3), lineWidth: 0.8))
             }
             .buttonStyle(.plain)
+            .frame(width: 100)
+            .fixedSize(horizontal: false, vertical: true)
             .popover(isPresented: $showCATPopover) {
                 RigConfigPopoverView(rig: RigControlEngine.shared)
             }
 
-            Divider().frame(height: 18)
 
-            // Deck Mode Picker (Radar & Activity vs. Smooth Waterfall)
-            Picker("", selection: $centerDeckMode) {
-                ForEach(CenterDeckMode.allCases) { deck in
-                    Label(deck.rawValue, systemImage: deck.icon).tag(deck)
-                }
-            }
-            .pickerStyle(.segmented)
-            .frame(width: 250)
+            BandmapModeSelector(
+                values: CenterDeckMode.allCases,
+                selection: $centerDeckMode,
+                segmentWidth: 145,
+                title: { $0.rawValue }
+            )
 
-            Divider().frame(height: 18)
 
-            // Dial readout
-            HStack(spacing: 8) {
+            // Fixed readout space prevents live frequency and split updates from moving controls.
+            VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 4) {
                     Text("VFO-A:")
                         .font(.system(size: 9.5, weight: .bold))
@@ -730,17 +737,18 @@ public struct BandmapView: View {
                         .foregroundColor(.primary)
                 }
 
-                if bandmap.isSplitActive {
-                    HStack(spacing: 4) {
+                HStack(spacing: 4) {
                         Text("VFO-B (TX):")
                             .font(.system(size: 9.5, weight: .bold))
                             .foregroundColor(.orange)
                         Text(String(format: "%.3f kHz", vfoBKHz))
                             .font(.system(size: 10.5, weight: .bold, design: .monospaced))
                             .foregroundColor(.primary)
-                    }
                 }
+                .opacity(bandmap.isSplitActive ? 1 : 0)
+                .accessibilityHidden(!bandmap.isSplitActive)
             }
+            .frame(width: 210, height: 34, alignment: .leading)
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
             .background(Color(NSColor.controlBackgroundColor), in: RoundedRectangle(cornerRadius: 5))
@@ -763,8 +771,11 @@ public struct BandmapView: View {
             let width = specGeo.size.width
             ZStack(alignment: .topLeading) {
                 // 1. RF Canvas with Gaussian curves, S-meter scales & Frequency ticks
-                Canvas { context, sz in
-                    drawSpectrumGraph(context: context, size: sz, range: bandRange, spots: activeSpots, phase: animationPhase)
+                TimelineView(.animation(minimumInterval: 0.1)) { timeline in
+                    Canvas { context, sz in
+                        drawSpectrumGraph(context: context, size: sz, range: bandRange, spots: activeSpots,
+                                          phase: timeline.date.timeIntervalSinceReferenceDate * 2)
+                    }
                 }
                 .frame(width: width, height: height)
                 .background(colorScheme == .dark ? Color(red: 0.03, green: 0.05, blue: 0.08) : Color(red: 0.04, green: 0.07, blue: 0.12))
@@ -929,7 +940,7 @@ public struct BandmapView: View {
 
             // Right: Spot Inspector & Geodesic Intelligence Card
             spotInspectorCard(activeSpots: activeSpots)
-                .frame(width: max(320, min(400, size.width * 0.40)))
+                .frame(maxWidth: .infinity)
                 .frame(maxHeight: .infinity)
         }
         .padding(8)
@@ -1251,8 +1262,11 @@ public struct BandmapView: View {
             let height = watGeo.size.height
 
             ZStack(alignment: .topLeading) {
-                Canvas { context, sz in
-                    drawWaterfall(context: context, size: sz, range: bandRange, spots: activeSpots, phase: animationPhase)
+                TimelineView(.animation(minimumInterval: 0.1)) { timeline in
+                    Canvas { context, sz in
+                        drawWaterfall(context: context, size: sz, range: bandRange, spots: activeSpots,
+                                      phase: timeline.date.timeIntervalSinceReferenceDate * 2)
+                    }
                 }
                 .frame(width: width, height: height)
 
@@ -1681,7 +1695,7 @@ public struct BandmapView: View {
                 }
 
                 // Filter chips
-                HStack(spacing: 4) {
+                WrappingControlsLayout(spacing: 4) {
                     spotFilterChip(title: "All", tag: "ALL")
                     spotFilterChip(title: "Fresh (<2m)", tag: "FRESH")
                     spotFilterChip(title: "New DXCC", tag: "NEW_DXCC")
@@ -1944,7 +1958,7 @@ public struct BandmapView: View {
     // MARK: - Bottom Status, Legend & Split Controls
 
     private var bottomStudioFooter: some View {
-        HStack(spacing: 16) {
+        WrappingControlsLayout(spacing: 16) {
             // Split Controls
             HStack(spacing: 8) {
                 Button {
@@ -2000,7 +2014,6 @@ public struct BandmapView: View {
                 legendPill(label: "Worked", color: .secondary)
             }
 
-            Spacer()
 
             // Zoom Controls
             HStack(spacing: 6) {
@@ -2182,5 +2195,35 @@ public struct BandmapView: View {
                 }
             }
         }
+    }
+}
+
+/// Native segmented controls resize to fit their labels during frequent updates.
+/// These segments keep the same measured width for every selected value.
+private struct BandmapModeSelector<Value: Hashable>: View {
+    let values: [Value]
+    @Binding var selection: Value
+    let segmentWidth: CGFloat
+    let title: (Value) -> String
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(values, id: \.self) { value in
+                Button { selection = value } label: {
+                    Text(title(value))
+                        .font(.system(size: 11, weight: .semibold))
+                        .lineLimit(1)
+                        .frame(width: segmentWidth, height: 26)
+                        .foregroundStyle(selection == value ? Color.white : Color.primary)
+                        .background(selection == value ? Color.accentColor : Color.clear,
+                                    in: RoundedRectangle(cornerRadius: 5))
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selection == value ? .isSelected : [])
+            }
+        }
+        .padding(3)
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 7))
+        .fixedSize(horizontal: true, vertical: true)
     }
 }
