@@ -1409,407 +1409,11 @@ public struct HamTrackerWorkspaceView: View {
 
     private var webSDRReceivePanel: some View {
         VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 7) {
-                HStack(spacing: 8) {
-                    Text("WEBSDR FT8 · \(appState.activeStationProfile?.grid.isEmpty == false ? appState.activeStationProfile?.grid ?? "LM55rr" : "LM55rr")")
-                        .font(.caption.bold())
-                        .fixedSize()
-                    Picker("Receiver", selection: $webSDR.selectedReceiverID) {
-                        ForEach(WebSDRReceiver.presets) { receiver in
-                            Text("\(receiver.flag) \(receiver.name) · \(receiver.location)\(receiver.supportsAutomaticRecording ? "" : " · manual")")
-                                .tag(receiver.id)
-                        }
-                    }
-                    .labelsHidden()
-                    .frame(width: 290)
-                    .onChange(of: webSDR.selectedReceiverID) { _, _ in
-                        webSDR.stop()
-                        webSDR.normalizeSelection()
-                        startWebSDRIfAutomatic()
-                    }
-                    Picker("FT8 band", selection: $webSDR.selectedBand) {
-                        ForEach(WebSDRFT8Monitor.bands.filter { webSDR.receiver.bands.contains($0.name) }) { band in
-                            Text(band.label).tag(band.name)
-                        }
-                    }
-                    .labelsHidden()
-                    .frame(width: 150)
-                    .onChange(of: webSDR.selectedBand) { _, _ in
-                        webSDR.stop()
-                        webSDR.normalizeSelection()
-                        startWebSDRIfAutomatic()
-                    }
-                    if webSDR.selectedReceiverID == "utah" {
-                        Picker("Utah antenna", selection: $webSDR.selectedUtahReceiver) {
-                            ForEach(webSDR.availableUtahReceivers) { receiver in
-                                Text(receiver.label).tag(receiver.number)
-                            }
-                        }
-                        .labelsHidden()
-                        .frame(width: 185)
-                        .onChange(of: webSDR.selectedUtahReceiver) { _, _ in
-                            webSDR.stop()
-                            startWebSDRIfAutomatic()
-                        }
-                    }
-                    if webSDR.selectedInputUID == WebSDRFT8Monitor.automaticRecordingUID {
-                        Menu {
-                            Button("Add a WebSDR for this band…") {
-                                customWebSDRError = ""
-                                showCustomWebSDR = true
-                            }
-                            if !webSDR.customEndpoints.isEmpty {
-                                Menu("Remove custom receiver") {
-                                    ForEach(webSDR.customEndpoints) { endpoint in
-                                        Button("\(endpoint.flag) \(endpoint.name)") {
-                                            webSDR.removeCustomEndpoint(endpoint.id)
-                                        }
-                                    }
-                                }
-                            }
-                            Divider()
-                            Menu("PSKReporter reception areas") {
-                                ForEach(recommendedReceiverRegions) { suggestion in
-                                    Menu("\(continentName(suggestion.region)) · \(suggestion.count) reports") {
-                                        let endpoints = webSDR.availableAutomaticEndpoints.filter { $0.continent == suggestion.region }
-                                        if endpoints.isEmpty {
-                                            Text("No compatible automatic receiver")
-                                        } else {
-                                            ForEach(endpoints) { endpoint in
-                                                Button("\(endpoint.flag) \(endpoint.name)") {
-                                                    if endpoint.id != webSDR.primaryAutomaticEndpoint?.id,
-                                                       !webSDR.selectedParallelEndpointIDs.contains(endpoint.id) {
-                                                        webSDR.toggleParallelEndpoint(endpoint.id)
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            Button("Choose one in each available region") { selectRegionalWebSDRs() }
-                            Button("Select every compatible WebSDR (\(webSDR.availableAutomaticEndpoints.count))") {
-                                webSDR.selectAllParallelEndpoints()
-                            }
-                            Button("Keep primary receiver only") { webSDR.clearParallelEndpoints() }
-                            Divider()
-                            ForEach(["AS", "EU", "AF", "NA", "SA", "OC"], id: \.self) { continent in
-                                Menu(continentName(continent)) {
-                                    let endpoints = webSDR.availableAutomaticEndpoints.filter { $0.continent == continent }
-                                    if endpoints.isEmpty {
-                                        Text("No verified automatic receiver on this band")
-                                    } else {
-                                        ForEach(endpoints) { endpoint in
-                                            Button {
-                                                webSDR.toggleParallelEndpoint(endpoint.id)
-                                            } label: {
-                                                Label("\(endpoint.flag) \(endpoint.name)",
-                                                      systemImage: webSDR.selectedParallelEndpointIDs.contains(endpoint.id)
-                                                        ? "checkmark.circle.fill" : "circle")
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        } label: {
-                            Text("Receivers \(webSDR.selectedAutomaticEndpoints.count)")
-                        }
-                        .help("Parallel receivers continue decoding when others are added")
-                    }
-                    Spacer(minLength: 0)
-                    Button {
-                        if icomPassword.isEmpty {
-                            icomPassword = CredentialVault.valueIfAvailableWithoutPrompt(for: .icomNetworkPassword)
-                        }
-                        if icomModelName == IcomNetworkModel.ic705.rawValue {
-                            icomModelName = IcomNetworkModel.ic7300MK2.rawValue
-                        }
-                        showIcomConnection = true
-                    } label: {
-                        Label("IC-7300MK2", systemImage: "radio")
-                    }
-                    .help("Configure IC-7300MK2 network connection")
-                    Button {
-                        if webSDR.isMonitoring { webSDR.stop() }
-                        else { webSDR.start(targetCallsign: engine.targetCallsign) }
-                    } label: {
-                        Label(webSDR.isMonitoring ? "Stop receive" : "Start receive",
-                              systemImage: webSDR.isMonitoring ? "stop.fill" : "play.fill")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(webSDR.isMonitoring ? .red : .green)
-                }
-                .controlSize(.small)
+            webSDRReceiveControls
 
-                HStack(spacing: 9) {
-                    Picker("Audio input", selection: $webSDR.selectedInputUID) {
-                        if webSDR.receiver.supportsAutomaticRecording {
-                            Text("WebSDR audio · automatic").tag(WebSDRFT8Monitor.automaticRecordingUID)
-                        }
-                        Text("System Audio").tag(WebSDRFT8Monitor.systemAudioUID)
-                        ForEach(webSDR.audioInputs) { device in
-                            Text(device.name).tag(device.uid)
-                        }
-                    }
-                    .frame(width: 330)
-                    .onChange(of: webSDR.selectedInputUID) { _, _ in
-                        webSDR.stop()
-                        startWebSDRIfAutomatic()
-                    }
-                    Button { webSDR.refreshInputs() } label: {
-                        Image(systemName: "arrow.clockwise")
-                    }
-                    .help("Refresh audio inputs")
-                    if webSDR.selectedInputUID == WebSDRFT8Monitor.automaticRecordingUID {
-                        Toggle("Listen", isOn: $webSDR.listenToReceiver)
-                            .toggleStyle(.checkbox)
-                    }
-                    Button("Show receiver") { webSDR.openReceiver() }
-                    Text("\(String(format: "%.3f", Double(webSDR.band.dialHz) / 1_000_000)) MHz USB · ~3 kHz")
-                        .foregroundStyle(.secondary)
-                    Toggle("DX sound", isOn: $webSDRDXAudioAlertsEnabled)
-                        .toggleStyle(.checkbox)
-                    Spacer(minLength: 0)
-                    Text(webSDR.status)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .frame(maxWidth: 460, alignment: .trailing)
-                        .foregroundStyle(.secondary)
-                }
-                .font(.caption)
-                .controlSize(.small)
-
-                if webSDR.selectedInputUID == WebSDRFT8Monitor.systemAudioUID,
-                   !webSDR.systemAudioPermissionGranted {
-                    HStack(spacing: 6) {
-                        Button("Request System Audio access") { webSDR.requestSystemAudioAccess() }
-                        Text("Reopen YAAM after granting access. Automatic WebSDR audio needs no macOS capture permission.")
-                            .foregroundStyle(.secondary)
-                    }
-                    .font(.caption2)
-                }
-                if webSDR.selectedAutomaticEndpoints.count > 1 {
-                    Text(webSDR.selectedAutomaticEndpoints.map {
-                        "\($0.flag) \($0.name): \(webSDR.receiverStatuses[$0.id] ?? "Connecting…")"
-                    }.joined(separator: "   ·   "))
-                    .font(.caption2)
-                    .lineLimit(1)
-                    .foregroundStyle(.secondary)
-                }
-                if let phase = webSDR.phaseSeconds {
-                    Text("Audio phase: \(phase, specifier: "%.1f") s · stream lag modulo 15 s")
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
-                DisclosureGroup("Setup and timing", isExpanded: $showWebSDRSetup) {
-                    Text("Automatic mode tunes USB with an approximately 3 kHz passband. System Audio requires macOS capture access. FT8 text cannot identify absolute WebSDR delay across whole cycles.")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-                .font(.caption2)
-                if let reply = selectedWebSDRReply {
-                    VStack(alignment: .leading, spacing: 7) {
-                        HStack {
-                            Label("Expected reply to \(reply.partner)", systemImage: "arrowshape.turn.up.left.fill")
-                                .font(.subheadline.bold())
-                            Spacer()
-                            if !replyFollowsLatest {
-                                Button("Follow latest") {
-                                    replyFollowsLatest = true
-                                    followLatestWebSDRReply()
-                                }
-                                .font(.caption)
-                            }
-                            Text("IC-7300MK2")
-                                .font(.caption.monospaced())
-                        }
-                        Text(reply.explanation)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        TextField("FT8 reply", text: $webSDRReplyDraft)
-                            .textFieldStyle(.roundedBorder)
-                            .font(.system(.body, design: .monospaced))
-                        HStack {
-                            Picker("My TX slot", selection: $selectedWebSDRTxParity) {
-                                Text("Even :00/:30").tag(SlotParity.even)
-                                Text("Odd :15/:45").tag(SlotParity.odd)
-                            }
-                            .pickerStyle(.segmented)
-                            .frame(width: 290)
-                            Toggle("Arm TX", isOn: Binding(
-                                get: { appState.ft8Engine.transmitArmed },
-                                set: { appState.ft8Engine.transmitArmed = $0 }
-                            ))
-                                .toggleStyle(.checkbox)
-                            Button("Queue next TX slot") { queueWebSDRReply(reply) }
-                                .buttonStyle(.borderedProminent)
-                                .disabled(!WebSDRReplyPlanner.isReady(webSDRReplyDraft,
-                                                                       for: reply,
-                                                                       targetCallsign: engine.targetCallsign)
-                                          || !appState.ft8Engine.transmitArmed)
-                        }
-                        Text("Uses the selected TX parity and audio output in FT8 Station. Verify the partner's actual slot before arming; WebSDR delay may span whole cycles.")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        if !webSDRReplyStatus.isEmpty {
-                            Text(webSDRReplyStatus)
-                                .font(.caption)
-                                .foregroundStyle(.orange)
-                        }
-                    }
-                    .padding(10)
-                    .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
-                }
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
             Divider()
-            ScrollView {
-                VStack(alignment: .leading, spacing: 6) {
-                    if !activeDXAlert.isEmpty {
-                        Label(activeDXAlert, systemImage: "sparkles")
-                            .font(.caption.bold())
-                            .foregroundStyle(.orange)
-                            .padding(7)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Color.orange.opacity(0.17), in: RoundedRectangle(cornerRadius: 6))
-                    }
-                    HStack(spacing: 6) {
-                    Image(systemName: "scope")
-                        .foregroundStyle(.orange)
-                    Text("Target: \(engine.targetCallsign.isEmpty ? "set callsign above" : engine.targetCallsign)")
-                        .fontWeight(.semibold)
-                    Spacer()
-                    Text("\(webSDR.consensusTargetMatches.count) matching messages")
-                }
-                .font(.caption)
-                .padding(6)
-                .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
-                Picker("Decoded messages", selection: $decodedMessageFilter) {
-                    Text("All (\(webSDR.consensusMessages.count))").tag(0)
-                    Text("\(engine.targetCallsign) (\(webSDR.consensusTargetMatches.count))").tag(1)
-                    Text("New DX / band").tag(2)
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 400)
-                if visibleWebSDRCycleGroups.isEmpty {
-                    Text("No FT8 message in this view yet. Check the receiver frequency and audio playback.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
-                    LazyVStack(spacing: 0) {
-                        ForEach(visibleWebSDRCycleGroups) { group in
-                            HStack(spacing: 6) {
-                                Text(group.slot, format: .dateTime.hour().minute().second())
-                                    .monospacedDigit()
-                                Text(group.isEven ? "RX EVEN · :00 / :30" : "RX ODD · :15 / :45")
-                                Text(Date().timeIntervalSince(group.slot) < 45 ? "· collecting" : "· late decodes possible")
-                                    .foregroundStyle(.secondary)
-                                Spacer()
-                                Text("\(group.messages.count) signals")
-                            }
-                            .font(.system(size: 10, weight: .semibold))
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 4)
-                            .background(group.isEven ? Color.green.opacity(0.25) : Color.blue.opacity(0.25))
-                            ForEach(group.messages) { message in
-                                let logStatus = message.transmittingCallsign.map {
-                                    webSDRLogbook.status(for: $0, band: webSDR.selectedBand)
-                                }
-                                HStack(spacing: 6) {
-                                    Text("\(logStatus?.entity.flagEmoji ?? message.transmittingFlag) \(logStatus?.entity.entityName ?? "Unknown")")
-                                        .font(.system(size: 10, weight: .medium))
-                                        .lineLimit(1)
-                                        .frame(width: 160, alignment: .leading)
-                                        .help(message.transmittingCallsign ?? "Transmitter not identified")
-                                    Text(message.text)
-                                        .font(.system(size: 11, design: .monospaced))
-                                        .textSelection(.enabled)
-                                        .lineLimit(1)
-                                        .help(message.text)
-                                    if let grid = WebSDRMessageParser.grid(in: message.text) {
-                                        Text(grid).font(.system(size: 9, design: .monospaced))
-                                            .foregroundStyle(.secondary)
-                                    } else if let grid = logStatus?.loggedGrid {
-                                        Text("\(grid) · log").font(.system(size: 9, design: .monospaced))
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    if let state = logStatus?.loggedState {
-                                        Text("\(state) · log").font(.system(size: 9))
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    if let plan = WebSDRReplyPlanner.plan(for: message.text,
-                                                                          targetCallsign: engine.targetCallsign) {
-                                        Button {
-                                            selectedWebSDRReply = plan
-                                            webSDRReplyDraft = plan.draft
-                                            selectedWebSDRTxParity = appState.ft8Engine.txParity
-                                            webSDRReplyStatus = ""
-                                            replyFollowsLatest = false
-                                        } label: {
-                                            Image(systemName: "arrowshape.turn.up.left.fill")
-                                        }
-                                        .buttonStyle(.plain)
-                                        .help("Prepare expected reply: \(plan.draft)")
-                                    }
-                                    Spacer(minLength: 2)
-                                    if message.mentionsTarget {
-                                        Text(message.addressedToTarget ? (message.isAcknowledgement ? "ACK" : "REPLY") : "MENTION")
-                                            .font(.system(size: 9, weight: .bold))
-                                            .foregroundStyle(message.isAcknowledgement ? .green : .orange)
-                                    }
-                                    if let status = logStatus, status.isNewDXCC || status.isNewBand {
-                                        Label(status.isNewDXCC ? "NEW DXCC" : "NEW BAND", systemImage: "sparkles")
-                                            .font(.system(size: 9, weight: .bold))
-                                            .foregroundStyle(status.isNewDXCC ? .orange : .yellow)
-                                            .help(status.isNewDXCC
-                                                  ? "No logged QSO with \(status.entity.entityName)"
-                                                  : "No logged QSO with \(status.entity.entityName) on \(webSDR.selectedBand)")
-                                    } else if logStatus?.workedCall == true {
-                                        Text("WORKED").font(.system(size: 9, weight: .semibold))
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    Text(WebSDRRelativeLevel.value(message.signalLevelDbFS, among: group.messages)
-                                         .map { "\($0) rel dB" } ?? "— rel dB")
-                                        .font(.system(size: 9, design: .monospaced))
-                                        .help("Relative to this cycle; raw audio level: \(message.signalLevelDbFS.map { String(format: "%.0f dBFS", $0) } ?? "unknown"). Not RF SNR.")
-                                    if message.receiverCount > 1 {
-                                        Text("\(message.receiverCount)/\(message.totalSelectedReceivers)")
-                                            .font(.system(size: 9, weight: .bold))
-                                            .foregroundStyle(message.hasMajority ? .purple : .secondary)
-                                    }
-                                    Text(message.receivers.map { "\($0.receiverFlag) \($0.receiverName)" }.joined(separator: ", "))
-                                        .font(.system(size: 9))
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(1)
-                                        .frame(maxWidth: 230, alignment: .trailing)
-                                        .help(message.receivers.map { "\($0.receiverFlag) \($0.receiverName) · \(Int($0.audioFrequencyHz)) Hz" }.joined(separator: "\n"))
-                                }
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 5)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(logStatus?.isNewDXCC == true ? Color.orange.opacity(0.27) :
-                                            logStatus?.isNewBand == true ? Color.yellow.opacity(0.22) :
-                                            message.hasMajority ? Color.purple.opacity(0.23) :
-                                            (group.isEven ? Color.green.opacity(0.13) : Color.blue.opacity(0.13)))
-                                .overlay(alignment: .leading) {
-                                    if logStatus?.isNewDXCC == true || logStatus?.isNewBand == true {
-                                        Rectangle().fill(.orange).frame(width: 4)
-                                    } else if message.mentionsTarget {
-                                        Rectangle().fill(.orange).frame(width: 3)
-                                    } else if message.hasMajority {
-                                        Rectangle().fill(.purple).frame(width: 3)
-                                    }
-                                }
-                                Divider().opacity(0.65)
-                            }
-                            Divider().background(Color.primary.opacity(0.35))
-                        }
-                    }
-                }
-                }
-                .padding(10)
-            }
+            webSDRDecodedMessages
+
         }
         .onAppear {
             webSDRLogbook = WebSDRLogbookIndex(records: appState.qsoRecords)
@@ -1836,6 +1440,438 @@ public struct HamTrackerWorkspaceView: View {
         .onChange(of: webSDR.consensusTargetMatches.count) { _, _ in
             if replyFollowsLatest { followLatestWebSDRReply() }
         }
+    }
+
+    private func webSDRMessageRow(_ message: WebSDRAggregatedMessage, in group: WebSDRCycleGroup) -> some View {
+        let logStatus = message.transmittingCallsign.map {
+            webSDRLogbook.status(for: $0, band: webSDR.selectedBand)
+        }
+        return HStack(spacing: 6) {
+            Text("\(logStatus?.entity.flagEmoji ?? message.transmittingFlag) \(logStatus?.entity.entityName ?? "Unknown")")
+                .font(.system(size: 10, weight: .medium))
+                .lineLimit(1)
+                .frame(width: 160, alignment: .leading)
+                .help(message.transmittingCallsign ?? "Transmitter not identified")
+            Text(message.text)
+                .font(.system(size: 11, design: .monospaced))
+                .textSelection(.enabled)
+                .lineLimit(1)
+                .help(message.text)
+            if let grid = WebSDRMessageParser.grid(in: message.text) {
+                Text(grid).font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            } else if let grid = logStatus?.loggedGrid {
+                Text("\(grid) · log").font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+            if let state = logStatus?.loggedState {
+                Text("\(state) · log").font(.system(size: 9))
+                    .foregroundStyle(.secondary)
+            }
+            if let plan = WebSDRReplyPlanner.plan(for: message.text,
+                                                  targetCallsign: engine.targetCallsign) {
+                Button {
+                    selectedWebSDRReply = plan
+                    webSDRReplyDraft = plan.draft
+                    selectedWebSDRTxParity = appState.ft8Engine.txParity
+                    webSDRReplyStatus = ""
+                    replyFollowsLatest = false
+                } label: {
+                    Image(systemName: "arrowshape.turn.up.left.fill")
+                }
+                .buttonStyle(.plain)
+                .help("Prepare expected reply: \(plan.draft)")
+            }
+            Spacer(minLength: 2)
+            if message.mentionsTarget {
+                Text(message.addressedToTarget ? (message.isAcknowledgement ? "ACK" : "REPLY") : "MENTION")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(message.isAcknowledgement ? .green : .orange)
+            }
+            if let status = logStatus, status.isNewDXCC || status.isNewBand {
+                Label(status.isNewDXCC ? "NEW DXCC" : "NEW BAND", systemImage: "sparkles")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(status.isNewDXCC ? .orange : .yellow)
+                    .help(status.isNewDXCC
+                          ? "No logged QSO with \(status.entity.entityName)"
+                          : "No logged QSO with \(status.entity.entityName) on \(webSDR.selectedBand)")
+            } else if logStatus?.workedCall == true {
+                Text("WORKED").font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            Text(WebSDRRelativeLevel.value(message.signalLevelDbFS, among: group.messages)
+                 .map { "\($0) rel dB" } ?? "— rel dB")
+                .font(.system(size: 9, design: .monospaced))
+                .help("Relative to this cycle; raw audio level: \(message.signalLevelDbFS.map { String(format: "%.0f dBFS", $0) } ?? "unknown"). Not RF SNR.")
+            if message.receiverCount > 1 {
+                Text("\(message.receiverCount)/\(message.totalSelectedReceivers)")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(message.hasMajority ? .purple : .secondary)
+            }
+            Text(message.receivers.map { "\($0.receiverFlag) \($0.receiverName)" }.joined(separator: ", "))
+                .font(.system(size: 9))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .frame(maxWidth: 230, alignment: .trailing)
+                .help(message.receivers.map { "\($0.receiverFlag) \($0.receiverName) · \(Int($0.audioFrequencyHz)) Hz" }.joined(separator: "\n"))
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 5)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(logStatus?.isNewDXCC == true ? Color.orange.opacity(0.27) :
+                    logStatus?.isNewBand == true ? Color.yellow.opacity(0.22) :
+                    message.hasMajority ? Color.purple.opacity(0.23) :
+                    (group.isEven ? Color.green.opacity(0.13) : Color.blue.opacity(0.13)))
+        .overlay(alignment: .leading) {
+            if logStatus?.isNewDXCC == true || logStatus?.isNewBand == true {
+                Rectangle().fill(.orange).frame(width: 4)
+            } else if message.mentionsTarget {
+                Rectangle().fill(.orange).frame(width: 3)
+            } else if message.hasMajority {
+                Rectangle().fill(.purple).frame(width: 3)
+            }
+        }
+    }
+
+    private func webSDRCycleHeader(_ group: WebSDRCycleGroup) -> some View {
+        HStack(spacing: 6) {
+            Text(group.slot, format: .dateTime.hour().minute().second())
+                .monospacedDigit()
+            Text(group.isEven ? "RX EVEN · :00 / :30" : "RX ODD · :15 / :45")
+            Text(Date().timeIntervalSince(group.slot) < 45 ? "· collecting" : "· late decodes possible")
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text("\(group.messages.count) signals")
+        }
+        .font(.system(size: 10, weight: .semibold))
+        .padding(.horizontal, 6)
+        .padding(.vertical, 4)
+        .background(group.isEven ? Color.green.opacity(0.25) : Color.blue.opacity(0.25))
+    }
+
+    private var webSDRAutomaticReceiversMenu: some View {
+        Menu {
+            Button("Add a WebSDR for this band…") {
+                customWebSDRError = ""
+                showCustomWebSDR = true
+            }
+            if !webSDR.customEndpoints.isEmpty {
+                Menu("Remove custom receiver") {
+                    ForEach(webSDR.customEndpoints) { endpoint in
+                        Button("\(endpoint.flag) \(endpoint.name)") {
+                            webSDR.removeCustomEndpoint(endpoint.id)
+                        }
+                    }
+                }
+            }
+            Divider()
+            Menu("PSKReporter reception areas") {
+                ForEach(recommendedReceiverRegions) { suggestion in
+                    Menu("\(continentName(suggestion.region)) · \(suggestion.count) reports") {
+                        let endpoints = webSDR.availableAutomaticEndpoints.filter { $0.continent == suggestion.region }
+                        if endpoints.isEmpty {
+                            Text("No compatible automatic receiver")
+                        } else {
+                            ForEach(endpoints) { endpoint in
+                                Button("\(endpoint.flag) \(endpoint.name)") {
+                                    if endpoint.id != webSDR.primaryAutomaticEndpoint?.id,
+                                       !webSDR.selectedParallelEndpointIDs.contains(endpoint.id) {
+                                        webSDR.toggleParallelEndpoint(endpoint.id)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Button("Choose one in each available region") { selectRegionalWebSDRs() }
+            Button("Select every compatible WebSDR (\(webSDR.availableAutomaticEndpoints.count))") {
+                webSDR.selectAllParallelEndpoints()
+            }
+            Button("Keep primary receiver only") { webSDR.clearParallelEndpoints() }
+            Divider()
+            ForEach(["AS", "EU", "AF", "NA", "SA", "OC"], id: \.self) { continent in
+                Menu(continentName(continent)) {
+                    let endpoints = webSDR.availableAutomaticEndpoints.filter { $0.continent == continent }
+                    if endpoints.isEmpty {
+                        Text("No verified automatic receiver on this band")
+                    } else {
+                        ForEach(endpoints) { endpoint in
+                            Button {
+                                webSDR.toggleParallelEndpoint(endpoint.id)
+                            } label: {
+                                Label("\(endpoint.flag) \(endpoint.name)",
+                                      systemImage: webSDR.selectedParallelEndpointIDs.contains(endpoint.id)
+                                        ? "checkmark.circle.fill" : "circle")
+                            }
+                        }
+                    }
+                }
+            }
+        } label: {
+            Text("Receivers \(webSDR.selectedAutomaticEndpoints.count)")
+        }
+        .help("Parallel receivers continue decoding when others are added")
+    }
+
+    private var webSDRAudioControls: some View {
+        HStack(spacing: 9) {
+            Picker("Audio input", selection: $webSDR.selectedInputUID) {
+                if webSDR.receiver.supportsAutomaticRecording {
+                    Text("WebSDR audio · automatic").tag(WebSDRFT8Monitor.automaticRecordingUID)
+                }
+                Text("System Audio").tag(WebSDRFT8Monitor.systemAudioUID)
+                ForEach(webSDR.audioInputs) { device in
+                    Text(device.name).tag(device.uid)
+                }
+            }
+            .frame(width: 330)
+            .onChange(of: webSDR.selectedInputUID) { _, _ in
+                webSDR.stop()
+                startWebSDRIfAutomatic()
+            }
+            Button { webSDR.refreshInputs() } label: {
+                Image(systemName: "arrow.clockwise")
+            }
+            .help("Refresh audio inputs")
+            if webSDR.selectedInputUID == WebSDRFT8Monitor.automaticRecordingUID {
+                Toggle("Listen", isOn: $webSDR.listenToReceiver)
+                    .toggleStyle(.checkbox)
+            }
+            Button("Show receiver") { webSDR.openReceiver() }
+            Text("\(String(format: "%.3f", Double(webSDR.band.dialHz) / 1_000_000)) MHz USB · ~3 kHz")
+                .foregroundStyle(.secondary)
+            Toggle("DX sound", isOn: $webSDRDXAudioAlertsEnabled)
+                .toggleStyle(.checkbox)
+            Spacer(minLength: 0)
+            Text(webSDR.status)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: 460, alignment: .trailing)
+                .foregroundStyle(.secondary)
+        }
+        .font(.caption)
+        .controlSize(.small)
+    }
+
+    private func webSDRReplyControls(_ reply: WebSDRReplyPlan) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack {
+                Label("Expected reply to \(reply.partner)", systemImage: "arrowshape.turn.up.left.fill")
+                    .font(.subheadline.bold())
+                Spacer()
+                if !replyFollowsLatest {
+                    Button("Follow latest") {
+                        replyFollowsLatest = true
+                        followLatestWebSDRReply()
+                    }
+                    .font(.caption)
+                }
+                Text("IC-7300MK2")
+                    .font(.caption.monospaced())
+            }
+            Text(reply.explanation)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            TextField("FT8 reply", text: $webSDRReplyDraft)
+                .textFieldStyle(.roundedBorder)
+                .font(.system(.body, design: .monospaced))
+            HStack {
+                Picker("My TX slot", selection: $selectedWebSDRTxParity) {
+                    Text("Even :00/:30").tag(SlotParity.even)
+                    Text("Odd :15/:45").tag(SlotParity.odd)
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 290)
+                Toggle("Arm TX", isOn: Binding(
+                    get: { appState.ft8Engine.transmitArmed },
+                    set: { appState.ft8Engine.transmitArmed = $0 }
+                ))
+                    .toggleStyle(.checkbox)
+                Button("Queue next TX slot") { queueWebSDRReply(reply) }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!WebSDRReplyPlanner.isReady(webSDRReplyDraft,
+                                                           for: reply,
+                                                           targetCallsign: engine.targetCallsign)
+                              || !appState.ft8Engine.transmitArmed)
+            }
+            Text("Uses the selected TX parity and audio output in FT8 Station. Verify the partner's actual slot before arming; WebSDR delay may span whole cycles.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            if !webSDRReplyStatus.isEmpty {
+                Text(webSDRReplyStatus)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+        }
+        .padding(10)
+        .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var webSDRReceiverControls: some View {
+        HStack(spacing: 8) {
+            Text("WEBSDR FT8 · \(appState.activeStationProfile?.grid.isEmpty == false ? appState.activeStationProfile?.grid ?? "LM55rr" : "LM55rr")")
+                .font(.caption.bold())
+                .fixedSize()
+            Picker("Receiver", selection: $webSDR.selectedReceiverID) {
+                ForEach(WebSDRReceiver.presets) { receiver in
+                    Text("\(receiver.flag) \(receiver.name) · \(receiver.location)\(receiver.supportsAutomaticRecording ? "" : " · manual")")
+                        .tag(receiver.id)
+                }
+            }
+            .labelsHidden()
+            .frame(width: 290)
+            .onChange(of: webSDR.selectedReceiverID) { _, _ in
+                webSDR.stop()
+                webSDR.normalizeSelection()
+                startWebSDRIfAutomatic()
+            }
+            Picker("FT8 band", selection: $webSDR.selectedBand) {
+                ForEach(WebSDRFT8Monitor.bands.filter { webSDR.receiver.bands.contains($0.name) }) { band in
+                    Text(band.label).tag(band.name)
+                }
+            }
+            .labelsHidden()
+            .frame(width: 150)
+            .onChange(of: webSDR.selectedBand) { _, _ in
+                webSDR.stop()
+                webSDR.normalizeSelection()
+                startWebSDRIfAutomatic()
+            }
+            if webSDR.selectedReceiverID == "utah" {
+                Picker("Utah antenna", selection: $webSDR.selectedUtahReceiver) {
+                    ForEach(webSDR.availableUtahReceivers) { receiver in
+                        Text(receiver.label).tag(receiver.number)
+                    }
+                }
+                .labelsHidden()
+                .frame(width: 185)
+                .onChange(of: webSDR.selectedUtahReceiver) { _, _ in
+                    webSDR.stop()
+                    startWebSDRIfAutomatic()
+                }
+            }
+            if webSDR.selectedInputUID == WebSDRFT8Monitor.automaticRecordingUID {
+                webSDRAutomaticReceiversMenu
+            }
+            Spacer(minLength: 0)
+            Button {
+                if icomPassword.isEmpty {
+                    icomPassword = CredentialVault.valueIfAvailableWithoutPrompt(for: .icomNetworkPassword)
+                }
+                if icomModelName == IcomNetworkModel.ic705.rawValue {
+                    icomModelName = IcomNetworkModel.ic7300MK2.rawValue
+                }
+                showIcomConnection = true
+            } label: {
+                Label("IC-7300MK2", systemImage: "radio")
+            }
+            .help("Configure IC-7300MK2 network connection")
+            Button {
+                if webSDR.isMonitoring { webSDR.stop() }
+                else { webSDR.start(targetCallsign: engine.targetCallsign) }
+            } label: {
+                Label(webSDR.isMonitoring ? "Stop receive" : "Start receive",
+                      systemImage: webSDR.isMonitoring ? "stop.fill" : "play.fill")
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(webSDR.isMonitoring ? .red : .green)
+        }
+        .controlSize(.small)
+    }
+
+    private var webSDRDecodedMessages: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 6) {
+                if !activeDXAlert.isEmpty {
+                    Label(activeDXAlert, systemImage: "sparkles")
+                        .font(.caption.bold())
+                        .foregroundStyle(.orange)
+                        .padding(7)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.orange.opacity(0.17), in: RoundedRectangle(cornerRadius: 6))
+                }
+                HStack(spacing: 6) {
+                Image(systemName: "scope")
+                    .foregroundStyle(.orange)
+                Text("Target: \(engine.targetCallsign.isEmpty ? "set callsign above" : engine.targetCallsign)")
+                    .fontWeight(.semibold)
+                Spacer()
+                Text("\(webSDR.consensusTargetMatches.count) matching messages")
+            }
+            .font(.caption)
+            .padding(6)
+            .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+            Picker("Decoded messages", selection: $decodedMessageFilter) {
+                Text("All (\(webSDR.consensusMessages.count))").tag(0)
+                Text("\(engine.targetCallsign) (\(webSDR.consensusTargetMatches.count))").tag(1)
+                Text("New DX / band").tag(2)
+            }
+            .pickerStyle(.segmented)
+            .frame(width: 400)
+            if visibleWebSDRCycleGroups.isEmpty {
+                Text("No FT8 message in this view yet. Check the receiver frequency and audio playback.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                LazyVStack(spacing: 0) {
+                    ForEach(visibleWebSDRCycleGroups) { group in
+                        webSDRCycleHeader(group)
+                        ForEach(group.messages) { message in
+                            webSDRMessageRow(message, in: group)
+                            Divider().opacity(0.65)
+                        }
+                        Divider().background(Color.primary.opacity(0.35))
+                    }
+                }
+            }
+            }
+            .padding(10)
+        }
+    }
+
+    @ViewBuilder
+    private var webSDRReceiveControls: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            webSDRReceiverControls
+
+            webSDRAudioControls
+
+            if webSDR.selectedInputUID == WebSDRFT8Monitor.systemAudioUID,
+               !webSDR.systemAudioPermissionGranted {
+                HStack(spacing: 6) {
+                    Button("Request System Audio access") { webSDR.requestSystemAudioAccess() }
+                    Text("Reopen YAAM after granting access. Automatic WebSDR audio needs no macOS capture permission.")
+                        .foregroundStyle(.secondary)
+                }
+                .font(.caption2)
+            }
+            if webSDR.selectedAutomaticEndpoints.count > 1 {
+                Text(webSDR.selectedAutomaticEndpoints.map {
+                    "\($0.flag) \($0.name): \(webSDR.receiverStatuses[$0.id] ?? "Connecting…")"
+                }.joined(separator: "   ·   "))
+                .font(.caption2)
+                .lineLimit(1)
+                .foregroundStyle(.secondary)
+            }
+            if let phase = webSDR.phaseSeconds {
+                Text("Audio phase: \(phase, specifier: "%.1f") s · stream lag modulo 15 s")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            DisclosureGroup("Setup and timing", isExpanded: $showWebSDRSetup) {
+                Text("Automatic mode tunes USB with an approximately 3 kHz passband. System Audio requires macOS capture access. FT8 text cannot identify absolute WebSDR delay across whole cycles.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .font(.caption2)
+            if let reply = selectedWebSDRReply {
+                webSDRReplyControls(reply)
+
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
     }
 
     private func continentName(_ code: String) -> String {
