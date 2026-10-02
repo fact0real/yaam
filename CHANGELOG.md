@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.37.15 — 2026-10-02
+
+- Redesign SKED as a country band planning workspace with worked and confirmed bands from the active station logbook.
+- Save requested bands separately for each operator and provide personalized, editable SKED email templates with individual previews.
+- Send selected operators separate messages through YAAM's configured SMTP account, with progress, stop, retry, and prior email reminders.
+
 ## 1.37.14 — 2026-10-02
 
 - Require and verify the QRZ Rank token for SKED, show callsign details, and include amateur prefixes in the country picker.
