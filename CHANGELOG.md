@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.37.12 — 2026-10-02
 
 - Simplify the HamTracker WebSDR message row so Swift 6.4 can type-check it.
 - Send and queue new QSOs only for enabled cloud services with available settings. Check uploads deferred by Touch ID after unlock, while retaining older pending requests for manual retry.
