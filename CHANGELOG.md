@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.37.14 — 2026-10-02
+
+- Require and verify the QRZ Rank token for SKED, show callsign details, and include amateur prefixes in the country picker.
+- Start WebSDR reception only on request, hide its background browser, show receiver reachability, keep regional selection open, and warn when no FT8 messages decode after 90 seconds.
+- Expand the receiver directory and restrict frequency choices to each receiver's listed FT8 bands.
+
 ## 1.37.13 — 2026-10-02
 
 - Add a SKED directory for the top 19 operators by country and ranking category, with QRZ contact sync, mail links, email copying, and Excel-compatible CSV export. Add country leaderboard CSV export.

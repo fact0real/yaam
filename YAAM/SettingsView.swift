@@ -751,7 +751,7 @@ struct SettingsView: View {
 
                 HStack(spacing: 8) {
                     if !CredentialVault.value(for: .qrzRankAPIToken).isEmpty {
-                        Label("Saved API token active in Keychain", systemImage: "checkmark.seal.fill")
+                        Label("API token saved in Keychain", systemImage: "checkmark.seal.fill")
                             .font(.caption)
                             .foregroundStyle(.green)
                     } else {

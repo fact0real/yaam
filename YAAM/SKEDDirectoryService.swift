@@ -7,6 +7,9 @@ nonisolated struct SKEDOperator: Identifiable, Sendable {
     let name: String?
     let email: String?
     let score: Int?
+    let confirmedQSOs: Int?
+    let dxccCountries: Int?
+    let bandSlots: Int?
     let mailto: URL?
 
     var validEmail: String? {
@@ -47,12 +50,16 @@ nonisolated struct SKEDDirectory: Sendable {
 
 nonisolated enum SKEDDirectoryError: LocalizedError, Sendable {
     case invalidCountry
+    case missingToken
+    case malformedToken
     case badResponse
     case server(Int, String)
 
     var errorDescription: String? {
         switch self {
         case .invalidCountry: return "Select a valid country."
+        case .missingToken: return "Add a valid QRZ Rank API token to load the SKED directory."
+        case .malformedToken: return "The saved QRZ Rank API token is malformed. Verify and replace it on this page."
         case .badResponse: return "The SKED service returned an unexpected response."
         case .server(let status, let message):
             return message.isEmpty ? "SKED service returned HTTP \(status)." : "SKED service: \(message)"
@@ -75,9 +82,13 @@ nonisolated enum SKEDDirectoryContract {
         request.timeoutInterval = enrich ? 60 : 20
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
-        if let token, !QRZRankAPIContract.normalizedToken(token).isEmpty {
-            request.setValue("Bearer \(QRZRankAPIContract.normalizedToken(token))", forHTTPHeaderField: "Authorization")
+        let normalizedToken = QRZRankAPIContract.normalizedToken(token ?? "")
+        guard !normalizedToken.isEmpty else { throw SKEDDirectoryError.missingToken }
+        let forbidden = CharacterSet.whitespacesAndNewlines.union(.controlCharacters)
+        guard normalizedToken.unicodeScalars.allSatisfy({ !forbidden.contains($0) }) else {
+            throw SKEDDirectoryError.malformedToken
         }
+        request.setValue("Bearer \(normalizedToken)", forHTTPHeaderField: "Authorization")
         return request
     }
 
@@ -107,9 +118,15 @@ nonisolated enum SKEDDirectoryContract {
             case "band": scoreKeys = ["val_score_band", "score_band", "score"]
             default: scoreKeys = ["val_score_qso", "score_qso", "score"]
             }
-            let score = Int((string(row, scoreKeys) ?? "").replacingOccurrences(of: ",", with: ""))
+            func count(_ keys: [String]) -> Int? {
+                Int((string(row, keys) ?? "").replacingOccurrences(of: ",", with: ""))
+            }
+            let score = count(scoreKeys)
             let mailto = string(row, ["sked_mailto"]).flatMap(URL.init(string:))
-            return SKEDOperator(rank: rank, callsign: callsign, name: name, email: email, score: score, mailto: mailto)
+            return SKEDOperator(rank: rank, callsign: callsign, name: name, email: email, score: score,
+                                confirmedQSOs: count(["val_score_qso", "score_qso"]),
+                                dxccCountries: count(["val_score_countries", "score_countries"]),
+                                bandSlots: count(["val_score_band", "score_band"]), mailto: mailto)
         }
         guard rows.isEmpty || !operators.isEmpty else { throw SKEDDirectoryError.badResponse }
         return SKEDDirectory(countryISO: string(body, ["country_iso", "iso"]) ?? requestedISO,

@@ -14,7 +14,8 @@ struct WebSDRReceiver: Identifiable, Hashable {
 
     var supportsAutomaticRecording: Bool {
         ["esslingen", "twente", "utah", "kfs", "na5b", "maasbree", "maasbree-high",
-         "so8oo", "dk0te", "k3fef", "paraibuna", "crapoca", "bordeaux"].contains(id)
+         "so8oo", "dk0te", "k3fef", "paraibuna", "crapoca", "bordeaux",
+         "kfs3", "hackgreen"].contains(id)
     }
 
     var flag: String {
@@ -61,6 +62,12 @@ struct WebSDRReceiver: Identifiable, Hashable {
         .init(id: "kfs", name: "KFS", location: "USA",
               url: URL(string: "http://websdr1.kfsdr.com:8901/")!,
               bands: ["80m", "40m", "30m", "20m", "17m", "15m", "10m"]),
+        .init(id: "kfs3", name: "KFS #3 · Southeast", location: "USA",
+              url: URL(string: "http://websdr3.kfsdr.com:8903/")!,
+              bands: ["80m", "40m", "30m", "20m", "17m", "15m", "10m"]),
+        .init(id: "hackgreen", name: "Hack Green", location: "United Kingdom",
+              url: URL(string: "http://hackgreensdr.org:8901/")!,
+              bands: ["80m", "40m", "17m"]),
         .init(id: "na5b", name: "NA5B", location: "USA",
               url: URL(string: "http://na5b.com:8901/")!,
               bands: ["80m", "40m", "30m", "20m", "15m", "10m"]),
@@ -84,7 +91,7 @@ struct WebSDRReceiver: Identifiable, Hashable {
               url: URL(string: "http://crapoca.websdr.com.br:8901/")!, bands: ["80m", "40m", "10m"]),
         .init(id: "tugraz", name: "TU Graz · OE6XUG", location: "Austria",
               url: URL(string: "https://websdr.iks.tugraz.at/")!,
-              bands: Set(WebSDRFT8Monitor.bands.map(\.name))),
+              bands: ["40m", "20m"]),
         .init(id: "pi4vnw", name: "PI4VNW · VERON", location: "Netherlands",
               url: URL(string: "https://pi4vnw.pa9x.com/")!,
               bands: Set(WebSDRFT8Monitor.bands.map(\.name))),
@@ -128,6 +135,28 @@ struct WebSDRAutomaticEndpoint: Identifiable, Hashable, Codable {
         }
         return normal + utah
     }()
+}
+
+private actor WebSDRHealthProbe {
+    static let shared = WebSDRHealthProbe()
+    private let session: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = 5
+        configuration.timeoutIntervalForResource = 7
+        return URLSession(configuration: configuration)
+    }()
+
+    func isReachable(_ url: URL) async -> Bool {
+        for method in ["HEAD", "GET"] {
+            var request = URLRequest(url: url)
+            request.httpMethod = method
+            request.timeoutInterval = 5
+            if let (_, response) = try? await session.data(for: request),
+               let http = response as? HTTPURLResponse,
+               (200..<400).contains(http.statusCode) { return true }
+        }
+        return false
+    }
 }
 
 struct UtahWebSDR: Identifiable, Hashable {
@@ -341,6 +370,9 @@ final class WebSDRFT8Monitor: ObservableObject {
     @Published private(set) var phaseSeconds: Double?
     @Published private(set) var clockOffsetSeconds: Double?
     @Published private(set) var receiverStatuses: [String: String] = [:]
+    @Published private(set) var receiverHealth: [String: Bool] = [:]
+    @Published private(set) var checkingReceivers: Set<String> = []
+    @Published private(set) var noDecodeWarning: String?
 
     private var loopbackCapture: LiveRadioSource?
     private var systemCapture: SystemAudioFT8Source?
@@ -359,6 +391,7 @@ final class WebSDRFT8Monitor: ObservableObject {
     private var activeTapIDs: [String: Int] = [:]
     private var decodeTask: Task<Void, Never>?
     private var clockTask: Task<Void, Never>?
+    private var noDecodeTask: Task<Void, Never>?
     private var activeTarget = ""
     private var activeReceiverName = ""
     private var sessionID = UUID()
@@ -455,6 +488,26 @@ final class WebSDRFT8Monitor: ObservableObject {
 
     func refreshInputs() { audioInputs = AudioDevices.inputDevices() }
     func openReceiver() { NSWorkspace.shared.open(activeReceiverURL ?? receiver.url) }
+
+    func checkReceiver(_ id: String, url: URL) {
+        guard !checkingReceivers.contains(id) else { return }
+        checkingReceivers.insert(id)
+        Task { [weak self] in
+            let reachable = await WebSDRHealthProbe.shared.isReachable(url)
+            guard let self else { return }
+            self.receiverHealth[id] = reachable
+            self.checkingReceivers.remove(id)
+        }
+    }
+
+    func checkAvailableReceivers() {
+        for receiver in WebSDRReceiver.presets {
+            checkReceiver(receiver.id, url: receiver.url)
+        }
+        for endpoint in availableAutomaticEndpoints where endpoint.id.hasPrefix("utah-") || endpoint.id.hasPrefix("custom-") {
+            checkReceiver(endpoint.id, url: endpoint.baseURL)
+        }
+    }
 
     var systemAudioPermissionGranted: Bool { CGPreflightScreenCaptureAccess() }
 
@@ -588,6 +641,7 @@ final class WebSDRFT8Monitor: ObservableObject {
         }
         stop()
         messages.removeAll()
+        noDecodeWarning = nil
         seenIDs.removeAll()
         phaseSeconds = nil
         clockOffsetSeconds = nil
@@ -606,6 +660,7 @@ final class WebSDRFT8Monitor: ObservableObject {
             status = "Opening \(endpoints.count) WebSDR receiver\(endpoints.count == 1 ? "" : "s")…"
             for endpoint in endpoints { startAutomaticEndpoint(endpoint, session: startedSession) }
             clockTask = Task { await synchronizeClock(session: startedSession) }
+            scheduleNoDecodeWarning(session: startedSession)
             return
         }
         consensusReceiverCount = 1
@@ -622,6 +677,7 @@ final class WebSDRFT8Monitor: ObservableObject {
         isMonitoring = true
         status = "Listening to \(selectedInputUID == Self.systemAudioUID ? "system audio" : "selected input")…"
         clockTask = Task { await synchronizeClock(session: startedSession) }
+        scheduleNoDecodeWarning(session: startedSession)
         decodeTask = Task.detached(priority: .userInitiated) { [weak self] in
             var previous: AudioSlot?
             for await slot in selectedSource.slots() {
@@ -661,6 +717,9 @@ final class WebSDRFT8Monitor: ObservableObject {
         liveAudioAt.removeAll()
         activeTapIDs.removeAll()
         receiverStatuses.removeAll()
+        noDecodeTask?.cancel()
+        noDecodeTask = nil
+        noDecodeWarning = nil
         decodeTask?.cancel()
         decodeTask = nil
         clockTask?.cancel()
@@ -671,6 +730,16 @@ final class WebSDRFT8Monitor: ObservableObject {
         systemCapture = nil
         if isMonitoring { status = "Monitoring stopped." }
         isMonitoring = false
+    }
+
+    private func scheduleNoDecodeWarning(session: UUID) {
+        noDecodeTask?.cancel()
+        noDecodeTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(90))
+            guard !Task.isCancelled, let self, self.sessionID == session,
+                  self.isMonitoring, self.messages.isEmpty else { return }
+            self.noDecodeWarning = "No FT8 messages after 90 seconds. This WebSDR may be unavailable, silent, or off frequency. Try another receiver or band."
+        }
     }
 
     private func consumeLiveAudio(_ samples: [Float], endedAt: Date, tapID: Int,
@@ -841,6 +910,7 @@ final class WebSDRFT8Monitor: ObservableObject {
                               signalLevelDbFS: signalLevelDbFS,
                               mentionsTarget: WebSDRMessageParser.mentions(activeTarget, in: message.text),
                               addressedToTarget: sender != nil))
+        noDecodeWarning = nil
         messages.sort {
             if $0.slotStart != $1.slotStart { return $0.slotStart > $1.slotStart }
             if $0.text != $1.text { return $0.text < $1.text }
@@ -887,6 +957,7 @@ final class WebSDRFT8Monitor: ObservableObject {
                               signalLevelDbFS: signalLevelDbFS,
                               mentionsTarget: WebSDRMessageParser.mentions(activeTarget, in: message.text),
                               addressedToTarget: sender != nil))
+        noDecodeWarning = nil
         messages.sort {
             if $0.slotStart != $1.slotStart { return $0.slotStart > $1.slotStart }
             if $0.text != $1.text { return $0.text < $1.text }

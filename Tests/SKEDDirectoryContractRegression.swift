@@ -4,8 +4,19 @@ import Foundation
 struct SKEDDirectoryContractRegression {
     static func main() throws {
         let request = try SKEDDirectoryContract.request(countryISO: " IR ", category: "qso", enrich: true,
-                                                        token: nil, userAgent: "YAAM-Regression/1")
+                                                        token: "sample-token", userAgent: "YAAM-Regression/1")
         precondition(request.url?.absoluteString == "https://qrz-rank.asis.sh/api/v1/sked/ir?limit=19&category=qso&enrich=true")
+        precondition(request.value(forHTTPHeaderField: "Authorization") == "Bearer sample-token")
+        do {
+            _ = try SKEDDirectoryContract.request(countryISO: "ir", category: "qso", enrich: true,
+                                                  token: nil, userAgent: "YAAM-Regression/1")
+            preconditionFailure("SKED must require a token")
+        } catch SKEDDirectoryError.missingToken {}
+        do {
+            _ = try SKEDDirectoryContract.request(countryISO: "ir", category: "qso", enrich: true,
+                                                  token: "two words", userAgent: "YAAM-Regression/1")
+            preconditionFailure("Malformed SKED tokens must be rejected")
+        } catch SKEDDirectoryError.malformedToken {}
         let csvRequest = try QRZRankAPIContract.makeCountryLeaderboardCSVRequest(
             countryIso: "IR", category: "band", userAgent: "YAAM-Regression/1"
         )
@@ -25,6 +36,9 @@ struct SKEDDirectoryContractRegression {
         let qso = try SKEDDirectoryContract.decode(fixture, requestedISO: "ir", category: "qso")
         precondition(qso.operators.count == 2)
         precondition(qso.operators[0].score == 23926)
+        precondition(qso.operators[0].confirmedQSOs == 23926)
+        precondition(qso.operators[0].dxccCountries == 158)
+        precondition(qso.operators[0].bandSlots == 867)
         precondition(qso.operators[0].name == "A, B \"Operator\"")
         precondition(qso.emailCount == 1)
         precondition(qso.allEmails == "operator@example.org")

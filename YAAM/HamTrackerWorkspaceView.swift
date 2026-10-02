@@ -52,6 +52,8 @@ public struct HamTrackerWorkspaceView: View {
     @AppStorage("webSDRDXAudioAlertsEnabled") private var webSDRDXAudioAlertsEnabled = true
     @State private var showIcomConnection = false
     @State private var showCustomWebSDR = false
+    @State private var showWebSDRReceivers = false
+    @State private var showPrimaryWebSDRPicker = false
     @State private var customWebSDRName = ""
     @State private var customWebSDRURL = ""
     @State private var customWebSDRFlag = ""
@@ -68,7 +70,6 @@ public struct HamTrackerWorkspaceView: View {
     @State private var webSDRReplyStatus = ""
     @State private var selectedWebSDRTxParity: SlotParity = .even
     @State private var replyFollowsLatest = true
-    @State private var targetRestartTask: Task<Void, Never>?
     @AppStorage("ft8OutputDeviceUID") private var webSDRFT8OutputDeviceUID = ""
     @State private var hoveredSpot: HamTrackSpot? = nil
     @State private var isShowingCLISheet: Bool = false
@@ -188,17 +189,10 @@ public struct HamTrackerWorkspaceView: View {
                 }
             }
         }
-        .onChange(of: engine.targetCallsign) { _, updated in
-            targetRestartTask?.cancel()
+        .onChange(of: engine.targetCallsign) { _, _ in
             webSDR.stop()
             selectedWebSDRReply = nil
             webSDRReplyDraft = ""
-            targetRestartTask = Task { @MainActor in
-                try? await Task.sleep(for: .milliseconds(650))
-                guard !Task.isCancelled, isWebSDRWorkspace,
-                      engine.targetCallsign == updated else { return }
-                startWebSDRIfAutomatic()
-            }
         }
     }
 
@@ -1417,7 +1411,7 @@ public struct HamTrackerWorkspaceView: View {
         }
         .onAppear {
             webSDRLogbook = WebSDRLogbookIndex(records: appState.qsoRecords)
-            startWebSDRIfAutomatic()
+            webSDR.checkAvailableReceivers()
             followLatestWebSDRReply()
             scanDXOpportunities()
         }
@@ -1557,68 +1551,74 @@ public struct HamTrackerWorkspaceView: View {
     }
 
     private var webSDRAutomaticReceiversMenu: some View {
-        Menu {
-            Button("Add a WebSDR for this band…") {
-                customWebSDRError = ""
-                showCustomWebSDR = true
-            }
-            if !webSDR.customEndpoints.isEmpty {
-                Menu("Remove custom receiver") {
-                    ForEach(webSDR.customEndpoints) { endpoint in
-                        Button("\(endpoint.flag) \(endpoint.name)") {
-                            webSDR.removeCustomEndpoint(endpoint.id)
-                        }
-                    }
+        Button("Receivers \(webSDR.selectedAutomaticEndpoints.count)") {
+            showWebSDRReceivers.toggle()
+            if showWebSDRReceivers { webSDR.checkAvailableReceivers() }
+        }
+        .popover(isPresented: $showWebSDRReceivers, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("WebSDR receivers · \(webSDR.selectedBand)").font(.headline)
+                Text("Green: site reachable · Red: site unavailable · Gray: checking")
+                    .font(.caption2).foregroundStyle(.secondary)
+                HStack {
+                    Button("One per region") { selectRegionalWebSDRs() }
+                    Button("Select all") { webSDR.selectAllParallelEndpoints() }
+                    Button("Primary only") { webSDR.clearParallelEndpoints() }
                 }
-            }
-            Divider()
-            Menu("PSKReporter reception areas") {
-                ForEach(recommendedReceiverRegions) { suggestion in
-                    Menu("\(continentName(suggestion.region)) · \(suggestion.count) reports") {
-                        let endpoints = webSDR.availableAutomaticEndpoints.filter { $0.continent == suggestion.region }
-                        if endpoints.isEmpty {
-                            Text("No compatible automatic receiver")
-                        } else {
-                            ForEach(endpoints) { endpoint in
-                                Button("\(endpoint.flag) \(endpoint.name)") {
-                                    if endpoint.id != webSDR.primaryAutomaticEndpoint?.id,
-                                       !webSDR.selectedParallelEndpointIDs.contains(endpoint.id) {
+                .font(.caption)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 9) {
+                        ForEach(["AS", "EU", "AF", "NA", "SA", "OC"], id: \.self) { continent in
+                            let endpoints = webSDR.availableAutomaticEndpoints.filter { $0.continent == continent }
+                            if !endpoints.isEmpty {
+                                Text(continentName(continent))
+                                    .font(.caption.bold()).foregroundStyle(.secondary)
+                                ForEach(endpoints) { endpoint in
+                                    Button {
                                         webSDR.toggleParallelEndpoint(endpoint.id)
+                                    } label: {
+                                        HStack(spacing: 8) {
+                                            Circle()
+                                                .fill(webSDR.receiverHealth[endpoint.id].map { $0 ? Color.green : Color.red } ?? .gray)
+                                                .frame(width: 8, height: 8)
+                                            Text("\(endpoint.flag) \(endpoint.name)")
+                                            Spacer()
+                                            if endpoint.id == webSDR.primaryAutomaticEndpoint?.id {
+                                                Text("Primary").foregroundStyle(.secondary)
+                                            } else if webSDR.selectedParallelEndpointIDs.contains(endpoint.id) {
+                                                Image(systemName: "checkmark")
+                                            }
+                                        }
+                                        .contentShape(Rectangle())
                                     }
+                                    .buttonStyle(.plain)
+                                    .disabled(endpoint.id == webSDR.primaryAutomaticEndpoint?.id)
                                 }
                             }
                         }
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-            }
-            Button("Choose one in each available region") { selectRegionalWebSDRs() }
-            Button("Select every compatible WebSDR (\(webSDR.availableAutomaticEndpoints.count))") {
-                webSDR.selectAllParallelEndpoints()
-            }
-            Button("Keep primary receiver only") { webSDR.clearParallelEndpoints() }
-            Divider()
-            ForEach(["AS", "EU", "AF", "NA", "SA", "OC"], id: \.self) { continent in
-                Menu(continentName(continent)) {
-                    let endpoints = webSDR.availableAutomaticEndpoints.filter { $0.continent == continent }
-                    if endpoints.isEmpty {
-                        Text("No verified automatic receiver on this band")
-                    } else {
-                        ForEach(endpoints) { endpoint in
-                            Button {
-                                webSDR.toggleParallelEndpoint(endpoint.id)
-                            } label: {
-                                Label("\(endpoint.flag) \(endpoint.name)",
-                                      systemImage: webSDR.selectedParallelEndpointIDs.contains(endpoint.id)
-                                        ? "checkmark.circle.fill" : "circle")
+                Divider()
+                Button("Add a WebSDR for this band…") {
+                    showWebSDRReceivers = false
+                    customWebSDRError = ""
+                    showCustomWebSDR = true
+                }
+                if !webSDR.customEndpoints.isEmpty {
+                    Menu("Remove custom receiver") {
+                        ForEach(webSDR.customEndpoints) { endpoint in
+                            Button("\(endpoint.flag) \(endpoint.name)") {
+                                webSDR.removeCustomEndpoint(endpoint.id)
                             }
                         }
                     }
                 }
             }
-        } label: {
-            Text("Receivers \(webSDR.selectedAutomaticEndpoints.count)")
+            .padding(14)
+            .frame(width: 330, height: 430)
         }
-        .help("Parallel receivers continue decoding when others are added")
+        .help("Choose parallel receivers by region")
     }
 
     private var webSDRAudioControls: some View {
@@ -1635,7 +1635,6 @@ public struct HamTrackerWorkspaceView: View {
             .frame(width: 330)
             .onChange(of: webSDR.selectedInputUID) { _, _ in
                 webSDR.stop()
-                startWebSDRIfAutomatic()
             }
             Button { webSDR.refreshInputs() } label: {
                 Image(systemName: "arrow.clockwise")
@@ -1720,18 +1719,68 @@ public struct HamTrackerWorkspaceView: View {
             Text("WEBSDR FT8 · \(appState.activeStationProfile?.grid.isEmpty == false ? appState.activeStationProfile?.grid ?? "LM55rr" : "LM55rr")")
                 .font(.caption.bold())
                 .fixedSize()
-            Picker("Receiver", selection: $webSDR.selectedReceiverID) {
-                ForEach(WebSDRReceiver.presets) { receiver in
-                    Text("\(receiver.flag) \(receiver.name) · \(receiver.location)\(receiver.supportsAutomaticRecording ? "" : " · manual")")
-                        .tag(receiver.id)
+            Button {
+                showPrimaryWebSDRPicker.toggle()
+                if showPrimaryWebSDRPicker { webSDR.checkAvailableReceivers() }
+            } label: {
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(webSDR.receiverHealth[webSDR.receiver.id].map { $0 ? Color.green : Color.red } ?? .gray)
+                        .frame(width: 8, height: 8)
+                    Text("\(webSDR.receiver.flag) \(webSDR.receiver.name) · \(webSDR.receiver.location)")
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.up.chevron.down").font(.caption2)
                 }
+                .frame(width: 275)
             }
-            .labelsHidden()
-            .frame(width: 290)
+            .popover(isPresented: $showPrimaryWebSDRPicker, arrowEdge: .bottom) {
+                VStack(alignment: .leading, spacing: 9) {
+                    Text("Choose a receiver").font(.headline)
+                    Text("Only listed FT8 bands can be selected afterward.")
+                        .font(.caption2).foregroundStyle(.secondary)
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(["AS", "EU", "AF", "NA", "SA", "OC"], id: \.self) { continent in
+                                let receivers = WebSDRReceiver.presets.filter { $0.continent == continent }
+                                if !receivers.isEmpty {
+                                    Text(continentName(continent))
+                                        .font(.caption.bold()).foregroundStyle(.secondary)
+                                    ForEach(receivers) { receiver in
+                                        Button {
+                                            webSDR.selectedReceiverID = receiver.id
+                                            showPrimaryWebSDRPicker = false
+                                        } label: {
+                                            HStack(spacing: 8) {
+                                                Circle()
+                                                    .fill(webSDR.receiverHealth[receiver.id].map { $0 ? Color.green : Color.red } ?? .gray)
+                                                    .frame(width: 8, height: 8)
+                                                Text("\(receiver.flag) \(receiver.name) · \(receiver.location)")
+                                                Spacer()
+                                                if !receiver.supportsAutomaticRecording {
+                                                    Text("Manual").foregroundStyle(.secondary)
+                                                }
+                                                if receiver.id == webSDR.receiver.id {
+                                                    Image(systemName: "checkmark")
+                                                }
+                                            }
+                                            .contentShape(Rectangle())
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                }
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                .padding(14)
+                .frame(width: 370, height: 480)
+            }
             .onChange(of: webSDR.selectedReceiverID) { _, _ in
                 webSDR.stop()
                 webSDR.normalizeSelection()
-                startWebSDRIfAutomatic()
+                webSDR.checkReceiver(webSDR.receiver.id, url: webSDR.receiver.url)
             }
             Picker("FT8 band", selection: $webSDR.selectedBand) {
                 ForEach(WebSDRFT8Monitor.bands.filter { webSDR.receiver.bands.contains($0.name) }) { band in
@@ -1743,7 +1792,7 @@ public struct HamTrackerWorkspaceView: View {
             .onChange(of: webSDR.selectedBand) { _, _ in
                 webSDR.stop()
                 webSDR.normalizeSelection()
-                startWebSDRIfAutomatic()
+                webSDR.checkAvailableReceivers()
             }
             if webSDR.selectedReceiverID == "utah" {
                 Picker("Utah antenna", selection: $webSDR.selectedUtahReceiver) {
@@ -1755,7 +1804,9 @@ public struct HamTrackerWorkspaceView: View {
                 .frame(width: 185)
                 .onChange(of: webSDR.selectedUtahReceiver) { _, _ in
                     webSDR.stop()
-                    startWebSDRIfAutomatic()
+                    if let receiver = webSDR.activeUtahReceiver {
+                        webSDR.checkReceiver("utah-\(receiver.number)", url: receiver.url)
+                    }
                 }
             }
             if webSDR.selectedInputUID == WebSDRFT8Monitor.automaticRecordingUID {
@@ -1809,13 +1860,22 @@ public struct HamTrackerWorkspaceView: View {
             .font(.caption)
             .padding(6)
             .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
-            Picker("Decoded messages", selection: $decodedMessageFilter) {
-                Text("All (\(webSDR.consensusMessages.count))").tag(0)
-                Text("\(engine.targetCallsign) (\(webSDR.consensusTargetMatches.count))").tag(1)
-                Text("New DX / band").tag(2)
+            HStack(spacing: 10) {
+                Text("Decoded messages").fixedSize(horizontal: true, vertical: false)
+                Picker("Decoded messages", selection: $decodedMessageFilter) {
+                    Text("All (\(webSDR.consensusMessages.count))").tag(0)
+                    Text("\(engine.targetCallsign) (\(webSDR.consensusTargetMatches.count))").tag(1)
+                    Text("New DX / band").tag(2)
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .frame(width: 400)
             }
-            .pickerStyle(.segmented)
-            .frame(width: 400)
+            if let warning = webSDR.noDecodeWarning {
+                Label(warning, systemImage: "exclamationmark.triangle")
+                    .font(.caption).foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if visibleWebSDRCycleGroups.isEmpty {
                 Text("No FT8 message in this view yet. Check the receiver frequency and audio playback.")
                     .font(.caption)
@@ -1909,7 +1969,9 @@ public struct HamTrackerWorkspaceView: View {
 
     private func selectRegionalWebSDRs() {
         for region in ["AS", "EU", "AF", "NA", "SA", "OC"] {
-            guard let endpoint = webSDR.availableAutomaticEndpoints.first(where: { $0.continent == region }),
+            let candidates = webSDR.availableAutomaticEndpoints.filter { $0.continent == region }
+            guard let endpoint = candidates.first(where: { webSDR.receiverHealth[$0.id] == true })
+                ?? candidates.first(where: { webSDR.receiverHealth[$0.id] != false }),
                   endpoint.id != webSDR.primaryAutomaticEndpoint?.id,
                   !webSDR.selectedParallelEndpointIDs.contains(endpoint.id) else { continue }
             webSDR.toggleParallelEndpoint(endpoint.id)
@@ -1958,7 +2020,7 @@ public struct HamTrackerWorkspaceView: View {
             HStack {
                 Spacer()
                 Button("Cancel") { showCustomWebSDR = false }
-                Button("Add and start") {
+                Button("Add receiver") {
                     guard webSDR.addCustomEndpoint(name: customWebSDRName, urlText: customWebSDRURL,
                                                    flag: customWebSDRFlag, continent: customWebSDRContinent) else {
                         customWebSDRError = "Enter a name and a valid http(s) receiver URL."
@@ -1968,7 +2030,7 @@ public struct HamTrackerWorkspaceView: View {
                     customWebSDRName = ""
                     customWebSDRURL = ""
                     customWebSDRFlag = ""
-                    startWebSDRIfAutomatic()
+                    webSDR.checkAvailableReceivers()
                 }
                 .buttonStyle(.borderedProminent)
             }
@@ -2046,13 +2108,6 @@ public struct HamTrackerWorkspaceView: View {
         }
         ft8.scheduleTransmission()
         webSDRReplyStatus = ft8.status
-    }
-
-    private func startWebSDRIfAutomatic() {
-        guard webSDR.selectedInputUID == WebSDRFT8Monitor.automaticRecordingUID,
-              webSDR.receiver.bands.contains(webSDR.selectedBand),
-              !webSDR.isMonitoring else { return }
-        webSDR.start(targetCallsign: engine.targetCallsign)
     }
 
     // Sub-Table 1: Live Spots Table View

@@ -11,6 +11,9 @@ struct SKEDDirectoryView: View {
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var notice: String?
+    @State private var tokenDraft = ""
+    @State private var validatingToken = false
+    @State private var selectedOperator: SKEDOperator?
 
     private var countries: [QRZCountrySummary] {
         let available = appState.qrzRankCountries
@@ -38,6 +41,9 @@ struct SKEDDirectoryView: View {
                             .padding(12)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .background(.orange.opacity(0.09), in: RoundedRectangle(cornerRadius: 10))
+                    }
+                    if directory == nil && !isLoading {
+                        tokenControls
                     }
                     if let directory {
                         summary(directory)
@@ -69,6 +75,9 @@ struct SKEDDirectoryView: View {
         }
         .onAppear { appState.fetchQRZRankCountries() }
         .task(id: "\(countryISO)-\(category)-\(refreshID)") { await load() }
+        .sheet(item: $selectedOperator) { item in
+            operatorDetails(item)
+        }
     }
 
     private var header: some View {
@@ -116,7 +125,7 @@ struct SKEDDirectoryView: View {
         HStack(spacing: 12) {
             Picker("Country", selection: $countryISO) {
                 ForEach(countries) { country in
-                    Text("\(flagForCountryIso(country.iso)) \(country.name) (\(country.iso.uppercased()))")
+                    Text("\(flagForCountryIso(country.iso)) \(DXCCDatabase.representativePrefix(forISO: country.iso) ?? "—") · \(country.name)")
                         .tag(country.iso.lowercased())
                 }
             }
@@ -208,10 +217,12 @@ struct SKEDDirectoryView: View {
                     Text(String(item.rank))
                         .foregroundStyle(.secondary)
                         .frame(width: 35, alignment: .leading)
-                    Text(item.callsign)
+                    Button(item.callsign) { selectedOperator = item }
+                        .buttonStyle(.plain)
                         .fontWeight(.semibold)
                         .foregroundStyle(.cyan)
                         .frame(width: 110, alignment: .leading)
+                        .help("Show operator details")
                     Text(item.name ?? "Name unavailable")
                         .foregroundStyle(item.name == nil ? .secondary : .primary)
                         .lineLimit(1)
@@ -247,6 +258,82 @@ struct SKEDDirectoryView: View {
                     .padding(10)
             }
         }
+    }
+
+    private var tokenControls: some View {
+        HStack(spacing: 10) {
+            SecureField("QRZ Rank API token", text: $tokenDraft)
+                .textFieldStyle(.roundedBorder)
+                .frame(maxWidth: 340)
+            Button("Verify and save token") {
+                Task { await verifyAndSaveToken() }
+            }
+            .disabled(validatingToken || QRZRankAPIContract.normalizedToken(tokenDraft).isEmpty)
+            if validatingToken { ProgressView().controlSize(.small) }
+            Link("Get a token", destination: URL(string: "https://qrz-rank.asis.sh/")!)
+            Spacer()
+        }
+        .padding(12)
+        .background(Color.accentColor.opacity(0.07), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func verifyAndSaveToken() async {
+        let token = QRZRankAPIContract.normalizedToken(tokenDraft)
+        guard !token.isEmpty else { return }
+        validatingToken = true
+        defer { validatingToken = false }
+        do {
+            _ = try await SKEDDirectoryService.shared.fetch(
+                countryISO: countryISO, category: category, enrich: false,
+                token: token, userAgent: "YAAM-macOS/\(appState.currentVersion)")
+            guard CredentialVault.set(token, for: .qrzRankAPIToken) else {
+                errorMessage = "The verified token could not be saved in Keychain."
+                return
+            }
+            tokenDraft = ""
+            refreshID += 1
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func operatorDetails(_ item: SKEDOperator) -> some View {
+        let entity = DXCCDatabase.resolve(callsign: item.callsign)
+        return VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Text(flagForCountryIso(directory?.countryISO ?? countryISO))
+                    .font(.largeTitle)
+                VStack(alignment: .leading) {
+                    Text(item.callsign).font(.title.bold())
+                    Text(directory?.countryName ?? countryISO.uppercased())
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text("#\(item.rank)").font(.title3.monospacedDigit())
+            }
+            Divider()
+            LabeledContent("Operator", value: item.name ?? "Name unavailable")
+            LabeledContent("Email", value: item.validEmail ?? "Not available")
+            LabeledContent("DXCC entity", value: "\(entity.flagEmoji) \(entity.entityName)")
+            LabeledContent("Continent / CQ zone", value: "\(entity.continent) / \(entity.cqZone)")
+            if let value = item.confirmedQSOs {
+                LabeledContent("Confirmed QSOs", value: value.formatted())
+            }
+            if let value = item.dxccCountries {
+                LabeledContent("DXCC countries", value: value.formatted())
+            }
+            if let value = item.bandSlots {
+                LabeledContent("Band slots", value: value.formatted())
+            }
+            HStack {
+                Link("View on QRZ", destination: URL(string: "https://www.qrz.com/db/\(item.callsign)")!)
+                Spacer()
+                Button("Email for SKED") { openEmail(item) }
+                    .disabled(item.validEmail == nil)
+            }
+        }
+        .padding(24)
+        .frame(width: 440)
     }
 
     private func load() async {

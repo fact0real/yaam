@@ -21,6 +21,10 @@
             <dict>
                 <key>NSExceptionAllowsInsecureHTTPLoads</key><true/>
             </dict>
+            <key>websdr3.kfsdr.com</key>
+            <dict><key>NSExceptionAllowsInsecureHTTPLoads</key><true/></dict>
+            <key>hackgreensdr.org</key>
+            <dict><key>NSExceptionAllowsInsecureHTTPLoads</key><true/></dict>
             <key>na5b.com</key>
             <dict>
                 <key>NSExceptionAllowsInsecureHTTPLoads</key><true/>
