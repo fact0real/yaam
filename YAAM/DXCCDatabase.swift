@@ -32,10 +32,22 @@ public struct DXCCEntityInfo: Equatable, Hashable, Sendable {
 public enum DXCCDatabase {
     /// A short, representative on-air prefix for a country in the SKED picker.
     public nonisolated static func representativePrefix(forISO iso: String) -> String? {
-        entries.filter { $0.entity.countryCode.caseInsensitiveCompare(iso) == .orderedSame }
-            .map(\.prefix)
-            .sorted { $0.count == $1.count ? $0 < $1 : $0.count < $1.count }
-            .first
+        var bestPrefix: String?
+        for entry in entries {
+            guard entry.entity.countryCode.caseInsensitiveCompare(iso) == .orderedSame else {
+                continue
+            }
+            let candidate = entry.prefix
+            if let current = bestPrefix {
+                if candidate.count < current.count ||
+                    (candidate.count == current.count && candidate < current) {
+                    bestPrefix = candidate
+                }
+            } else {
+                bestPrefix = candidate
+            }
+        }
+        return bestPrefix
     }
 
     private struct PrefixEntry {
