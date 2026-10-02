@@ -246,6 +246,25 @@ actor QRZRankService {
         return try QRZRankAPIContract.decodeCountryLeaderboard(data)
     }
 
+    func fetchCountryLeaderboardCSV(
+        countryIso: String,
+        category: String,
+        token: String? = nil,
+        userAgent: String
+    ) async throws -> Data {
+        let request = try QRZRankAPIContract.makeCountryLeaderboardCSVRequest(
+            countryIso: countryIso, category: category, token: token, userAgent: userAgent
+        )
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw QRZRankFetchFailure.invalidResponse }
+        guard (200..<300).contains(http.statusCode) else {
+            throw QRZRankFetchFailure.server(status: http.statusCode,
+                message: QRZRankAPIContract.decodeError(data)?.message ?? "")
+        }
+        guard !data.isEmpty else { throw QRZRankFetchFailure.invalidResponse }
+        return data.starts(with: [0xEF, 0xBB, 0xBF]) ? data : Data([0xEF, 0xBB, 0xBF]) + data
+    }
+
     func fetchStationAnalysis(
         callsign: String,
         token: String? = nil,

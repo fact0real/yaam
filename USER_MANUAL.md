@@ -748,5 +748,11 @@ Located under **Operator Desk → DX Activity → Digital Callsign Monitor** (or
 
 ---
 
+## SKED Directory
+
+Open the **SKED** tab and choose a country and ranking category (QSOs, DXCC countries, or band slots). Iran is selected by default. YAAM shows up to 19 ranked operators with their callsign, name, score, and available email. Missing addresses are shown as unavailable.
+
+Use **Sync QRZ** to refresh contact details, **Email** to open a prepared SKED message, **Copy all emails** to copy available addresses separated by `;`, or **Export CSV** to save an Excel-friendly UTF-8 file. The **Leaderboard → National Standings** view also offers CSV export for the selected country and category.
+
 > **Support & Feedback:**  
 > Press `Cmd + Shift + F` anywhere within YAAM to open the feedback panel to submit suggestions, bug reports, or feature requests directly to the development team.

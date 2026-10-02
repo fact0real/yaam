@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.37.13 — 2026-10-02
+
+- Add a SKED directory for the top 19 operators by country and ranking category, with QRZ contact sync, mail links, email copying, and Excel-compatible CSV export. Add country leaderboard CSV export.
+
 ## 1.37.12 — 2026-10-02
 
 - Simplify the HamTracker WebSDR message row so Swift 6.4 can type-check it.

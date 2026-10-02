@@ -516,6 +516,8 @@ struct ContentView: View {
             } else if appState.selectedTab == 2 {
                 // Tab 2: NEW FULL-PAGE LEADERBOARD VIEW
                 LeaderboardView()
+            } else if appState.selectedTab == 7 {
+                SKEDDirectoryView()
             } else if appState.selectedTab == 3 {
                 DXAdvisorView()
             } else if appState.selectedTab == 4 {
@@ -1255,6 +1257,7 @@ struct TopNavigationTabBar: View {
         TabItem(tag: 6, title: "Stats", icon: "chart.bar.xaxis"),
         TabItem(tag: 4, title: "Awards", icon: "trophy"),
         TabItem(tag: 2, title: "Leaderboard", icon: "crown"),
+        TabItem(tag: 7, title: "SKED", icon: "antenna.radiowaves.left.and.right"),
         TabItem(tag: 3, title: "DX Advisor", icon: "globe.americas"),
         TabItem(tag: 1, title: "Convert & Export", icon: "arrow.triangle.2.circlepath.circle")
     ]

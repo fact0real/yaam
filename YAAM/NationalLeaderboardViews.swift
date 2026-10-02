@@ -7,6 +7,7 @@
 
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 
 // MARK: - Inspecting Station Item Wrapper
 struct InspectingStationItem: Identifiable {
@@ -368,6 +369,8 @@ struct WorldChampionCard: View {
 struct NationalLeaderboardContainerView: View {
     @EnvironmentObject var appState: AppState
     @State private var inspectingStation: InspectingStationItem? = nil
+    @State private var isExportingCSV = false
+    @State private var csvExportError: String?
 
     private let fallbackCountries: [(iso: String, name: String)] = [
         ("ir", "Iran (EP)"),
@@ -463,6 +466,12 @@ struct NationalLeaderboardContainerView: View {
                 if appState.isFetchingNationalLeaderboard {
                     ProgressView().controlSize(.small)
                 }
+
+                Button(action: exportLeaderboardCSV) {
+                    Label("Export CSV", systemImage: "square.and.arrow.down")
+                }
+                .buttonStyle(.bordered)
+                .disabled(isExportingCSV)
 
                 Button(action: {
                     appState.fetchNationalLeaderboard()
@@ -605,11 +614,43 @@ struct NationalLeaderboardContainerView: View {
             StationAnalysisSheetView(targetCallsign: item.callsign, countryIso: appState.selectedNationalCountryIso)
                 .environmentObject(appState)
         }
+        .alert("CSV export failed", isPresented: Binding(
+            get: { csvExportError != nil },
+            set: { if !$0 { csvExportError = nil } }
+        )) {
+            Button("OK", role: .cancel) { csvExportError = nil }
+        } message: {
+            Text(csvExportError ?? "Unknown error")
+        }
         .onAppear {
             appState.fetchQRZRankCountries()
             if appState.nationalLeaderboard == nil {
                 appState.fetchNationalLeaderboard()
             }
+        }
+    }
+
+    private func exportLeaderboardCSV() {
+        let iso = appState.selectedNationalCountryIso
+        let category = appState.selectedNationalCategory
+        let panel = NSSavePanel()
+        panel.title = "Export national leaderboard"
+        panel.allowedContentTypes = [.commaSeparatedText]
+        panel.nameFieldStringValue = "Leaderboard_\(iso.uppercased())_\(category).csv"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        isExportingCSV = true
+        Task { @MainActor in
+            do {
+                let token = CredentialVault.value(for: .qrzRankAPIToken)
+                let data = try await QRZRankService.shared.fetchCountryLeaderboardCSV(
+                    countryIso: iso, category: category, token: token,
+                    userAgent: "YAAM-macOS/\(appState.currentVersion)"
+                )
+                try data.write(to: url, options: .atomic)
+            } catch {
+                csvExportError = error.localizedDescription
+            }
+            isExportingCSV = false
         }
     }
 }

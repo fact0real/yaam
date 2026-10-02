@@ -602,6 +602,31 @@ nonisolated enum QRZRankAPIContract {
         return req
     }
 
+    static func makeCountryLeaderboardCSVRequest(
+        countryIso: String,
+        category: String,
+        token: String? = nil,
+        userAgent: String
+    ) throws -> URLRequest {
+        let iso = countryIso.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard iso.count == 2, iso.unicodeScalars.allSatisfy(CharacterSet.letters.contains),
+              ["qso", "countries", "band"].contains(category),
+              var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
+            throw QRZRankAPIContractError.invalidURL
+        }
+        components.path = "/api/v1/leaderboard/country/\(iso)/csv"
+        components.queryItems = [URLQueryItem(name: "category", value: category)]
+        guard let url = components.url else { throw QRZRankAPIContractError.invalidURL }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 25
+        request.setValue("text/csv", forHTTPHeaderField: "Accept")
+        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        if let token, !normalizedToken(token).isEmpty {
+            request.setValue("Bearer \(normalizedToken(token))", forHTTPHeaderField: "Authorization")
+        }
+        return request
+    }
+
     static func makeAnalysisRequest(
         callsign: String,
         token: String? = nil,
