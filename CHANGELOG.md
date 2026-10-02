@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Simplify the HamTracker WebSDR message row so Swift 6.4 can type-check it.
+- Send and queue new QSOs only for enabled cloud services with available settings. Check uploads deferred by Touch ID after unlock, while retaining older pending requests for manual retry.
+
 ## 1.37.11 — 2026-10-01
 
 - Add the Digital Callsign Monitor (HamTracker), WebSDR FT8 receive, multi-receiver consensus, and guided FT8 reply planning. Package the optional Python diagnostic script with the app.

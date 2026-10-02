@@ -40,6 +40,8 @@ public struct PendingCloudUploadItem: Codable, Identifiable, Sendable, Equatable
     public var lastAttemptDate: Date?
     public var lastErrorMessage: String?
     public var pausedServices: [String]?
+    /// Only services added while locked need a configuration check after unlock.
+    public var configurationCheckServices: [String]?
     public let enqueuedAt: Date
 
     public init(
@@ -52,6 +54,7 @@ public struct PendingCloudUploadItem: Codable, Identifiable, Sendable, Equatable
         lastAttemptDate: Date? = nil,
         lastErrorMessage: String? = nil,
         pausedServices: [String]? = nil,
+        configurationCheckServices: [String]? = nil,
         enqueuedAt: Date = Date()
     ) {
         self.id = id
@@ -63,6 +66,7 @@ public struct PendingCloudUploadItem: Codable, Identifiable, Sendable, Equatable
         self.lastAttemptDate = lastAttemptDate
         self.lastErrorMessage = lastErrorMessage
         self.pausedServices = pausedServices
+        self.configurationCheckServices = configurationCheckServices
         self.enqueuedAt = enqueuedAt
     }
 
@@ -221,6 +225,42 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
         return services
     }
 
+    /// Check actual settings after unlock. Never persist credentials or infer their absence while locked.
+    private func configuredServices(
+        from services: [String],
+        stationID: String?,
+        qrzKeyOverride: String? = nil
+    ) -> [String] {
+        guard CredentialVault.isVaultSessionUnlocked else { return [] }
+        return services.filter { service in
+            switch service {
+            case "QRZ":
+                return !(qrzKeyOverride ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                    !CredentialVault.qrzLogbookKey(stationID: stationID).isEmpty
+            case "Club Log":
+                let defaults = UserDefaults.standard
+                return !(defaults.string(forKey: "clubLogEmail") ?? "").isEmpty &&
+                    !(defaults.string(forKey: "clubLogCallsign") ?? "").isEmpty &&
+                    !CredentialVault.value(for: .clubLogPassword).isEmpty &&
+                    !CredentialVault.value(for: .clubLogAPIKey).isEmpty
+            case "eQSL":
+                return !(UserDefaults.standard.string(forKey: "eqslUsername") ?? "").isEmpty &&
+                    !CredentialVault.value(for: .eqslPassword).isEmpty
+            case "Wavelog":
+                let engine = WavelogSyncEngine.shared
+                engine.reloadSettings()
+                return engine.isAutoPushEnabled && engine.isConfigured
+            case "LoTW":
+                guard TQSLService.hasStationData() else { return false }
+                guard let resolved = TQSLCoordinator.resolveBinaryPath() else { return false }
+                resolved.scopedURL?.stopAccessingSecurityScopedResource()
+                return true
+            default:
+                return false
+            }
+        }
+    }
+
     // MARK: - Main Dispatch Entry Point
     func dispatch(
         record: QSORecordModel,
@@ -233,8 +273,20 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
         let call = record["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         guard !call.isEmpty else { return }
 
-        let activeServices = enabledServices()
-        guard !activeServices.isEmpty else { return }
+        let enabled = enabledServices()
+        var vaultUnlocked = CredentialVault.isVaultSessionUnlocked
+        let configured = vaultUnlocked ? configuredServices(
+            from: enabled,
+            stationID: stationID,
+            qrzKeyOverride: isNetworkConnected ? qrzKeyOverride : nil
+        ) : []
+        if vaultUnlocked && !CredentialVault.isVaultSessionUnlocked { vaultUnlocked = false }
+        let selection = CloudUploadServiceSelection.select(
+            enabled: enabled,
+            vaultUnlocked: vaultUnlocked,
+            configured: configured
+        )
+        guard !selection.services.isEmpty else { return }
 
         // If offline right now, enqueue immediately without waiting for network timeouts
         if !isNetworkConnected {
@@ -242,20 +294,22 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
                 record: record,
                 stationID: stationID,
                 stationLocation: stationLocation,
-                targetServices: activeServices,
-                errorReason: "Internet disconnected (Offline)"
+                targetServices: selection.services,
+                errorReason: "Internet disconnected (Offline)",
+                configurationCheckPending: selection.needsConfigurationCheck
             )
             return
         }
 
         // With the Touch ID lock on, credentials read as empty until the user unlocks; keep the QSO in the outbox
-        if !CredentialVault.isVaultSessionUnlocked {
+        if selection.needsConfigurationCheck {
             enqueue(
                 record: record,
                 stationID: stationID,
                 stationLocation: stationLocation,
-                targetServices: activeServices,
-                errorReason: "Credential vault locked (Touch ID)"
+                targetServices: selection.services,
+                errorReason: "Credential vault locked (Touch ID)",
+                configurationCheckPending: true
             )
             return
         }
@@ -267,7 +321,7 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
                 stationID: stationID,
                 stationLocation: stationLocation,
                 qrzKeyOverride: qrzKeyOverride,
-                targetServices: activeServices
+                targetServices: selection.services
             )
         }
     }
@@ -279,7 +333,8 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
         stationLocation: String?,
         targetServices: [String],
         errorReason: String?,
-        pausedServices: [String] = []
+        pausedServices: [String] = [],
+        configurationCheckPending: Bool = false
     ) {
         let call = record["CALL"].uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
         guard !targetServices.isEmpty else { return }
@@ -294,6 +349,13 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
             return existingCall == call && existingDate == newDate && existingTime == newTime
         }) {
             var current = Set(pendingQueue[existingIdx].pendingServices)
+            if configurationCheckPending {
+                pendingQueue[existingIdx].configurationCheckServices = CloudUploadServiceSelection.mergedUncheckedServices(
+                    existingPending: pendingQueue[existingIdx].pendingServices,
+                    existingUnchecked: pendingQueue[existingIdx].configurationCheckServices ?? [],
+                    incoming: targetServices
+                )
+            }
             current.formUnion(targetServices)
             pendingQueue[existingIdx].pendingServices = Array(current)
             pendingQueue[existingIdx].lastErrorMessage = errorReason
@@ -311,6 +373,7 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
                 lastAttemptDate: Date(),
                 lastErrorMessage: errorReason,
                 pausedServices: pausedServices,
+                configurationCheckServices: configurationCheckPending ? targetServices : nil,
                 enqueuedAt: Date()
             )
             pendingQueue.append(newItem)
@@ -407,6 +470,35 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
         qrzKeyOverride: String?,
         targetServices: [String]
     ) async {
+        guard isEnabled else { return }
+        guard CredentialVault.isVaultSessionUnlocked else {
+            enqueue(
+                record: record,
+                stationID: stationID,
+                stationLocation: stationLocation,
+                targetServices: targetServices,
+                errorReason: "Credential vault locked (Touch ID)",
+                configurationCheckPending: true
+            )
+            return
+        }
+        let eligibleServices = configuredServices(
+            from: targetServices,
+            stationID: stationID,
+            qrzKeyOverride: qrzKeyOverride
+        )
+        guard CredentialVault.isVaultSessionUnlocked else {
+            enqueue(
+                record: record,
+                stationID: stationID,
+                stationLocation: stationLocation,
+                targetServices: targetServices,
+                errorReason: "Credential vault locked (Touch ID)",
+                configurationCheckPending: true
+            )
+            return
+        }
+        guard !eligibleServices.isEmpty else { return }
         let startTime = Date()
         isUploading = true
         defer { isUploading = false }
@@ -417,7 +509,7 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
         var configErrors: [String] = []
 
         // 1. QRZ Logbook (ACTION=INSERT)
-        if targetServices.contains("QRZ") {
+        if eligibleServices.contains("QRZ") {
             let qrzOutcome = await uploadToQRZLogbook(record: record, stationID: stationID, keyOverride: qrzKeyOverride)
             if qrzOutcome.success {
                 successfulServices.append("QRZ")
@@ -430,7 +522,7 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
         }
 
         // 2. Club Log (realtime.php)
-        if targetServices.contains("Club Log") {
+        if eligibleServices.contains("Club Log") {
             let clubLogOutcome = await uploadToClubLogRealTime(record: record)
             if clubLogOutcome.success {
                 successfulServices.append("Club Log")
@@ -443,7 +535,7 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
         }
 
         // 3. eQSL.cc
-        if targetServices.contains("eQSL") {
+        if eligibleServices.contains("eQSL") {
             let eqslOutcome = await uploadToEQSLRealTime(record: record)
             if eqslOutcome.success {
                 successfulServices.append("eQSL")
@@ -456,7 +548,7 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
         }
 
         // 4. Wavelog / Cloudlog
-        if targetServices.contains("Wavelog") {
+        if eligibleServices.contains("Wavelog") {
             let wavelogOutcome = await WavelogSyncEngine.shared.pushSingleQSO(record: record)
             switch wavelogOutcome {
             case .success, .duplicate:
@@ -473,7 +565,7 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
         }
 
         // 5. ARRL LoTW via TQSL CLI
-        if targetServices.contains("LoTW") {
+        if eligibleServices.contains("LoTW") {
             let lotwOutcome = await uploadToLoTWViaTQSL(
                 record: record,
                 stationID: stationID,
@@ -498,13 +590,15 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
 
         // If any service failed due to network / connectivity issues, buffer in offline outbox!
         if !networkFailedServices.isEmpty || !manualRetryServices.isEmpty {
+            let vaultLocked = !CredentialVault.isVaultSessionUnlocked
             enqueue(
                 record: record,
                 stationID: stationID,
                 stationLocation: stationLocation,
                 targetServices: networkFailedServices + manualRetryServices,
                 errorReason: configErrors.isEmpty ? "Connection failed during upload" : "Upload rejected or service not configured; retry manually",
-                pausedServices: manualRetryServices
+                pausedServices: vaultLocked ? [] : manualRetryServices,
+                configurationCheckPending: vaultLocked
             )
         }
 
@@ -552,6 +646,7 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
     }
 
     public func flushPendingQueue(triggerReason: String = "") async {
+        guard isEnabled else { return }
         guard !isFlushingQueue else { return }
         guard !pendingQueue.isEmpty else { return }
         guard isNetworkConnected else { return }
@@ -568,6 +663,8 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
         let manualRetry = triggerReason == "Manual Sync"
         let maxAutomaticRetryAge: TimeInterval = 7 * 24 * 60 * 60
         var fullyCompletedIndices: [Int] = []
+        var skippedAfterUnlock: [UUID: [String]] = [:]
+        var uploadedItemIDs = Set<UUID>()
         var totalUploadedServices = 0
         var unavailableServices = Set<String>()
 
@@ -575,6 +672,45 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
             if !CredentialVault.isVaultSessionUnlocked { break }
 
             var item = pendingQueue[index]
+            if let unchecked = item.configurationCheckServices, !unchecked.isEmpty {
+                let enabled = Set(enabledServices())
+                let configured = configuredServices(
+                    from: unchecked.filter { enabled.contains($0) },
+                    stationID: item.stationID
+                )
+                if !CredentialVault.isVaultSessionUnlocked { break }
+                let selection = CloudUploadServiceSelection.select(
+                    enabled: unchecked,
+                    vaultUnlocked: true,
+                    configured: configured
+                )
+                let configuredSet = Set(selection.services)
+                let uncheckedSet = Set(unchecked)
+                let skipped = item.pendingServices.filter { uncheckedSet.contains($0) && !configuredSet.contains($0) }
+                item.pendingServices.removeAll { skipped.contains($0) }
+                item.pausedServices?.removeAll { skipped.contains($0) }
+                item.configurationCheckServices = nil
+                if !skipped.isEmpty {
+                    skippedAfterUnlock[item.id] = skipped
+                    if !item.pendingServices.isEmpty {
+                        appendRecentLog(CloudUploadLogItem(
+                            callsign: item.callsign,
+                            band: item.band,
+                            mode: item.mode,
+                            services: skipped,
+                            timestamp: Date(),
+                            latencyMs: 0,
+                            success: false,
+                            message: "Skipped services without configuration after unlock"
+                        ))
+                    }
+                }
+                pendingQueue[index] = item
+                if item.pendingServices.isEmpty {
+                    fullyCompletedIndices.append(index)
+                    continue
+                }
+            }
             if !manualRetry && Date().timeIntervalSince(item.enqueuedAt) > maxAutomaticRetryAge { continue }
             let record = QSORecordModel(fields: item.recordFields)
             var servicesToRemove: [String] = []
@@ -583,6 +719,7 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
 
             for service in item.pendingServices {
                 if !CredentialVault.isVaultSessionUnlocked { break }
+                if !enabledServices().contains(service) { continue }
                 if unavailableServices.contains(service) || (!manualRetry && pausedServices.contains(service)) { continue }
                 var success = false
                 var networkFailure = false
@@ -626,6 +763,7 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
                 if success {
                     servicesToRemove.append(service)
                     pausedServices.remove(service)
+                    uploadedItemIDs.insert(item.id)
                     totalUploadedServices += 1
                 } else if networkFailure {
                     unavailableServices.insert(service)
@@ -655,15 +793,20 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
         for idx in fullyCompletedIndices.sorted(by: >) {
             if idx < pendingQueue.count {
                 let completed = pendingQueue.remove(at: idx)
+                let skipped = skippedAfterUnlock[completed.id] ?? []
                 let logItem = CloudUploadLogItem(
                     callsign: completed.callsign,
                     band: completed.band,
                     mode: completed.mode,
-                    services: ["Outbox Sync"],
+                    services: skipped.isEmpty ? ["Outbox Sync"] : skipped,
                     timestamp: Date(),
                     latencyMs: 0,
-                    success: true,
-                    message: "Completed outbox sync"
+                    success: skipped.isEmpty,
+                    message: skipped.isEmpty
+                        ? "Completed outbox sync"
+                        : (uploadedItemIDs.contains(completed.id)
+                            ? "Configured services uploaded; unconfigured services skipped"
+                            : "No configured service remained in the outbox")
                 )
                 appendRecentLog(logItem)
             }
@@ -671,11 +814,13 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
 
         savePendingQueueToDisk()
 
-        if totalUploadedServices > 0 || (manualRetry && !pendingQueue.isEmpty) {
+        if totalUploadedServices > 0 || !skippedAfterUnlock.isEmpty || (manualRetry && !pendingQueue.isEmpty) {
             let reasonStr = triggerReason.isEmpty ? "" : " (\(triggerReason))"
             let pausedCount = pendingQueue.filter { !($0.pausedServices ?? []).isEmpty }.count
-            var statusText = "☁️ Outbox: \(fullyCompletedIndices.count) QSO(s) completed, \(pendingQueue.count) waiting\(reasonStr)"
+            let skippedCount = skippedAfterUnlock.values.reduce(0) { $0 + $1.count }
+            var statusText = "☁️ Outbox: \(totalUploadedServices) service upload(s), \(pendingQueue.count) QSO(s) waiting\(reasonStr)"
             if pausedCount > 0 { statusText += "; \(pausedCount) need settings checked" }
+            if skippedCount > 0 { statusText += "; \(skippedCount) unconfigured service(s) skipped" }
             self.lastUploadStatus = statusText
             triggerToast()
         }

@@ -1625,11 +1625,11 @@ struct SettingsView: View {
 
                     HStack {
                         if cloudDaemon.pendingQueueCount > 0 {
-                            Label("\(cloudDaemon.pendingQueueCount) QSO(s) pending offline upload", systemImage: "tray.full.fill")
+                            Label("\(cloudDaemon.pendingQueueCount) QSO(s) awaiting cloud upload", systemImage: "tray.full.fill")
                                 .font(.caption)
                                 .foregroundColor(.orange)
                         } else {
-                            Label("Outbox queue is empty (All contacts synchronized)", systemImage: "checkmark.circle.fill")
+                            Label("Outbox queue is empty", systemImage: "checkmark.circle.fill")
                                 .font(.caption)
                                 .foregroundColor(.green)
                         }
@@ -1644,7 +1644,7 @@ struct SettingsView: View {
                         }
                     }
 
-                    Text("Contacts finished in SDR-Control (FT8 UDP or iCloud) are uploaded instantly to QRZ, LoTW, Club Log, eQSL, and Wavelog. If the internet is disconnected, they are stored in the local outbox and automatically uploaded as soon as the connection is restored.")
+                    Text("New contacts upload to enabled services that are configured. Network failures wait in the outbox; uploads logged while Touch ID is locked are checked after unlock. Older requests and rejected uploads remain available for manual retry.")
                         .font(.caption2)
                         .foregroundColor(.secondary)
                 }

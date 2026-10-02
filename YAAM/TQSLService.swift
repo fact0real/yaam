@@ -43,6 +43,13 @@ public final class TQSLService: ObservableObject {
         (NSHomeDirectory() as NSString).appendingPathComponent(".tqsl")
     }
 
+    public nonisolated static func hasStationData() -> Bool {
+        let fileManager = FileManager.default
+        return [realTQSLDirectory(), containerTQSLDirectory()].contains { directory in
+            fileManager.fileExists(atPath: (directory as NSString).appendingPathComponent("station_data"))
+        }
+    }
+
     @discardableResult
     public nonisolated static func synchronizeTQSLStorage() -> (synced: Bool, message: String) {
         let fileManager = FileManager.default

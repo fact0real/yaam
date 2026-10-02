@@ -12,6 +12,7 @@ struct PendingCloudUploadItem: Codable, Identifiable, Equatable {
     var lastAttemptDate: Date?
     var lastErrorMessage: String?
     var pausedServices: [String]?
+    var configurationCheckServices: [String]?
     let enqueuedAt: Date
 }
 
@@ -27,9 +28,11 @@ struct PendingQueueCredentialRegression {
           "enqueuedAt":"2026-09-20T10:00:00Z"}]
         """.data(using: .utf8)!
         let dec = JSONDecoder(); dec.dateDecodingStrategy = .iso8601
-        let items = try dec.decode([PendingCloudUploadItem].self, from: legacy)
+        var items = try dec.decode([PendingCloudUploadItem].self, from: legacy)
         precondition(items.count == 1 && items[0].attemptCount == 2 && items[0].pendingServices == ["QRZ"])
         precondition(items[0].pausedServices == nil, "Older queue files must decode without pausedServices")
+        precondition(items[0].configurationCheckServices == nil, "Older queue files must decode without a configuration check list")
+        items[0].configurationCheckServices = ["QRZ"]
         // scrub trigger used by loadPendingQueueFromDisk
         precondition(legacy.range(of: Data("qrzKeyOverride".utf8)) != nil)
 
@@ -40,6 +43,7 @@ struct PendingQueueCredentialRegression {
         precondition(!text.contains(secret) && !text.contains("qrzKeyOverride"))
         let again = try dec.decode([PendingCloudUploadItem].self, from: out)
         precondition(again == items)
+        precondition(again[0].configurationCheckServices == ["QRZ"])
 
         // 3. Resolution at retry time: profile key > global key > empty; rotation is honoured; deleted profile -> global.
         var vault: [UUID: String] = [sid: "PROFILE-KEY"]

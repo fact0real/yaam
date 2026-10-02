@@ -144,7 +144,7 @@ Whenever you add a new location or renew a certificate inside the official TQSL 
 
 ### 2.6 Zero-Click Cloud Upload Background Daemon
 Enable **Zero-Click LoTW Upload** in settings. Whenever a QSO is finalized in Quick Log or via FT8, the background daemon bundles the contact, cryptographically signs it with TQSL, and uploads it to ARRL servers without requiring manual button clicks. Successfully uploaded QSOs are marked with `LOTW_QSL_SENT = Y`.
-* **Outbox:** Pending uploads wait while the Touch ID credential vault is locked. Network failures retry automatically for up to seven days; older items remain in the outbox for a manual **Upload Outbox Now** attempt. Rejected or unconfigured services also retain their QSO and wait for a manual retry after settings are corrected. The outbox holds at most 500 upload requests and warns when an older request is displaced.
+* **Outbox:** New QSOs are sent or queued only for enabled services with usable settings. Pending uploads wait while the Touch ID credential vault is locked; YAAM checks their service settings after unlock. Network failures retry automatically for up to seven days; older items remain in the outbox for a manual **Upload Outbox Now** attempt. Rejected requests retain their QSO for manual retry after settings are corrected. Existing paused entries from earlier versions remain in the outbox. The outbox holds at most 500 upload requests and warns when an older request is displaced.
 
 ### 2.7 Bi-Directional Reconciliation in QSL Hub
 In the **QSL Hub** workspace, click **Fetch LoTW Confirmations** to download matched confirmations. The reconciliation engine uses a 30-minute matching window for time drift tolerance. Verified contacts turn bright green in your log table with `LOTW_QSL_RCVD = Y`.

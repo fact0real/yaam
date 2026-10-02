@@ -1443,11 +1443,19 @@ public struct HamTrackerWorkspaceView: View {
     }
 
     private func webSDRMessageRow(_ message: WebSDRAggregatedMessage, in group: WebSDRCycleGroup) -> some View {
-        let logStatus = message.transmittingCallsign.map {
+        let logStatus: WebSDRLogbookStatus? = message.transmittingCallsign.map {
             webSDRLogbook.status(for: $0, band: webSDR.selectedBand)
         }
+        let entityLabel: String = "\(logStatus?.entity.flagEmoji ?? message.transmittingFlag) \(logStatus?.entity.entityName ?? "Unknown")"
+        let relativeLevel: String = WebSDRRelativeLevel.value(message.signalLevelDbFS, among: group.messages)
+            .map { "\($0) rel dB" } ?? "— rel dB"
+        let rawLevel: String = message.signalLevelDbFS.map { String(format: "%.0f dBFS", $0) } ?? "unknown"
+        let receiverNames: String = message.receivers.map { "\($0.receiverFlag) \($0.receiverName)" }.joined(separator: ", ")
+        let receiverDetails: String = message.receivers
+            .map { "\($0.receiverFlag) \($0.receiverName) · \(Int($0.audioFrequencyHz)) Hz" }
+            .joined(separator: "\n")
         return HStack(spacing: 6) {
-            Text("\(logStatus?.entity.flagEmoji ?? message.transmittingFlag) \(logStatus?.entity.entityName ?? "Unknown")")
+            Text(entityLabel)
                 .font(.system(size: 10, weight: .medium))
                 .lineLimit(1)
                 .frame(width: 160, alignment: .leading)
@@ -1499,21 +1507,20 @@ public struct HamTrackerWorkspaceView: View {
                 Text("WORKED").font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(.secondary)
             }
-            Text(WebSDRRelativeLevel.value(message.signalLevelDbFS, among: group.messages)
-                 .map { "\($0) rel dB" } ?? "— rel dB")
+            Text(relativeLevel)
                 .font(.system(size: 9, design: .monospaced))
-                .help("Relative to this cycle; raw audio level: \(message.signalLevelDbFS.map { String(format: "%.0f dBFS", $0) } ?? "unknown"). Not RF SNR.")
+                .help("Relative to this cycle; raw audio level: \(rawLevel). Not RF SNR.")
             if message.receiverCount > 1 {
                 Text("\(message.receiverCount)/\(message.totalSelectedReceivers)")
                     .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(message.hasMajority ? .purple : .secondary)
             }
-            Text(message.receivers.map { "\($0.receiverFlag) \($0.receiverName)" }.joined(separator: ", "))
+            Text(receiverNames)
                 .font(.system(size: 9))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .frame(maxWidth: 230, alignment: .trailing)
-                .help(message.receivers.map { "\($0.receiverFlag) \($0.receiverName) · \(Int($0.audioFrequencyHz)) Hz" }.joined(separator: "\n"))
+                .help(receiverDetails)
         }
         .padding(.horizontal, 6)
         .padding(.vertical, 5)
