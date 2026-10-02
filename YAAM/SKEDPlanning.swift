@@ -13,9 +13,10 @@ nonisolated struct SKEDCountryBandActivity: Sendable {
 
     static func make(entries: [SKEDLogBandEntry], countryISO: String) -> Self {
         let matching = entries.filter { $0.countryISO.caseInsensitiveCompare(countryISO) == .orderedSame }
+        let shownBands = Set(SKEDMailTemplate.bands)
         return Self(
-            worked: Set(matching.map { $0.band.lowercased() }.filter { !$0.isEmpty }),
-            confirmed: Set(matching.filter(\.confirmed).map { $0.band.lowercased() }.filter { !$0.isEmpty }),
+            worked: Set(matching.map { $0.band.lowercased() }.filter(shownBands.contains)),
+            confirmed: Set(matching.filter(\.confirmed).map { $0.band.lowercased() }.filter(shownBands.contains)),
             qsoCount: matching.count
         )
     }
@@ -24,14 +25,11 @@ nonisolated struct SKEDCountryBandActivity: Sendable {
 }
 
 nonisolated enum SKEDMailTemplate {
-    static let bands = [
-        "2190m", "630m", "160m", "80m", "60m", "40m", "30m", "20m", "17m", "15m", "12m", "10m",
-        "6m", "4m", "2m", "1.25m", "70cm", "33cm", "23cm", "13cm", "9cm", "6cm", "3cm", "1.25cm"
-    ]
+    static let bands = ["160m", "80m", "60m", "40m", "30m", "20m", "17m", "15m", "12m", "10m", "6m"]
 
     static let defaultSubject = "A friendly SKED request from {my_callsign} to {callsign}"
     static let defaultBody = """
-    Hi {greeting},
+    Hi {greeting} ({callsign}),
 
     I hope you're doing well! I'm {my_callsign}{my_location}, and I'd love to arrange a SKED with you on {bands}.
 

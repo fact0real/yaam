@@ -14,6 +14,12 @@ private struct SKEDPreparedEmail {
     let body: String
 }
 
+private struct SKEDCountryChoice: Identifiable {
+    let iso: String
+    let title: String
+    var id: String { iso }
+}
+
 struct SKEDDirectoryView: View {
     @EnvironmentObject private var appState: AppState
     @State private var countryISO = "ir"
@@ -33,24 +39,45 @@ struct SKEDDirectoryView: View {
     @State private var composeSelection: SKEDComposeSelection?
     @State private var previewCallsign = ""
     @State private var showSMTPSettings = false
+    @State private var smtpConfigured = false
     @State private var isSending = false
     @State private var cancelSending = false
     @State private var sendingCallsign = ""
     @State private var sendResults: [String: Bool] = [:]
     @State private var sendErrors: [String: String] = [:]
     @State private var skedSentCalls: Set<String> = []
-    @AppStorage("sked.mailSubject.v1") private var mailSubjectTemplate = SKEDMailTemplate.defaultSubject
-    @AppStorage("sked.mailBody.v1") private var mailBodyTemplate = SKEDMailTemplate.defaultBody
+    @State private var countryChoices: [SKEDCountryChoice] = []
+    @State private var mailSubjectTemplate = SKEDMailTemplate.defaultSubject
+    @State private var mailBodyTemplate = SKEDMailTemplate.defaultBody
 
     private var countries: [QRZCountrySummary] {
-        let available = appState.qrzRankCountries
-            .filter { $0.iso.count == 2 }
-            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        var byISO: [String: QRZCountrySummary] = [:]
+        for country in appState.qrzRankCountries where country.iso.count == 2 {
+            let iso = country.iso.lowercased()
+            byISO[iso] = QRZCountrySummary(
+                iso: iso, name: fullCountryName(for: iso, fallback: country.name),
+                stationCount: country.stationCount)
+        }
+        let available = byISO.values.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
         if !available.isEmpty { return available }
         return Locale.Region.isoRegions.map(\.identifier).filter { $0.count == 2 }.compactMap { iso -> QRZCountrySummary? in
             guard let name = Locale(identifier: "en_US").localizedString(forRegionCode: iso) else { return nil }
             return QRZCountrySummary(iso: iso.lowercased(), name: name)
         }.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    private func fullCountryName(for iso: String, fallback: String) -> String {
+        let code = iso.uppercased()
+        let localized = Locale(identifier: "en_US").localizedString(forRegionCode: code) ?? ""
+        return localized.isEmpty || localized.caseInsensitiveCompare(code) == .orderedSame ? fallback : localized
+    }
+
+    private func updateCountryChoices() {
+        countryChoices = countries.map { country in
+            let prefix = DXCCDatabase.representativePrefix(forISO: country.iso) ?? country.iso.uppercased()
+            return SKEDCountryChoice(iso: country.iso.lowercased(),
+                                     title: "\(flagForCountryIso(country.iso)) \(country.name) · \(prefix)")
+        }
     }
 
     var body: some View {
@@ -112,7 +139,16 @@ struct SKEDDirectoryView: View {
         }
         .onAppear {
             appState.fetchQRZRankCountries()
+            updateCountryChoices()
             loadBandPlans()
+            loadMailTemplate()
+        }
+        .onChange(of: appState.qrzRankCountries) { _, _ in updateCountryChoices() }
+        .onChange(of: mailSubjectTemplate) { _, value in
+            UserDefaults.standard.set(value, forKey: "sked.mailSubject.v1")
+        }
+        .onChange(of: mailBodyTemplate) { _, value in
+            UserDefaults.standard.set(value, forKey: "sked.mailBody.v1")
         }
         .onChange(of: countryISO) { _, _ in
             selectedCallsigns.removeAll()
@@ -177,12 +213,11 @@ struct SKEDDirectoryView: View {
     private var filters: some View {
         HStack(spacing: 12) {
             Picker("Country", selection: $countryISO) {
-                ForEach(countries) { country in
-                    Text("\(flagForCountryIso(country.iso)) \(DXCCDatabase.representativePrefix(forISO: country.iso) ?? "—") · \(country.name)")
-                        .tag(country.iso.lowercased())
+                ForEach(countryChoices) { country in
+                    Text(country.title).tag(country.iso)
                 }
             }
-            .frame(width: 265)
+            .frame(width: 335)
 
             Picker("Rank by", selection: $category) {
                 Text("Confirmed QSOs").tag("qso")
@@ -197,7 +232,16 @@ struct SKEDDirectoryView: View {
         HStack(spacing: 10) {
             Button {
                 guard let directory else { return }
-                let operators = directory.operators.filter { selectedCallsigns.contains($0.callsign) }
+                selectedCallsigns = Set(directory.operators.compactMap { $0.validEmail == nil ? nil : $0.callsign })
+            } label: {
+                Label("Select All", systemImage: "checkmark.square")
+            }
+            .disabled(directory?.emailCount == 0 || directory == nil)
+            .help("Select every operator with an email address in this country")
+
+            Button {
+                guard let directory else { return }
+                let operators = directory.operators.filter { selectedCallsigns.contains($0.callsign) && $0.validEmail != nil }
                 openComposer(for: operators)
             } label: {
                 Label("Email selected (\(selectedCallsigns.count))", systemImage: "paperplane")
@@ -238,7 +282,7 @@ struct SKEDDirectoryView: View {
             Text(flagForCountryIso(directory.countryISO))
                 .font(.system(size: 36))
             VStack(alignment: .leading, spacing: 3) {
-                Text(directory.countryName)
+                Text(fullCountryName(for: directory.countryISO, fallback: directory.countryName))
                     .font(.title3.weight(.bold))
                 Text("\(directory.operators.count) ranked operators")
                     .font(.subheadline)
@@ -267,7 +311,7 @@ struct SKEDDirectoryView: View {
     private func countryBandOverview(_ directory: SKEDDirectory) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Label("\(directory.countryName) · band history", systemImage: "waveform.path")
+                Label("\(fullCountryName(for: directory.countryISO, fallback: directory.countryName)) · band history", systemImage: "waveform.path")
                     .font(.headline)
                 Spacer()
                 Text("From the active station logbook")
@@ -310,9 +354,8 @@ struct SKEDDirectoryView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button("Select all with email") {
-                    selectedCallsigns = Set(directory.operators.filter { $0.validEmail != nil }.map(\.callsign))
-                }
+                Text("\(directory.emailCount) contacts with email")
+                    .font(.caption).foregroundStyle(.secondary)
                 Button("Suggest bands for selected") {
                     for callsign in selectedCallsigns where bandPlans[callsign, default: []].isEmpty {
                         suggestBands(for: callsign)
@@ -636,7 +679,7 @@ struct SKEDDirectoryView: View {
             )
             guard !Task.isCancelled else { return }
             directory = result
-            selectedCallsigns = selectedCallsigns.intersection(Set(result.operators.map(\.callsign)))
+            selectedCallsigns = selectedCallsigns.intersection(Set(result.operators.compactMap { $0.validEmail == nil ? nil : $0.callsign }))
             if !result.operators.contains(where: { $0.callsign == focusedCallsign }) {
                 focusedCallsign = result.operators.first?.callsign
             }
@@ -649,12 +692,23 @@ struct SKEDDirectoryView: View {
 
     private func openComposer(for operators: [SKEDOperator]) {
         guard !operators.isEmpty else { return }
+        smtpConfigured = appState.isSMTPConfigured
         previewCallsign = operators[0].callsign
         sendResults = [:]
         sendErrors = [:]
         cancelSending = false
         sendingCallsign = ""
         composeSelection = SKEDComposeSelection(operators: operators)
+    }
+
+    private func loadMailTemplate() {
+        if let saved = UserDefaults.standard.string(forKey: "sked.mailSubject.v1") {
+            mailSubjectTemplate = saved
+        }
+        if let saved = UserDefaults.standard.string(forKey: "sked.mailBody.v1") {
+            mailBodyTemplate = saved.replacingOccurrences(of: "Hi {greeting},\n\nI hope",
+                                                              with: "Hi {greeting} ({callsign}),\n\nI hope")
+        }
     }
 
     private func renderedSubject(for item: SKEDOperator) -> String {
@@ -680,7 +734,7 @@ struct SKEDDirectoryView: View {
         if appState.activeStationProfile?.normalizedCallsign.isEmpty != false {
             return "Choose an active station profile with your callsign before sending."
         }
-        if !appState.isSMTPConfigured {
+        if !smtpConfigured {
             return "Configure your SMTP account in YAAM Settings → Email before sending."
         }
         if let item = pending.first(where: { $0.validEmail == nil }) {
@@ -699,6 +753,7 @@ struct SKEDDirectoryView: View {
         let preview = selection.operators.first { $0.callsign == previewCallsign }
             ?? selection.operators[0]
         let pending = selection.operators.filter { sendResults[$0.callsign] != true }
+        let issue = sendIssue(for: selection)
         return VStack(alignment: .leading, spacing: 15) {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
@@ -724,6 +779,7 @@ struct SKEDDirectoryView: View {
                     TextEditor(text: $mailBodyTemplate)
                         .font(.system(.body, design: .monospaced))
                         .scrollContentBackground(.hidden)
+                        .frame(height: 245)
                         .padding(6)
                         .background(Color(NSColor.textBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
                         .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(NSColor.separatorColor)))
@@ -737,7 +793,7 @@ struct SKEDDirectoryView: View {
                     .font(.caption)
                     .disabled(isSending)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
 
                 VStack(alignment: .leading, spacing: 10) {
                     HStack {
@@ -774,6 +830,15 @@ struct SKEDDirectoryView: View {
                                     .stroke(chosen ? Color.accentColor : .clear, lineWidth: 1))
                         }
                     }
+                    if selection.operators.count > 1 {
+                        Button("Apply these bands to all selected") {
+                            let chosen = bandPlans[preview.callsign, default: []]
+                            for item in selection.operators { bandPlans[item.callsign] = chosen }
+                            saveBandPlans()
+                        }
+                        .font(.caption)
+                        .disabled(isSending || bandPlans[preview.callsign, default: []].isEmpty)
+                    }
                     Divider()
                     Text(renderedSubject(for: preview))
                         .font(.subheadline.bold())
@@ -783,6 +848,7 @@ struct SKEDDirectoryView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .textSelection(.enabled)
                     }
+                    .frame(height: 150)
                     .padding(12)
                     .background(Color(NSColor.textBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
                     if selection.operators.count > 1 {
@@ -794,8 +860,12 @@ struct SKEDDirectoryView: View {
                                     VStack(alignment: .leading, spacing: 2) {
                                         HStack {
                                             Text(item.callsign).font(.caption.bold()).frame(width: 75, alignment: .leading)
+                                            Text(item.name ?? item.callsign)
+                                                .font(.caption).lineLimit(1)
+                                                .frame(maxWidth: .infinity, alignment: .leading)
                                             Text(SKEDMailTemplate.bandPhrase(bandPlans[item.callsign] ?? []))
                                                 .font(.caption).lineLimit(1)
+                                                .frame(maxWidth: 125, alignment: .trailing)
                                             Spacer()
                                             if let sent = sendResults[item.callsign] {
                                                 Image(systemName: sent ? "checkmark.circle.fill" : "xmark.circle.fill")
@@ -810,12 +880,12 @@ struct SKEDDirectoryView: View {
                                 }
                             }
                         }
-                        .frame(maxHeight: 125)
+                        .frame(height: 105)
                     }
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
             }
-            if let issue = sendIssue(for: selection) {
+            if let issue {
                 Label(issue, systemImage: "exclamationmark.triangle.fill")
                     .font(.caption).foregroundStyle(.orange)
             }
@@ -852,14 +922,17 @@ struct SKEDDirectoryView: View {
                     Task { await sendComposed(selection) }
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(isSending || pending.isEmpty || sendIssue(for: selection) != nil)
+                .disabled(isSending || pending.isEmpty || issue != nil)
             }
         }
         .padding(22)
-        .frame(width: 980, height: 665)
+        .frame(width: 980, height: 700)
         .interactiveDismissDisabled(isSending)
         .sheet(isPresented: $showSMTPSettings) {
             SMTPSettingsView(embeddedInSettings: false)
+        }
+        .onChange(of: showSMTPSettings) { _, showing in
+            if !showing { smtpConfigured = appState.isSMTPConfigured }
         }
     }
 

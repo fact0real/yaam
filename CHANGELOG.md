@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.37.16 — 2026-10-02
+
+- Show full country names in the SKED picker and focus SKED planning on 160m through 6m.
+- Put Select All in the main SKED toolbar; it includes only operators with valid email addresses in the selected country.
+- Stabilize the SKED email editor layout and avoid repeated settings lookups while composing. Show each recipient's name and callsign in the individual-delivery list.
+
 ## 1.37.15 — 2026-10-02
 
 - Redesign SKED as a country band planning workspace with worked and confirmed bands from the active station logbook.
