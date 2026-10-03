@@ -115,10 +115,10 @@ struct WebSDRAutomaticEndpoint: Identifiable, Hashable, Codable {
     let baseURL: URL
     let bands: Set<String>
 
-    func tunedURL(for band: WebSDRFT8Band) -> URL? {
-        guard bands.contains(band.name) else { return nil }
+    func tunedURL(for band: String, dialHz: Int) -> URL? {
+        guard bands.contains(band) else { return nil }
         var parts = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)
-        parts?.query = "tune=\(band.dialHz / 1_000)usb"
+        parts?.query = WebSDRFrequency.tuneQuery(dialHz)
         return parts?.url
     }
 
@@ -348,7 +348,10 @@ final class WebSDRFT8Monitor: ObservableObject {
     ]
 
     @Published var selectedReceiverID = "esslingen"
-    @Published var selectedBand = "20m"
+    @Published var selectedBand = "20m" {
+        didSet { if selectedBand != oldValue { manualDialHz = nil } }
+    }
+    @Published private(set) var manualDialHz: Int?
     @Published var selectedUtahReceiver = 2
     @Published var selectedParallelEndpointIDs: Set<String> = []
     @Published private(set) var customEndpoints: [WebSDRAutomaticEndpoint] = {
@@ -406,6 +409,34 @@ final class WebSDRFT8Monitor: ObservableObject {
 
     var band: WebSDRFT8Band {
         Self.bands.first { $0.name == selectedBand } ?? Self.bands[3]
+    }
+    var dialHz: Int { manualDialHz ?? band.dialHz }
+
+    @discardableResult
+    func applyManualFrequency(_ text: String) -> String? {
+        let antennaBands = receiver.id == "utah"
+            ? UtahWebSDR.all.first(where: { $0.number == selectedUtahReceiver })?.bands
+            : nil
+        switch WebSDRFrequency.resolve(text, receiverBands: receiver.bands,
+                                      antennaBands: antennaBands) {
+        case .failure(let error):
+            return error.localizedDescription
+        case .success(let selection):
+            stop()
+            messages.removeAll()
+            selectedBand = selection.band
+            manualDialHz = selection.dialHz
+            normalizeSelection()
+            status = "Tuned to \(WebSDRFrequency.formattedMHz(dialHz)) MHz USB · \(selectedBand). Start receive when ready."
+            return nil
+        }
+    }
+
+    func usePresetFrequency() {
+        stop()
+        messages.removeAll()
+        manualDialHz = nil
+        status = "Preset \(WebSDRFrequency.formattedMHz(dialHz)) MHz USB · \(selectedBand). Start receive when ready."
     }
 
     var directedMessages: [WebSDRDecodedMessage] { messages.filter(\.addressedToTarget) }
@@ -477,7 +508,7 @@ final class WebSDRFT8Monitor: ObservableObject {
         guard let base else { return nil }
         var parts = URLComponents(url: base, resolvingAgainstBaseURL: false)
         if receiver.supportsAutomaticRecording || receiver.id.hasPrefix("maasbree") {
-            parts?.query = "tune=\(band.dialHz / 1_000)usb"
+            parts?.query = WebSDRFrequency.tuneQuery(dialHz)
         }
         return parts?.url
     }
@@ -580,7 +611,7 @@ final class WebSDRFT8Monitor: ObservableObject {
     }
 
     private func startAutomaticEndpoint(_ endpoint: WebSDRAutomaticEndpoint, session: UUID) {
-        guard let url = endpoint.tunedURL(for: band) else { return }
+        guard let url = endpoint.tunedURL(for: selectedBand, dialHz: dialHz) else { return }
         let browser = WebSDRBrowserSession()
         browsers[endpoint.id] = browser
         recordedStreams[endpoint.id] = RecordedStream()

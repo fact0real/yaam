@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.37.23 — 2026-10-03
+
+- Add a manual WebSDR dial frequency field in MHz, with the receiver's listed bands and Utah antenna selection checked before tuning.
+- Use the chosen dial frequency for receiver URLs, automatic FT8 decoding, and WebSDR reply setup; provide a one-click return to the band preset.
+
 ## 1.37.22 — 2026-10-03
 
 - Keep the SKED email window's header and Close/Send controls visible when delivery errors or overlap warnings appear; scroll the changing content within the available screen height.

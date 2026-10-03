@@ -59,6 +59,8 @@ public struct HamTrackerWorkspaceView: View {
     @State private var customWebSDRFlag = ""
     @State private var customWebSDRContinent = "AS"
     @State private var customWebSDRError = ""
+    @State private var webSDRFrequencyDraft = ""
+    @State private var webSDRFrequencyError = ""
     @AppStorage("icomNetworkHost") private var icomHost = ""
     @AppStorage("icomNetworkControlPort") private var icomPort = 50_001
     @AppStorage("icomNetworkUsername") private var icomUsername = ""
@@ -1412,6 +1414,7 @@ public struct HamTrackerWorkspaceView: View {
         .onAppear {
             webSDRLogbook = WebSDRLogbookIndex(records: appState.qsoRecords)
             webSDR.checkReceiver(webSDR.receiver.id, url: webSDR.receiver.url)
+            webSDRFrequencyDraft = WebSDRFrequency.formattedMHz(webSDR.dialHz)
             followLatestWebSDRReply()
             scanDXOpportunities()
         }
@@ -1645,7 +1648,7 @@ public struct HamTrackerWorkspaceView: View {
                     .toggleStyle(.checkbox)
             }
             Button("Show receiver") { webSDR.openReceiver() }
-            Text("\(String(format: "%.3f", Double(webSDR.band.dialHz) / 1_000_000)) MHz USB · ~3 kHz")
+            Text("\(WebSDRFrequency.formattedMHz(webSDR.dialHz)) MHz USB · ~3 kHz")
                 .foregroundStyle(.secondary)
             Toggle("DX sound", isOn: $webSDRDXAudioAlertsEnabled)
                 .toggleStyle(.checkbox)
@@ -1781,6 +1784,8 @@ public struct HamTrackerWorkspaceView: View {
                 webSDR.stop()
                 webSDR.normalizeSelection()
                 webSDR.checkReceiver(webSDR.receiver.id, url: webSDR.receiver.url)
+                webSDRFrequencyDraft = WebSDRFrequency.formattedMHz(webSDR.dialHz)
+                webSDRFrequencyError = ""
             }
             Picker("FT8 band", selection: $webSDR.selectedBand) {
                 ForEach(WebSDRFT8Monitor.bands.filter { webSDR.receiver.bands.contains($0.name) }) { band in
@@ -1793,6 +1798,8 @@ public struct HamTrackerWorkspaceView: View {
                 webSDR.stop()
                 webSDR.normalizeSelection()
                 webSDR.checkReceiver(webSDR.receiver.id, url: webSDR.receiver.url)
+                webSDRFrequencyDraft = WebSDRFrequency.formattedMHz(webSDR.dialHz)
+                webSDRFrequencyError = ""
             }
             if webSDR.selectedReceiverID == "utah" {
                 Picker("Utah antenna", selection: $webSDR.selectedUtahReceiver) {
@@ -1826,8 +1833,15 @@ public struct HamTrackerWorkspaceView: View {
             }
             .help("Configure IC-7300MK2 network connection")
             Button {
-                if webSDR.isMonitoring { webSDR.stop() }
-                else { webSDR.start(targetCallsign: engine.targetCallsign) }
+                if webSDR.isMonitoring {
+                    webSDR.stop()
+                } else {
+                    if webSDRFrequencyDraft != WebSDRFrequency.formattedMHz(webSDR.dialHz) {
+                        applyWebSDRFrequency()
+                        guard webSDRFrequencyError.isEmpty else { return }
+                    }
+                    webSDR.start(targetCallsign: engine.targetCallsign)
+                }
             } label: {
                 Label(webSDR.isMonitoring ? "Stop receive" : "Start receive",
                       systemImage: webSDR.isMonitoring ? "stop.fill" : "play.fill")
@@ -1836,6 +1850,48 @@ public struct HamTrackerWorkspaceView: View {
             .tint(webSDR.isMonitoring ? .red : .green)
         }
         .controlSize(.small)
+    }
+
+    private var webSDRManualFrequencyControls: some View {
+        HStack(spacing: 8) {
+            Label("Dial frequency", systemImage: "dial.low")
+                .font(.caption.bold())
+            TextField("14.074", text: $webSDRFrequencyDraft)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 105)
+                .onSubmit(applyWebSDRFrequency)
+            Text("MHz · USB")
+                .foregroundStyle(.secondary)
+            Button("Tune") { applyWebSDRFrequency() }
+                .disabled(webSDRFrequencyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            if webSDR.manualDialHz != nil {
+                Button("Use band preset") {
+                    webSDR.usePresetFrequency()
+                    webSDRFrequencyDraft = WebSDRFrequency.formattedMHz(webSDR.dialHz)
+                    webSDRFrequencyError = ""
+                }
+            }
+            if !webSDRFrequencyError.isEmpty {
+                Label(webSDRFrequencyError, systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                    .lineLimit(1)
+                    .help(webSDRFrequencyError)
+            } else {
+                Text("Enter a frequency in a band listed for this receiver. Tuning stops the current session.")
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+        }
+        .font(.caption)
+        .controlSize(.small)
+    }
+
+    private func applyWebSDRFrequency() {
+        webSDRFrequencyError = webSDR.applyManualFrequency(webSDRFrequencyDraft) ?? ""
+        if webSDRFrequencyError.isEmpty {
+            webSDRFrequencyDraft = WebSDRFrequency.formattedMHz(webSDR.dialHz)
+        }
     }
 
     private var webSDRDecodedMessages: some View {
@@ -1901,6 +1957,8 @@ public struct HamTrackerWorkspaceView: View {
     private var webSDRReceiveControls: some View {
         VStack(alignment: .leading, spacing: 7) {
             webSDRReceiverControls
+
+            webSDRManualFrequencyControls
 
             webSDRAudioControls
 
@@ -2100,7 +2158,7 @@ public struct HamTrackerWorkspaceView: View {
         if let issue = ft8.prepareWebSDRReply(webSDRReplyDraft,
                                                targetCallsign: engine.targetCallsign,
                                                grid: appState.activeStationProfile?.grid ?? "LM55",
-                                               dialHz: UInt64(webSDR.band.dialHz),
+                                               dialHz: UInt64(webSDR.dialHz),
                                                radio: appState.icomNetworkRadio,
                                                usbOutputUID: webSDRFT8OutputDeviceUID) {
             webSDRReplyStatus = issue
