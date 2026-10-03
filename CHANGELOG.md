@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.37.25 — 2026-10-03
+
+- Add 17 user-supplied receivers in Russia, South Korea, Saudi Arabia, Israel, and the United Kingdom to the WebSDR picker; place the Cherepovets receiver under Russia.
+- Open WebSDR and KiwiSDR pages with the selected frequency using each page's query format, while keeping new receivers on manual system audio until automatic recording is validated.
+- Check KiwiSDR availability through its status endpoint so private receivers are shown as unavailable; limit receivers with unverified coverage to 20 m.
+
 ## 1.37.24 — 2026-10-03
 
 - Select all or individual unmatched QRZ Incoming requests and compose one personalized message per callsign, including all selected request dates.

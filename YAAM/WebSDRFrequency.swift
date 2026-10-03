@@ -69,3 +69,40 @@ enum WebSDRFrequency {
         }
     }
 }
+
+/// Receiver pages use different query parameters for their tuning controls.
+/// Keep these links separate from the automatic audio recording endpoint list.
+enum WebSDRTuningStyle: Hashable {
+    case none
+    case webSDR
+    case kiwiSDR
+    case frequencyHz
+
+    func tunedURL(_ base: URL, dialHz: Int) -> URL? {
+        guard self != .none else { return base }
+        guard var parts = URLComponents(url: base, resolvingAgainstBaseURL: false) else { return nil }
+        var items = parts.queryItems ?? []
+        let key: String
+        switch self {
+        case .webSDR: key = "tune"
+        case .kiwiSDR: key = "f"
+        case .frequencyHz: key = "frequency"
+        case .none: return base
+        }
+        items.removeAll { $0.name.caseInsensitiveCompare(key) == .orderedSame ||
+            (self == .frequencyHz && $0.name.caseInsensitiveCompare("modulation") == .orderedSame) }
+        let value: String
+        switch self {
+        case .webSDR, .kiwiSDR:
+            value = String(WebSDRFrequency.tuneQuery(dialHz).dropFirst("tune=".count))
+        case .frequencyHz:
+            value = String(dialHz)
+        case .none:
+            return base
+        }
+        items.append(URLQueryItem(name: key, value: value))
+        if self == .frequencyHz { items.append(URLQueryItem(name: "modulation", value: "USB")) }
+        parts.queryItems = items
+        return parts.url
+    }
+}

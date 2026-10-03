@@ -43,6 +43,38 @@
             <dict><key>NSExceptionAllowsInsecureHTTPLoads</key><true/></dict>
             <key>ham.websdrbordeaux.fr</key>
             <dict><key>NSExceptionAllowsInsecureHTTPLoads</key><true/></dict>
+            <key>websdr.78dx.ru</key>
+            <dict><key>NSExceptionAllowsInsecureHTTPLoads</key><true/></dict>
+            <key>websdr.rn4wa.ru</key>
+            <dict><key>NSExceptionAllowsInsecureHTTPLoads</key><true/></dict>
+            <key>sdr.r9a.ru</key>
+            <dict><key>NSExceptionAllowsInsecureHTTPLoads</key><true/></dict>
+            <key>websdr.ru</key>
+            <dict><key>NSExceptionAllowsInsecureHTTPLoads</key><true/></dict>
+            <key>www.hoshinokoe.ru</key>
+            <dict><key>NSExceptionAllowsInsecureHTTPLoads</key><true/></dict>
+            <key>95.31.238.59</key>
+            <dict><key>NSExceptionAllowsInsecureHTTPLoads</key><true/></dict>
+            <key>alexzulu.ru</key>
+            <dict><key>NSExceptionAllowsInsecureHTTPLoads</key><true/></dict>
+            <key>ds1tuw.iptime.org</key>
+            <dict><key>NSExceptionAllowsInsecureHTTPLoads</key><true/></dict>
+            <key>baodesign.com</key>
+            <dict><key>NSExceptionAllowsInsecureHTTPLoads</key><true/></dict>
+            <key>hik.iptime.org</key>
+            <dict><key>NSExceptionAllowsInsecureHTTPLoads</key><true/></dict>
+            <key>sdr.ds3pic.kr</key>
+            <dict><key>NSExceptionAllowsInsecureHTTPLoads</key><true/></dict>
+            <key>riyadh-3.proxy.rx-888.com</key>
+            <dict><key>NSExceptionAllowsInsecureHTTPLoads</key><true/></dict>
+            <key>94.159.134.215</key>
+            <dict><key>NSExceptionAllowsInsecureHTTPLoads</key><true/></dict>
+            <key>31.125.21.159</key>
+            <dict><key>NSExceptionAllowsInsecureHTTPLoads</key><true/></dict>
+            <key>planet3.dyndns.org</key>
+            <dict><key>NSExceptionAllowsInsecureHTTPLoads</key><true/></dict>
+            <key>gm4rdx.proxy.kiwisdr.com</key>
+            <dict><key>NSExceptionAllowsInsecureHTTPLoads</key><true/></dict>
         </dict>
     </dict>
 </dict>

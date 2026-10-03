@@ -11,6 +11,8 @@ struct WebSDRReceiver: Identifiable, Hashable {
     let location: String
     let url: URL
     let bands: Set<String>
+    var tuningStyle: WebSDRTuningStyle = .none
+    var continentOverride: String? = nil
 
     var supportsAutomaticRecording: Bool {
         ["esslingen", "twente", "utah", "kfs", "na5b", "maasbree", "maasbree-high",
@@ -19,7 +21,7 @@ struct WebSDRReceiver: Identifiable, Hashable {
     }
 
     var flag: String {
-        switch location {
+        return switch location {
         case "Germany": "🇩🇪"
         case "Netherlands": "🇳🇱"
         case "USA": "🇺🇸"
@@ -30,17 +32,22 @@ struct WebSDRReceiver: Identifiable, Hashable {
         case "Austria": "🇦🇹"
         case "United Kingdom": "🇬🇧"
         case "France": "🇫🇷"
+        case "Russia": "🇷🇺"
+        case "South Korea": "🇰🇷"
+        case "Saudi Arabia": "🇸🇦"
+        case "Israel": "🇮🇱"
         default: "🌐"
         }
     }
 
     var continent: String {
-        switch location {
+        if let continentOverride { return continentOverride }
+        return switch location {
         case "USA": "NA"
         case "Brazil": "SA"
         case "Australia", "New Zealand": "OC"
         case "South Africa": "AF"
-        case "India", "Israel": "AS"
+        case "India", "Israel", "South Korea", "Saudi Arabia": "AS"
         default: "EU"
         }
     }
@@ -103,7 +110,59 @@ struct WebSDRReceiver: Identifiable, Hashable {
               bands: ["80m", "40m", "20m", "15m", "10m"]),
         .init(id: "kc4mcq", name: "KC4MCQ", location: "USA",
               url: URL(string: "https://kc4mcq.us/live-sdr/")!,
-              bands: Set(WebSDRFT8Monitor.bands.map(\.name)))
+              bands: Set(WebSDRFT8Monitor.bands.map(\.name))),
+        // The four WebSDR sites below were listed for 14 MHz. Other band
+        // coverage is not published consistently, so only 20 m is offered.
+        .init(id: "ru-78dx", name: "78DX · Saint Petersburg", location: "Russia",
+              url: URL(string: "http://websdr.78dx.ru:8901/")!, bands: ["20m"], tuningStyle: .webSDR),
+        .init(id: "ru-rn4wa", name: "RN4WA", location: "Russia",
+              url: URL(string: "http://websdr.rn4wa.ru/")!, bands: ["20m"], tuningStyle: .webSDR),
+        .init(id: "ru-r9a", name: "R9A · Kalachevo", location: "Russia",
+              url: URL(string: "http://sdr.r9a.ru/")!, bands: ["20m"], tuningStyle: .webSDR,
+              continentOverride: "AS"),
+        .init(id: "ru-websdr", name: "WebSDR.ru · Cherepovets", location: "Russia",
+              url: URL(string: "http://websdr.ru/?frequency=14074000&modulation=USB")!,
+              bands: ["20m"], tuningStyle: .frequencyHz),
+        // These receivers publish 0–30 MHz coverage through their status pages.
+        .init(id: "ru-hoshinokoe", name: "Hoshinokoe · Priladozhskiy", location: "Russia",
+              url: URL(string: "http://www.hoshinokoe.ru:8073/")!,
+              bands: Set(WebSDRFT8Monitor.bands.map(\.name)), tuningStyle: .kiwiSDR),
+        .init(id: "ru-95-31-238-59", name: "95.31.238.59", location: "Russia",
+              url: URL(string: "http://95.31.238.59:8073/")!,
+              bands: Set(WebSDRFT8Monitor.bands.map(\.name)), tuningStyle: .kiwiSDR),
+        .init(id: "ru-radiorubka", name: "RadioRubka SDR3", location: "Russia",
+              url: URL(string: "https://sdr3.radiorubka.org/")!,
+              bands: Set(WebSDRFT8Monitor.bands.map(\.name)), tuningStyle: .kiwiSDR),
+        .init(id: "ru-alexzulu", name: "AlexZulu", location: "Russia",
+              url: URL(string: "http://alexzulu.ru:8073/")!,
+              bands: Set(WebSDRFT8Monitor.bands.map(\.name)), tuningStyle: .kiwiSDR),
+        .init(id: "kr-ds1tuw", name: "DS1TUW · Seoul", location: "South Korea",
+              url: URL(string: "http://ds1tuw.iptime.org:8073/")!,
+              bands: Set(WebSDRFT8Monitor.bands.map(\.name)), tuningStyle: .kiwiSDR),
+        .init(id: "kr-baodesign", name: "BaoDesign", location: "South Korea",
+              url: URL(string: "http://baodesign.com:8073/")!,
+              bands: Set(WebSDRFT8Monitor.bands.map(\.name)), tuningStyle: .kiwiSDR),
+        .init(id: "kr-hik", name: "HIK", location: "South Korea",
+              url: URL(string: "http://hik.iptime.org:8075/")!,
+              bands: Set(WebSDRFT8Monitor.bands.map(\.name)), tuningStyle: .kiwiSDR),
+        .init(id: "kr-ds3pic", name: "DS3PIC", location: "South Korea",
+              url: URL(string: "http://sdr.ds3pic.kr/")!,
+              bands: Set(WebSDRFT8Monitor.bands.map(\.name)), tuningStyle: .kiwiSDR),
+        .init(id: "sa-riyadh", name: "Riyadh-3", location: "Saudi Arabia",
+              url: URL(string: "http://riyadh-3.proxy.rx-888.com:8073/")!,
+              bands: Set(WebSDRFT8Monitor.bands.map(\.name)), tuningStyle: .kiwiSDR),
+        .init(id: "il-4x1fk", name: "4X1FK · Rishon LeZion", location: "Israel",
+              url: URL(string: "http://94.159.134.215:8074/")!,
+              bands: Set(WebSDRFT8Monitor.bands.map(\.name)), tuningStyle: .kiwiSDR),
+        .init(id: "uk-31-125-21-159", name: "31.125.21.159", location: "United Kingdom",
+              url: URL(string: "http://31.125.21.159:8073/")!,
+              bands: Set(WebSDRFT8Monitor.bands.map(\.name)), tuningStyle: .kiwiSDR),
+        .init(id: "uk-planet3", name: "Planet3", location: "United Kingdom",
+              url: URL(string: "http://planet3.dyndns.org:8073/")!,
+              bands: Set(WebSDRFT8Monitor.bands.map(\.name)), tuningStyle: .kiwiSDR),
+        .init(id: "uk-gm4rdx", name: "GM4RDX · Scotland", location: "United Kingdom",
+              url: URL(string: "http://gm4rdx.proxy.kiwisdr.com:8073/")!,
+              bands: Set(WebSDRFT8Monitor.bands.map(\.name)), tuningStyle: .kiwiSDR)
     ]
 }
 
@@ -146,7 +205,17 @@ private actor WebSDRHealthProbe {
         return URLSession(configuration: configuration)
     }()
 
-    func isReachable(_ url: URL) async -> Bool {
+    func isReachable(_ url: URL, isKiwiSDR: Bool) async -> Bool {
+        if isKiwiSDR {
+            var request = URLRequest(url: url.appendingPathComponent("status"))
+            request.timeoutInterval = 5
+            guard let (data, response) = try? await session.data(for: request),
+                  let http = response as? HTTPURLResponse,
+                  (200..<400).contains(http.statusCode),
+                  let status = String(data: data, encoding: .utf8) else { return false }
+            return status.split(whereSeparator: \.isNewline).contains("status=active") &&
+                status.split(whereSeparator: \.isNewline).contains("offline=no")
+        }
         for method in ["HEAD", "GET"] {
             var request = URLRequest(url: url)
             request.httpMethod = method
@@ -506,11 +575,9 @@ final class WebSDRFT8Monitor: ObservableObject {
     var activeReceiverURL: URL? {
         let base = receiver.id == "utah" ? activeUtahReceiver?.url : receiver.url
         guard let base else { return nil }
-        var parts = URLComponents(url: base, resolvingAgainstBaseURL: false)
-        if receiver.supportsAutomaticRecording || receiver.id.hasPrefix("maasbree") {
-            parts?.query = WebSDRFrequency.tuneQuery(dialHz)
-        }
-        return parts?.url
+        let style: WebSDRTuningStyle = receiver.supportsAutomaticRecording || receiver.id.hasPrefix("maasbree")
+            ? .webSDR : receiver.tuningStyle
+        return style.tunedURL(base, dialHz: dialHz)
     }
     var estimatedDelayModuloCycle: Double? {
         guard let phaseSeconds else { return nil }
@@ -525,8 +592,9 @@ final class WebSDRFT8Monitor: ObservableObject {
         if let last = receiverHealthCheckedAt[id], Date().timeIntervalSince(last) < 120 { return }
         guard !checkingReceivers.contains(id) else { return }
         checkingReceivers.insert(id)
+        let isKiwiSDR = WebSDRReceiver.presets.first { $0.id == id }?.tuningStyle == .kiwiSDR
         Task { [weak self] in
-            let reachable = await WebSDRHealthProbe.shared.isReachable(url)
+            let reachable = await WebSDRHealthProbe.shared.isReachable(url, isKiwiSDR: isKiwiSDR)
             guard let self else { return }
             self.receiverHealth[id] = reachable
             self.receiverHealthCheckedAt[id] = Date()

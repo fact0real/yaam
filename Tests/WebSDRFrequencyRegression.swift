@@ -24,6 +24,15 @@ struct WebSDRFrequencyRegression {
         precondition(rejects("144.174"))
         precondition(rejects("10.136"))
         precondition(rejects("7.074", antenna: ["20m"]))
+        let standard = URL(string: "http://example.org/?tune=7074usb&theme=dark")!
+        precondition(WebSDRTuningStyle.webSDR.tunedURL(standard, dialHz: 14_074_000)?.absoluteString ==
+                     "http://example.org/?theme=dark&tune=14074usb")
+        let kiwi = URL(string: "http://example.org:8073/")!
+        precondition(WebSDRTuningStyle.kiwiSDR.tunedURL(kiwi, dialHz: 14_074_500)?.absoluteString ==
+                     "http://example.org:8073/?f=14074.5usb")
+        let frequency = URL(string: "http://example.org/?frequency=14074000&modulation=USB&theme=dark")!
+        precondition(WebSDRTuningStyle.frequencyHz.tunedURL(frequency, dialHz: 7_074_000)?.absoluteString ==
+                     "http://example.org/?theme=dark&frequency=7074000&modulation=USB")
         print("WebSDR manual frequency regression passed")
     }
 }
