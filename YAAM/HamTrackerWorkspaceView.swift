@@ -1411,7 +1411,7 @@ public struct HamTrackerWorkspaceView: View {
         }
         .onAppear {
             webSDRLogbook = WebSDRLogbookIndex(records: appState.qsoRecords)
-            webSDR.checkAvailableReceivers()
+            webSDR.checkReceiver(webSDR.receiver.id, url: webSDR.receiver.url)
             followLatestWebSDRReply()
             scanDXOpportunities()
         }
@@ -1792,7 +1792,7 @@ public struct HamTrackerWorkspaceView: View {
             .onChange(of: webSDR.selectedBand) { _, _ in
                 webSDR.stop()
                 webSDR.normalizeSelection()
-                webSDR.checkAvailableReceivers()
+                webSDR.checkReceiver(webSDR.receiver.id, url: webSDR.receiver.url)
             }
             if webSDR.selectedReceiverID == "utah" {
                 Picker("Utah antenna", selection: $webSDR.selectedUtahReceiver) {

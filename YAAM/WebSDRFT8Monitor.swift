@@ -371,6 +371,7 @@ final class WebSDRFT8Monitor: ObservableObject {
     @Published private(set) var clockOffsetSeconds: Double?
     @Published private(set) var receiverStatuses: [String: String] = [:]
     @Published private(set) var receiverHealth: [String: Bool] = [:]
+    private var receiverHealthCheckedAt: [String: Date] = [:]
     @Published private(set) var checkingReceivers: Set<String> = []
     @Published private(set) var noDecodeWarning: String?
 
@@ -490,18 +491,20 @@ final class WebSDRFT8Monitor: ObservableObject {
     func openReceiver() { NSWorkspace.shared.open(activeReceiverURL ?? receiver.url) }
 
     func checkReceiver(_ id: String, url: URL) {
+        if let last = receiverHealthCheckedAt[id], Date().timeIntervalSince(last) < 120 { return }
         guard !checkingReceivers.contains(id) else { return }
         checkingReceivers.insert(id)
         Task { [weak self] in
             let reachable = await WebSDRHealthProbe.shared.isReachable(url)
             guard let self else { return }
             self.receiverHealth[id] = reachable
+            self.receiverHealthCheckedAt[id] = Date()
             self.checkingReceivers.remove(id)
         }
     }
 
     func checkAvailableReceivers() {
-        for receiver in WebSDRReceiver.presets {
+        for receiver in WebSDRReceiver.presets where receiver.bands.contains(selectedBand) {
             checkReceiver(receiver.id, url: receiver.url)
         }
         for endpoint in availableAutomaticEndpoints where endpoint.id.hasPrefix("utah-") || endpoint.id.hasPrefix("custom-") {
@@ -930,6 +933,9 @@ final class WebSDRFT8Monitor: ObservableObject {
         let error = systemCapture?.lastError ?? loopbackCapture?.lastError
         status = error?.localizedDescription ?? "Audio capture stopped."
         isMonitoring = false
+        noDecodeTask?.cancel()
+        noDecodeTask = nil
+        noDecodeWarning = nil
         systemCapture?.stop()
         loopbackCapture?.stop()
         systemCapture = nil

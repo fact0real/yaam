@@ -229,6 +229,7 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
     private func configuredServices(
         from services: [String],
         stationID: String?,
+        stationLocation: String? = nil,
         qrzKeyOverride: String? = nil
     ) -> [String] {
         guard CredentialVault.isVaultSessionUnlocked else { return [] }
@@ -251,6 +252,7 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
                 engine.reloadSettings()
                 return engine.isAutoPushEnabled && engine.isConfigured
             case "LoTW":
+                guard !resolvedLoTWStationLocation(stationID: stationID, stationLocation: stationLocation).isEmpty else { return false }
                 guard TQSLService.hasStationData() else { return false }
                 guard let resolved = TQSLCoordinator.resolveBinaryPath() else { return false }
                 resolved.scopedURL?.stopAccessingSecurityScopedResource()
@@ -259,6 +261,17 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
                 return false
             }
         }
+    }
+
+    private func resolvedLoTWStationLocation(stationID: String?, stationLocation: String?) -> String {
+        let explicit = (stationLocation ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !explicit.isEmpty { return explicit }
+        let saved = (UserDefaults.standard.string(forKey: "lotwStationLocation") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !saved.isEmpty { return saved }
+        guard let db = try? LogbookDatabase(), let profiles = try? db.loadStationProfiles() else { return "" }
+        let profileID = stationID.flatMap(UUID.init(uuidString:))
+            ?? UserDefaults.standard.string(forKey: "activeStationProfileID").flatMap(UUID.init(uuidString:))
+        return profiles.first(where: { $0.id == profileID })?.lotwStationLocation.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
 
     // MARK: - Main Dispatch Entry Point
@@ -278,6 +291,7 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
         let configured = vaultUnlocked ? configuredServices(
             from: enabled,
             stationID: stationID,
+            stationLocation: stationLocation,
             qrzKeyOverride: isNetworkConnected ? qrzKeyOverride : nil
         ) : []
         if vaultUnlocked && !CredentialVault.isVaultSessionUnlocked { vaultUnlocked = false }
@@ -485,6 +499,7 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
         let eligibleServices = configuredServices(
             from: targetServices,
             stationID: stationID,
+            stationLocation: stationLocation,
             qrzKeyOverride: qrzKeyOverride
         )
         guard CredentialVault.isVaultSessionUnlocked else {
@@ -676,7 +691,8 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
                 let enabled = Set(enabledServices())
                 let configured = configuredServices(
                     from: unchecked.filter { enabled.contains($0) },
-                    stationID: item.stationID
+                    stationID: item.stationID,
+                    stationLocation: item.stationLocation
                 )
                 if !CredentialVault.isVaultSessionUnlocked { break }
                 let selection = CloudUploadServiceSelection.select(
@@ -999,25 +1015,9 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
         stationID: String? = nil,
         stationLocation: String? = nil
     ) async -> (success: Bool, message: String) {
-        var resolvedLocation = (stationLocation ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        if resolvedLocation.isEmpty {
-            resolvedLocation = (UserDefaults.standard.string(forKey: "lotwStationLocation") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        if resolvedLocation.isEmpty {
-            if let db = try? LogbookDatabase(), let profiles = try? db.loadStationProfiles() {
-                if let sid = stationID, let uuid = UUID(uuidString: sid),
-                   let prof = profiles.first(where: { $0.id == uuid }),
-                   !prof.lotwStationLocation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    resolvedLocation = prof.lotwStationLocation.trimmingCharacters(in: .whitespacesAndNewlines)
-                } else if let activeID = UserDefaults.standard.string(forKey: "activeStationProfileID").flatMap(UUID.init(uuidString:)),
-                          let prof = profiles.first(where: { $0.id == activeID }),
-                          !prof.lotwStationLocation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    resolvedLocation = prof.lotwStationLocation.trimmingCharacters(in: .whitespacesAndNewlines)
-                } else if let firstProf = profiles.first,
-                          !firstProf.lotwStationLocation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    resolvedLocation = firstProf.lotwStationLocation.trimmingCharacters(in: .whitespacesAndNewlines)
-                }
-            }
+        let resolvedLocation = resolvedLoTWStationLocation(stationID: stationID, stationLocation: stationLocation)
+        guard !resolvedLocation.isEmpty else {
+            return (false, "Choose a LoTW station location before automatic upload.")
         }
 
         let adifContent = buildSingleQSOADIF(record)

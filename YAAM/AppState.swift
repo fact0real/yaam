@@ -185,15 +185,6 @@ struct UnconfirmedCallsignStatModel: Identifiable {
     let email: String
 }
 
-struct EmailHistoryEntry: Identifiable, Codable, Equatable, Hashable {
-    let id: UUID
-    let date: Date
-    let callsign: String
-    let email: String
-    let subject: String
-    let status: String
-}
-
 struct BulkEmailRecipient: Identifiable {
     let id = UUID()
     let callsign: String
@@ -2195,7 +2186,7 @@ class AppState: NSObject, ObservableObject {
         }
     }
     @Published var recentLogFiles: [URL] = []
-    @Published var selectedTab: Int = min(6, max(0, UserDefaults.standard.integer(forKey: "selectedTab")))
+    @Published var selectedTab: Int = min(7, max(0, UserDefaults.standard.integer(forKey: "selectedTab")))
     @Published var convertSource: Int = 0 // 0: External File, 1: YAAM Database
     @Published var convertDatabaseProfileID: UUID? = nil // nil: All Station Profiles / Full Database
     
@@ -6650,6 +6641,7 @@ class AppState: NSObject, ObservableObject {
         attachmentName: String? = nil,
         replyTo: String? = nil,
         callsign: String? = nil,
+        historyKind: String? = nil,
         playSound: Bool = true,
         completion: @escaping (Bool, String) -> Void
     ) {
@@ -6664,11 +6656,28 @@ class AppState: NSObject, ObservableObject {
         let user = UserDefaults.standard.string(forKey: "smtpUser")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let rawPass = CredentialVault.value(for: .smtpPassword)
         
-        let pass = rawPass.replacingOccurrences(of: " ", with: "")
+        let pass = rawPass
         
         guard !host.isEmpty, !user.isEmpty, !pass.isEmpty else {
             if playSound { playActivitySound(.failure) }
             completion(false, "SMTP MISSING: Check Preferences for Host, User, and Pass.")
+            return
+        }
+        let safeHeader: (String) -> Bool = { value in
+            !value.unicodeScalars.contains {
+                CharacterSet.controlCharacters.contains($0) || CharacterSet.newlines.contains($0)
+            }
+        }
+        guard safeHeader(user), safeHeader(pass), safeHeader(recipient), safeHeader(subject),
+              safeHeader(replyTo ?? ""), safeHeader(attachmentName ?? ""),
+              user.contains("@"), recipient.contains("@"),
+              !user.hasPrefix("-"), !recipient.hasPrefix("-"),
+              !user.contains(where: \.isWhitespace), !recipient.contains(where: \.isWhitespace),
+              host.unicodeScalars.allSatisfy({ scalar in
+                  scalar.isASCII && (CharacterSet.alphanumerics.contains(scalar) || scalar == "." || scalar == "-")
+              }),
+              Int(port).map({ (1...65535).contains($0) }) == true else {
+            completion(false, "Invalid SMTP address, server, or message header.")
             return
         }
         
@@ -6760,12 +6769,11 @@ class AppState: NSObject, ObservableObject {
             let urlScheme = isPort465 ? "smtps" : "smtp"
             
             var arguments = [
+                "--disable", "--config", "-", "--silent", "--show-error",
+                "--connect-timeout", "15", "--max-time", "45",
                 "--url", "\(urlScheme)://\(host):\(port)",
-                "--user", "\(user):\(pass)",
                 "--mail-from", user,
                 "--mail-rcpt", recipient,
-                "--verbose",
-                "--insecure",
                 "--ipv4"
             ]
             
@@ -6773,48 +6781,67 @@ class AppState: NSObject, ObservableObject {
                 arguments.append("--ssl-reqd")
             }
             
-            let tempEmailURL = FileManager.default.temporaryDirectory
-                .appendingPathComponent(UUID().uuidString)
-                .appendingPathExtension("eml")
+            let privateDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+            let tempEmailURL = privateDirectory.appendingPathComponent("message.eml")
             arguments.append(contentsOf: ["--upload-file", tempEmailURL.path])
             process.arguments = arguments
 
             let outputPipe = Pipe()
+            let configPipe = Pipe()
+            process.standardInput = configPipe
             
             process.standardOutput = outputPipe
             process.standardError = outputPipe
             
             do {
+                try FileManager.default.createDirectory(at: privateDirectory, withIntermediateDirectories: false,
+                                                        attributes: [.posixPermissions: 0o700])
                 try emailContentData.write(to: tempEmailURL, options: .atomic)
+                let escapedCredentials = "\(user):\(pass)"
+                    .replacingOccurrences(of: "\\", with: "\\\\")
+                    .replacingOccurrences(of: "\"", with: "\\\"")
+                configPipe.fileHandleForWriting.write(Data("user = \"\(escapedCredentials)\"\n".utf8))
+                try? configPipe.fileHandleForWriting.close()
                 try process.run()
+                _ = outputPipe.fileHandleForReading.readDataToEndOfFile()
                 process.waitUntilExit()
-                try? FileManager.default.removeItem(at: tempEmailURL)
-                
-                let errData = outputPipe.fileHandleForReading.readDataToEndOfFile()
-                let outputLog = String(data: errData, encoding: .utf8) ?? "EMPTY LOG"
+                try? FileManager.default.removeItem(at: privateDirectory)
                 
                 if process.terminationStatus == 0 {
                     DispatchQueue.main.async {
-                        self.recordEmailHistory(callsign: targetCallsign, email: recipient, subject: subject, status: "Sent")
+                        self.recordEmailHistory(callsign: targetCallsign, email: recipient, subject: subject, status: "Sent", kind: historyKind)
                         if playSound { self.playActivitySound(.success) }
                         completion(true, "Email successfully sent to \(recipient)!")
                     }
                 } else {
                     DispatchQueue.main.async {
-                        self.recordEmailHistory(callsign: targetCallsign, email: recipient, subject: subject, status: "Failed")
+                        self.recordEmailHistory(callsign: targetCallsign, email: recipient, subject: subject, status: "Failed", kind: historyKind)
                         if playSound { self.playActivitySound(.failure) }
-                        completion(false, "ERROR \(process.terminationStatus):\n\n" + outputLog)
+                        completion(false, Self.smtpFailureMessage(code: process.terminationStatus))
                     }
                 }
             } catch {
-                try? FileManager.default.removeItem(at: tempEmailURL)
+                try? FileManager.default.removeItem(at: privateDirectory)
                 DispatchQueue.main.async {
-                    self.recordEmailHistory(callsign: targetCallsign, email: recipient, subject: subject, status: "Failed")
+                    self.recordEmailHistory(callsign: targetCallsign, email: recipient, subject: subject, status: "Failed", kind: historyKind)
                     if playSound { self.playActivitySound(.failure) }
-                    completion(false, "Process Failed: \(error.localizedDescription)")
+                    completion(false, "Could not start SMTP delivery. Check YAAM's SMTP settings and try again.")
                 }
             }
         }
+    }
+
+    private static func smtpFailureMessage(code: Int32) -> String {
+        let detail: String
+        switch code {
+        case 5, 6: detail = "The SMTP server could not be resolved."
+        case 7: detail = "Could not connect to the SMTP server."
+        case 28: detail = "The SMTP connection timed out."
+        case 35, 51, 58, 60: detail = "The SMTP TLS certificate or secure connection could not be verified."
+        case 67: detail = "SMTP sign-in failed. Check the saved account password."
+        default: detail = "The SMTP server did not accept the message."
+        }
+        return "ERROR \(code): \(detail)"
     }
 
     func bulkEmailRecipients(limit: Int = 50) -> [BulkEmailRecipient] {
@@ -7537,6 +7564,7 @@ class AppState: NSObject, ObservableObject {
         email: String,
         subject: String,
         status: String,
+        kind: String? = nil,
         updateLogbookRows: Bool = true,
         autoSave: Bool = true
     ) {
@@ -7547,6 +7575,7 @@ class AppState: NSObject, ObservableObject {
                     email: email,
                     subject: subject,
                     status: status,
+                    kind: kind,
                     updateLogbookRows: updateLogbookRows,
                     autoSave: autoSave
                 )
@@ -7560,7 +7589,8 @@ class AppState: NSObject, ObservableObject {
             callsign: callsign,
             email: email,
             subject: subject,
-            status: status
+            status: status,
+            kind: kind
         )
 
         emailHistory.insert(entry, at: 0)
@@ -7829,13 +7859,13 @@ class AppState: NSObject, ObservableObject {
         let call = record["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         if record["QSL_SENT"].uppercased() == "Y" { return true }
         if let emailSent = record.fields["APP_YAAM_EMAIL_SENT_DATE"], !emailSent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return true }
-        if let history = emailHistoryByCallsign[call], history.status == "Sent" { return true }
+        if emailHistory.contains(where: { $0.callsign.caseInsensitiveCompare(call) == .orderedSame && $0.countsAsQSL }) { return true }
         return false
     }
 
     func sentEmailSummary(for record: QSORecordModel) -> String {
         let call = record["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        if let entry = latestEmailHistory(for: call), entry.status == "Sent" {
+        if let entry = emailHistory.first(where: { $0.callsign.caseInsensitiveCompare(call) == .orderedSame && $0.countsAsQSL }) {
             return "Sent on \(formattedEmailHistoryDate(entry.date))"
         }
         if let date = record.fields["APP_YAAM_EMAIL_SENT_DATE"], !date.isEmpty {

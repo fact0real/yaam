@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.37.20 — 2026-10-03
+
+- Verify SMTP certificates, keep credentials out of process arguments and error logs, and reject unsafe mail headers.
+- Distinguish SKED mail from QSL history, validate personalized template fields, and show delivery failures for individual and batch sends.
+- Protect SKED and national leaderboard CSV exports from spreadsheet formulas.
+- Keep WebSDR audio active with a nearly invisible on-screen browser, limit health checks, and clear stale decode warnings.
+- Require an explicit LoTW station location for unattended uploads; improve country-band matching for Barbados and Trinidad and Tobago.
+- Restore the SKED tab on relaunch and make the full Bandmap segment clickable.
+
 ## 1.37.19 — 2026-10-03
 
 - Group SKED countries by the eight live QRZ Rank divisions, and add US state and territory selection with dedicated state SKED results.

@@ -100,9 +100,11 @@ final class WebSDRBrowserSession: NSObject, WKNavigationDelegate, WKScriptMessag
                              configuration: configuration)
         page.navigationDelegate = self
         // Keeping WebKit attached to a live window prevents background media suspension.
-        let leftEdge = NSScreen.screens.map(\.frame.minX).min() ?? 0
-        let host = NSWindow(contentRect: NSRect(x: leftEdge - 700, y: -10_000, width: 640, height: 480),
+        let leftmostScreen = NSScreen.screens.min { $0.frame.minX < $1.frame.minX }
+        let screenFrame = leftmostScreen?.frame ?? .zero
+        let host = NSWindow(contentRect: NSRect(x: screenFrame.minX - 639, y: screenFrame.minY, width: 640, height: 480),
                             styleMask: [.borderless], backing: .buffered, defer: false)
+        host.alphaValue = 0.01
         host.contentView = page
         host.ignoresMouseEvents = true
         host.hasShadow = false

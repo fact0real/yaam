@@ -646,7 +646,7 @@ struct NationalLeaderboardContainerView: View {
                     countryIso: iso, category: category, token: token,
                     userAgent: "YAAM-macOS/\(appState.currentVersion)"
                 )
-                try data.write(to: url, options: .atomic)
+                try CSVExportSafety.sanitized(data).write(to: url, options: .atomic)
             } catch {
                 csvExportError = error.localizedDescription
             }

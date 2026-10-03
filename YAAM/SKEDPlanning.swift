@@ -187,7 +187,7 @@ nonisolated enum SKEDMailTemplate {
                        bands: Set<String>, stationCallsign: String, stationGrid: String,
                        stationQTH: String, stationName: String = "",
                        timeWindowUTC: String? = nil) -> String {
-        let greeting = name?.split(whereSeparator: \.isWhitespace).first.map(String.init) ?? "there"
+        let greeting = greetingName(name, callsign: callsign)
         let location: String
         if !stationQTH.isEmpty && !stationGrid.isEmpty {
             location = " in \(stationQTH) (grid \(stationGrid))"
@@ -199,20 +199,62 @@ nonisolated enum SKEDMailTemplate {
             location = ""
         }
         let replacements = [
-            "{greeting}": greeting,
-            "{name}": name ?? callsign,
-            "{callsign}": callsign,
-            "{bands}": bandPhrase(bands),
-            "{my_callsign}": stationCallsign,
-            "{my_grid}": stationGrid,
-            "{my_qth}": stationQTH,
-            "{my_location}": location,
-            "{my_name}": stationName,
-            "{time_window}": timeWindowUTC ?? "I'm flexible on timing, so feel free to suggest a slot that works for you."
+            "greeting": greeting,
+            "name": name ?? callsign,
+            "callsign": callsign,
+            "bands": bandPhrase(bands),
+            "my_callsign": stationCallsign,
+            "my_call": stationCallsign,
+            "my_grid": stationGrid,
+            "my_qth": stationQTH,
+            "my_location": location,
+            "my_name": stationName,
+            "time_window": timeWindowUTC ?? "I'm flexible on timing, so feel free to suggest a slot that works for you."
         ]
-        return replacements.reduce(template) { result, pair in
-            result.replacingOccurrences(of: pair.key, with: pair.value)
+        let pattern = try! NSRegularExpression(pattern: #"\{([A-Za-z0-9_-]+)\}"#)
+        let range = NSRange(template.startIndex..<template.endIndex, in: template)
+        let matches = pattern.matches(in: template, range: range)
+        var output = template
+        for match in matches.reversed() {
+            guard let fieldRange = Range(match.range(at: 1), in: template),
+                  let wholeRange = Range(match.range, in: output),
+                  let replacement = replacements[template[fieldRange].lowercased()] else { continue }
+            output.replaceSubrange(wholeRange, with: replacement)
         }
+        return output
+    }
+
+    static func unresolvedFields(_ template: String) -> [String] {
+        let known: Set<String> = ["greeting", "name", "callsign", "bands", "my_callsign", "my_call",
+                                  "my_grid", "my_qth", "my_location", "my_name", "time_window"]
+        let pattern = try! NSRegularExpression(pattern: #"\{([A-Za-z0-9_-]+)\}"#)
+        let matches = pattern.matches(in: template, range: NSRange(template.startIndex..<template.endIndex, in: template))
+        return Array(Set(matches.compactMap { match -> String? in
+            guard let range = Range(match.range(at: 1), in: template) else { return nil }
+            let field = String(template[range])
+            return known.contains(field.lowercased()) ? nil : field
+        })).sorted()
+    }
+
+    static func greetingName(_ name: String?, callsign: String = "there") -> String {
+        guard let name else { return callsign }
+        let titles: Set<String> = ["dr", "mr", "mrs", "ms", "prof", "rev", "fr", "hon", "ing", "eng", "sr", "sra", "sir"]
+        let suffixes: Set<String> = ["jr", "ii", "iii", "iv", "inc", "llc", "ltd"]
+        var words = name.split(whereSeparator: \.isWhitespace)
+        var skipped = 0
+        if words.count > 1, words[0].hasSuffix(",") || words[0].hasSuffix("،") {
+            words.removeFirst()
+            skipped = 1
+        }
+        let first = words.enumerated().map { item in
+            (index: item.offset + skipped, word: item.element.trimmingCharacters(in: .punctuationCharacters))
+        }.first { item in
+            let initial = item.word.count == 1 && item.word.unicodeScalars.allSatisfy(\.isASCII)
+            let lower = item.word.lowercased()
+            return !item.word.isEmpty && !initial && !titles.contains(lower)
+                && !(item.index > 0 && suffixes.contains(lower))
+        }?.word
+        return first ?? callsign
     }
 
     static func safeSubject(_ value: String) -> String {

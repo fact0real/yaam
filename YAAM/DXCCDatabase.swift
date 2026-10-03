@@ -369,6 +369,8 @@ public enum DXCCDatabase {
         entry("YY", "Venezuela", "VE", "🇻🇪", "SA", 9, 12),
         entry("FY", "French Guiana", "GF", "🇬🇫", "SA", 9, 12),
         entry("8R", "Guyana", "GY", "🇬🇾", "SA", 9, 12),
+        entry("8P", "Barbados", "BB", "🇧🇧", "NA", 8, 11),
+        entry("9Y", "Trinidad and Tobago", "TT", "🇹🇹", "SA", 9, 11),
         entry("PZ", "Suriname", "SR", "🇸🇷", "SA", 9, 12),
         entry("VP8", "Falkland Islands", "FK", "🇫🇰", "SA", 13, 16),
 

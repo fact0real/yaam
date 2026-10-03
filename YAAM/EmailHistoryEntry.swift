@@ -1,0 +1,13 @@
+import Foundation
+
+struct EmailHistoryEntry: Identifiable, Codable, Equatable, Hashable {
+    let id: UUID
+    let date: Date
+    let callsign: String
+    let email: String
+    let subject: String
+    let status: String
+    var kind: String? = nil
+
+    var countsAsQSL: Bool { status == "Sent" && kind?.uppercased() != "SKED" }
+}

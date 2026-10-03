@@ -38,13 +38,10 @@ nonisolated struct SKEDDirectory: Sendable {
     var csv: Data { csv(locationName: countryName) }
 
     func csv(locationName: String) -> Data {
-        func quoted(_ value: String) -> String {
-            "\"" + value.replacingOccurrences(of: "\"", with: "\"\"") + "\""
-        }
         let rows = ["Rank,Callsign,Name,Email,Score,Country,Category"] + operators.map { item in
             [String(item.rank), item.callsign, item.name ?? "", item.validEmail ?? "",
              item.score.map(String.init) ?? "", locationName, category]
-                .map(quoted).joined(separator: ",")
+                .map(CSVExportSafety.cell).joined(separator: ",")
         }
         return Data(("\u{FEFF}" + rows.joined(separator: "\r\n") + "\r\n").utf8)
     }

@@ -86,6 +86,20 @@ struct SKEDPlanningRegression {
         precondition(secondMessage.contains("Hi Samira (EP2BBB),"))
         precondition(secondMessage.contains("on 15m."))
         precondition(!secondMessage.contains("EP1AAA"))
+        let mixedFields = SKEDMailTemplate.render("Hi {GREETING}, {CALLSIGN} / {MY_CALL} / {BANDS} / {BAND}",
+            callsign: "EP2BBB", name: "SMITH, JOHN", bands: ["20m"], stationCallsign: "W1ABC",
+            stationGrid: "FN42", stationQTH: "Boston")
+        precondition(mixedFields == "Hi JOHN, EP2BBB / W1ABC / 20m / {BAND}")
+        precondition(SKEDMailTemplate.unresolvedFields(mixedFields) == ["BAND"])
+        precondition(SKEDMailTemplate.greetingName("Dr. Ali Smith") == "Ali")
+        precondition(SKEDMailTemplate.greetingName("SMITH, JOHN") == "JOHN")
+        precondition(SKEDMailTemplate.greetingName("J. Robert Smith") == "Robert")
+        precondition(SKEDMailTemplate.greetingName("Doe, Jr.", callsign: "EP1AAA") == "EP1AAA")
+        precondition(SKEDMailTemplate.greetingName("رضایی، علی") == "علی")
+        precondition(SKEDMailTemplate.unresolvedFields("{BAND2} {foo-bar}") == ["BAND2", "foo-bar"])
+        let noRescan = SKEDMailTemplate.render("{name}", callsign: "EP2BBB", name: "{my_call}",
+            bands: [], stationCallsign: "W1ABC", stationGrid: "", stationQTH: "")
+        precondition(noRescan == "{my_call}")
         precondition(SKEDMailTemplate.safeSubject("Hello\r\nBcc: hidden") == "Hello Bcc: hidden")
         print("SKED planning regression passed")
     }

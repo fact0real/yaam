@@ -2217,6 +2217,7 @@ private struct BandmapModeSelector<Value: Hashable>: View {
                         .foregroundStyle(selection == value ? Color.white : Color.primary)
                         .background(selection == value ? Color.accentColor : Color.clear,
                                     in: RoundedRectangle(cornerRadius: 5))
+                        .contentShape(RoundedRectangle(cornerRadius: 5))
                 }
                 .buttonStyle(.plain)
                 .accessibilityAddTraits(selection == value ? .isSelected : [])

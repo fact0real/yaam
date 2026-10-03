@@ -723,6 +723,7 @@ struct SKEDDirectoryView: View {
         isLoadingLogHistory = true
         let records = appState.qsoRecords
         let iso = countryISO
+        let destinationCountryKey = CountryNameNormalizer.canonicalKey(directory.countryName)
         let stateCode = selectedUSState
         let stateName = geography?.states.first(where: { $0.code == stateCode })?.name.lowercased() ?? ""
         let callsigns = Set(directory.operators.map { $0.callsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() })
@@ -738,7 +739,9 @@ struct SKEDDirectoryView: View {
                 if let cached = countryByCall[key] {
                     resolvedISO = cached
                 } else {
-                    resolvedISO = DXCCDatabase.resolve(callsign: call, country: country).countryCode
+                    let loggedNameKey = CountryNameNormalizer.canonicalKey(country)
+                    resolvedISO = !country.isEmpty && loggedNameKey == destinationCountryKey
+                        ? iso : DXCCDatabase.resolve(callsign: call, country: country).countryCode
                     countryByCall[key] = resolvedISO
                 }
                 let countryMatches = SKEDStateLogMatch.matches(
@@ -962,14 +965,14 @@ struct SKEDDirectoryView: View {
             stationGrid: SKEDMailTemplate.fourCharacterGrid(station?.normalizedGrid ?? ""),
             stationQTH: station?.qth ?? "", stationName: senderName,
             timeWindowUTC: utcTimeWindow)
-        if !mailBodyTemplate.contains("{callsign}") {
-            let greeting = item.name?.split(whereSeparator: \.isWhitespace).first.map(String.init) ?? "there"
+        if !mailBodyTemplate.localizedCaseInsensitiveContains("{callsign}") {
+            let greeting = SKEDMailTemplate.greetingName(item.name, callsign: item.callsign)
             rendered = "Hi \(greeting) (\(item.callsign)),\n\n" + rendered
         }
-        if !mailBodyTemplate.contains("{bands}") {
+        if !mailBodyTemplate.localizedCaseInsensitiveContains("{bands}") {
             rendered += "\n\nSuggested bands: \(SKEDMailTemplate.bandPhrase(bandPlans[item.callsign, default: []]))."
         }
-        if let utcTimeWindow, !mailBodyTemplate.contains("{time_window}") {
+        if let utcTimeWindow, !mailBodyTemplate.localizedCaseInsensitiveContains("{time_window}") {
             rendered += "\n\n" + utcTimeWindow
         }
         return rendered.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -993,6 +996,10 @@ struct SKEDDirectoryView: View {
         }
         if mailBodyTemplate.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return "Write a message before sending."
+        }
+        let unknown = SKEDMailTemplate.unresolvedFields(mailSubjectTemplate + "\n" + mailBodyTemplate)
+        if !unknown.isEmpty {
+            return "Unknown email field: " + unknown.map { "{\($0)}" }.joined(separator: ", ")
         }
         if !smtpConfigured {
             return "Configure your SMTP account in YAAM Settings → Email before sending."
@@ -1047,7 +1054,7 @@ struct SKEDDirectoryView: View {
                         .background(Color(NSColor.textBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
                         .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(NSColor.separatorColor)))
                         .disabled(isSending)
-                    Text("Fields: {greeting} · {name} · {callsign} · {bands} · {my_name} · {my_callsign} · {my_grid} · {my_qth} · {time_window}")
+                    Text("Fields: {greeting} · {name} · {callsign} · {bands} · {my_name} · {my_callsign} / {my_call} · {my_grid} · {my_qth} · {my_location} · {time_window}")
                         .font(.caption2).foregroundStyle(.secondary)
                     Toggle("Propose daily availability", isOn: $includeTimeWindow)
                         .font(.caption.bold())
@@ -1131,7 +1138,7 @@ struct SKEDDirectoryView: View {
                     .frame(height: 150)
                     .padding(12)
                     .background(Color(NSColor.textBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
-                    if selection.operators.count > 1 {
+                    if selection.operators.count > 1 || !sendErrors.isEmpty {
                         Divider()
                         Text("Individual delivery").font(.caption.bold())
                         ScrollView {
@@ -1223,18 +1230,22 @@ struct SKEDDirectoryView: View {
         for message in messages {
             if cancelSending { break }
             sendingCallsign = message.callsign
-            let success = await withCheckedContinuation { continuation in
+            let result: (Bool, String) = await withCheckedContinuation { continuation in
                 appState.sendEmail(to: message.email, subject: message.subject, body: message.body,
-                                   callsign: message.callsign, playSound: false) { ok, _ in
-                    continuation.resume(returning: ok)
+                                   callsign: message.callsign, historyKind: "SKED", playSound: false) { ok, detail in
+                    continuation.resume(returning: (ok, detail))
                 }
             }
+            let success = result.0
             sendResults[message.callsign] = success
             if success {
                 skedSentCalls.insert(message.callsign)
                 sendErrors.removeValue(forKey: message.callsign)
             } else {
-                sendErrors[message.callsign] = "Delivery failed. Check YAAM's SMTP settings and network connection."
+                sendErrors[message.callsign] = result.1
+                if [5, 6, 7, 28, 35, 51, 58, 60, 67].contains(Int(result.1.split(separator: ":").first?.dropFirst(6) ?? "") ?? -1) {
+                    break
+                }
             }
             if !cancelSending {
                 try? await Task.sleep(for: .milliseconds(750))
