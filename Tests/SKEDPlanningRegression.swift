@@ -17,6 +17,20 @@ struct SKEDPlanningRegression {
         precondition(activity.worked == ["20m", "40m"])
         precondition(activity.confirmed == ["20m"])
 
+        let operators = SKEDOperatorBandActivity.grouped(entries: [
+            .init(callsign: " xw1yc ", band: "15M", confirmed: true),
+            .init(callsign: "XW1YC", band: "20m", confirmed: false),
+            .init(callsign: "XW1YC", band: "", confirmed: false),
+            .init(callsign: "XW1OS", band: "40m", confirmed: false),
+            .init(callsign: "XW1OS", band: "2m", confirmed: true)
+        ])
+        precondition(operators["XW1YC"]?.qsoCount == 3)
+        precondition(operators["XW1YC"]?.worked == ["15m", "20m"])
+        precondition(operators["XW1YC"]?.confirmed == ["15m"])
+        precondition(operators["XW1YC"]?.bandSummary == "Confirmed 15m · Worked 20m")
+        precondition(operators["XW1OS"]?.bandSummary == "Confirmed 2m · Worked 40m")
+        precondition(operators["XW1AA"] == nil)
+
         let bands: Set<String> = ["17m", "20m", "40m"]
         let message = SKEDMailTemplate.render(
             SKEDMailTemplate.defaultBody, callsign: "EP1AAA", name: "Alex Example",

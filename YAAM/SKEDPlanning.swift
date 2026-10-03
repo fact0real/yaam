@@ -24,6 +24,55 @@ nonisolated struct SKEDCountryBandActivity: Sendable {
     static let empty = Self(worked: [], confirmed: [], qsoCount: 0)
 }
 
+nonisolated struct SKEDOperatorLogBandEntry: Sendable {
+    let callsign: String
+    let band: String
+    let confirmed: Bool
+}
+
+nonisolated struct SKEDOperatorBandActivity: Sendable {
+    let worked: Set<String>
+    let confirmed: Set<String>
+    let qsoCount: Int
+
+    static func grouped(entries: [SKEDOperatorLogBandEntry]) -> [String: Self] {
+        var result: [String: Self] = [:]
+        for entry in entries {
+            let call = entry.callsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            guard !call.isEmpty else { continue }
+            let band = entry.band.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            let previous = result[call] ?? Self(worked: [], confirmed: [], qsoCount: 0)
+            var worked = previous.worked
+            var confirmed = previous.confirmed
+            if !band.isEmpty {
+                worked.insert(band)
+                if entry.confirmed { confirmed.insert(band) }
+            }
+            result[call] = Self(worked: worked, confirmed: confirmed, qsoCount: previous.qsoCount + 1)
+        }
+        return result
+    }
+
+    var bandSummary: String {
+        let order = SKEDMailTemplate.bands
+        func sorted(_ bands: Set<String>) -> [String] {
+            bands.sorted { left, right in
+                let leftIndex = order.firstIndex(of: left) ?? Int.max
+                let rightIndex = order.firstIndex(of: right) ?? Int.max
+                return leftIndex == rightIndex ? left < right : leftIndex < rightIndex
+            }
+        }
+        let confirmedText = sorted(confirmed).joined(separator: ", ")
+        let unconfirmedText = sorted(worked.subtracting(confirmed)).joined(separator: ", ")
+        switch (confirmedText.isEmpty, unconfirmedText.isEmpty) {
+        case (false, false): return "Confirmed \(confirmedText) · Worked \(unconfirmedText)"
+        case (false, true): return "Confirmed \(confirmedText)"
+        case (true, false): return "Worked \(unconfirmedText)"
+        case (true, true): return "Band not recorded"
+        }
+    }
+}
+
 nonisolated enum SKEDMailTemplate {
     static let bands = ["160m", "80m", "60m", "40m", "30m", "20m", "17m", "15m", "12m", "10m", "6m"]
 

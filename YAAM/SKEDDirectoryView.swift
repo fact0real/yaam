@@ -36,6 +36,8 @@ struct SKEDDirectoryView: View {
     @State private var selectedCallsigns: Set<String> = []
     @State private var bandPlans: [String: Set<String>] = [:]
     @State private var countryActivity = SKEDCountryBandActivity.empty
+    @State private var operatorActivityByCallsign: [String: SKEDOperatorBandActivity] = [:]
+    @State private var isLoadingLogHistory = false
     @State private var composeSelection: SKEDComposeSelection?
     @State private var previewCallsign = ""
     @State private var smtpConfigured = false
@@ -173,7 +175,9 @@ struct SKEDDirectoryView: View {
             loadSenderName()
         }
         .task(id: "\(countryISO)-\(category)-\(refreshID)") { await load() }
-        .task(id: "\(countryISO)-\(appState.qsoRecordsRevision)") { await updateCountryActivity() }
+        .task(id: "\(countryISO)-\(appState.qsoRecordsRevision)-\(directory?.operators.map(\.callsign).joined(separator: ",") ?? "")") {
+            await updateCountryActivity()
+        }
         .sheet(item: $selectedOperator) { item in
             operatorDetails(item)
         }
@@ -472,6 +476,8 @@ struct SKEDDirectoryView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .frame(maxWidth: 220, alignment: .leading)
+                    operatorHistory(item)
+                        .frame(width: 195, alignment: .leading)
                     Button("Email") { openComposer(for: [item]) }
                         .buttonStyle(.bordered)
                         .disabled(item.validEmail == nil)
@@ -496,6 +502,32 @@ struct SKEDDirectoryView: View {
         }
     }
 
+    private func operatorHistory(_ item: SKEDOperator) -> some View {
+        let call = item.callsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        return VStack(alignment: .leading, spacing: 3) {
+            if isLoadingLogHistory {
+                Label("Checking logbook…", systemImage: "clock")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else if let activity = operatorActivityByCallsign[call] {
+                Label("\(activity.qsoCount) previous QSO\(activity.qsoCount == 1 ? "" : "s")",
+                      systemImage: activity.confirmed.isEmpty ? "waveform" : "checkmark.circle.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(activity.confirmed.isEmpty ? Color.blue : Color.green)
+                Text(activity.bandSummary)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            } else {
+                Label("No previous QSO", systemImage: "circle.dashed")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .help(isLoadingLogHistory ? "Checking the active station logbook" : operatorActivityByCallsign[call].map {
+            "Your active station log: \($0.qsoCount) QSO\($0.qsoCount == 1 ? "" : "s") with \(item.callsign). \($0.bandSummary)."
+        } ?? "No QSO with \(item.callsign) in the active station logbook")
+    }
+
     private func planningPanel(_ directory: SKEDDirectory) -> some View {
         let item = directory.operators.first { $0.callsign == focusedCallsign }
             ?? directory.operators.first
@@ -516,6 +548,7 @@ struct SKEDDirectoryView: View {
                     Label("No email address available", systemImage: "envelope.badge")
                         .font(.caption).foregroundStyle(.orange)
                 }
+                operatorHistory(item)
                 HStack {
                     Button("Operator details") { selectedOperator = item }
                     Spacer()
@@ -627,13 +660,22 @@ struct SKEDDirectoryView: View {
     }
 
     private func updateCountryActivity() async {
+        guard let directory, directory.countryISO.caseInsensitiveCompare(countryISO) == .orderedSame else {
+            countryActivity = .empty
+            operatorActivityByCallsign = [:]
+            isLoadingLogHistory = false
+            return
+        }
+        isLoadingLogHistory = true
         let records = appState.qsoRecords
         let iso = countryISO
+        let callsigns = Set(directory.operators.map { $0.callsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() })
         let result = await Task.detached(priority: .utility) {
             var countryByCall: [String: String] = [:]
             var entries: [SKEDLogBandEntry] = []
+            var operatorEntries: [SKEDOperatorLogBandEntry] = []
             for record in records {
-                let call = record.fields["CALL"] ?? ""
+                let call = (record.fields["CALL"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
                 let country = record.fields["COUNTRY"] ?? ""
                 let key = "\(call)|\(country)"
                 let resolvedISO: String
@@ -643,16 +685,29 @@ struct SKEDDirectoryView: View {
                     resolvedISO = DXCCDatabase.resolve(callsign: call, country: country).countryCode
                     countryByCall[key] = resolvedISO
                 }
-                guard resolvedISO.caseInsensitiveCompare(iso) == .orderedSame else { continue }
-                let band = (record.fields["BAND"].flatMap { $0.isEmpty ? nil : $0 }
+                let countryMatches = resolvedISO.caseInsensitiveCompare(iso) == .orderedSame
+                let operatorMatches = callsigns.contains(call)
+                guard countryMatches || operatorMatches else { continue }
+                let band = (record.fields["BAND"].flatMap {
+                                let value = $0.trimmingCharacters(in: .whitespacesAndNewlines)
+                                return value.isEmpty ? nil : value
+                            }
                             ?? record.fields["FREQ"].flatMap(AmateurBandPlan.band(for:))
                             ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-                entries.append(.init(countryISO: resolvedISO, band: band, confirmed: record.isConfirmed))
+                if countryMatches {
+                    entries.append(.init(countryISO: resolvedISO, band: band, confirmed: record.isConfirmed))
+                }
+                if operatorMatches {
+                    operatorEntries.append(.init(callsign: call, band: band, confirmed: record.isConfirmed))
+                }
             }
-            return SKEDCountryBandActivity.make(entries: entries, countryISO: iso)
+            return (SKEDCountryBandActivity.make(entries: entries, countryISO: iso),
+                    SKEDOperatorBandActivity.grouped(entries: operatorEntries))
         }.value
         guard !Task.isCancelled else { return }
-        countryActivity = result
+        countryActivity = result.0
+        operatorActivityByCallsign = result.1
+        isLoadingLogHistory = false
     }
 
     private var tokenControls: some View {

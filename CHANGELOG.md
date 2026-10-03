@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.37.18 — 2026-10-03
+
+- Show each SKED operator's previous QSO count and worked or confirmed bands from the active station logbook directly in the directory and planning panel.
+- Refresh per-operator history when the selected country, ranked operators, or logbook records change.
+
 ## 1.37.17 — 2026-10-03
 
 - Make Select All reversible and add shared band controls for selected SKED operators on the directory and email screen.
