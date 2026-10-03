@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.37.17 — 2026-10-03
+
+- Make Select All reversible and add shared band controls for selected SKED operators on the directory and email screen.
+- Refresh the SKED email copy, always sign with the sender's name and callsign, and use a four-character station grid.
+- Add an optional local-time SKED window that is converted to explicit UTC dates and times in each personalized email.
+- Close the composer and confirm success after every selected email is delivered; retain progress and retry controls for partial failures.
+
 ## 1.37.16 — 2026-10-02
 
 - Show full country names in the SKED picker and focus SKED planning on 160m through 6m.

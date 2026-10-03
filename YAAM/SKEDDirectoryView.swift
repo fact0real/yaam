@@ -38,8 +38,13 @@ struct SKEDDirectoryView: View {
     @State private var countryActivity = SKEDCountryBandActivity.empty
     @State private var composeSelection: SKEDComposeSelection?
     @State private var previewCallsign = ""
-    @State private var showSMTPSettings = false
     @State private var smtpConfigured = false
+    @State private var senderName = ""
+    @State private var includeTimeWindow = false
+    @State private var timeStart = Date().addingTimeInterval(3600)
+    @State private var timeEnd = Date().addingTimeInterval(7200)
+    @State private var showSendSuccess = false
+    @State private var sendSuccessCount = 0
     @State private var isSending = false
     @State private var cancelSending = false
     @State private var sendingCallsign = ""
@@ -102,6 +107,9 @@ struct SKEDDirectoryView: View {
                     if let directory {
                         summary(directory)
                         countryBandOverview(directory)
+                        if !selectedCallsigns.isEmpty {
+                            selectedOperatorsBandBar(directory)
+                        }
                         if directory.operators.isEmpty {
                             ContentUnavailableView("No operators found", systemImage: "antenna.radiowaves.left.and.right.slash",
                                                    description: Text("Try another country or ranking category."))
@@ -142,6 +150,7 @@ struct SKEDDirectoryView: View {
             updateCountryChoices()
             loadBandPlans()
             loadMailTemplate()
+            loadSenderName()
         }
         .onChange(of: appState.qrzRankCountries) { _, _ in updateCountryChoices() }
         .onChange(of: mailSubjectTemplate) { _, value in
@@ -149,6 +158,9 @@ struct SKEDDirectoryView: View {
         }
         .onChange(of: mailBodyTemplate) { _, value in
             UserDefaults.standard.set(value, forKey: "sked.mailBody.v1")
+        }
+        .onChange(of: senderName) { _, value in
+            UserDefaults.standard.set(value, forKey: senderNameStorageKey)
         }
         .onChange(of: countryISO) { _, _ in
             selectedCallsigns.removeAll()
@@ -158,6 +170,7 @@ struct SKEDDirectoryView: View {
         .onChange(of: appState.activeStationProfileID) { _, _ in
             selectedCallsigns.removeAll()
             loadBandPlans()
+            loadSenderName()
         }
         .task(id: "\(countryISO)-\(category)-\(refreshID)") { await load() }
         .task(id: "\(countryISO)-\(appState.qsoRecordsRevision)") { await updateCountryActivity() }
@@ -166,6 +179,11 @@ struct SKEDDirectoryView: View {
         }
         .sheet(item: $composeSelection) { selection in
             composer(selection)
+        }
+        .alert("SKED email sent", isPresented: $showSendSuccess) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("Sent \(sendSuccessCount) personalized email\(sendSuccessCount == 1 ? "" : "s") successfully.")
         }
     }
 
@@ -232,12 +250,22 @@ struct SKEDDirectoryView: View {
         HStack(spacing: 10) {
             Button {
                 guard let directory else { return }
-                selectedCallsigns = Set(directory.operators.compactMap { $0.validEmail == nil ? nil : $0.callsign })
+                let eligible = Set(directory.operators.compactMap { $0.validEmail == nil ? nil : $0.callsign })
+                if eligible.isSubset(of: selectedCallsigns) {
+                    selectedCallsigns.subtract(eligible)
+                } else {
+                    selectedCallsigns.formUnion(eligible)
+                }
             } label: {
-                Label("Select All", systemImage: "checkmark.square")
+                let allSelected = directory.map { directory in
+                    let eligible = Set(directory.operators.compactMap { $0.validEmail == nil ? nil : $0.callsign })
+                    return !eligible.isEmpty && eligible.isSubset(of: selectedCallsigns)
+                } ?? false
+                Label(allSelected ? "Deselect All" : "Select All",
+                      systemImage: allSelected ? "square" : "checkmark.square")
             }
             .disabled(directory?.emailCount == 0 || directory == nil)
-            .help("Select every operator with an email address in this country")
+            .help("Toggle all operators with an email address in this country")
 
             Button {
                 guard let directory else { return }
@@ -275,6 +303,38 @@ struct SKEDDirectoryView: View {
             .disabled(isLoading)
             .help("Refresh rankings and look up missing contact details on QRZ")
         }
+    }
+
+    private func selectedOperatorsBandBar(_ directory: SKEDDirectory) -> some View {
+        let operators = directory.operators.filter { selectedCallsigns.contains($0.callsign) && $0.validEmail != nil }
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("\(operators.count) operators selected", systemImage: "person.2.fill")
+                    .font(.headline)
+                Text("Choose bands for everyone here; each email will use the operator's name and callsign.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Button("Clear selection") { selectedCallsigns.removeAll() }
+                    .controlSize(.small)
+            }
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 72), spacing: 7)], spacing: 7) {
+                ForEach(SKEDMailTemplate.bands, id: \.self) { band in
+                    let chosenForAll = operators.allSatisfy { bandPlans[$0.callsign, default: []].contains(band) }
+                    Button(band) { toggleBand(band, for: operators) }
+                        .buttonStyle(.plain)
+                        .font(.caption.bold())
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 7)
+                        .background(chosenForAll ? Color.accentColor.opacity(0.24) : Color.secondary.opacity(0.08),
+                                    in: RoundedRectangle(cornerRadius: 7))
+                        .overlay(RoundedRectangle(cornerRadius: 7)
+                            .stroke(chosenForAll ? Color.accentColor : .clear, lineWidth: 1))
+                        .help(chosenForAll ? "Remove \(band) from all selected operators" : "Add \(band) to all selected operators")
+                }
+            }
+        }
+        .padding(14)
+        .background(Color.accentColor.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
     }
 
     private func summary(_ directory: SKEDDirectory) -> some View {
@@ -549,6 +609,17 @@ struct SKEDDirectoryView: View {
         saveBandPlans()
     }
 
+    private func toggleBand(_ band: String, for operators: [SKEDOperator]) {
+        guard !operators.isEmpty else { return }
+        let remove = operators.allSatisfy { bandPlans[$0.callsign, default: []].contains(band) }
+        for item in operators {
+            var chosen = bandPlans[item.callsign, default: []]
+            if remove { chosen.remove(band) } else { chosen.insert(band) }
+            bandPlans[item.callsign] = chosen
+        }
+        saveBandPlans()
+    }
+
     private func suggestBands(for callsign: String) {
         let priority = ["20m", "40m", "17m", "15m", "10m", "30m", "80m", "12m", "160m", "6m", "60m"]
         bandPlans[callsign] = Set(priority.filter { !countryActivity.worked.contains($0) }.prefix(3))
@@ -693,6 +764,9 @@ struct SKEDDirectoryView: View {
     private func openComposer(for operators: [SKEDOperator]) {
         guard !operators.isEmpty else { return }
         smtpConfigured = appState.isSMTPConfigured
+        includeTimeWindow = false
+        timeStart = Date().addingTimeInterval(3600)
+        timeEnd = Date().addingTimeInterval(7200)
         previewCallsign = operators[0].callsign
         sendResults = [:]
         sendErrors = [:]
@@ -706,9 +780,34 @@ struct SKEDDirectoryView: View {
             mailSubjectTemplate = saved
         }
         if let saved = UserDefaults.standard.string(forKey: "sked.mailBody.v1") {
-            mailBodyTemplate = saved.replacingOccurrences(of: "Hi {greeting},\n\nI hope",
-                                                              with: "Hi {greeting} ({callsign}),\n\nI hope")
+            if saved.contains("I hope you're doing well!") {
+                mailBodyTemplate = SKEDMailTemplate.defaultBody
+            } else {
+                let oldFooter = "\n\n73,\n{my_callsign}"
+                mailBodyTemplate = saved.hasSuffix(oldFooter)
+                    ? String(saved.dropLast(oldFooter.count)) : saved
+            }
         }
+    }
+
+    private var senderNameStorageKey: String {
+        "sked.senderName.v1.\(appState.activeStationProfile?.normalizedCallsign ?? "no-station")"
+    }
+
+    private func loadSenderName() {
+        senderName = UserDefaults.standard.string(forKey: senderNameStorageKey) ?? ""
+    }
+
+    private var utcTimeWindow: String? {
+        includeTimeWindow ? SKEDMailTemplate.utcWindow(start: timeStart, end: timeEnd) : nil
+    }
+
+    private func localTimeDescription(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        formatter.timeZone = .current
+        return formatter.string(from: date)
     }
 
     private func renderedSubject(for item: SKEDOperator) -> String {
@@ -717,22 +816,51 @@ struct SKEDDirectoryView: View {
             mailSubjectTemplate, callsign: item.callsign, name: item.name,
             bands: bandPlans[item.callsign, default: []],
             stationCallsign: station?.normalizedCallsign ?? "",
-            stationGrid: station?.normalizedGrid ?? "", stationQTH: station?.qth ?? ""))
+            stationGrid: SKEDMailTemplate.fourCharacterGrid(station?.normalizedGrid ?? ""),
+            stationQTH: station?.qth ?? "", stationName: senderName,
+            timeWindowUTC: utcTimeWindow))
     }
 
     private func renderedBody(for item: SKEDOperator) -> String {
         let station = appState.activeStationProfile
-        return SKEDMailTemplate.render(
+        var rendered = SKEDMailTemplate.render(
             mailBodyTemplate, callsign: item.callsign, name: item.name,
             bands: bandPlans[item.callsign, default: []],
             stationCallsign: station?.normalizedCallsign ?? "",
-            stationGrid: station?.normalizedGrid ?? "", stationQTH: station?.qth ?? "")
+            stationGrid: SKEDMailTemplate.fourCharacterGrid(station?.normalizedGrid ?? ""),
+            stationQTH: station?.qth ?? "", stationName: senderName,
+            timeWindowUTC: utcTimeWindow)
+        if !mailBodyTemplate.contains("{callsign}") {
+            let greeting = item.name?.split(whereSeparator: \.isWhitespace).first.map(String.init) ?? "there"
+            rendered = "Hi \(greeting) (\(item.callsign)),\n\n" + rendered
+        }
+        if !mailBodyTemplate.contains("{bands}") {
+            rendered += "\n\nSuggested bands: \(SKEDMailTemplate.bandPhrase(bandPlans[item.callsign, default: []]))."
+        }
+        if let utcTimeWindow, !mailBodyTemplate.contains("{time_window}") {
+            rendered += "\n\n" + utcTimeWindow
+        }
+        return rendered.trimmingCharacters(in: .whitespacesAndNewlines)
+            + "\n\n" + SKEDMailTemplate.signature(name: senderName,
+                                                    callsign: station?.normalizedCallsign ?? "")
     }
 
     private func sendIssue(for selection: SKEDComposeSelection) -> String? {
         let pending = selection.operators.filter { sendResults[$0.callsign] != true }
         if appState.activeStationProfile?.normalizedCallsign.isEmpty != false {
             return "Choose an active station profile with your callsign before sending."
+        }
+        if senderName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "Enter your name for the email signature."
+        }
+        if includeTimeWindow && timeEnd <= timeStart {
+            return "The end of the local time window must be after its start."
+        }
+        if includeTimeWindow && timeStart < Date().addingTimeInterval(-60) {
+            return "Choose a future local time window."
+        }
+        if mailBodyTemplate.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "Write a message before sending."
         }
         if !smtpConfigured {
             return "Configure your SMTP account in YAAM Settings → Email before sending."
@@ -773,19 +901,38 @@ struct SKEDDirectoryView: View {
                     Text("Saved automatically. Each preview replaces the fields below with that operator's details and band plan.")
                         .font(.caption).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
+                    TextField("Your name for the signature", text: $senderName)
+                        .textFieldStyle(.roundedBorder)
+                        .disabled(isSending)
                     TextField("Subject", text: $mailSubjectTemplate)
                         .textFieldStyle(.roundedBorder)
                         .disabled(isSending)
                     TextEditor(text: $mailBodyTemplate)
                         .font(.system(.body, design: .monospaced))
                         .scrollContentBackground(.hidden)
-                        .frame(height: 245)
+                        .frame(height: 190)
                         .padding(6)
                         .background(Color(NSColor.textBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
                         .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(NSColor.separatorColor)))
                         .disabled(isSending)
-                    Text("Fields: {greeting} · {name} · {callsign} · {bands} · {my_callsign} · {my_grid} · {my_qth}")
+                    Text("Fields: {greeting} · {name} · {callsign} · {bands} · {my_name} · {my_callsign} · {my_grid} · {my_qth} · {time_window}")
                         .font(.caption2).foregroundStyle(.secondary)
+                    Toggle("Propose a time window", isOn: $includeTimeWindow)
+                        .font(.caption.bold())
+                        .disabled(isSending)
+                    if includeTimeWindow {
+                        Text("Choose dates and times in your Mac's local time (\(TimeZone.current.abbreviation(for: timeStart) ?? TimeZone.current.identifier)).")
+                            .font(.caption2).foregroundStyle(.secondary)
+                        DatePicker("From", selection: $timeStart, displayedComponents: [.date, .hourAndMinute])
+                            .disabled(isSending)
+                        DatePicker("Until", selection: $timeEnd, displayedComponents: [.date, .hourAndMinute])
+                            .disabled(isSending)
+                        Text("Local: \(localTimeDescription(timeStart)) – \(localTimeDescription(timeEnd))")
+                            .font(.caption2).foregroundStyle(.secondary)
+                        Text(utcTimeWindow ?? "")
+                            .font(.caption2).foregroundStyle(.cyan)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                     Button("Restore friendly default") {
                         mailSubjectTemplate = SKEDMailTemplate.defaultSubject
                         mailBodyTemplate = SKEDMailTemplate.defaultBody
@@ -812,13 +959,23 @@ struct SKEDDirectoryView: View {
                     Text("To: \(preview.name ?? preview.callsign) <\(preview.validEmail ?? "no email")>")
                         .font(.caption)
                         .textSelection(.enabled)
-                    Text("Bands: \(bandPlans[preview.callsign, default: []].isEmpty ? "Choose below" : SKEDMailTemplate.bandPhrase(bandPlans[preview.callsign] ?? []))")
+                    Text(selection.operators.count == 1
+                         ? "Bands for \(preview.callsign)"
+                         : "Bands for all \(selection.operators.count) recipients")
+                        .font(.caption.bold())
+                    Text("Preview: \(bandPlans[preview.callsign, default: []].isEmpty ? "Choose below" : SKEDMailTemplate.bandPhrase(bandPlans[preview.callsign] ?? []))")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.cyan)
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 62), spacing: 5)], spacing: 5) {
                         ForEach(SKEDMailTemplate.bands, id: \.self) { band in
-                            let chosen = bandPlans[preview.callsign, default: []].contains(band)
-                            Button(band) { toggleBand(band, for: preview.callsign) }
+                            let chosen = selection.operators.allSatisfy { bandPlans[$0.callsign, default: []].contains(band) }
+                            Button(band) {
+                                if selection.operators.count == 1 {
+                                    toggleBand(band, for: preview.callsign)
+                                } else {
+                                    toggleBand(band, for: selection.operators)
+                                }
+                            }
                                 .buttonStyle(.plain)
                                 .disabled(isSending)
                                 .font(.caption.bold())
@@ -829,15 +986,6 @@ struct SKEDDirectoryView: View {
                                 .overlay(RoundedRectangle(cornerRadius: 6)
                                     .stroke(chosen ? Color.accentColor : .clear, lineWidth: 1))
                         }
-                    }
-                    if selection.operators.count > 1 {
-                        Button("Apply these bands to all selected") {
-                            let chosen = bandPlans[preview.callsign, default: []]
-                            for item in selection.operators { bandPlans[item.callsign] = chosen }
-                            saveBandPlans()
-                        }
-                        .font(.caption)
-                        .disabled(isSending || bandPlans[preview.callsign, default: []].isEmpty)
                     }
                     Divider()
                     Text(renderedSubject(for: preview))
@@ -912,7 +1060,6 @@ struct SKEDDirectoryView: View {
                     .foregroundStyle(sendResults.values.contains(false) ? .orange : .green)
             }
             HStack {
-                Button("SMTP Settings") { showSMTPSettings = true }
                 Spacer()
                 Button("Close") { composeSelection = nil }
                     .disabled(isSending)
@@ -926,14 +1073,8 @@ struct SKEDDirectoryView: View {
             }
         }
         .padding(22)
-        .frame(width: 980, height: 700)
+        .frame(width: 1000, height: 760)
         .interactiveDismissDisabled(isSending)
-        .sheet(isPresented: $showSMTPSettings) {
-            SMTPSettingsView(embeddedInSettings: false)
-        }
-        .onChange(of: showSMTPSettings) { _, showing in
-            if !showing { smtpConfigured = appState.isSMTPConfigured }
-        }
     }
 
     private func sendComposed(_ selection: SKEDComposeSelection) async {
@@ -969,6 +1110,16 @@ struct SKEDDirectoryView: View {
         }
         sendingCallsign = ""
         isSending = false
+        if selection.operators.allSatisfy({ sendResults[$0.callsign] == true }) {
+            sendSuccessCount = selection.operators.count
+            notice = "Sent \(sendSuccessCount) personalized SKED email\(sendSuccessCount == 1 ? "" : "s") successfully."
+            selectedCallsigns.subtract(Set(selection.operators.map(\.callsign)))
+            composeSelection = nil
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(250))
+                showSendSuccess = true
+            }
+        }
     }
 
     private func exportCSV() {

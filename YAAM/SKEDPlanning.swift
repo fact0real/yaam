@@ -31,15 +31,29 @@ nonisolated enum SKEDMailTemplate {
     static let defaultBody = """
     Hi {greeting} ({callsign}),
 
-    I hope you're doing well! I'm {my_callsign}{my_location}, and I'd love to arrange a SKED with you on {bands}.
+    It's {my_callsign}{my_location}. I'd love to set up a SKED with you on {bands}. Those bands look promising with the current propagation, and they're a good match for my antenna's resonance.
 
-    Would any of these bands work for you? I'm happy to find a time and mode that suits us both. Please let me know what you think, and what time works best at your end.
+    {time_window}
 
-    Looking forward to meeting you on the air!
-
-    73,
-    {my_callsign}
+    Let me know what works for you, and we can pick a mode that suits us both. It'll be great to catch you on the air!
     """
+
+    static func fourCharacterGrid(_ value: String) -> String {
+        let clean = value.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        return clean.count >= 4 ? String(clean.prefix(4)) : ""
+    }
+
+    static func utcWindow(start: Date, end: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd HH:mm 'UTC'"
+        return "Could you do a SKED between \(formatter.string(from: start)) and \(formatter.string(from: end))?"
+    }
+
+    static func signature(name: String, callsign: String) -> String {
+        "73,\n\(name.split(whereSeparator: \.isWhitespace).joined(separator: " "))\n\(callsign)"
+    }
 
     static func ordered(_ selected: Set<String>) -> [String] {
         bands.filter { selected.contains($0) }
@@ -57,8 +71,9 @@ nonisolated enum SKEDMailTemplate {
 
     static func render(_ template: String, callsign: String, name: String?,
                        bands: Set<String>, stationCallsign: String, stationGrid: String,
-                       stationQTH: String) -> String {
-        let greeting = name?.split(whereSeparator: \.isWhitespace).first.map(String.init) ?? callsign
+                       stationQTH: String, stationName: String = "",
+                       timeWindowUTC: String? = nil) -> String {
+        let greeting = name?.split(whereSeparator: \.isWhitespace).first.map(String.init) ?? "there"
         let location: String
         if !stationQTH.isEmpty && !stationGrid.isEmpty {
             location = " in \(stationQTH) (grid \(stationGrid))"
@@ -77,7 +92,9 @@ nonisolated enum SKEDMailTemplate {
             "{my_callsign}": stationCallsign,
             "{my_grid}": stationGrid,
             "{my_qth}": stationQTH,
-            "{my_location}": location
+            "{my_location}": location,
+            "{my_name}": stationName,
+            "{time_window}": timeWindowUTC ?? "I'm flexible on timing, so feel free to suggest a slot that works for you."
         ]
         return replacements.reduce(template) { result, pair in
             result.replacingOccurrences(of: pair.key, with: pair.value)

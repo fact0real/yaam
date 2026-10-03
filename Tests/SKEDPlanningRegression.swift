@@ -24,6 +24,32 @@ struct SKEDPlanningRegression {
         precondition(message.contains("Hi Alex (EP1AAA),"))
         precondition(message.contains("40m, 20m, and 17m"))
         precondition(message.contains("W1ABC in Boston (grid FN42)"))
+        precondition(message.contains("current propagation"))
+        precondition(message.contains("antenna's resonance"))
+        precondition(!message.contains("I hope you're doing well!"))
+        precondition(!message.contains("{time_window}"))
+        precondition(SKEDMailTemplate.fourCharacterGrid("fn42ab") == "FN42")
+        precondition(SKEDMailTemplate.fourCharacterGrid("fn3") == "")
+        precondition(SKEDMailTemplate.signature(name: "Alex Smith", callsign: "W1ABC") == "73,\nAlex Smith\nW1ABC")
+        var tehranCalendar = Calendar(identifier: .gregorian)
+        tehranCalendar.timeZone = TimeZone(identifier: "Asia/Tehran")!
+        let start = tehranCalendar.date(from: DateComponents(year: 2026, month: 10, day: 3, hour: 19, minute: 30))!
+        let end = start.addingTimeInterval(90 * 60)
+        let utcWindow = SKEDMailTemplate.utcWindow(start: start, end: end)
+        precondition(utcWindow.contains("2026-10-03 16:00 UTC"))
+        precondition(utcWindow.contains("2026-10-03 17:30 UTC"))
+        precondition(!utcWindow.contains("GMT"))
+        let crossingMidnight = tehranCalendar.date(from: DateComponents(year: 2026, month: 10, day: 3, hour: 2))!
+        let crossingWindow = SKEDMailTemplate.utcWindow(start: crossingMidnight,
+                                                        end: crossingMidnight.addingTimeInterval(2 * 3600))
+        precondition(crossingWindow.contains("2026-10-02 22:30 UTC"))
+        precondition(crossingWindow.contains("2026-10-03 00:30 UTC"))
+        let scheduled = SKEDMailTemplate.render(
+            SKEDMailTemplate.defaultBody, callsign: "EP1AAA", name: "Alex Example",
+            bands: ["20m"], stationCallsign: "W1ABC", stationGrid: "FN42",
+            stationQTH: "Boston", stationName: "Taylor", timeWindowUTC: utcWindow)
+        precondition(scheduled.contains("2026-10-03 16:00 UTC"))
+        precondition(!scheduled.contains("{time_window}"))
         let secondMessage = SKEDMailTemplate.render(
             SKEDMailTemplate.defaultBody, callsign: "EP2BBB", name: "Samira Example",
             bands: ["15m"], stationCallsign: "W1ABC", stationGrid: "FN42", stationQTH: "Boston")
