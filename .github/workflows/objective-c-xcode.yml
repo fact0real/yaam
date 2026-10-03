@@ -35,6 +35,26 @@ jobs:
                      CODE_SIGNING_ALLOWED=NO \
                      clean build analyze 2>&1 | tee xcodebuild.log
 
+      - name: Report Xcode errors
+        if: failure()
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          log = Path("xcodebuild.log")
+          if not log.exists():
+              print("::error::Xcode build log was not created")
+          else:
+              errors = [line.strip() for line in log.read_text(errors="replace").splitlines()
+                        if "error:" in line.lower() or "fatal error:" in line.lower()]
+              for line in errors[:20]:
+                  escaped = line.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+                  print(f"::error::{escaped}")
+              if not errors:
+                  print("::error::Xcode failed without an error line; inspect the uploaded build log")
+          PY
+
       - name: Upload build diagnostics
         if: always()
         uses: actions/upload-artifact@v4
