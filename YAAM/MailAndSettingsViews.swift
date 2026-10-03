@@ -531,6 +531,7 @@ Warm 73,
         let recipient = appState.selectedEmailAddress
         let subject = emailSubject
         let body = emailBody
+        let incomingDetailsDraft = isIncomingDetailsDraft
         
         let myCall = resolvedMyCallsign
         let profile = appState.activeStationProfile
@@ -572,7 +573,9 @@ Warm 73,
             subject: subject,
             body: body,
             attachmentData: attachmentData,
-            attachmentName: attachmentName
+            attachmentName: attachmentName,
+            callsign: appState.selectedEmailCallsign,
+            historyKind: incomingDetailsDraft ? QRZIncomingBulkMail.historyKind : nil
         ) { success, log in
             DispatchQueue.main.async {
                 self.isSending = false

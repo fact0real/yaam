@@ -820,6 +820,9 @@ struct QRZIncomingRequestsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var requestToReject: QRZIncomingConfirmation?
     @State private var showRejectSheet = false
+    @State private var selectedRequestIDs = Set<String>()
+    @State private var bulkRequests: [QRZIncomingConfirmation] = []
+    @State private var showBulkComposer = false
 
     private var outstanding: [QRZIncomingConfirmation] {
         appState.qrzIncomingRequests.filter { !appState.hasLocalQSO(for: $0) }
@@ -856,6 +859,30 @@ struct QRZIncomingRequestsView: View {
                 )
             }
 
+            HStack(spacing: 10) {
+                Button(selectedRequestIDs.count == outstanding.count && !outstanding.isEmpty
+                       ? "Clear selection" : "Select all needing details") {
+                    if selectedRequestIDs.count == outstanding.count {
+                        selectedRequestIDs.removeAll()
+                    } else {
+                        selectedRequestIDs = Set(outstanding.map(\.id))
+                    }
+                }
+                .disabled(outstanding.isEmpty || appState.isFetchingQRZIncoming)
+                Text("\(selectedRequestIDs.count) selected · one personalized email per callsign")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button {
+                    bulkRequests = outstanding.filter { selectedRequestIDs.contains($0.id) }
+                    showBulkComposer = true
+                } label: {
+                    Label("Email selected", systemImage: "envelope.stack.fill")
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(selectedRequestIDs.isEmpty || appState.isFetchingQRZIncoming || appState.isRejectingQRZIncoming)
+            }
+
             if appState.isRejectingQRZIncoming {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
@@ -877,6 +904,19 @@ struct QRZIncomingRequestsView: View {
             } else {
                 List(appState.qrzIncomingRequests) { request in
                     HStack(spacing: 12) {
+                        if !appState.hasLocalQSO(for: request) {
+                            Toggle("Select \(request.callsign)", isOn: Binding(
+                                get: { selectedRequestIDs.contains(request.id) },
+                                set: { selected in
+                                    if selected { selectedRequestIDs.insert(request.id) }
+                                    else { selectedRequestIDs.remove(request.id) }
+                                }
+                            ))
+                            .labelsHidden()
+                            .toggleStyle(.checkbox)
+                        } else {
+                            Color.clear.frame(width: 14, height: 14)
+                        }
                         Image(systemName: appState.hasLocalQSO(for: request) ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
                             .foregroundStyle(appState.hasLocalQSO(for: request) ? .green : .orange)
                         VStack(alignment: .leading, spacing: 3) {
@@ -956,8 +996,18 @@ struct QRZIncomingRequestsView: View {
         .onAppear {
             if appState.qrzIncomingRequests.isEmpty { appState.fetchQRZIncomingRequests() }
         }
+        .onChange(of: appState.qrzIncomingRequests) { _, _ in
+            selectedRequestIDs.formIntersection(Set(outstanding.map(\.id)))
+        }
+        .onChange(of: appState.qsoRecordsRevision) { _, _ in
+            selectedRequestIDs.formIntersection(Set(outstanding.map(\.id)))
+        }
         .sheet(isPresented: $appState.showIncomingEmailComposer) {
             EmailComposerView()
+                .environmentObject(appState)
+        }
+        .sheet(isPresented: $showBulkComposer) {
+            QRZIncomingBulkEmailView(requests: bulkRequests)
                 .environmentObject(appState)
         }
         .sheet(isPresented: $showRejectSheet) {

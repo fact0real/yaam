@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.37.24 — 2026-10-03
+
+- Select all or individual unmatched QRZ Incoming requests and compose one personalized message per callsign, including all selected request dates.
+- Resolve missing recipient addresses from QRZ/HAMQTH, allow manual correction, preview each message, and send separate SMTP emails with per-recipient progress and stop control.
+- Skip previously emailed QRZ Incoming operators by default and keep these detail requests distinct from QSL delivery in email history.
+
 ## 1.37.23 — 2026-10-03
 
 - Add a manual WebSDR dial frequency field in MHz, with the receiver's listed bands and Utah antenna selection checked before tuning.

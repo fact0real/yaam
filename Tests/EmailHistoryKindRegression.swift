@@ -11,6 +11,9 @@ struct EmailHistoryKindRegression {
         var sked = decoded[0]
         sked.kind = "SKED"
         precondition(!sked.countsAsQSL)
+        var incoming = decoded[0]
+        incoming.kind = "QRZ_INCOMING_DETAILS"
+        precondition(!incoming.countsAsQSL)
         precondition([sked, decoded[0]].contains(where: \.countsAsQSL))
         precondition(![sked].contains(where: \.countsAsQSL))
         let encoded = try JSONEncoder().encode(sked)
