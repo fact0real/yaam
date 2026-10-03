@@ -8,6 +8,7 @@ struct EmailHistoryEntry: Identifiable, Codable, Equatable, Hashable {
     let subject: String
     let status: String
     var kind: String? = nil
+    var sked: SKEDMailDetails? = nil
 
     var countsAsQSL: Bool { status == "Sent" && kind?.uppercased() != "SKED" }
 }

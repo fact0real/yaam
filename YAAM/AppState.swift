@@ -6642,6 +6642,7 @@ class AppState: NSObject, ObservableObject {
         replyTo: String? = nil,
         callsign: String? = nil,
         historyKind: String? = nil,
+        skedDetails: SKEDMailDetails? = nil,
         playSound: Bool = true,
         completion: @escaping (Bool, String) -> Void
     ) {
@@ -6809,9 +6810,11 @@ class AppState: NSObject, ObservableObject {
                 
                 if process.terminationStatus == 0 {
                     DispatchQueue.main.async {
-                        self.recordEmailHistory(callsign: targetCallsign, email: recipient, subject: subject, status: "Sent", kind: historyKind)
+                        let historySaved = self.recordEmailHistory(callsign: targetCallsign, email: recipient,
+                            subject: subject, status: "Sent", kind: historyKind, skedDetails: skedDetails)
                         if playSound { self.playActivitySound(.success) }
-                        completion(true, "Email successfully sent to \(recipient)!")
+                        completion(true, historySaved ? "Email successfully sent to \(recipient)!" :
+                            "HISTORY SAVE FAILED: Email was sent to \(recipient), but its local history could not be saved. Do not resend it without checking your mailbox.")
                     }
                 } else {
                     DispatchQueue.main.async {
@@ -7535,8 +7538,10 @@ class AppState: NSObject, ObservableObject {
         guard let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return nil }
         let dir = appSupport.appendingPathComponent("YAAM")
         if !fm.fileExists(atPath: dir.path) {
-            try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+            try? fm.createDirectory(at: dir, withIntermediateDirectories: true,
+                                    attributes: [.posixPermissions: 0o700])
         }
+        guard (try? fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dir.path)) != nil else { return nil }
         return dir.appendingPathComponent("EmailHistory.json")
     }
 
@@ -7559,15 +7564,16 @@ class AppState: NSObject, ObservableObject {
         refreshEmailHistoryColumns()
     }
 
-    func recordEmailHistory(
+    @discardableResult func recordEmailHistory(
         callsign: String,
         email: String,
         subject: String,
         status: String,
         kind: String? = nil,
+        skedDetails: SKEDMailDetails? = nil,
         updateLogbookRows: Bool = true,
         autoSave: Bool = true
-    ) {
+    ) -> Bool {
         guard Thread.isMainThread else {
             DispatchQueue.main.async { [weak self] in
                 self?.recordEmailHistory(
@@ -7576,11 +7582,12 @@ class AppState: NSObject, ObservableObject {
                     subject: subject,
                     status: status,
                     kind: kind,
+                    skedDetails: skedDetails,
                     updateLogbookRows: updateLogbookRows,
                     autoSave: autoSave
                 )
             }
-            return
+            return false
         }
 
         let entry = EmailHistoryEntry(
@@ -7590,19 +7597,24 @@ class AppState: NSObject, ObservableObject {
             email: email,
             subject: subject,
             status: status,
-            kind: kind
+            kind: kind,
+            sked: skedDetails
         )
 
         emailHistory.insert(entry, at: 0)
-        emailHistory = Array(emailHistory.prefix(500))
+        let recentIDs = Set(emailHistory.prefix(500).map(\.id))
+        emailHistory = emailHistory.filter {
+            recentIDs.contains($0.id) || ($0.kind?.uppercased() == "SKED" && $0.status == "Sent")
+        }
         let norm = callsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         if !norm.isEmpty {
             emailHistoryByCallsign[norm] = entry
         }
-        saveEmailHistory()
+        let saved = saveEmailHistory()
         if updateLogbookRows {
             updateEmailHistoryColumn(with: entry, autoSave: autoSave)
         }
+        return saved
     }
 
     func latestEmailHistory(for callsign: String) -> EmailHistoryEntry? {
@@ -7678,10 +7690,16 @@ class AppState: NSObject, ObservableObject {
         return "\(formatter.string(from: entry.date)) | \(entry.status) | \(entry.subject)"
     }
 
-    private func saveEmailHistory() {
+    @discardableResult private func saveEmailHistory() -> Bool {
         guard let url = emailHistoryURL,
-              let data = try? JSONEncoder().encode(emailHistory) else { return }
-        try? data.write(to: url, options: .atomic)
+              let data = try? JSONEncoder().encode(emailHistory) else { return false }
+        do {
+            try data.write(to: url, options: .atomic)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+            return true
+        } catch {
+            return false
+        }
     }
 
     // MARK: - Newly Confirmed Management

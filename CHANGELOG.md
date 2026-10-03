@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.37.21 — 2026-10-03
+
+- Keep a searchable local history of successfully sent SKED emails with recipient, exact subject and body, requested bands, sending time, and proposed daily schedule.
+- Mark previously emailed operators in the directory and show their full sent history from the SKED page.
+- Warn before repeat SKED requests for overlapping or unknown planned days; allow new nonoverlapping days and an explicit override after review.
+- Preserve successful SKED history beyond the general recent-email limit and restrict local history file permissions.
+
 ## 1.37.20 — 2026-10-03
 
 - Verify SMTP certificates, keep credentials out of process arguments and error logs, and reject unsafe mail headers.

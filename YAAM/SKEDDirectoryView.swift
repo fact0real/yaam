@@ -12,6 +12,7 @@ private struct SKEDPreparedEmail {
     let email: String
     let subject: String
     let body: String
+    let details: SKEDMailDetails
 }
 
 private struct SKEDCountryChoice: Identifiable {
@@ -58,7 +59,11 @@ struct SKEDDirectoryView: View {
     @State private var sendingCallsign = ""
     @State private var sendResults: [String: Bool] = [:]
     @State private var sendErrors: [String: String] = [:]
-    @State private var skedSentCalls: Set<String> = []
+    @State private var allowOverlappingSKED = false
+    @State private var showSKEDHistory = false
+    @State private var showComposerHistory = false
+    @State private var historyFilterCallsign = ""
+    @State private var historySaveWarnings: Set<String> = []
     @State private var mailSubjectTemplate = SKEDMailTemplate.defaultSubject
     @State private var mailBodyTemplate = SKEDMailTemplate.defaultBody
 
@@ -182,6 +187,9 @@ struct SKEDDirectoryView: View {
         .onChange(of: senderName) { _, value in
             UserDefaults.standard.set(value, forKey: senderNameStorageKey)
         }
+        .onChange(of: includeTimeWindow) { _, _ in allowOverlappingSKED = false }
+        .onChange(of: timeStart) { _, _ in allowOverlappingSKED = false }
+        .onChange(of: timeEnd) { _, _ in allowOverlappingSKED = false }
         .onChange(of: countryISO) { _, _ in
             selectedUSState = ""
             selectedCallsigns.removeAll()
@@ -209,10 +217,16 @@ struct SKEDDirectoryView: View {
         .sheet(item: $composeSelection) { selection in
             composer(selection)
         }
+        .sheet(isPresented: $showSKEDHistory) {
+            SKEDMailHistoryView(entries: SKEDMailHistory.successfulEntries(appState.emailHistory),
+                                destinationKey: destinationKey, initialCallsign: historyFilterCallsign)
+        }
         .alert("SKED email sent", isPresented: $showSendSuccess) {
             Button("OK", role: .cancel) { }
         } message: {
-            Text("Sent \(sendSuccessCount) personalized email\(sendSuccessCount == 1 ? "" : "s") successfully.")
+            Text("Sent \(sendSuccessCount) personalized email\(sendSuccessCount == 1 ? "" : "s") successfully." +
+                 (historySaveWarnings.isEmpty ? "" :
+                  " Local history could not be saved for \(historySaveWarnings.sorted().joined(separator: ", ")). Check your mailbox before sending again."))
         }
     }
 
@@ -341,6 +355,14 @@ struct SKEDDirectoryView: View {
                 Label("Export CSV", systemImage: "square.and.arrow.down")
             }
             .disabled(directory?.operators.isEmpty != false)
+
+            Button {
+                historyFilterCallsign = ""
+                showSKEDHistory = true
+            } label: {
+                Label("Sent history (\(SKEDMailHistory.successfulEntries(appState.emailHistory).count))",
+                      systemImage: "clock.arrow.circlepath")
+            }
 
             Button {
                 if let emails = directory?.allEmails, !emails.isEmpty {
@@ -487,6 +509,8 @@ struct SKEDDirectoryView: View {
             .background(Color(NSColor.controlBackgroundColor))
 
             ForEach(directory.operators) { item in
+                let sentSKED = SKEDMailHistory.entries(for: item.callsign, email: item.validEmail,
+                                                       in: appState.emailHistory)
                 HStack(spacing: 10) {
                     Toggle("Select \(item.callsign)", isOn: Binding(
                         get: { selectedCallsigns.contains(item.callsign) },
@@ -507,12 +531,16 @@ struct SKEDDirectoryView: View {
                         VStack(alignment: .leading, spacing: 3) {
                             HStack(spacing: 7) {
                                 Text(item.callsign).font(.callout.bold()).foregroundStyle(.cyan)
-                                if skedSentCalls.contains(item.callsign) {
+                                if !sentSKED.isEmpty {
                                     Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
                                 }
                             }
                             Text(item.name ?? "Name unavailable")
                                 .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            if let latest = sentSKED.first {
+                                Text("SKED emailed \(latest.date.formatted(date: .abbreviated, time: .omitted)) · \(sentSKED.count) sent")
+                                    .font(.caption2).foregroundStyle(.green).lineLimit(1)
+                            }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .contentShape(Rectangle())
@@ -603,6 +631,15 @@ struct SKEDDirectoryView: View {
                         .font(.caption).foregroundStyle(.orange)
                 }
                 operatorHistory(item)
+                let sentSKED = SKEDMailHistory.entries(for: item.callsign, email: item.validEmail,
+                                                       in: appState.emailHistory)
+                if !sentSKED.isEmpty {
+                    Button("View \(sentSKED.count) sent SKED email\(sentSKED.count == 1 ? "" : "s")") {
+                        historyFilterCallsign = item.callsign
+                        showSKEDHistory = true
+                    }
+                    .font(.caption)
+                }
                 HStack {
                     Button("Operator details") { selectedOperator = item }
                     Spacer()
@@ -905,6 +942,9 @@ struct SKEDDirectoryView: View {
         previewCallsign = operators[0].callsign
         sendResults = [:]
         sendErrors = [:]
+        allowOverlappingSKED = false
+        historySaveWarnings = []
+        showComposerHistory = false
         cancelSending = false
         sendingCallsign = ""
         composeSelection = SKEDComposeSelection(operators: operators)
@@ -935,6 +975,15 @@ struct SKEDDirectoryView: View {
 
     private var utcTimeWindow: String? {
         includeTimeWindow ? SKEDMailTemplate.utcWindow(start: timeStart, end: timeEnd) : nil
+    }
+
+    private var proposedSchedule: SKEDMailSchedule? {
+        includeTimeWindow ? SKEDMailSchedule(start: timeStart, end: timeEnd) : nil
+    }
+
+    private func conflictingSKED(for item: SKEDOperator) -> [EmailHistoryEntry] {
+        SKEDMailHistory.conflicts(for: item.callsign, email: item.validEmail,
+                                  schedule: proposedSchedule, in: appState.emailHistory)
     }
 
     private func localTimeDescription(_ date: Date) -> String {
@@ -1013,6 +1062,10 @@ struct SKEDDirectoryView: View {
         if pending.contains(where: { renderedSubject(for: $0).isEmpty || renderedBody(for: $0).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
             return "The subject and message cannot be empty."
         }
+        if !allowOverlappingSKED, !pending.isEmpty,
+           pending.allSatisfy({ !conflictingSKED(for: $0).isEmpty }) {
+            return "Every selected operator has an overlapping or unknown SKED schedule. Choose different days or review the earlier email and explicitly allow another send."
+        }
         return nil
     }
 
@@ -1020,6 +1073,7 @@ struct SKEDDirectoryView: View {
         let preview = selection.operators.first { $0.callsign == previewCallsign }
             ?? selection.operators[0]
         let pending = selection.operators.filter { sendResults[$0.callsign] != true }
+        let eligibleCount = pending.filter { allowOverlappingSKED || conflictingSKED(for: $0).isEmpty }.count
         let issue = sendIssue(for: selection)
         return VStack(alignment: .leading, spacing: 15) {
             HStack {
@@ -1176,13 +1230,45 @@ struct SKEDDirectoryView: View {
                 Label(issue, systemImage: "exclamationmark.triangle.fill")
                     .font(.caption).foregroundStyle(.orange)
             }
-            let previouslyEmailed = selection.operators.filter {
-                appState.emailHistoryByCallsign[$0.callsign]?.status == "Sent"
-                    && sendResults[$0.callsign] != true
+            let conflicts = pending.compactMap { item -> (SKEDOperator, EmailHistoryEntry)? in
+                guard let latest = conflictingSKED(for: item).first else { return nil }
+                return (item, latest)
             }
-            if !previouslyEmailed.isEmpty && !isSending {
-                Label("YAAM history shows earlier email to \(previouslyEmailed.map(\.callsign).joined(separator: ", ")). Review before sending again.",
-                      systemImage: "clock.arrow.circlepath")
+            if !conflicts.isEmpty && !isSending {
+                VStack(alignment: .leading, spacing: 5) {
+                    Label("Review previous SKED emails before sending again", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption.bold()).foregroundStyle(.orange)
+                    ForEach(Array(conflicts.indices.prefix(3)), id: \.self) { index in
+                        let item = conflicts[index].0
+                        let previous = conflicts[index].1
+                        Text("\(item.callsign): sent \(previous.date.formatted(date: .abbreviated, time: .shortened)) · \(previous.sked?.schedule?.shortDescription ?? "planned days unknown")")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                    if conflicts.count > 3 {
+                        Text("And \(conflicts.count - 3) more recipients. Open history to review them.")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                    HStack {
+                        Toggle("Send again despite overlap or unknown dates", isOn: $allowOverlappingSKED)
+                            .font(.caption)
+                            .disabled(isSending)
+                        Spacer()
+                        Button("View sent history") {
+                            showComposerHistory = true
+                        }
+                        .popover(isPresented: $showComposerHistory, arrowEdge: .bottom) {
+                            SKEDMailHistoryView(entries: SKEDMailHistory.successfulEntries(appState.emailHistory),
+                                                destinationKey: destinationKey,
+                                                initialCallsign: conflicts.count == 1 ? conflicts[0].0.callsign : "")
+                        }
+                    }
+                }
+                .padding(10)
+                .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 9))
+            }
+            if !historySaveWarnings.isEmpty {
+                Label("Email sent, but local history could not be saved for \(historySaveWarnings.sorted().joined(separator: ", ")). Do not resend without checking your mailbox.",
+                      systemImage: "externaldrive.badge.exclamationmark")
                     .font(.caption).foregroundStyle(.orange)
             }
             if isSending {
@@ -1194,7 +1280,7 @@ struct SKEDDirectoryView: View {
                         .disabled(cancelSending)
                 }
             } else if !sendResults.isEmpty {
-                Text("\(sendResults.values.filter { $0 }.count) sent · \(sendResults.values.filter { !$0 }.count) failed")
+                Text("\(sendResults.values.filter { $0 }.count) sent · \(sendResults.values.filter { !$0 }.count) not sent")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(sendResults.values.contains(false) ? .orange : .green)
             }
@@ -1202,13 +1288,12 @@ struct SKEDDirectoryView: View {
                 Spacer()
                 Button("Close") { composeSelection = nil }
                     .disabled(isSending)
-                Button(pending.count == selection.operators.count
-                       ? "Send \(pending.count) individual email\(pending.count == 1 ? "" : "s")"
-                       : "Retry \(pending.count) unsent email\(pending.count == 1 ? "" : "s")") {
+                Button("Send \(eligibleCount) email\(eligibleCount == 1 ? "" : "s")" +
+                       (eligibleCount < pending.count ? " · skip \(pending.count - eligibleCount) overlap" : "")) {
                     Task { await sendComposed(selection) }
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(isSending || pending.isEmpty || issue != nil)
+                .disabled(isSending || eligibleCount == 0 || issue != nil)
             }
         }
         .padding(22)
@@ -1218,29 +1303,49 @@ struct SKEDDirectoryView: View {
 
     private func sendComposed(_ selection: SKEDComposeSelection) async {
         guard sendIssue(for: selection) == nil, !isSending else { return }
+        let schedule = proposedSchedule
+        let stationCallsign = appState.activeStationProfile?.normalizedCallsign ?? ""
+        let destination = destinationKey
+        let destinationName = destinationTitle
         let messages = selection.operators
             .filter { sendResults[$0.callsign] != true }
             .compactMap { item -> SKEDPreparedEmail? in
                 guard let email = item.validEmail else { return nil }
+                let body = renderedBody(for: item)
                 return SKEDPreparedEmail(callsign: item.callsign, email: email,
-                                         subject: renderedSubject(for: item), body: renderedBody(for: item))
+                                         subject: renderedSubject(for: item), body: body,
+                                         details: SKEDMailDetails(recipientName: item.name,
+                                            senderCallsign: stationCallsign, destinationKey: destination,
+                                            destinationName: destinationName, body: body,
+                                            bands: SKEDMailTemplate.ordered(bandPlans[item.callsign, default: []]),
+                                            schedule: schedule))
             }
         isSending = true
         cancelSending = false
         for message in messages {
             if cancelSending { break }
+            if !allowOverlappingSKED,
+               !SKEDMailHistory.conflicts(for: message.callsign, email: message.email,
+                                          schedule: schedule, in: appState.emailHistory).isEmpty {
+                sendResults[message.callsign] = false
+                sendErrors[message.callsign] = "An overlapping SKED email was already sent to this callsign or address. Review its history before retrying."
+                continue
+            }
             sendingCallsign = message.callsign
             let result: (Bool, String) = await withCheckedContinuation { continuation in
                 appState.sendEmail(to: message.email, subject: message.subject, body: message.body,
-                                   callsign: message.callsign, historyKind: "SKED", playSound: false) { ok, detail in
+                                   callsign: message.callsign, historyKind: "SKED",
+                                   skedDetails: message.details, playSound: false) { ok, detail in
                     continuation.resume(returning: (ok, detail))
                 }
             }
             let success = result.0
             sendResults[message.callsign] = success
             if success {
-                skedSentCalls.insert(message.callsign)
                 sendErrors.removeValue(forKey: message.callsign)
+                if result.1.hasPrefix("HISTORY SAVE FAILED:") {
+                    historySaveWarnings.insert(message.callsign)
+                }
             } else {
                 sendErrors[message.callsign] = result.1
                 if [5, 6, 7, 28, 35, 51, 58, 60, 67].contains(Int(result.1.split(separator: ":").first?.dropFirst(6) ?? "") ?? -1) {
@@ -1255,7 +1360,9 @@ struct SKEDDirectoryView: View {
         isSending = false
         if selection.operators.allSatisfy({ sendResults[$0.callsign] == true }) {
             sendSuccessCount = selection.operators.count
-            notice = "Sent \(sendSuccessCount) personalized SKED email\(sendSuccessCount == 1 ? "" : "s") successfully."
+            notice = historySaveWarnings.isEmpty
+                ? "Sent \(sendSuccessCount) personalized SKED email\(sendSuccessCount == 1 ? "" : "s") successfully."
+                : "Emails sent, but local history was not saved for \(historySaveWarnings.sorted().joined(separator: ", ")). Check your mailbox before sending again."
             selectedCallsigns.subtract(Set(selection.operators.map(\.callsign)))
             composeSelection = nil
             Task { @MainActor in
