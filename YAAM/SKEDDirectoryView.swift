@@ -49,6 +49,7 @@ struct SKEDDirectoryView: View {
     @State private var previewCallsign = ""
     @State private var smtpConfigured = false
     @State private var senderName = ""
+    @State private var digitalMode: SKEDDigitalMode = .either
     @State private var includeTimeWindow = false
     @State private var timeStart = Date().addingTimeInterval(3600)
     @State private var timeEnd = Date().addingTimeInterval(7200)
@@ -56,6 +57,7 @@ struct SKEDDirectoryView: View {
     @State private var sendSuccessCount = 0
     @State private var isSending = false
     @State private var cancelSending = false
+    @State private var closeComposerAfterSending = false
     @State private var sendingCallsign = ""
     @State private var sendResults: [String: Bool] = [:]
     @State private var sendErrors: [String: String] = [:]
@@ -190,6 +192,9 @@ struct SKEDDirectoryView: View {
         }
         .onChange(of: senderName) { _, value in
             UserDefaults.standard.set(value, forKey: senderNameStorageKey)
+        }
+        .onChange(of: digitalMode) { _, value in
+            UserDefaults.standard.set(value.rawValue, forKey: "sked.digitalMode.v1")
         }
     }
 
@@ -960,22 +965,25 @@ struct SKEDDirectoryView: View {
         timeStart = Date().addingTimeInterval(3600)
         timeEnd = Date().addingTimeInterval(7200)
         previewCallsign = operators[0].callsign
+        digitalMode = SKEDDigitalMode(rawValue: UserDefaults.standard.string(forKey: "sked.digitalMode.v1") ?? "") ?? .either
         sendResults = [:]
         sendErrors = [:]
         allowOverlappingSKED = false
         historySaveWarnings = []
         showComposerHistory = false
         cancelSending = false
+        closeComposerAfterSending = false
         sendingCallsign = ""
         composeSelection = SKEDComposeSelection(operators: operators)
     }
 
     private func loadMailTemplate() {
         if let saved = UserDefaults.standard.string(forKey: "sked.mailSubject.v1") {
-            mailSubjectTemplate = saved
+            mailSubjectTemplate = saved == "A friendly SKED request from {my_callsign} to {callsign}"
+                ? SKEDMailTemplate.defaultSubject : saved
         }
         if let saved = UserDefaults.standard.string(forKey: "sked.mailBody.v1") {
-            if saved.contains("I hope you're doing well!") {
+            if saved.contains("I hope you're doing well!") || saved == SKEDMailTemplate.previousDefaultBody {
                 mailBodyTemplate = SKEDMailTemplate.defaultBody
             } else {
                 let oldFooter = "\n\n73,\n{my_callsign}"
@@ -1021,7 +1029,7 @@ struct SKEDDirectoryView: View {
             bands: bandPlans[item.callsign, default: []],
             stationCallsign: station?.normalizedCallsign ?? "",
             stationGrid: SKEDMailTemplate.fourCharacterGrid(station?.normalizedGrid ?? ""),
-            stationQTH: station?.qth ?? "", stationName: senderName,
+            stationQTH: station?.qth ?? "", stationName: senderName, mode: digitalMode,
             timeWindowUTC: utcTimeWindow))
     }
 
@@ -1032,7 +1040,7 @@ struct SKEDDirectoryView: View {
             bands: bandPlans[item.callsign, default: []],
             stationCallsign: station?.normalizedCallsign ?? "",
             stationGrid: SKEDMailTemplate.fourCharacterGrid(station?.normalizedGrid ?? ""),
-            stationQTH: station?.qth ?? "", stationName: senderName,
+            stationQTH: station?.qth ?? "", stationName: senderName, mode: digitalMode,
             timeWindowUTC: utcTimeWindow)
         if !mailBodyTemplate.localizedCaseInsensitiveContains("{callsign}") {
             let greeting = SKEDMailTemplate.greetingName(item.name, callsign: item.callsign)
@@ -1040,6 +1048,9 @@ struct SKEDDirectoryView: View {
         }
         if !mailBodyTemplate.localizedCaseInsensitiveContains("{bands}") {
             rendered += "\n\nSuggested bands: \(SKEDMailTemplate.bandPhrase(bandPlans[item.callsign, default: []]))."
+        }
+        if !mailBodyTemplate.localizedCaseInsensitiveContains("{mode}") {
+            rendered += "\n\nPreferred digital mode: \(digitalMode.title)."
         }
         if let utcTimeWindow, !mailBodyTemplate.localizedCaseInsensitiveContains("{time_window}") {
             rendered += "\n\n" + utcTimeWindow
@@ -1084,168 +1095,234 @@ struct SKEDDirectoryView: View {
         }
         if !allowOverlappingSKED, !pending.isEmpty,
            pending.allSatisfy({ !conflictingSKED(for: $0).isEmpty }) {
-            return "Every selected operator has an overlapping or unknown SKED schedule. Choose different days or review the earlier email and explicitly allow another send."
+            return "Every remaining operator has an overlapping or unknown SKED schedule. Choose different days or review the earlier email and explicitly allow another send."
         }
         return nil
     }
 
     private func composer(_ selection: SKEDComposeSelection) -> some View {
-        let preview = selection.operators.first { $0.callsign == previewCallsign }
-            ?? selection.operators[0]
+        let preview = selection.operators.first { $0.callsign == previewCallsign } ?? selection.operators[0]
         let pending = selection.operators.filter { sendResults[$0.callsign] != true }
         let eligibleCount = pending.filter { allowOverlappingSKED || conflictingSKED(for: $0).isEmpty }.count
         let issue = sendIssue(for: selection)
-        return VStack(alignment: .leading, spacing: 15) {
-            HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(selection.operators.count == 1 ? "SKED email · \(preview.callsign)" : "SKED emails · \(selection.operators.count) operators")
-                        .font(.title2.bold())
-                    Text("Each operator receives a separate, personalized message through your YAAM SMTP account.")
-                        .font(.caption).foregroundStyle(.secondary)
+        let visibleFrame = NSApp.keyWindow?.screen?.visibleFrame ?? NSScreen.main?.visibleFrame
+            ?? NSRect(x: 0, y: 0, width: 1200, height: 900)
+        let sheetWidth = min(1000, max(560, visibleFrame.width - 100))
+        let sheetHeight = min(760, max(420, visibleFrame.height - 100))
+        return VStack(spacing: 0) {
+            composerHeader(selection, preview: preview)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 14)
+            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    composerColumns(selection, preview: preview, width: sheetWidth)
+                    composerFeedback(pending: pending, issue: issue)
                 }
-                Spacer()
-                Label(appState.configuredSMTPEmail.isEmpty ? "SMTP not configured" : appState.configuredSMTPEmail,
-                      systemImage: "envelope.badge.shield.half.filled")
-                    .font(.caption)
+                .padding(20)
             }
-            HStack(alignment: .top, spacing: 18) {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Shared template").font(.headline)
-                    Text("Saved automatically. Each preview replaces the fields below with that operator's details and band plan.")
-                        .font(.caption).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    TextField("Your name for the signature", text: $senderName)
-                        .textFieldStyle(.roundedBorder)
-                        .disabled(isSending)
-                    TextField("Subject", text: $mailSubjectTemplate)
-                        .textFieldStyle(.roundedBorder)
-                        .disabled(isSending)
-                    TextEditor(text: $mailBodyTemplate)
-                        .font(.system(.body, design: .monospaced))
-                        .scrollContentBackground(.hidden)
-                        .frame(height: 190)
-                        .padding(6)
-                        .background(Color(NSColor.textBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
-                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(NSColor.separatorColor)))
-                        .disabled(isSending)
-                    Text("Fields: {greeting} · {name} · {callsign} · {bands} · {my_name} · {my_callsign} / {my_call} · {my_grid} · {my_qth} · {my_location} · {time_window}")
-                        .font(.caption2).foregroundStyle(.secondary)
-                    Toggle("Propose daily availability", isOn: $includeTimeWindow)
-                        .font(.caption.bold())
-                        .disabled(isSending)
-                    if includeTimeWindow {
-                        Text("Choose the first and last day, then your available hours each day in local time (\(TimeZone.current.abbreviation(for: timeStart) ?? TimeZone.current.identifier)).")
-                            .font(.caption2).foregroundStyle(.secondary)
-                        DatePicker("First day · daily start", selection: $timeStart, displayedComponents: [.date, .hourAndMinute])
-                            .disabled(isSending)
-                        DatePicker("Last day · daily end", selection: $timeEnd, displayedComponents: [.date, .hourAndMinute])
-                            .disabled(isSending)
-                        Text("Local: each day, \(localTimeDescription(timeStart)) through \(localTimeDescription(timeEnd))")
-                            .font(.caption2).foregroundStyle(.secondary)
-                        Text(utcTimeWindow ?? "")
-                            .font(.caption2).foregroundStyle(.cyan)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    Button("Restore friendly default") {
-                        mailSubjectTemplate = SKEDMailTemplate.defaultSubject
-                        mailBodyTemplate = SKEDMailTemplate.defaultBody
-                    }
-                    .font(.caption)
-                    .disabled(isSending)
-                }
-                .frame(maxWidth: .infinity, alignment: .topLeading)
+            .frame(minHeight: 0)
+            Divider()
+            composerFooter(selection, eligibleCount: eligibleCount, issue: issue)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 12)
+        }
+        .frame(width: sheetWidth, height: sheetHeight)
+        .interactiveDismissDisabled(isSending)
+    }
 
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack {
-                        Text("Personalized preview").font(.headline)
-                        Spacer()
-                        if selection.operators.count > 1 {
-                            Picker("Operator", selection: $previewCallsign) {
-                                ForEach(selection.operators) { item in
-                                    Text(item.callsign).tag(item.callsign)
-                                }
-                            }
-                            .labelsHidden()
-                            .frame(width: 130)
-                        }
-                    }
-                    Text("To: \(preview.name ?? preview.callsign) <\(preview.validEmail ?? "no email")>")
-                        .font(.caption)
-                        .textSelection(.enabled)
-                    Text(selection.operators.count == 1
-                         ? "Bands for \(preview.callsign)"
-                         : "Bands for all \(selection.operators.count) recipients")
-                        .font(.caption.bold())
-                    Text("Preview: \(bandPlans[preview.callsign, default: []].isEmpty ? "Choose below" : SKEDMailTemplate.bandPhrase(bandPlans[preview.callsign] ?? []))")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.cyan)
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 62), spacing: 5)], spacing: 5) {
-                        ForEach(SKEDMailTemplate.bands, id: \.self) { band in
-                            let chosen = selection.operators.allSatisfy { bandPlans[$0.callsign, default: []].contains(band) }
-                            Button(band) {
-                                if selection.operators.count == 1 {
-                                    toggleBand(band, for: preview.callsign)
-                                } else {
-                                    toggleBand(band, for: selection.operators)
-                                }
-                            }
-                                .buttonStyle(.plain)
-                                .disabled(isSending)
-                                .font(.caption.bold())
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 5)
-                                .background(chosen ? Color.accentColor.opacity(0.23) : Color.secondary.opacity(0.08),
-                                            in: RoundedRectangle(cornerRadius: 6))
-                                .overlay(RoundedRectangle(cornerRadius: 6)
-                                    .stroke(chosen ? Color.accentColor : .clear, lineWidth: 1))
-                        }
-                    }
+    private func composerHeader(_ selection: SKEDComposeSelection, preview: SKEDOperator) -> some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(selection.operators.count == 1 ? "SKED email · \(preview.callsign)" : "SKED emails · \(selection.operators.count) operators")
+                    .font(.title2.bold())
+                Text("Each operator receives a separate, personalized message through your YAAM SMTP account.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button {
+                closeComposer()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(isSending ? "Stop after this email and close" : "Close SKED email")
+            .keyboardShortcut(.cancelAction)
+        }
+    }
+
+    private func composerColumns(_ selection: SKEDComposeSelection, preview: SKEDOperator, width: CGFloat) -> some View {
+        Group {
+            if width < 820 {
+                VStack(alignment: .leading, spacing: 20) {
+                    composerTemplateColumn()
                     Divider()
-                    Text(renderedSubject(for: preview))
-                        .font(.subheadline.bold())
-                        .textSelection(.enabled)
-                    ScrollView {
-                        Text(renderedBody(for: preview))
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .textSelection(.enabled)
+                    composerPreviewColumn(selection, preview: preview)
+                }
+            } else {
+                HStack(alignment: .top, spacing: 18) {
+                    composerTemplateColumn()
+                    composerPreviewColumn(selection, preview: preview)
+                }
+            }
+        }
+    }
+
+    private func composerTemplateColumn() -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Shared template").font(.headline)
+            Text("Saved automatically. Each preview replaces the fields below with that operator's details and band plan.")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            TextField("Your name for the signature", text: $senderName)
+                .textFieldStyle(.roundedBorder)
+                .disabled(isSending)
+            TextField("Subject", text: $mailSubjectTemplate)
+                .textFieldStyle(.roundedBorder)
+                .disabled(isSending)
+            Picker("Digital mode", selection: $digitalMode) {
+                ForEach(SKEDDigitalMode.allCases, id: \.self) { mode in
+                    Text(mode.title).tag(mode)
+                }
+            }
+            .pickerStyle(.menu)
+            .disabled(isSending)
+            TextEditor(text: $mailBodyTemplate)
+                .font(.system(.body, design: .monospaced))
+                .scrollContentBackground(.hidden)
+                .frame(height: 190)
+                .padding(6)
+                .background(Color(NSColor.textBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(NSColor.separatorColor)))
+                .disabled(isSending)
+            Text("Fields: {greeting} · {name} · {callsign} · {bands} · {mode} · {my_name} · {my_callsign} / {my_call} · {my_grid} · {my_qth} · {my_location} · {time_window}")
+                .font(.caption2).foregroundStyle(.secondary)
+            Toggle("Propose daily availability", isOn: $includeTimeWindow)
+                .font(.caption.bold())
+                .disabled(isSending)
+            if includeTimeWindow {
+                Text("Choose the first and last day, then your available hours each day in local time (\(TimeZone.current.abbreviation(for: timeStart) ?? TimeZone.current.identifier)).")
+                    .font(.caption2).foregroundStyle(.secondary)
+                DatePicker("First day · daily start", selection: $timeStart, displayedComponents: [.date, .hourAndMinute])
+                    .disabled(isSending)
+                DatePicker("Last day · daily end", selection: $timeEnd, displayedComponents: [.date, .hourAndMinute])
+                    .disabled(isSending)
+                Text("Local: each day, \(localTimeDescription(timeStart)) through \(localTimeDescription(timeEnd))")
+                    .font(.caption2).foregroundStyle(.secondary)
+                Text(utcTimeWindow ?? "")
+                    .font(.caption2).foregroundStyle(.cyan)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Button("Restore friendly default") {
+                mailSubjectTemplate = SKEDMailTemplate.defaultSubject
+                mailBodyTemplate = SKEDMailTemplate.defaultBody
+            }
+            .font(.caption)
+            .disabled(isSending)
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+
+    }
+
+    private func composerPreviewColumn(_ selection: SKEDComposeSelection, preview: SKEDOperator) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Personalized preview").font(.headline)
+                Spacer()
+                if selection.operators.count > 1 {
+                    Picker("Operator", selection: $previewCallsign) {
+                        ForEach(selection.operators) { item in
+                            Text(item.callsign).tag(item.callsign)
+                        }
                     }
-                    .frame(height: 150)
-                    .padding(12)
-                    .background(Color(NSColor.textBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
-                    if selection.operators.count > 1 || !sendErrors.isEmpty {
-                        Divider()
-                        Text("Individual delivery").font(.caption.bold())
-                        ScrollView {
-                            VStack(alignment: .leading, spacing: 5) {
-                                ForEach(selection.operators) { item in
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        HStack {
-                                            Text(item.callsign).font(.caption.bold()).frame(width: 75, alignment: .leading)
-                                            Text(item.name ?? item.callsign)
-                                                .font(.caption).lineLimit(1)
-                                                .frame(maxWidth: .infinity, alignment: .leading)
-                                            Text(SKEDMailTemplate.bandPhrase(bandPlans[item.callsign] ?? []))
-                                                .font(.caption).lineLimit(1)
-                                                .frame(maxWidth: 125, alignment: .trailing)
-                                            Spacer()
-                                            if let sent = sendResults[item.callsign] {
-                                                Image(systemName: sent ? "checkmark.circle.fill" : "xmark.circle.fill")
-                                                    .foregroundStyle(sent ? Color.green : Color.red)
-                                            }
-                                        }
-                                        if let error = sendErrors[item.callsign] {
-                                            Text(error).font(.caption2).foregroundStyle(.red)
-                                                .fixedSize(horizontal: false, vertical: true)
-                                        }
+                    .labelsHidden()
+                    .frame(width: 130)
+                }
+            }
+            Text("To: \(preview.name ?? preview.callsign) <\(preview.validEmail ?? "no email")>")
+                .font(.caption)
+                .textSelection(.enabled)
+            Text(selection.operators.count == 1
+                 ? "Bands for \(preview.callsign)"
+                 : "Bands for all \(selection.operators.count) recipients")
+                .font(.caption.bold())
+            Text("Preview: \(bandPlans[preview.callsign, default: []].isEmpty ? "Choose below" : SKEDMailTemplate.bandPhrase(bandPlans[preview.callsign] ?? []))")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.cyan)
+            Text("Digital mode: \(digitalMode.title)")
+                .font(.caption.weight(.medium))
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 62), spacing: 5)], spacing: 5) {
+                ForEach(SKEDMailTemplate.bands, id: \.self) { band in
+                    let chosen = selection.operators.allSatisfy { bandPlans[$0.callsign, default: []].contains(band) }
+                    Button(band) {
+                        if selection.operators.count == 1 {
+                            toggleBand(band, for: preview.callsign)
+                        } else {
+                            toggleBand(band, for: selection.operators)
+                        }
+                    }
+                        .buttonStyle(.plain)
+                        .disabled(isSending)
+                        .font(.caption.bold())
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 5)
+                        .background(chosen ? Color.accentColor.opacity(0.23) : Color.secondary.opacity(0.08),
+                                    in: RoundedRectangle(cornerRadius: 6))
+                        .overlay(RoundedRectangle(cornerRadius: 6)
+                            .stroke(chosen ? Color.accentColor : .clear, lineWidth: 1))
+                }
+            }
+            Divider()
+            Text(renderedSubject(for: preview))
+                .font(.subheadline.bold())
+                .textSelection(.enabled)
+            ScrollView {
+                Text(renderedBody(for: preview))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
+            }
+            .frame(height: 150)
+            .padding(12)
+            .background(Color(NSColor.textBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+            if selection.operators.count > 1 || !sendErrors.isEmpty {
+                Divider()
+                Text("Individual delivery").font(.caption.bold())
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 5) {
+                        ForEach(selection.operators) { item in
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack {
+                                    Text(item.callsign).font(.caption.bold()).frame(width: 75, alignment: .leading)
+                                    Text(item.name ?? item.callsign)
+                                        .font(.caption).lineLimit(1)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                    Text(SKEDMailTemplate.bandPhrase(bandPlans[item.callsign] ?? []))
+                                        .font(.caption).lineLimit(1)
+                                        .frame(maxWidth: 125, alignment: .trailing)
+                                    Spacer()
+                                    if let sent = sendResults[item.callsign] {
+                                        Image(systemName: sent ? "checkmark.circle.fill" : "xmark.circle.fill")
+                                            .foregroundStyle(sent ? Color.green : Color.red)
                                     }
                                 }
+                                if let error = sendErrors[item.callsign] {
+                                    Text(error).font(.caption2).foregroundStyle(.red)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
                             }
                         }
-                        .frame(height: 105)
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .topLeading)
+                .frame(height: 105)
             }
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    private func composerFeedback(pending: [SKEDOperator], issue: String?) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
             if let issue {
                 Label(issue, systemImage: "exclamationmark.triangle.fill")
                     .font(.caption).foregroundStyle(.orange)
@@ -1304,21 +1381,43 @@ struct SKEDDirectoryView: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(sendResults.values.contains(false) ? .orange : .green)
             }
-            HStack {
-                Spacer()
-                Button("Close") { composeSelection = nil }
-                    .disabled(isSending)
-                Button("Send \(eligibleCount) email\(eligibleCount == 1 ? "" : "s")" +
-                       (eligibleCount < pending.count ? " · skip \(pending.count - eligibleCount) overlap" : "")) {
-                    Task { await sendComposed(selection) }
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(isSending || eligibleCount == 0 || issue != nil)
-            }
         }
-        .padding(22)
-        .frame(width: 1000, height: 760)
-        .interactiveDismissDisabled(isSending)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func composerFooter(_ selection: SKEDComposeSelection,
+                                eligibleCount: Int, issue: String?) -> some View {
+        HStack(spacing: 10) {
+            if let issue {
+                Label(issue, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .lineLimit(1)
+                    .help(issue)
+            } else if !sendResults.isEmpty {
+                Text("\(sendResults.values.filter { $0 }.count) sent · \(sendResults.values.filter { !$0 }.count) not sent")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 8)
+            Button(isSending ? "Stop & close" : "Close") { closeComposer() }
+                .layoutPriority(1)
+            Button("Send \(eligibleCount) email\(eligibleCount == 1 ? "" : "s")") {
+                Task { await sendComposed(selection) }
+            }
+            .buttonStyle(.borderedProminent)
+            .layoutPriority(1)
+            .disabled(isSending || eligibleCount == 0 || issue != nil)
+        }
+    }
+
+    private func closeComposer() {
+        if isSending {
+            cancelSending = true
+            closeComposerAfterSending = true
+        } else {
+            composeSelection = nil
+        }
     }
 
     private func sendComposed(_ selection: SKEDComposeSelection) async {
@@ -1338,10 +1437,12 @@ struct SKEDDirectoryView: View {
                                             senderCallsign: stationCallsign, destinationKey: destination,
                                             destinationName: destinationName, body: body,
                                             bands: SKEDMailTemplate.ordered(bandPlans[item.callsign, default: []]),
+                                            mode: digitalMode.title,
                                             schedule: schedule))
             }
         isSending = true
         cancelSending = false
+        closeComposerAfterSending = false
         for message in messages {
             if cancelSending { break }
             if !allowOverlappingSKED,
@@ -1378,6 +1479,13 @@ struct SKEDDirectoryView: View {
         }
         sendingCallsign = ""
         isSending = false
+        if closeComposerAfterSending {
+            let delivered = sendResults.values.filter { $0 }.count
+            notice = "SKED sending stopped after the current email. \(delivered) delivered."
+            closeComposerAfterSending = false
+            composeSelection = nil
+            return
+        }
         if selection.operators.allSatisfy({ sendResults[$0.callsign] == true }) {
             sendSuccessCount = selection.operators.count
             notice = historySaveWarnings.isEmpty

@@ -66,6 +66,7 @@ struct SKEDMailDetails: Codable, Hashable, Sendable {
     let destinationName: String
     let body: String
     let bands: [String]
+    var mode: String? = nil
     let schedule: SKEDMailSchedule?
 }
 

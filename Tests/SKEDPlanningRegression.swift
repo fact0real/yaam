@@ -46,6 +46,13 @@ struct SKEDPlanningRegression {
         precondition(message.contains("W1ABC in Boston (grid FN42)"))
         precondition(message.contains("current propagation"))
         precondition(message.contains("antenna's resonance"))
+        precondition(message.contains("using FT8 or FT4"))
+        precondition(SKEDMailTemplate.defaultSubject.contains("{mode}"))
+        let ft4 = SKEDMailTemplate.render("Let's use {mode} on {bands}.", callsign: "EP1AAA",
+            name: "Alex Example", bands: ["20m"], stationCallsign: "W1ABC",
+            stationGrid: "FN42", stationQTH: "Boston", mode: .ft4)
+        precondition(ft4 == "Let's use FT4 on 20m.")
+        precondition(SKEDMailTemplate.unresolvedFields("{mode} {bands}").isEmpty)
         precondition(!message.contains("I hope you're doing well!"))
         precondition(!message.contains("{time_window}"))
         precondition(SKEDMailTemplate.fourCharacterGrid("fn42ab") == "FN42")
@@ -84,7 +91,7 @@ struct SKEDPlanningRegression {
             SKEDMailTemplate.defaultBody, callsign: "EP2BBB", name: "Samira Example",
             bands: ["15m"], stationCallsign: "W1ABC", stationGrid: "FN42", stationQTH: "Boston")
         precondition(secondMessage.contains("Hi Samira (EP2BBB),"))
-        precondition(secondMessage.contains("on 15m."))
+        precondition(secondMessage.contains("on 15m, using FT8 or FT4."))
         precondition(!secondMessage.contains("EP1AAA"))
         let mixedFields = SKEDMailTemplate.render("Hi {GREETING}, {CALLSIGN} / {MY_CALL} / {BANDS} / {BAND}",
             callsign: "EP2BBB", name: "SMITH, JOHN", bands: ["20m"], stationCallsign: "W1ABC",

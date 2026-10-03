@@ -18,7 +18,7 @@ struct SKEDMailHistoryView: View {
             let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !query.isEmpty else { return true }
             return [entry.callsign, entry.email, entry.subject, entry.sked?.recipientName ?? "",
-                    entry.sked?.destinationName ?? "", entry.sked?.body ?? ""]
+                    entry.sked?.destinationName ?? "", entry.sked?.mode ?? "", entry.sked?.body ?? ""]
                 .contains { $0.localizedCaseInsensitiveContains(query) }
         }
     }
@@ -100,6 +100,9 @@ struct SKEDMailHistoryView: View {
                     LabeledContent("From station", value: details.senderCallsign)
                     LabeledContent("Destination", value: details.destinationName)
                     LabeledContent("Requested bands", value: details.bands.joined(separator: ", "))
+                    if let mode = details.mode {
+                        LabeledContent("Digital mode", value: mode)
+                    }
                     if let schedule = details.schedule {
                         LabeledContent("Planned days", value: schedule.shortDescription)
                         Text(schedule.utcDescription).font(.caption).foregroundStyle(.secondary)

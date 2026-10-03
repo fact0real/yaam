@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.37.22 — 2026-10-03
+
+- Keep the SKED email window's header and Close/Send controls visible when delivery errors or overlap warnings appear; scroll the changing content within the available screen height.
+- Let operators choose FT8, FT4, or either mode from the email composer and include that choice in personalized messages and sent history.
+- Allow Stop & close during delivery, stopping after the current email completes.
+
 ## 1.37.21 — 2026-10-03
 
 - Keep a searchable local history of successfully sent SKED emails with recipient, exact subject and body, requested bands, sending time, and proposed daily schedule.

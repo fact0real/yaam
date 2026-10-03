@@ -87,11 +87,28 @@ nonisolated struct SKEDOperatorBandActivity: Sendable {
     }
 }
 
+nonisolated enum SKEDDigitalMode: String, CaseIterable, Codable, Sendable {
+    case ft8 = "FT8"
+    case ft4 = "FT4"
+    case either = "FT8 or FT4"
+
+    var title: String { rawValue }
+}
+
 nonisolated enum SKEDMailTemplate {
     static let bands = ["160m", "80m", "60m", "40m", "30m", "20m", "17m", "15m", "12m", "10m", "6m"]
 
-    static let defaultSubject = "A friendly SKED request from {my_callsign} to {callsign}"
+    static let defaultSubject = "A friendly {mode} SKED request from {my_callsign} to {callsign}"
     static let defaultBody = """
+    Hi {greeting} ({callsign}),
+
+    It's {my_callsign}{my_location}. I'd love to set up a digital SKED with you on {bands}, using {mode}. Those bands look promising with the current propagation, and they're a good match for my antenna's resonance.
+
+    {time_window}
+
+    Let me know what works for you. It'll be great to catch you on the air!
+    """
+    static let previousDefaultBody = """
     Hi {greeting} ({callsign}),
 
     It's {my_callsign}{my_location}. I'd love to set up a SKED with you on {bands}. Those bands look promising with the current propagation, and they're a good match for my antenna's resonance.
@@ -185,7 +202,7 @@ nonisolated enum SKEDMailTemplate {
 
     static func render(_ template: String, callsign: String, name: String?,
                        bands: Set<String>, stationCallsign: String, stationGrid: String,
-                       stationQTH: String, stationName: String = "",
+                       stationQTH: String, stationName: String = "", mode: SKEDDigitalMode = .either,
                        timeWindowUTC: String? = nil) -> String {
         let greeting = greetingName(name, callsign: callsign)
         let location: String
@@ -203,6 +220,7 @@ nonisolated enum SKEDMailTemplate {
             "name": name ?? callsign,
             "callsign": callsign,
             "bands": bandPhrase(bands),
+            "mode": mode.title,
             "my_callsign": stationCallsign,
             "my_call": stationCallsign,
             "my_grid": stationGrid,
@@ -225,7 +243,7 @@ nonisolated enum SKEDMailTemplate {
     }
 
     static func unresolvedFields(_ template: String) -> [String] {
-        let known: Set<String> = ["greeting", "name", "callsign", "bands", "my_callsign", "my_call",
+        let known: Set<String> = ["greeting", "name", "callsign", "bands", "mode", "my_callsign", "my_call",
                                   "my_grid", "my_qth", "my_location", "my_name", "time_window"]
         let pattern = try! NSRegularExpression(pattern: #"\{([A-Za-z0-9_-]+)\}"#)
         let matches = pattern.matches(in: template, range: NSRange(template.startIndex..<template.endIndex, in: template))
