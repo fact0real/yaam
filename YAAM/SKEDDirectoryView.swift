@@ -171,7 +171,7 @@ struct SKEDDirectoryView: View {
         }
     }
 
-    private var observedView: some View {
+    private var persistedPreferencesView: some View {
         mainView
         .onAppear {
             loadBandPlans()
@@ -191,6 +191,10 @@ struct SKEDDirectoryView: View {
         .onChange(of: senderName) { _, value in
             UserDefaults.standard.set(value, forKey: senderNameStorageKey)
         }
+    }
+
+    private var selectionObservedView: some View {
+        persistedPreferencesView
         .onChange(of: includeTimeWindow) { _, _ in allowOverlappingSKED = false }
         .onChange(of: timeStart) { _, _ in allowOverlappingSKED = false }
         .onChange(of: timeEnd) { _, _ in allowOverlappingSKED = false }
@@ -210,6 +214,10 @@ struct SKEDDirectoryView: View {
             loadBandPlans()
             loadSenderName()
         }
+    }
+
+    private var observedView: some View {
+        selectionObservedView
         .task(id: geographyRefreshID) { await loadGeography() }
         .task(id: "\(destinationKey)-\(category)-\(refreshID)") { await load() }
         .task(id: "\(destinationKey)-\(appState.qsoRecordsRevision)-\(directory?.operators.map(\.callsign).joined(separator: ",") ?? "")") {
