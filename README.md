@@ -54,7 +54,7 @@ YAAM brings your logbook, DX activity, radio controls, contests, and QSL workflo
 | **📻 Radio & digital** | Connect through Hamlib, FLRig, or TCI; operate the built-in FT8 station and work with multiple receivers. |
 | **🏆 Awards & statistics** | Track DXCC, WAS, and grids; compare worked and confirmed totals; find contacts that can add award credit. |
 | **✉️ QSL & outreach** | Work with LoTW, QRZ, eQSL, and Club Log; prepare labels and cards; compose follow-up messages from saved templates. |
-| **📻 SKED directory** | Browse the top 19 ranked operators in a country with names and available emails; copy addresses, prepare SKED mail, or export CSV. |
+| **📻 SKED directory** | Browse operators by QRZ Rank region, country, or US state; review names and available emails, plan bands and daily SKED hours, or export CSV. |
 | **⚡ Contest & CW** | Use contest exchanges, serials, ESM, and Cabrillo export alongside keyer tools, CW training, and pileup practice. |
 
 ### Built for the operating desk

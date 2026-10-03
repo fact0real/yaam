@@ -35,13 +35,15 @@ nonisolated struct SKEDDirectory: Sendable {
 
     var emailCount: Int { operators.filter { $0.validEmail != nil }.count }
 
-    var csv: Data {
+    var csv: Data { csv(locationName: countryName) }
+
+    func csv(locationName: String) -> Data {
         func quoted(_ value: String) -> String {
             "\"" + value.replacingOccurrences(of: "\"", with: "\"\"") + "\""
         }
         let rows = ["Rank,Callsign,Name,Email,Score,Country,Category"] + operators.map { item in
             [String(item.rank), item.callsign, item.name ?? "", item.validEmail ?? "",
-             item.score.map(String.init) ?? "", countryName, category]
+             item.score.map(String.init) ?? "", locationName, category]
                 .map(quoted).joined(separator: ",")
         }
         return Data(("\u{FEFF}" + rows.joined(separator: "\r\n") + "\r\n").utf8)
@@ -70,7 +72,11 @@ nonisolated enum SKEDDirectoryError: LocalizedError, Sendable {
 nonisolated enum SKEDDirectoryContract {
     static func request(countryISO: String, category: String, enrich: Bool, token: String?, userAgent: String) throws -> URLRequest {
         let iso = countryISO.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard iso.count == 2, iso.unicodeScalars.allSatisfy(CharacterSet.letters.contains),
+        let isCountry = (2...3).contains(iso.count) &&
+            iso.utf8.allSatisfy { (48...57).contains($0) || (97...122).contains($0) }
+        let isState = iso.hasPrefix("state:") && iso.count == 8 &&
+            iso.dropFirst(6).unicodeScalars.allSatisfy(CharacterSet.letters.contains)
+        guard isCountry || isState,
               ["qso", "countries", "band"].contains(category) else { throw SKEDDirectoryError.invalidCountry }
         var components = URLComponents(url: QRZRankAPIContract.baseURL, resolvingAgainstBaseURL: false)!
         components.path = "/api/v1/sked/\(iso)"

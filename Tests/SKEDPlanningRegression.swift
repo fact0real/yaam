@@ -16,6 +16,12 @@ struct SKEDPlanningRegression {
         precondition(activity.qsoCount == 4)
         precondition(activity.worked == ["20m", "40m"])
         precondition(activity.confirmed == ["20m"])
+        precondition(SKEDStateLogMatch.matches(destinationISO: "us", stateCode: "CA", stateName: "California",
+                                               loggedISO: "US", loggedState: " ca "))
+        precondition(!SKEDStateLogMatch.matches(destinationISO: "us", stateCode: "CA", stateName: "California",
+                                                loggedISO: "US", loggedState: "NY"))
+        precondition(SKEDStateLogMatch.matches(destinationISO: "us", stateCode: "PR", stateName: "Puerto Rico",
+                                               loggedISO: "PR", loggedState: "Puerto Rico"))
 
         let operators = SKEDOperatorBandActivity.grouped(entries: [
             .init(callsign: " xw1yc ", band: "15M", confirmed: true),
@@ -49,20 +55,30 @@ struct SKEDPlanningRegression {
         tehranCalendar.timeZone = TimeZone(identifier: "Asia/Tehran")!
         let start = tehranCalendar.date(from: DateComponents(year: 2026, month: 10, day: 3, hour: 19, minute: 30))!
         let end = start.addingTimeInterval(90 * 60)
-        let utcWindow = SKEDMailTemplate.utcWindow(start: start, end: end)
-        precondition(utcWindow.contains("2026-10-03 16:00 UTC"))
-        precondition(utcWindow.contains("2026-10-03 17:30 UTC"))
+        let utcWindow = SKEDMailTemplate.utcWindow(start: start, end: end, timeZone: tehranCalendar.timeZone)
+        precondition(utcWindow.contains("on 2026-10-03"))
+        precondition(utcWindow.contains("each day from 16:00 to 17:30 UTC"))
         precondition(!utcWindow.contains("GMT"))
         let crossingMidnight = tehranCalendar.date(from: DateComponents(year: 2026, month: 10, day: 3, hour: 2))!
         let crossingWindow = SKEDMailTemplate.utcWindow(start: crossingMidnight,
-                                                        end: crossingMidnight.addingTimeInterval(2 * 3600))
-        precondition(crossingWindow.contains("2026-10-02 22:30 UTC"))
-        precondition(crossingWindow.contains("2026-10-03 00:30 UTC"))
+                                                        end: crossingMidnight.addingTimeInterval(2 * 3600),
+                                                        timeZone: tehranCalendar.timeZone)
+        precondition(crossingWindow.contains("2026-10-02 22:30–2026-10-03 00:30 UTC"))
+        let dailyStart = tehranCalendar.date(from: DateComponents(year: 2026, month: 10, day: 3, hour: 10))!
+        let dailyEnd = tehranCalendar.date(from: DateComponents(year: 2026, month: 10, day: 5, hour: 20))!
+        let dailyWindow = SKEDMailTemplate.utcWindow(start: dailyStart, end: dailyEnd,
+                                                     timeZone: tehranCalendar.timeZone)
+        precondition(dailyWindow.contains("on any day from 2026-10-03 through 2026-10-05"))
+        precondition(dailyWindow.contains("each day from 06:30 to 16:30 UTC"))
+        precondition(!dailyWindow.contains("between"))
+        precondition(!SKEDMailTemplate.isValidDailyWindow(start: dailyStart,
+                                                         end: tehranCalendar.date(from: DateComponents(year: 2026, month: 10, day: 5, hour: 9))!,
+                                                         timeZone: tehranCalendar.timeZone))
         let scheduled = SKEDMailTemplate.render(
             SKEDMailTemplate.defaultBody, callsign: "EP1AAA", name: "Alex Example",
             bands: ["20m"], stationCallsign: "W1ABC", stationGrid: "FN42",
             stationQTH: "Boston", stationName: "Taylor", timeWindowUTC: utcWindow)
-        precondition(scheduled.contains("2026-10-03 16:00 UTC"))
+        precondition(scheduled.contains("each day from 16:00 to 17:30 UTC"))
         precondition(!scheduled.contains("{time_window}"))
         let secondMessage = SKEDMailTemplate.render(
             SKEDMailTemplate.defaultBody, callsign: "EP2BBB", name: "Samira Example",

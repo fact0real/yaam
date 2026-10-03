@@ -6,6 +6,20 @@ nonisolated struct SKEDLogBandEntry: Sendable {
     let confirmed: Bool
 }
 
+nonisolated enum SKEDStateLogMatch {
+    static func matches(destinationISO: String, stateCode: String, stateName: String,
+                        loggedISO: String, loggedState: String) -> Bool {
+        let countryMatches = loggedISO.caseInsensitiveCompare(destinationISO) == .orderedSame
+            || (["PR", "GU", "VI"].contains(stateCode) && loggedISO.caseInsensitiveCompare(stateCode) == .orderedSame)
+        guard countryMatches else { return false }
+        guard !stateCode.isEmpty else { return true }
+        let state = loggedState.trimmingCharacters(in: .whitespacesAndNewlines)
+        return state.caseInsensitiveCompare(stateCode) == .orderedSame
+            || state.caseInsensitiveCompare("US-\(stateCode)") == .orderedSame
+            || (!stateName.isEmpty && state.caseInsensitiveCompare(stateName) == .orderedSame)
+    }
+}
+
 nonisolated struct SKEDCountryBandActivity: Sendable {
     let worked: Set<String>
     let confirmed: Set<String>
@@ -92,12 +106,63 @@ nonisolated enum SKEDMailTemplate {
         return clean.count >= 4 ? String(clean.prefix(4)) : ""
     }
 
-    static func utcWindow(start: Date, end: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
-        formatter.dateFormat = "yyyy-MM-dd HH:mm 'UTC'"
-        return "Could you do a SKED between \(formatter.string(from: start)) and \(formatter.string(from: end))?"
+    static func isValidDailyWindow(start: Date, end: Date, timeZone: TimeZone = .current) -> Bool {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        let startDay = calendar.startOfDay(for: start)
+        let endDay = calendar.startOfDay(for: end)
+        let days = calendar.dateComponents([.day], from: startDay, to: endDay).day ?? -1
+        let first = calendar.dateComponents([.hour, .minute], from: start)
+        let last = calendar.dateComponents([.hour, .minute], from: end)
+        let startMinute = (first.hour ?? 0) * 60 + (first.minute ?? 0)
+        let endMinute = (last.hour ?? 0) * 60 + (last.minute ?? 0)
+        return (0...31).contains(days) && endMinute > startMinute
+    }
+
+    static func utcWindow(start: Date, end: Date, timeZone: TimeZone = .current) -> String {
+        guard isValidDailyWindow(start: start, end: end, timeZone: timeZone) else { return "" }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        let firstDay = calendar.startOfDay(for: start)
+        let lastDay = calendar.startOfDay(for: end)
+        let dayCount = calendar.dateComponents([.day], from: firstDay, to: lastDay).day! + 1
+        let first = calendar.dateComponents([.hour, .minute], from: start)
+        let last = calendar.dateComponents([.hour, .minute], from: end)
+        guard let startHour = first.hour, let startMinute = first.minute,
+              let endHour = last.hour, let endMinute = last.minute else { return "" }
+
+        let utc = TimeZone(secondsFromGMT: 0)!
+        let dateFormatter = DateFormatter()
+        dateFormatter.locale = Locale(identifier: "en_US_POSIX")
+        dateFormatter.timeZone = utc
+        dateFormatter.dateFormat = "yyyy-MM-dd"
+        let timeFormatter = DateFormatter()
+        timeFormatter.locale = Locale(identifier: "en_US_POSIX")
+        timeFormatter.timeZone = utc
+        timeFormatter.dateFormat = "HH:mm"
+        var windows: [(start: Date, end: Date)] = []
+        for offset in 0..<dayCount {
+            guard let day = calendar.date(byAdding: .day, value: offset, to: firstDay),
+                  let dayStart = calendar.date(bySettingHour: startHour, minute: startMinute, second: 0, of: day),
+                  let dayEnd = calendar.date(bySettingHour: endHour, minute: endMinute, second: 0, of: day) else { continue }
+            windows.append((dayStart, dayEnd))
+        }
+        guard let initial = windows.first, let final = windows.last else { return "" }
+        let allSameClock = windows.allSatisfy {
+            timeFormatter.string(from: $0.start) == timeFormatter.string(from: initial.start) &&
+            timeFormatter.string(from: $0.end) == timeFormatter.string(from: initial.end) &&
+            dateFormatter.string(from: $0.start) == dateFormatter.string(from: $0.end)
+        }
+        if allSameClock {
+            let dates = dateFormatter.string(from: initial.start) == dateFormatter.string(from: final.start)
+                ? "on \(dateFormatter.string(from: initial.start))"
+                : "on any day from \(dateFormatter.string(from: initial.start)) through \(dateFormatter.string(from: final.start))"
+            return "Could we arrange a SKED \(dates)? I'm available each day from \(timeFormatter.string(from: initial.start)) to \(timeFormatter.string(from: initial.end)) UTC."
+        }
+        let lines = windows.map { window in
+            "\(dateFormatter.string(from: window.start)) \(timeFormatter.string(from: window.start))–\(dateFormatter.string(from: window.end)) \(timeFormatter.string(from: window.end)) UTC"
+        }
+        return "Could we arrange a SKED during one of these daily UTC windows?\n" + lines.joined(separator: "\n")
     }
 
     static func signature(name: String, callsign: String) -> String {

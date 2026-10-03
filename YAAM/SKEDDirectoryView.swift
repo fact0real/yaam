@@ -22,7 +22,13 @@ private struct SKEDCountryChoice: Identifiable {
 
 struct SKEDDirectoryView: View {
     @EnvironmentObject private var appState: AppState
+    @State private var regionID = "me"
     @State private var countryISO = "ir"
+    @State private var selectedUSState = ""
+    @State private var geography: SKEDGeographyCatalog?
+    @State private var geographyError: String?
+    @State private var isLoadingGeography = false
+    @State private var geographyRefreshID = 0
     @State private var category = "qso"
     @State private var refreshID = 0
     @State private var directory: SKEDDirectory?
@@ -53,37 +59,38 @@ struct SKEDDirectoryView: View {
     @State private var sendResults: [String: Bool] = [:]
     @State private var sendErrors: [String: String] = [:]
     @State private var skedSentCalls: Set<String> = []
-    @State private var countryChoices: [SKEDCountryChoice] = []
     @State private var mailSubjectTemplate = SKEDMailTemplate.defaultSubject
     @State private var mailBodyTemplate = SKEDMailTemplate.defaultBody
 
-    private var countries: [QRZCountrySummary] {
-        var byISO: [String: QRZCountrySummary] = [:]
-        for country in appState.qrzRankCountries where country.iso.count == 2 {
-            let iso = country.iso.lowercased()
-            byISO[iso] = QRZCountrySummary(
-                iso: iso, name: fullCountryName(for: iso, fallback: country.name),
-                stationCount: country.stationCount)
+    private var destinationKey: String {
+        countryISO == "us" && !selectedUSState.isEmpty ? "state:\(selectedUSState.lowercased())" : countryISO
+    }
+
+    private var destinationTitle: String {
+        if countryISO == "us", let state = geography?.states.first(where: { $0.code == selectedUSState }) {
+            return "\(state.name), United States"
         }
-        let available = byISO.values.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-        if !available.isEmpty { return available }
-        return Locale.Region.isoRegions.map(\.identifier).filter { $0.count == 2 }.compactMap { iso -> QRZCountrySummary? in
-            guard let name = Locale(identifier: "en_US").localizedString(forRegionCode: iso) else { return nil }
-            return QRZCountrySummary(iso: iso.lowercased(), name: name)
-        }.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        let fallback = geography?.countries.first(where: { $0.iso == countryISO })?.serviceName ?? countryISO.uppercased()
+        return fullCountryName(for: countryISO, fallback: fallback)
     }
 
     private func fullCountryName(for iso: String, fallback: String) -> String {
+        if iso.caseInsensitiveCompare("bq1") == .orderedSame { return "Bonaire" }
+        if ["x1", "x2"].contains(iso.lowercased()) { return "Antarctic station \(iso.uppercased())" }
         let code = iso.uppercased()
         let localized = Locale(identifier: "en_US").localizedString(forRegionCode: code) ?? ""
         return localized.isEmpty || localized.caseInsensitiveCompare(code) == .orderedSame ? fallback : localized
     }
 
-    private func updateCountryChoices() {
-        countryChoices = countries.map { country in
-            let prefix = DXCCDatabase.representativePrefix(forISO: country.iso) ?? country.iso.uppercased()
-            return SKEDCountryChoice(iso: country.iso.lowercased(),
-                                     title: "\(flagForCountryIso(country.iso)) \(country.name) · \(prefix)")
+    private var countryChoices: [SKEDCountryChoice] {
+        (geography?.countries(in: regionID) ?? []).sorted {
+            fullCountryName(for: $0.iso, fallback: $0.serviceName)
+                .localizedStandardCompare(fullCountryName(for: $1.iso, fallback: $1.serviceName)) == .orderedAscending
+        }.map { country in
+            let prefix = country.iso == "bq1" ? "PJ4" : DXCCDatabase.representativePrefix(forISO: country.iso) ?? country.iso.uppercased()
+            let flag = flagForCountryIso(country.iso == "bq1" ? "bq" : country.iso)
+            return SKEDCountryChoice(iso: country.iso,
+                                     title: "\(flag) \(fullCountryName(for: country.iso, fallback: country.serviceName)) · \(prefix)")
         }
     }
 
@@ -96,6 +103,16 @@ struct SKEDDirectoryView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
+                    if let geographyError {
+                        HStack {
+                            Label("Region and state catalog: \(geographyError)", systemImage: "globe.americas.fill")
+                                .foregroundStyle(.orange)
+                            Spacer()
+                            Button("Retry") { geographyRefreshID += 1 }
+                        }
+                        .padding(12)
+                        .background(.orange.opacity(0.09), in: RoundedRectangle(cornerRadius: 10))
+                    }
                     if let errorMessage {
                         Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
                             .foregroundStyle(.orange)
@@ -148,13 +165,14 @@ struct SKEDDirectoryView: View {
             .background(Color(NSColor.textBackgroundColor))
         }
         .onAppear {
-            appState.fetchQRZRankCountries()
-            updateCountryChoices()
             loadBandPlans()
             loadMailTemplate()
             loadSenderName()
         }
-        .onChange(of: appState.qrzRankCountries) { _, _ in updateCountryChoices() }
+        .onChange(of: regionID) { _, newRegion in
+            guard let geography, !geography.countries(in: newRegion).contains(where: { $0.iso == countryISO }) else { return }
+            countryISO = newRegion == "na" ? "us" : geography.countries(in: newRegion).first?.iso ?? countryISO
+        }
         .onChange(of: mailSubjectTemplate) { _, value in
             UserDefaults.standard.set(value, forKey: "sked.mailSubject.v1")
         }
@@ -165,6 +183,12 @@ struct SKEDDirectoryView: View {
             UserDefaults.standard.set(value, forKey: senderNameStorageKey)
         }
         .onChange(of: countryISO) { _, _ in
+            selectedUSState = ""
+            selectedCallsigns.removeAll()
+            focusedCallsign = nil
+            loadBandPlans()
+        }
+        .onChange(of: selectedUSState) { _, _ in
             selectedCallsigns.removeAll()
             focusedCallsign = nil
             loadBandPlans()
@@ -174,8 +198,9 @@ struct SKEDDirectoryView: View {
             loadBandPlans()
             loadSenderName()
         }
-        .task(id: "\(countryISO)-\(category)-\(refreshID)") { await load() }
-        .task(id: "\(countryISO)-\(appState.qsoRecordsRevision)-\(directory?.operators.map(\.callsign).joined(separator: ",") ?? "")") {
+        .task(id: geographyRefreshID) { await loadGeography() }
+        .task(id: "\(destinationKey)-\(category)-\(refreshID)") { await load() }
+        .task(id: "\(destinationKey)-\(appState.qsoRecordsRevision)-\(directory?.operators.map(\.callsign).joined(separator: ",") ?? "")") {
             await updateCountryActivity()
         }
         .sheet(item: $selectedOperator) { item in
@@ -234,19 +259,48 @@ struct SKEDDirectoryView: View {
 
     private var filters: some View {
         HStack(spacing: 12) {
-            Picker("Country", selection: $countryISO) {
-                ForEach(countryChoices) { country in
-                    Text(country.title).tag(country.iso)
+            Picker("Region", selection: $regionID) {
+                if let geography {
+                    ForEach(geography.regions) { region in
+                        Text("\(region.icon) \(region.name)").tag(region.id)
+                    }
+                } else {
+                    Text("🕌 Middle East").tag("me")
                 }
             }
-            .frame(width: 335)
+            .frame(width: 225)
+            .disabled(geography == nil)
+            if isLoadingGeography { ProgressView().controlSize(.small) }
+
+            Picker("Country", selection: $countryISO) {
+                if geography == nil {
+                    Text("🇮🇷 Iran · EP").tag("ir")
+                } else {
+                    ForEach(countryChoices) { country in
+                        Text(country.title).tag(country.iso)
+                    }
+                }
+            }
+            .frame(width: 285)
+            .disabled(geography == nil)
+
+            if countryISO == "us" {
+                Picker("US state", selection: $selectedUSState) {
+                    Text("All United States").tag("")
+                    ForEach(geography?.states ?? []) { state in
+                        Text("\(state.name) · \(state.code)").tag(state.code)
+                    }
+                }
+                .frame(width: 265)
+                .disabled(geography == nil)
+            }
 
             Picker("Rank by", selection: $category) {
                 Text("Confirmed QSOs").tag("qso")
                 Text("DXCC countries").tag("countries")
                 Text("Band slots").tag("band")
             }
-            .frame(width: 235)
+            .frame(width: 190)
         }
     }
 
@@ -343,10 +397,10 @@ struct SKEDDirectoryView: View {
 
     private func summary(_ directory: SKEDDirectory) -> some View {
         HStack(spacing: 16) {
-            Text(flagForCountryIso(directory.countryISO))
+            Text(flagForCountryIso(countryISO == "bq1" ? "bq" : countryISO))
                 .font(.system(size: 36))
             VStack(alignment: .leading, spacing: 3) {
-                Text(fullCountryName(for: directory.countryISO, fallback: directory.countryName))
+                Text(destinationTitle)
                     .font(.title3.weight(.bold))
                 Text("\(directory.operators.count) ranked operators")
                     .font(.subheadline)
@@ -375,7 +429,7 @@ struct SKEDDirectoryView: View {
     private func countryBandOverview(_ directory: SKEDDirectory) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Label("\(fullCountryName(for: directory.countryISO, fallback: directory.countryName)) · band history", systemImage: "waveform.path")
+                Label("\(destinationTitle) · band history", systemImage: "waveform.path")
                     .font(.headline)
                 Spacer()
                 Text("From the active station logbook")
@@ -615,7 +669,7 @@ struct SKEDDirectoryView: View {
 
     private var bandPlanStorageKey: String {
         let station = appState.activeStationProfile?.normalizedCallsign ?? "no-station"
-        return "sked.bandPlans.v1.\(station).\(countryISO.lowercased())"
+        return "sked.bandPlans.v1.\(station).\(destinationKey)"
     }
 
     private func loadBandPlans() {
@@ -669,6 +723,8 @@ struct SKEDDirectoryView: View {
         isLoadingLogHistory = true
         let records = appState.qsoRecords
         let iso = countryISO
+        let stateCode = selectedUSState
+        let stateName = geography?.states.first(where: { $0.code == stateCode })?.name.lowercased() ?? ""
         let callsigns = Set(directory.operators.map { $0.callsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() })
         let result = await Task.detached(priority: .utility) {
             var countryByCall: [String: String] = [:]
@@ -685,7 +741,10 @@ struct SKEDDirectoryView: View {
                     resolvedISO = DXCCDatabase.resolve(callsign: call, country: country).countryCode
                     countryByCall[key] = resolvedISO
                 }
-                let countryMatches = resolvedISO.caseInsensitiveCompare(iso) == .orderedSame
+                let countryMatches = SKEDStateLogMatch.matches(
+                    destinationISO: iso, stateCode: stateCode, stateName: stateName,
+                    loggedISO: resolvedISO, loggedState: record.fields["STATE"] ?? "")
+                    || (iso == "bq1" && call.hasPrefix("PJ4"))
                 let operatorMatches = callsigns.contains(call)
                 guard countryMatches || operatorMatches else { continue }
                 let band = (record.fields["BAND"].flatMap {
@@ -695,7 +754,7 @@ struct SKEDDirectoryView: View {
                             ?? record.fields["FREQ"].flatMap(AmateurBandPlan.band(for:))
                             ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
                 if countryMatches {
-                    entries.append(.init(countryISO: resolvedISO, band: band, confirmed: record.isConfirmed))
+                    entries.append(.init(countryISO: iso, band: band, confirmed: record.isConfirmed))
                 }
                 if operatorMatches {
                     operatorEntries.append(.init(callsign: call, band: band, confirmed: record.isConfirmed))
@@ -742,6 +801,7 @@ struct SKEDDirectoryView: View {
             }
             tokenDraft = ""
             refreshID += 1
+            geographyRefreshID += 1
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -751,11 +811,11 @@ struct SKEDDirectoryView: View {
         let entity = DXCCDatabase.resolve(callsign: item.callsign)
         return VStack(alignment: .leading, spacing: 16) {
             HStack {
-                Text(flagForCountryIso(directory?.countryISO ?? countryISO))
+                Text(flagForCountryIso(countryISO == "bq1" ? "bq" : countryISO))
                     .font(.largeTitle)
                 VStack(alignment: .leading) {
                     Text(item.callsign).font(.title.bold())
-                    Text(directory?.countryName ?? countryISO.uppercased())
+                    Text(destinationTitle)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -792,6 +852,23 @@ struct SKEDDirectoryView: View {
         .frame(width: 440)
     }
 
+    private func loadGeography() async {
+        isLoadingGeography = true
+        defer { isLoadingGeography = false }
+        do {
+            let catalog = try await SKEDGeographyService.shared.fetch(
+                token: CredentialVault.value(for: .qrzRankAPIToken),
+                userAgent: "YAAM-macOS/\(appState.currentVersion)")
+            guard !Task.isCancelled else { return }
+            geography = catalog
+            geographyError = nil
+            if let actualRegion = catalog.region(for: countryISO) { regionID = actualRegion }
+        } catch {
+            guard !Task.isCancelled else { return }
+            geographyError = error.localizedDescription
+        }
+    }
+
     private func load() async {
         isLoading = true
         errorMessage = nil
@@ -800,7 +877,7 @@ struct SKEDDirectoryView: View {
         do {
             let token = CredentialVault.value(for: .qrzRankAPIToken)
             let result = try await SKEDDirectoryService.shared.fetch(
-                countryISO: countryISO, category: category, enrich: true,
+                countryISO: destinationKey, category: category, enrich: true,
                 token: token, userAgent: "YAAM-macOS/\(appState.currentVersion)"
             )
             guard !Task.isCancelled else { return }
@@ -908,11 +985,11 @@ struct SKEDDirectoryView: View {
         if senderName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return "Enter your name for the email signature."
         }
-        if includeTimeWindow && timeEnd <= timeStart {
-            return "The end of the local time window must be after its start."
+        if includeTimeWindow && !SKEDMailTemplate.isValidDailyWindow(start: timeStart, end: timeEnd) {
+            return "Choose up to 31 days, with a daily end time later than the daily start time."
         }
-        if includeTimeWindow && timeStart < Date().addingTimeInterval(-60) {
-            return "Choose a future local time window."
+        if includeTimeWindow && timeEnd < Date().addingTimeInterval(-60) {
+            return "Choose dates that still include a future daily window."
         }
         if mailBodyTemplate.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return "Write a message before sending."
@@ -972,17 +1049,17 @@ struct SKEDDirectoryView: View {
                         .disabled(isSending)
                     Text("Fields: {greeting} · {name} · {callsign} · {bands} · {my_name} · {my_callsign} · {my_grid} · {my_qth} · {time_window}")
                         .font(.caption2).foregroundStyle(.secondary)
-                    Toggle("Propose a time window", isOn: $includeTimeWindow)
+                    Toggle("Propose daily availability", isOn: $includeTimeWindow)
                         .font(.caption.bold())
                         .disabled(isSending)
                     if includeTimeWindow {
-                        Text("Choose dates and times in your Mac's local time (\(TimeZone.current.abbreviation(for: timeStart) ?? TimeZone.current.identifier)).")
+                        Text("Choose the first and last day, then your available hours each day in local time (\(TimeZone.current.abbreviation(for: timeStart) ?? TimeZone.current.identifier)).")
                             .font(.caption2).foregroundStyle(.secondary)
-                        DatePicker("From", selection: $timeStart, displayedComponents: [.date, .hourAndMinute])
+                        DatePicker("First day · daily start", selection: $timeStart, displayedComponents: [.date, .hourAndMinute])
                             .disabled(isSending)
-                        DatePicker("Until", selection: $timeEnd, displayedComponents: [.date, .hourAndMinute])
+                        DatePicker("Last day · daily end", selection: $timeEnd, displayedComponents: [.date, .hourAndMinute])
                             .disabled(isSending)
-                        Text("Local: \(localTimeDescription(timeStart)) – \(localTimeDescription(timeEnd))")
+                        Text("Local: each day, \(localTimeDescription(timeStart)) through \(localTimeDescription(timeEnd))")
                             .font(.caption2).foregroundStyle(.secondary)
                         Text(utcTimeWindow ?? "")
                             .font(.caption2).foregroundStyle(.cyan)
@@ -1182,10 +1259,10 @@ struct SKEDDirectoryView: View {
         let panel = NSSavePanel()
         panel.title = "Export SKED directory"
         panel.allowedContentTypes = [.commaSeparatedText]
-        panel.nameFieldStringValue = "SKED_\(directory.countryISO.uppercased())_top19_\(category).csv"
+        panel.nameFieldStringValue = "SKED_\(destinationKey.uppercased().replacingOccurrences(of: ":", with: "_"))_top19_\(category).csv"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
-            try directory.csv.write(to: url, options: .atomic)
+            try directory.csv(locationName: destinationTitle).write(to: url, options: .atomic)
             notice = "CSV saved to \(url.lastPathComponent)."
         } catch {
             errorMessage = "Could not save CSV: \(error.localizedDescription)"

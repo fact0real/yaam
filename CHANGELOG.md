@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.37.19 — 2026-10-03
+
+- Group SKED countries by the eight live QRZ Rank divisions, and add US state and territory selection with dedicated state SKED results.
+- Scope country-band history and saved plans to the selected US state when applicable.
+- Describe proposed SKED availability as a daily time window in UTC across the selected dates, including explicit daily windows when UTC dates or offsets differ.
+
 ## 1.37.18 — 2026-10-03
 
 - Show each SKED operator's previous QSO count and worked or confirmed bands from the active station logbook directly in the directory and planning panel.

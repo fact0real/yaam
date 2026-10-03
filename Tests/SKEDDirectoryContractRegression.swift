@@ -7,6 +7,18 @@ struct SKEDDirectoryContractRegression {
                                                         token: "sample-token", userAgent: "YAAM-Regression/1")
         precondition(request.url?.absoluteString == "https://qrz-rank.asis.sh/api/v1/sked/ir?limit=19&category=qso&enrich=true")
         precondition(request.value(forHTTPHeaderField: "Authorization") == "Bearer sample-token")
+        let stateRequest = try SKEDDirectoryContract.request(countryISO: "state:CA", category: "band",
+                                                             enrich: false, token: "sample-token",
+                                                             userAgent: "YAAM-Regression/1")
+        precondition(stateRequest.url?.absoluteString == "https://qrz-rank.asis.sh/api/v1/sked/state:ca?limit=19&category=band&enrich=false")
+        let bonaireRequest = try SKEDDirectoryContract.request(countryISO: "BQ1", category: "qso",
+                                                               enrich: false, token: "sample-token",
+                                                               userAgent: "YAAM-Regression/1")
+        precondition(bonaireRequest.url?.path == "/api/v1/sked/bq1")
+        let polarRequest = try SKEDDirectoryContract.request(countryISO: "X1", category: "qso",
+                                                             enrich: false, token: "sample-token",
+                                                             userAgent: "YAAM-Regression/1")
+        precondition(polarRequest.url?.path == "/api/v1/sked/x1")
         do {
             _ = try SKEDDirectoryContract.request(countryISO: "ir", category: "qso", enrich: true,
                                                   token: nil, userAgent: "YAAM-Regression/1")
@@ -45,6 +57,8 @@ struct SKEDDirectoryContractRegression {
         precondition(qso.operators[1].validEmail == nil)
         precondition(qso.csv.starts(with: Data([0xEF, 0xBB, 0xBF])))
         precondition(String(decoding: qso.csv, as: UTF8.self).contains("\"A, B \"\"Operator\"\"\""))
+        precondition(String(decoding: qso.csv(locationName: "California, United States"), as: UTF8.self)
+            .contains("\"California, United States\""))
         let dxcc = try SKEDDirectoryContract.decode(fixture, requestedISO: "ir", category: "countries")
         precondition(dxcc.operators[0].score == 158)
         let band = try SKEDDirectoryContract.decode(fixture, requestedISO: "ir", category: "band")
