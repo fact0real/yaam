@@ -99,7 +99,7 @@ struct SKEDDirectoryView: View {
         }
     }
 
-    var body: some View {
+    private var mainView: some View {
         VStack(spacing: 0) {
             header
             Divider()
@@ -169,6 +169,10 @@ struct SKEDDirectoryView: View {
             }
             .background(Color(NSColor.textBackgroundColor))
         }
+    }
+
+    private var observedView: some View {
+        mainView
         .onAppear {
             loadBandPlans()
             loadMailTemplate()
@@ -211,6 +215,10 @@ struct SKEDDirectoryView: View {
         .task(id: "\(destinationKey)-\(appState.qsoRecordsRevision)-\(directory?.operators.map(\.callsign).joined(separator: ",") ?? "")") {
             await updateCountryActivity()
         }
+    }
+
+    private var presentedView: some View {
+        observedView
         .sheet(item: $selectedOperator) { item in
             operatorDetails(item)
         }
@@ -221,6 +229,10 @@ struct SKEDDirectoryView: View {
             SKEDMailHistoryView(entries: SKEDMailHistory.successfulEntries(appState.emailHistory),
                                 destinationKey: destinationKey, initialCallsign: historyFilterCallsign)
         }
+    }
+
+    var body: some View {
+        presentedView
         .alert("SKED email sent", isPresented: $showSendSuccess) {
             Button("OK", role: .cancel) { }
         } message: {
