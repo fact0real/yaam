@@ -22,8 +22,15 @@ public struct Globe3DMarker: Identifiable, Sendable, Hashable {
     public let band: String
     public let mode: String
     public let snr: Int?
+    public let qslConfirmed: Bool?
     public let isHome: Bool
     public let timestamp: Date
+
+    // MapKit snapshots should change with marker content, not a newly generated UUID.
+    // Live signal views reconstruct markers frequently while receiving decodes.
+    public var mapContentSignature: String {
+        "\(callsign)|\(grid)|\(band)|\(mode)|\(coordinate.latitude)|\(coordinate.longitude)|\(snr.map(String.init) ?? "")|\(qslConfirmed.map(String.init) ?? "")"
+    }
 
     public init(
         callsign: String,
@@ -33,6 +40,7 @@ public struct Globe3DMarker: Identifiable, Sendable, Hashable {
         band: String = "20M",
         mode: String = "FT8",
         snr: Int? = nil,
+        qslConfirmed: Bool? = nil,
         isHome: Bool = false,
         timestamp: Date = Date()
     ) {
@@ -43,6 +51,7 @@ public struct Globe3DMarker: Identifiable, Sendable, Hashable {
         self.band = band
         self.mode = mode
         self.snr = snr
+        self.qslConfirmed = qslConfirmed
         self.isHome = isHome
         self.timestamp = timestamp
     }

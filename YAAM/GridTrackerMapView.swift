@@ -32,6 +32,7 @@ public final class GridTrackerStationAnnotation: NSObject, MKAnnotation {
     public let grid: String
     public let isHome: Bool
     public let isConfirmed: Bool
+    public let isLogQSO: Bool
 
     public init(
         coordinate: CLLocationCoordinate2D,
@@ -40,7 +41,8 @@ public final class GridTrackerStationAnnotation: NSObject, MKAnnotation {
         marker: Globe3DMarker? = nil,
         grid: String,
         isHome: Bool = false,
-        isConfirmed: Bool = false
+        isConfirmed: Bool = false,
+        isLogQSO: Bool = false
     ) {
         self.coordinate = coordinate
         self.title = title
@@ -49,6 +51,7 @@ public final class GridTrackerStationAnnotation: NSObject, MKAnnotation {
         self.grid = grid
         self.isHome = isHome
         self.isConfirmed = isConfirmed
+        self.isLogQSO = isLogQSO
         super.init()
     }
 }
@@ -81,35 +84,47 @@ public final class SolarTerminatorOverlay: NSObject, MKOverlay {
 
 public struct GridTrackerMapView: NSViewRepresentable {
     public var homeCoordinate: GeoCoordinate
+    public var homeCallsign: String
+    public var homeGrid: String
     public var markers: [Globe3DMarker]
     public var logSummaries: [String: GridLogSummary]
     public var mapType: MKMapType
     public var showDayNightShadow: Bool
     public var showGridLines: Bool
     public var showTrafficArcs: Bool
+    public var showWholeWorld: Bool
+    public var zoomCommand: Int
     public var telemetryState: MapTelemetryState
     public var onSelectMarker: (Globe3DMarker) -> Void
     public var onSelectGrid: (String) -> Void
 
     public init(
         homeCoordinate: GeoCoordinate,
+        homeCallsign: String = "",
+        homeGrid: String = "",
         markers: [Globe3DMarker],
         logSummaries: [String: GridLogSummary],
         mapType: MKMapType = .standard,
         showDayNightShadow: Bool = true,
         showGridLines: Bool = true,
         showTrafficArcs: Bool = true,
+        showWholeWorld: Bool = false,
+        zoomCommand: Int = 0,
         telemetryState: MapTelemetryState,
         onSelectMarker: @escaping (Globe3DMarker) -> Void,
         onSelectGrid: @escaping (String) -> Void
     ) {
         self.homeCoordinate = homeCoordinate
+        self.homeCallsign = homeCallsign
+        self.homeGrid = homeGrid
         self.markers = markers
         self.logSummaries = logSummaries
         self.mapType = mapType
         self.showDayNightShadow = showDayNightShadow
         self.showGridLines = showGridLines
         self.showTrafficArcs = showTrafficArcs
+        self.showWholeWorld = showWholeWorld
+        self.zoomCommand = zoomCommand
         self.telemetryState = telemetryState
         self.onSelectMarker = onSelectMarker
         self.onSelectGrid = onSelectGrid
@@ -131,9 +146,15 @@ public struct GridTrackerMapView: NSViewRepresentable {
         mapView.isScrollEnabled = true    // ← explicit: drag to pan
 
         // Set initial region centered on home
-        let center = CLLocationCoordinate2D(latitude: homeCoordinate.latitude, longitude: homeCoordinate.longitude)
-        let span = MKCoordinateSpan(latitudeDelta: 65, longitudeDelta: 100)
-        mapView.setRegion(MKCoordinateRegion(center: center, span: span), animated: false)
+        if showWholeWorld {
+            let center = CLLocationCoordinate2D(latitude: homeCoordinate.latitude, longitude: homeCoordinate.longitude)
+            let span = MKCoordinateSpan(latitudeDelta: 125, longitudeDelta: 280)
+            mapView.setRegion(MKCoordinateRegion(center: center, span: span), animated: false)
+        } else {
+            let center = CLLocationCoordinate2D(latitude: homeCoordinate.latitude, longitude: homeCoordinate.longitude)
+            let span = MKCoordinateSpan(latitudeDelta: 65, longitudeDelta: 100)
+            mapView.setRegion(MKCoordinateRegion(center: center, span: span), animated: false)
+        }
 
         context.coordinator.mapView = mapView
         context.coordinator.setupTrackingArea(mapView)
@@ -146,6 +167,7 @@ public struct GridTrackerMapView: NSViewRepresentable {
         if mapView.mapType != mapType {
             mapView.mapType = mapType
         }
+        context.coordinator.applyZoomCommand()
         context.coordinator.refreshAll(force: false)
     }
 
@@ -159,10 +181,28 @@ public struct GridTrackerMapView: NSViewRepresentable {
         private var lastAnnotationsSignature: String = ""
         private var lastOverlaysSignature: String = ""
         private var lastHoverUpdate: TimeInterval = 0
+        private var lastZoomCommand: Int
 
         init(_ parent: GridTrackerMapView) {
             self.parent = parent
+            self.lastZoomCommand = parent.zoomCommand
             super.init()
+        }
+
+        func applyZoomCommand() {
+            guard let mapView, parent.zoomCommand != lastZoomCommand else { return }
+            let delta = parent.zoomCommand - lastZoomCommand
+            lastZoomCommand = parent.zoomCommand
+            let factor = pow(delta > 0 ? 0.67 : 1.5, Double(abs(delta)))
+            let span = mapView.region.span
+            let region = MKCoordinateRegion(
+                center: mapView.region.center,
+                span: MKCoordinateSpan(
+                    latitudeDelta: min(160, max(0.01, span.latitudeDelta * factor)),
+                    longitudeDelta: min(355, max(0.01, span.longitudeDelta * factor))
+                )
+            )
+            mapView.setRegion(region, animated: true)
         }
 
         func setupTrackingArea(_ view: NSView) {
@@ -210,7 +250,7 @@ public struct GridTrackerMapView: NSViewRepresentable {
         private func updateOverlays(force: Bool) {
             guard let mapView else { return }
 
-            let overlaySig = "\(parent.showGridLines):\(parent.showDayNightShadow):\(parent.showTrafficArcs):\(parent.markers.prefix(30).count)"
+            let overlaySig = "\(parent.showGridLines):\(parent.showDayNightShadow):\(parent.showTrafficArcs):\(parent.homeCoordinate.latitude):\(parent.homeCoordinate.longitude):\(parent.markers.prefix(30).map(\.mapContentSignature))"
             if !force && overlaySig == lastOverlaysSignature { return }
             lastOverlaysSignature = overlaySig
 
@@ -238,7 +278,7 @@ public struct GridTrackerMapView: NSViewRepresentable {
         private func updateAnnotations(force: Bool) {
             guard let mapView else { return }
 
-            let annSig = "\(parent.homeCoordinate.latitude):\(parent.homeCoordinate.longitude):\(parent.markers.count):\(parent.logSummaries.count)"
+            let annSig = "\(parent.homeCoordinate.latitude):\(parent.homeCoordinate.longitude):\(parent.homeCallsign):\(parent.homeGrid):\(parent.markers.prefix(40).map(\.mapContentSignature)):\(parent.logSummaries.count)"
             if !force && annSig == lastAnnotationsSignature { return }
             lastAnnotationsSignature = annSig
 
@@ -250,9 +290,9 @@ public struct GridTrackerMapView: NSViewRepresentable {
             let homeCoord = CLLocationCoordinate2D(latitude: parent.homeCoordinate.latitude, longitude: parent.homeCoordinate.longitude)
             let homeAnn = GridTrackerStationAnnotation(
                 coordinate: homeCoord,
-                title: "📡 HOME [EP2AES]",
-                subtitle: "Tehran, Iran · LM55",
-                grid: "LM55",
+                title: parent.homeCallsign.isEmpty ? "📡 Home station" : "📡 \(parent.homeCallsign)",
+                subtitle: parent.homeGrid.isEmpty ? "Station location" : parent.homeGrid,
+                grid: parent.homeGrid,
                 isHome: true,
                 isConfirmed: true
             )
@@ -269,7 +309,8 @@ public struct GridTrackerMapView: NSViewRepresentable {
                     marker: m,
                     grid: m.grid,
                     isHome: false,
-                    isConfirmed: true
+                    isConfirmed: m.qslConfirmed ?? true,
+                    isLogQSO: m.qslConfirmed != nil
                 )
                 annotations.append(ann)
                 if !m.grid.isEmpty {
@@ -330,7 +371,9 @@ public struct GridTrackerMapView: NSViewRepresentable {
 
             // Draw a small filled circle (no pulse, no animation)
             let dotSize: CGFloat = customAnn.isConfirmed ? 12 : 10
-            let dotColor: NSColor = customAnn.isConfirmed ? NSColor.systemRed : NSColor.systemOrange
+            let dotColor: NSColor = customAnn.isLogQSO
+                ? (customAnn.isConfirmed ? .systemGreen : .systemOrange)
+                : (customAnn.isConfirmed ? .systemRed : .systemOrange)
 
             let renderer = NSGraphicsContext.current?.cgContext
             _ = renderer  // suppress unused warning — we draw via NSImage

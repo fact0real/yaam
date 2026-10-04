@@ -74,17 +74,16 @@ struct ContentView: View {
             .padding(.vertical, 8)
             .padding(.horizontal, 12)
             .background(Color(NSColor.windowBackgroundColor))
-            .onChange(of: appState.selectedTab) { _, value in
-                UserDefaults.standard.set(value, forKey: "selectedTab")
-            }
             
             Divider()
             
             // MARK: - Tab Views Routing
             Group {
                 if appState.selectedTab == 0 {
-                    // Tab 0: ADIFMaster High-Performance Table Grid
+                    // Keep the high-performance log table as the primary destination.
                     LogTableView()
+            } else if appState.selectedTab == 8 {
+                StationWorkspaceView()
             } else if appState.selectedTab == 5 {
                 OperatorDeskView()
             } else if appState.selectedTab == 6 {
@@ -1252,6 +1251,7 @@ struct TopNavigationTabBar: View {
     }
 
     private let tabs: [TabItem] = [
+        TabItem(tag: 8, title: "Station", icon: "square.grid.2x2"),
         TabItem(tag: 0, title: "Log Table", icon: "tablecells"),
         TabItem(tag: 5, title: "Operator Desk", icon: "antenna.radiowaves.left.and.right"),
         TabItem(tag: 6, title: "Stats", icon: "chart.bar.xaxis"),

@@ -2186,7 +2186,7 @@ class AppState: NSObject, ObservableObject {
         }
     }
     @Published var recentLogFiles: [URL] = []
-    @Published var selectedTab: Int = min(7, max(0, UserDefaults.standard.integer(forKey: "selectedTab")))
+    @Published var selectedTab: Int = 8
     @Published var convertSource: Int = 0 // 0: External File, 1: YAAM Database
     @Published var convertDatabaseProfileID: UUID? = nil // nil: All Station Profiles / Full Database
     
@@ -4689,7 +4689,7 @@ class AppState: NSObject, ObservableObject {
 
         isFetchingPropagation = true
 
-        var snapshot = PropagationSnapshot(updatedAt: Date())
+        var snapshot = PropagationSnapshot()
         let group = DispatchGroup()
         let lock = NSLock()
 
@@ -4712,6 +4712,9 @@ class AppState: NSObject, ObservableObject {
                 snapshot.bz = self.xmlValue("bfield", in: xml) ?? self.xmlValue("bz", in: xml) ?? "-"
                 snapshot.bands = self.parseBandConditions(from: xml)
                 snapshot.vhfConditions = self.parseVHFConditions(from: xml)
+                if snapshot.solarFlux != "-" || !snapshot.bands.isEmpty {
+                    snapshot.updatedAt = Date()
+                }
                 lock.unlock()
             }.resume()
         }

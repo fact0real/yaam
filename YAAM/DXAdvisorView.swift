@@ -70,11 +70,12 @@ private struct DXAdvisorLogSnapshot {
 
 struct DXAdvisorView: View {
     @EnvironmentObject var appState: AppState
-    @AppStorage("stationGrid") private var stationGrid = ""
-    @AppStorage("radioModel") private var radioModel = ""
-    @AppStorage("radioPowerWatts") private var radioPowerWatts = 100
-    @AppStorage("antennaDescription") private var antennaDescription = ""
-    @AppStorage("antennaHeightMeters") private var antennaHeightMeters = 10
+    @ObservedObject private var livePropagation = DXLivePropagationStore.shared
+    private var stationGrid: String { appState.effectiveStationGrid }
+    private var radioModel: String { appState.activeStationProfile?.radioModel ?? "" }
+    private var radioPowerWatts: Int { appState.activeStationProfile?.powerWatts ?? 0 }
+    private var antennaDescription: String { appState.activeStationProfile?.antennaDescription ?? "" }
+    private var antennaHeightMeters: Int { appState.activeStationProfile?.antennaHeightMeters ?? 0 }
     @State private var cachedPathPredictions: [DXPathPrediction] = []
     @State private var isCalculatingPathPredictions = false
     @State private var bulkEmailTemplate = "LoTW/QRZ Confirmation"
@@ -85,12 +86,16 @@ struct DXAdvisorView: View {
     @State private var logSnapshot = DXAdvisorLogSnapshot.empty
     @State private var selectedAdvisorTab = 0
     @State private var voacapSearchQuery = ""
+    @State private var destinationGrid = ""
+    @State private var voacapCopyStatus = ""
     @State private var voacapFilterMode = "All"
     @State private var solarForecastViewMode = "chart"
     @State private var calendarToastMessage: String? = nil
 
     @State private var currentDate = Date()
-    private let clockTimer = Timer.publish(every: 5.0, on: .main, in: .common).autoconnect()
+    @State private var lastEvaluatedUTCHour = -1
+    @State private var lastPathEvaluation = Date.distantPast
+    private let clockTimer = Timer.publish(every: 60.0, on: .main, in: .common).autoconnect()
 
     private var utcCalendar: Calendar {
         var cal = Calendar(identifier: .gregorian)
@@ -169,13 +174,22 @@ struct DXAdvisorView: View {
             baseBands = ["40M", "30M", "80M", "160M"]
         }
 
-        return baseBands.sorted {
-            propagationScore(for: $0) > propagationScore(for: $1)
+        let heardBands = freshReceptions.map { $0.band.uppercased() }
+        let regionalBands = livePropagation.wsprBands.filter { Date().timeIntervalSince($0.latest) <= 3600 }.map { $0.band.uppercased() }
+        let candidates = Array(Set(baseBands + heardBands + regionalBands))
+        return candidates.sorted {
+            let lhs = propagationScore(for: $0) + (heardBands.contains($0) ? 80 : 0) + (regionalBands.contains($0) ? 25 : 0)
+            let rhs = propagationScore(for: $1) + (heardBands.contains($1) ? 80 : 0) + (regionalBands.contains($1) ? 25 : 0)
+            return lhs == rhs ? bandSort($0, $1) : lhs > rhs
         }
     }
 
     private var workedCountries: Set<String> {
         logSnapshot.workedCountries
+    }
+
+    private var freshReceptions: [DXReception] {
+        livePropagation.receptions.filter { Date().timeIntervalSince($0.observedAt) <= 7200 }
     }
 
     private var confirmedCountries: Set<String> {
@@ -198,7 +212,11 @@ struct DXAdvisorView: View {
     }
 
     private var stationCoordinate: DXCoordinate? {
-        coordinate(fromMaidenhead: stationGrid)
+        guard let profile = appState.activeStationProfile,
+              !profile.grid.isEmpty || (Double(profile.latitude) != nil && Double(profile.longitude) != nil)
+        else { return nil }
+        let point = appState.effectiveStationCoordinate
+        return DXCoordinate(latitude: point.latitude, longitude: point.longitude)
     }
 
     private var amateurBands: [String] {
@@ -254,7 +272,16 @@ struct DXAdvisorView: View {
             }
         )
 
-        let targetCountries = workedCountries.filter { !$0.isEmpty && $0 != "Unknown" }
+        let observedCountries = Set(freshReceptions.map { normalizedCountryName($0.country) })
+        var countriesByKey: [String: String] = [:]
+        for country in workedCountries where !country.isEmpty && country != "Unknown" {
+            countriesByKey[normalizedCountryName(country)] = country
+        }
+        for country in freshReceptions.map(\.country) where !country.isEmpty && country != "Unknown" {
+            let key = normalizedCountryName(country)
+            if countriesByKey[key] == nil { countriesByKey[key] = country }
+        }
+        let targetCountries = Array(countriesByKey.values)
 
         return targetCountries.compactMap { country -> DXPathPrediction? in
             guard let target = coordinate(forCountry: country) else { return nil }
@@ -288,6 +315,9 @@ struct DXAdvisorView: View {
             )
         }
         .sorted {
+            let lhsObserved = observedCountries.contains(normalizedCountryName($0.country))
+            let rhsObserved = observedCountries.contains(normalizedCountryName($1.country))
+            if lhsObserved != rhsObserved { return lhsObserved }
             let lhs = ($0.bestScore?.score ?? 0) + ($0.needsConfirmation ? 14 : 0)
             let rhs = ($1.bestScore?.score ?? 0) + ($1.needsConfirmation ? 14 : 0)
             return lhs == rhs ? $0.distanceKm > $1.distanceKm : lhs > rhs
@@ -302,47 +332,56 @@ struct DXAdvisorView: View {
 
             switch selectedAdvisorTab {
             case 0:
-                spaceWeatherView
+                DXLivePropagationView().environmentObject(appState)
             case 1:
                 voacapPlannerView
             case 2:
-                bandOpportunitiesAndTargetsView
+                spaceWeatherView
             case 3:
+                bandOpportunitiesAndTargetsView
+            case 4:
                 qslEmailOutreachView
             default:
-                spaceWeatherView
+                DXLivePropagationView().environmentObject(appState)
             }
         }
         .onAppear {
             if appState.propagationSnapshot.updatedAt == nil {
                 appState.fetchPropagationSnapshot()
             }
-            refreshPathPredictions()
             refreshLogSnapshot()
+            refreshPathPredictions()
             syncBulkEmailSelection()
         }
-        .onChange(of: stationGrid) { _, _ in refreshPathPredictions() }
-        .onChange(of: radioPowerWatts) { _, _ in refreshPathPredictions() }
-        .onChange(of: antennaDescription) { _, _ in refreshPathPredictions() }
-        .onChange(of: antennaHeightMeters) { _, _ in refreshPathPredictions() }
+        .onChange(of: appState.stationProfiles) { _, _ in refreshPathPredictions() }
+        .onChange(of: appState.activeStationProfileID) { _, _ in refreshPathPredictions() }
         .onChange(of: appState.qsoRecordsRevision) { _, _ in
             refreshLogSnapshot()
             refreshPathPredictions()
         }
+        .onChange(of: appState.propagationSnapshot.updatedAt) { _, _ in refreshPathPredictions() }
+        .onChange(of: livePropagation.lastRefresh) { _, _ in refreshPathPredictions() }
         .onChange(of: bulkEmailRecipients.count) { _, _ in syncBulkEmailSelection() }
-        .onReceive(clockTimer) { currentDate = $0 }
+        .onReceive(clockTimer) {
+            currentDate = $0
+            if utcHour != lastEvaluatedUTCHour || currentDate.timeIntervalSince(lastPathEvaluation) >= 300 {
+                lastEvaluatedUTCHour = utcHour
+                refreshPathPredictions()
+            }
+        }
     }
 
     private var tabSelector: some View {
         HStack(spacing: 12) {
             Picker("", selection: $selectedAdvisorTab) {
-                Label("Space Weather & Solar", systemImage: "sun.max.fill").tag(0)
-                Label("VOACAP Path Planner", systemImage: "safari.fill").tag(1)
-                Label("Band Targets & DXCC", systemImage: "target").tag(2)
-                Label("QSL Email Outreach", systemImage: "envelope.badge.fill").tag(3)
+                Label("Propagation Now", systemImage: "dot.radiowaves.left.and.right").tag(0)
+                Label("Path Planner", systemImage: "safari.fill").tag(1)
+                Label("Space Weather", systemImage: "sun.max.fill").tag(2)
+                Label("Band Targets & DXCC", systemImage: "target").tag(3)
+                Label("QSL Email Outreach", systemImage: "envelope.badge.fill").tag(4)
             }
             .pickerStyle(.segmented)
-            .frame(maxWidth: 680)
+            .frame(maxWidth: 850)
 
             Spacer()
 
@@ -361,10 +400,11 @@ struct DXAdvisorView: View {
 
     private var tabContextBadge: String {
         switch selectedAdvisorTab {
-        case 0: return "NOAA SWPC & HamQSL Live"
-        case 1: return "\(pathPredictions.count) DX Paths Evaluated"
-        case 2: return "\(unconfirmedCountries.count) Unconfirmed Countries"
-        case 3: return "\(bulkEmailRecipients.count) Email Candidates"
+        case 0: return "Measured reception & ionosphere"
+        case 1: return "\(pathPredictions.count) heuristic path guides"
+        case 2: return "NOAA & HamQSL · broad conditions"
+        case 3: return "\(unconfirmedCountries.count) Unconfirmed Countries"
+        case 4: return "\(bulkEmailRecipients.count) Email Candidates"
         default: return ""
         }
     }
@@ -428,12 +468,21 @@ struct DXAdvisorView: View {
             }
             Spacer()
             Button {
-                appState.fetchPropagationSnapshot()
+                if selectedAdvisorTab == 0 {
+                    livePropagation.refresh(
+                        callsign: appState.activeStationProfile?.normalizedCallsign ?? "",
+                        grid: appState.effectiveStationGrid,
+                        coordinate: appState.effectiveStationCoordinate,
+                        force: true
+                    )
+                } else {
+                    appState.fetchPropagationSnapshot()
+                }
             } label: {
                 Image(systemName: "arrow.clockwise")
             }
-            .disabled(appState.isFetchingPropagation)
-            .help("Refresh HamQSL propagation data")
+            .disabled(selectedAdvisorTab == 0 ? livePropagation.isRefreshing : appState.isFetchingPropagation)
+            .help(selectedAdvisorTab == 0 ? "Refresh live DX Advisor sources" : "Refresh HamQSL propagation data")
 
             HStack(spacing: 8) {
                 HStack(spacing: 4) {
@@ -477,12 +526,14 @@ struct DXAdvisorView: View {
     private var headerSubtitle: String {
         switch selectedAdvisorTab {
         case 0:
-            return "Real-time solar indices, NOAA 27-day forecast, and HF/VHF ionospheric conditions"
+            return "Measured signals and ionosphere near your active station"
         case 1:
-            return "VOACAP ionospheric path predictions, Great Circle bearings, and optimal bands"
+            return "Path geometry and an advisory band guide; open VOACAP for a physical prediction"
         case 2:
-            return "Diurnal band opportunities and unconfirmed DXCC targets from your log"
+            return "NOAA solar forecast and HamQSL broad regional conditions"
         case 3:
+            return "Diurnal band opportunities and unconfirmed DXCC targets from your log"
+        case 4:
             return "Bulk QSL request email dispatch and communication audit trail"
         default:
             return "Heuristic band and confirmation targets from your YAAM log"
@@ -495,10 +546,14 @@ struct DXAdvisorView: View {
                 Text("Propagation")
                     .font(.headline)
                 Spacer()
-                Text("Sources: HamQSL / N0NBH, NOAA SWPC")
+                Text("Sources: HamQSL / N0NBH, NOAA SWPC · broad conditions, not a local path forecast")
                     .font(.caption2)
                     .foregroundColor(.secondary)
             }
+
+            Text(appState.propagationSnapshot.updatedAt.map { "HamQSL fetched \(DXLivePropagationStore.age($0)). Check the original service for observation time." } ?? "HamQSL has not returned usable data; band conditions are unknown.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
 
             solarForecastSection
 
@@ -726,7 +781,7 @@ struct DXAdvisorView: View {
 
     private var bandRecommendationSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Band Targets")
+            Text("Band Targets · observed evidence first")
                 .font(.headline)
 
             if bandTargets.isEmpty {
@@ -761,12 +816,50 @@ struct DXAdvisorView: View {
     private var voacapPlannerSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Label("VOACAP-Style Path Planner", systemImage: "point.3.connected.trianglepath.dotted")
+                Label("Point-to-point path planner", systemImage: "point.3.connected.trianglepath.dotted")
                     .font(.headline)
                 Spacer()
-                Text(stationCoordinate == nil ? "Set Grid in Settings" : "Ranked for current UTC hour")
+                Text(stationCoordinate == nil ? "Set your station position" : "Guide for current UTC hour")
                     .font(.caption)
                     .foregroundColor(.secondary)
+            }
+
+            Text("The ranked paths below use broad HamQSL conditions, path distance, local solar time and station profile equipment. Their scores are relative guide values, not VOACAP reliability percentages or live path measurements. Country coordinates represent approximate centers.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("Paths actually heard via PSK Reporter in the last two hours appear first. An empty result does not mean a closed path.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+
+            stationSummary
+            HStack(spacing: 12) {
+                TextField("Destination grid, e.g. JN11", text: $destinationGrid)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 210)
+                if let origin = stationCoordinate,
+                   let box = MaidenheadGridEngine.boundingBox(for: destinationGrid.uppercased()) {
+                    let target = DXCoordinate(latitude: box.center.latitude, longitude: box.center.longitude)
+                    Text("\(Int(greatCircleDistanceKm(from: origin, to: target).rounded())) km · short path \(Int(initialBearing(from: origin, to: target).rounded()))°")
+                        .font(.caption.monospaced())
+                } else if !destinationGrid.isEmpty {
+                    Text("Enter a valid Maidenhead grid").font(.caption).foregroundStyle(.orange)
+                }
+                Spacer()
+                if stationCoordinate != nil {
+                    Button("Copy VOACAP setup") { copyVOACAPSetup() }
+                        .font(.caption)
+                }
+                Link("Calculate in VOACAP Online", destination: URL(string: "https://www.voacap.com/hf/")!)
+                    .font(.caption.weight(.semibold))
+            }
+            if !voacapCopyStatus.isEmpty {
+                Text(voacapCopyStatus).font(.caption2).foregroundStyle(.secondary)
+            }
+            if let origin = stationCoordinate {
+                Text(String(format: "Use transmitter %.4f°, %.4f°; power and antenna from your active station profile. Enter the destination coordinates and required mode/SNR in VOACAP Online for a true 24-hour REL forecast.", origin.latitude, origin.longitude))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
 
             if stationCoordinate != nil && !pathPredictions.isEmpty {
@@ -774,7 +867,7 @@ struct DXAdvisorView: View {
                     Picker("", selection: $voacapFilterMode) {
                         Text("All Paths (\(pathPredictions.count))").tag("All")
                         Text("Needed DXCC (\(pathPredictions.filter(\.needsConfirmation).count))").tag("Needed")
-                        Text("High Score (>70)").tag("High Score")
+                        Text("Strong guide (70+)").tag("High Score")
                     }
                     .pickerStyle(.segmented)
                     .frame(maxWidth: 360)
@@ -826,7 +919,7 @@ struct DXAdvisorView: View {
                             .frame(width: 110, alignment: .center)
                         Text("Optimum Band")
                             .frame(width: 85, alignment: .center)
-                        Text("Reliability")
+                        Text("Guide score")
                             .frame(width: 75, alignment: .trailing)
                         Text("Propagation Window & Rationale")
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -1175,6 +1268,9 @@ struct DXAdvisorView: View {
 
     private func pathPredictionRow(_ prediction: DXPathPrediction) -> some View {
         let best = prediction.bestScore
+        let observed = freshReceptions.filter {
+            normalizedCountryName($0.country) == normalizedCountryName(prediction.country)
+        }
 
         return HStack(spacing: 12) {
             // Column 1: Target Country & Path Geometry (Fixed width: 220)
@@ -1192,6 +1288,16 @@ struct DXAdvisorView: View {
                             .padding(.vertical, 1.5)
                             .background(Color.orange)
                             .cornerRadius(4)
+                    }
+                    if !prediction.isWorked {
+                        Text("Unworked")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(.blue)
+                    }
+                    if !observed.isEmpty {
+                        Image(systemName: "dot.radiowaves.left.and.right")
+                            .foregroundStyle(.green)
+                            .help("Your signal was received in this country via PSK Reporter")
                     }
                 }
 
@@ -1216,14 +1322,14 @@ struct DXAdvisorView: View {
                     .overlay(RoundedRectangle(cornerRadius: 5).stroke(conditionColor(for: best.band).opacity(0.3), lineWidth: 1))
                     .frame(width: 85, alignment: .center)
 
-                // Column 4: Reliability Score (Fixed width: 75)
-                Text("\(best.score)%")
+                // Relative heuristic score; not a measured or VOACAP reliability percentage.
+                Text("\(best.score)/100")
                     .font(.system(.subheadline, design: .rounded).weight(.bold))
                     .foregroundColor(best.score >= 70 ? .green : (best.score >= 40 ? .orange : .secondary))
                     .frame(width: 75, alignment: .trailing)
 
                 // Column 5: Propagation Window & Rationale (Expands to fill)
-                Text(best.reason)
+                Text(observed.isEmpty ? best.reason : "PSK heard \(observed.count)× · \(observed[0].band) · \(DXLivePropagationStore.age(observed[0].observedAt)); \(best.reason)")
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .lineLimit(1)
@@ -1281,7 +1387,7 @@ struct DXAdvisorView: View {
                                 .foregroundColor(.orange)
                                 .help("Worked but not confirmed")
                         }
-                        Text("\(score.score)%")
+                        Text("\(score.score)/100")
                             .font(.system(.caption2, design: .monospaced))
                             .bold()
                     }
@@ -1305,14 +1411,36 @@ struct DXAdvisorView: View {
         }
     }
 
+    private func copyVOACAPSetup() {
+        guard let origin = stationCoordinate else { return }
+        var lines = [
+            String(format: "Transmitter latitude: %.5f", origin.latitude),
+            String(format: "Transmitter longitude: %.5f", origin.longitude)
+        ]
+        if let box = MaidenheadGridEngine.boundingBox(for: destinationGrid.uppercased()) {
+            lines.append(String(format: "Receiver latitude: %.5f", box.center.latitude))
+            lines.append(String(format: "Receiver longitude: %.5f", box.center.longitude))
+        }
+        if !radioModel.isEmpty && !antennaDescription.isEmpty {
+            lines.append("Radio: \(radioModel)")
+            lines.append("Power: \(radioPowerWatts) W")
+            lines.append("Antenna: \(antennaDescription), \(antennaHeightMeters) m")
+        } else {
+            lines.append("Radio, power and antenna: verify in station equipment")
+        }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(lines.joined(separator: "\n"), forType: .string)
+        voacapCopyStatus = "Station and destination setup copied for manual VOACAP entry."
+    }
+
     private var stationSummary: some View {
         HStack(spacing: 12) {
-            Label(stationGrid.isEmpty ? "Grid not set" : stationGrid.uppercased(), systemImage: "location")
+            Label(stationCoordinate == nil ? "Position not set" : (stationGrid.isEmpty ? "Coordinates set" : stationGrid.uppercased()), systemImage: "location")
 
-            Text(radioModel.isEmpty ? "\(radioPowerWatts) W" : "\(radioModel), \(radioPowerWatts) W")
+            Text(radioModel.isEmpty ? "Radio not set" : "\(radioModel), \(radioPowerWatts) W")
                 .lineLimit(1)
 
-            Text(antennaDescription.isEmpty ? "Antenna not set" : "\(antennaDescription), \(antennaHeightMeters)m")
+            Text(antennaDescription.isEmpty ? "Antenna / power not verified" : "\(antennaDescription), \(antennaHeightMeters)m")
                 .lineLimit(1)
 
             Spacer(minLength: 0)
@@ -1558,8 +1686,10 @@ struct DXAdvisorView: View {
     }
 
     private func conditionText(for band: String) -> String {
+        guard let updated = appState.propagationSnapshot.updatedAt,
+              Date().timeIntervalSince(updated) < 1800 else { return "unknown" }
         let key = "\(conditionBandGroup(for: band))_\(isDaytimeBandWindow ? "day" : "night")"
-        return appState.propagationSnapshot.bands[key] ?? "heuristic"
+        return appState.propagationSnapshot.bands[key] ?? "unknown"
     }
 
     private func conditionBandGroup(for band: String) -> String {
@@ -1616,7 +1746,7 @@ struct DXAdvisorView: View {
         }
 
         let antennaPenalty = antennaDescription.isEmpty ? -3 : 0
-        let lowPowerPenalty = radioPowerWatts < 25 ? -5 : 0
+        let lowPowerPenalty = !antennaDescription.isEmpty && radioPowerWatts < 25 ? -5 : 0
         return liveScore + antennaPenalty + lowPowerPenalty
     }
 
@@ -1636,10 +1766,10 @@ struct DXAdvisorView: View {
         let terminatorBonus = stationDaylight != targetDaylight ? 12 : 0
         let distancePoints = distanceScore(distanceKm: distanceKm, band: band)
         let timePoints = timeScore(band: band, stationDaylight: stationDaylight, targetDaylight: targetDaylight)
-        let powerPoints = radioPowerWatts >= 100 ? 4 : (radioPowerWatts < 25 ? -8 : 0)
-        let antennaPoints = antennaDescription.isEmpty ? -5 : min(8, antennaHeightMeters / 3)
-        let confirmationPoints = needsConfirmationOnBand ? 14 : 0
-        let rawScore = conditionPoints + distancePoints + timePoints + terminatorBonus + powerPoints + antennaPoints + confirmationPoints
+        let equipmentVerified = !antennaDescription.isEmpty && !radioModel.isEmpty
+        let powerPoints = equipmentVerified ? (radioPowerWatts >= 100 ? 4 : (radioPowerWatts < 25 ? -8 : 0)) : 0
+        let antennaPoints = equipmentVerified ? min(8, antennaHeightMeters / 3) : 0
+        let rawScore = conditionPoints + distancePoints + timePoints + terminatorBonus + powerPoints + antennaPoints
         let score = min(98, max(5, rawScore))
 
         let reasonParts = [
@@ -1761,6 +1891,7 @@ struct DXAdvisorView: View {
     }
 
     private func refreshPathPredictions() {
+        lastPathEvaluation = Date()
         guard stationCoordinate != nil else {
             cachedPathPredictions = []
             isCalculatingPathPredictions = false

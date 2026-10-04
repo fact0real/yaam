@@ -53,6 +53,7 @@ public struct Globe3DMapView: NSViewRepresentable {
     public var showGreatCircleArcs: Bool
     public var showDayNightShadow: Bool
     public var showCountryLabels: Bool
+    public var zoomCommand: Int
     public var telemetryState: MapTelemetryState
     public var onSelectMarker: ((Globe3DMarker) -> Void)?
 
@@ -63,6 +64,7 @@ public struct Globe3DMapView: NSViewRepresentable {
         showGreatCircleArcs: Bool = true,
         showDayNightShadow: Bool = true,
         showCountryLabels: Bool = true,
+        zoomCommand: Int = 0,
         telemetryState: MapTelemetryState,
         onSelectMarker: ((Globe3DMarker) -> Void)? = nil
     ) {
@@ -72,6 +74,7 @@ public struct Globe3DMapView: NSViewRepresentable {
         self.showGreatCircleArcs = showGreatCircleArcs
         self.showDayNightShadow = showDayNightShadow
         self.showCountryLabels = showCountryLabels
+        self.zoomCommand = zoomCommand
         self.telemetryState = telemetryState
         self.onSelectMarker = onSelectMarker
     }
@@ -121,6 +124,7 @@ public struct Globe3DMapView: NSViewRepresentable {
         if mapView.mapType != mapType {
             mapView.mapType = mapType
         }
+        context.coordinator.applyZoomCommand()
         context.coordinator.refreshAll(force: false)
     }
 
@@ -134,10 +138,22 @@ public struct Globe3DMapView: NSViewRepresentable {
         private var lastAnnotationsSig: String = ""
         private var lastOverlaysSig: String = ""
         private var lastHoverUpdate: TimeInterval = 0
+        private var lastZoomCommand: Int
 
         init(_ parent: Globe3DMapView) {
             self.parent = parent
+            self.lastZoomCommand = parent.zoomCommand
             super.init()
+        }
+
+        func applyZoomCommand() {
+            guard let mapView, parent.zoomCommand != lastZoomCommand else { return }
+            let delta = parent.zoomCommand - lastZoomCommand
+            lastZoomCommand = parent.zoomCommand
+            let factor = pow(delta > 0 ? 0.67 : 1.5, Double(abs(delta)))
+            let camera = mapView.camera.copy() as! MKMapCamera
+            camera.centerCoordinateDistance = min(45_000_000, max(5_000, camera.centerCoordinateDistance * factor))
+            mapView.setCamera(camera, animated: true)
         }
 
         func setupTrackingArea(_ view: NSView) {
@@ -184,7 +200,7 @@ public struct Globe3DMapView: NSViewRepresentable {
         private func updateOverlays(force: Bool) {
             guard let mapView else { return }
 
-            let overlaySig = "\(parent.showGreatCircleArcs):\(parent.showDayNightShadow):\(parent.markers.prefix(35).count)"
+            let overlaySig = "\(parent.showGreatCircleArcs):\(parent.showDayNightShadow):\(parent.homeCoordinate.latitude):\(parent.homeCoordinate.longitude):\(parent.markers.prefix(35).map(\.mapContentSignature))"
             if !force && overlaySig == lastOverlaysSig { return }
             lastOverlaysSig = overlaySig
 
@@ -229,7 +245,7 @@ public struct Globe3DMapView: NSViewRepresentable {
         private func updateAnnotations(force: Bool) {
             guard let mapView else { return }
 
-            let annSig = "\(parent.homeCoordinate.latitude):\(parent.homeCoordinate.longitude):\(parent.markers.prefix(35).map(\.callsign).joined(separator: ","))"
+            let annSig = "\(parent.homeCoordinate.latitude):\(parent.homeCoordinate.longitude):\(parent.markers.prefix(35).map(\.mapContentSignature))"
             if !force && annSig == lastAnnotationsSig { return }
             lastAnnotationsSig = annSig
 
