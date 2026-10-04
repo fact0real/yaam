@@ -46,7 +46,9 @@ final class WebSDRBrowserSession: NSObject, WKNavigationDelegate, WKScriptMessag
                     this.__yaamTapped = true;
                     const context = this.context;
                     const tapID = window.__yaamNextTapID = (window.__yaamNextTapID || 0) + 1;
-                    const tap = context.createScriptProcessor(4096, 1, 1);
+                    // Fewer bridge messages keep the main thread responsive on
+                    // long sessions without changing the 12 kHz receive samples.
+                    const tap = context.createScriptProcessor(8192, 1, 1);
                     const silent = context.createGain();
                     silent.gain.value = 0;
                     tap.onaudioprocess = event => {
@@ -65,12 +67,17 @@ final class WebSDRBrowserSession: NSObject, WKNavigationDelegate, WKScriptMessag
                       tap.__yaamPosition = position - input.length;
                       tap.__yaamLastSample = input[input.length - 1];
                       const bytes = new Uint8Array(output.length * 2);
+                      let hasAudio = false;
                       for (let i = 0; i < output.length; i++) {
                         const value = output[i];
                         const pcm = Math.max(-32768, Math.min(32767, Math.round(value * 32767)));
+                        if (pcm !== 0) hasAudio = true;
                         bytes[i * 2] = pcm & 255;
                         bytes[i * 2 + 1] = (pcm >> 8) & 255;
                       }
+                      // Abandoned WebSDR audio nodes can continue emitting silence.
+                      // Do not send those buffers over the WebKit message bridge.
+                      if (!hasAudio) return;
                       let binary = '';
                       for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
                       window.webkit.messageHandlers.yaamAudio.postMessage({
@@ -197,6 +204,7 @@ final class WebSDRBrowserSession: NSObject, WKNavigationDelegate, WKScriptMessag
                         guard active && !Task.isCancelled else { return }
                         if Date().timeIntervalSince(self.lastAudioAt ?? .distantPast) > 8 {
                             onStatus?("Receiver audio interrupted; reconnecting…")
+                            self.lastAudioAt = nil
                             page.reload()
                             return
                         }

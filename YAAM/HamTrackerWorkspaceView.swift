@@ -44,6 +44,7 @@ public struct HamTrackerWorkspaceView: View {
     @State private var selectedStreamTab: Int = 0 // 0: Live Stream, 1: DX Cluster, 2: Top Spotters
     @State private var isWebSDRWorkspace = false
     @State private var decodedMessageFilter = 1
+    @State private var visibleWebSDRCycleGroups: [WebSDRCycleGroup] = []
     @State private var showWebSDRSetup = false
     @State private var webSDRLogbook = WebSDRLogbookIndex()
     @State private var alertedDXKeys = Set<String>()
@@ -78,7 +79,7 @@ public struct HamTrackerWorkspaceView: View {
     @State private var showExportNotification: Bool = false
     @State private var rotatorActionNotification: String? = nil
 
-    private var visibleWebSDRCycleGroups: [WebSDRCycleGroup] {
+    private func rebuildVisibleWebSDRCycleGroups() {
         let visible: [WebSDRAggregatedMessage]
         switch decodedMessageFilter {
         case 1: visible = webSDR.consensusTargetMatches
@@ -90,7 +91,7 @@ public struct HamTrackerWorkspaceView: View {
         default: visible = webSDR.consensusMessages
         }
         let grouped = Dictionary(grouping: visible, by: \.slotStart)
-        return grouped.keys.sorted(by: >).map { slot in
+        visibleWebSDRCycleGroups = grouped.keys.sorted(by: >).map { slot in
             WebSDRCycleGroup(slot: slot, messages: (grouped[slot] ?? []).sorted {
                 if $0.mentionsTarget != $1.mentionsTarget { return $0.mentionsTarget }
                 if $0.receiverCount != $1.receiverCount { return $0.receiverCount > $1.receiverCount }
@@ -1413,6 +1414,7 @@ public struct HamTrackerWorkspaceView: View {
         }
         .onAppear {
             webSDRLogbook = WebSDRLogbookIndex(records: appState.qsoRecords)
+            rebuildVisibleWebSDRCycleGroups()
             webSDR.checkReceiver(webSDR.receiver.id, url: webSDR.receiver.url)
             webSDRFrequencyDraft = WebSDRFrequency.formattedMHz(webSDR.dialHz)
             followLatestWebSDRReply()
@@ -1420,22 +1422,22 @@ public struct HamTrackerWorkspaceView: View {
         }
         .onChange(of: appState.qsoRecordsRevision) { _, _ in
             webSDRLogbook = WebSDRLogbookIndex(records: appState.qsoRecords)
+            rebuildVisibleWebSDRCycleGroups()
             scanDXOpportunities()
         }
-        .onChange(of: webSDR.consensusMessages.first?.id) { _, _ in
+        .onChange(of: webSDR.decodeRevision) { _, _ in
+            rebuildVisibleWebSDRCycleGroups()
             scanDXOpportunities()
+            if replyFollowsLatest { followLatestWebSDRReply() }
         }
-        .onChange(of: webSDR.messages.count) { _, _ in
-            scanDXOpportunities()
-        }
+        .onChange(of: decodedMessageFilter) { _, _ in rebuildVisibleWebSDRCycleGroups() }
+        .onChange(of: webSDR.selectedBand) { _, _ in rebuildVisibleWebSDRCycleGroups() }
+        .onChange(of: webSDR.selectedParallelEndpointIDs) { _, _ in rebuildVisibleWebSDRCycleGroups() }
         .sheet(isPresented: $showIcomConnection) {
             icomConnectionSheet
         }
         .sheet(isPresented: $showCustomWebSDR) {
             customWebSDRSheet
-        }
-        .onChange(of: webSDR.consensusTargetMatches.count) { _, _ in
-            if replyFollowsLatest { followLatestWebSDRReply() }
         }
     }
 

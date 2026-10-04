@@ -437,6 +437,7 @@ final class WebSDRFT8Monitor: ObservableObject {
     }
     @Published private(set) var audioInputs: [AudioInputDevice] = []
     @Published private(set) var messages: [WebSDRDecodedMessage] = []
+    @Published private(set) var decodeRevision = 0
     @Published private(set) var isMonitoring = false
     @Published private(set) var status = "Ready to decode system playback audio."
     @Published private(set) var phaseSeconds: Double?
@@ -455,13 +456,21 @@ final class WebSDRFT8Monitor: ObservableObject {
         var shortSegments = 0
     }
     private var browsers: [String: WebSDRBrowserSession] = [:]
+    private var endpointGeneration: [String: Int] = [:]
     private var recordedStreams: [String: RecordedStream] = [:]
     private var recordingDecodeTasks: [String: Task<Void, Never>] = [:]
+    private var pendingRecordings: [String: WebSDRRecording] = [:]
     private var liveTimelines: [String: WebSDRAudioTimeline] = [:]
     private var livePreviousSlots: [String: AudioSlot] = [:]
     private var liveDecodeTasks: [String: Task<Void, Never>] = [:]
+    private struct LiveDecodePair {
+        let previous: AudioSlot
+        let current: AudioSlot
+    }
+    private var pendingLivePairs: [String: LiveDecodePair] = [:]
     private var liveAudioAt: [String: Date] = [:]
     private var activeTapIDs: [String: Int] = [:]
+    private var liveStreamGeneration: [String: Int] = [:]
     private var decodeTask: Task<Void, Never>?
     private var clockTask: Task<Void, Never>?
     private var noDecodeTask: Task<Void, Never>?
@@ -469,6 +478,8 @@ final class WebSDRFT8Monitor: ObservableObject {
     private var activeReceiverName = ""
     private var sessionID = UUID()
     private var seenIDs = Set<String>()
+    private var cachedConsensusMessages: [WebSDRAggregatedMessage] = []
+    private var cachedConsensusTargetMatches: [WebSDRAggregatedMessage] = []
     private var consensusReceiverCount = 1
     private var systemAudioGrantNeedsRestart = false
 
@@ -493,6 +504,8 @@ final class WebSDRFT8Monitor: ObservableObject {
         case .success(let selection):
             stop()
             messages.removeAll()
+            rebuildConsensus()
+            decodeRevision &+= 1
             selectedBand = selection.band
             manualDialHz = selection.dialHz
             normalizeSelection()
@@ -504,26 +517,29 @@ final class WebSDRFT8Monitor: ObservableObject {
     func usePresetFrequency() {
         stop()
         messages.removeAll()
+        rebuildConsensus()
+        decodeRevision &+= 1
         manualDialHz = nil
         status = "Preset \(WebSDRFrequency.formattedMHz(dialHz)) MHz USB · \(selectedBand). Start receive when ready."
     }
 
     var directedMessages: [WebSDRDecodedMessage] { messages.filter(\.addressedToTarget) }
     var targetMatches: [WebSDRDecodedMessage] { messages.filter(\.mentionsTarget) }
-    var consensusMessages: [WebSDRAggregatedMessage] {
+    var consensusMessages: [WebSDRAggregatedMessage] { cachedConsensusMessages }
+    var consensusTargetMatches: [WebSDRAggregatedMessage] { cachedConsensusTargetMatches }
+
+    private func rebuildConsensus() {
         let groups = WebSDRConsensusBuilder.build(messages.map {
             .init(id: $0.id, receiverID: $0.receiverID, slotStart: $0.slotStart, text: $0.text)
         }, primaryReceiverID: primaryAutomaticEndpoint?.id)
         let byID = Dictionary(uniqueKeysWithValues: messages.map { ($0.id, $0) })
-        return groups.compactMap { group in
+        cachedConsensusMessages = groups.compactMap { group in
             let detections = group.observationIDs.compactMap { byID[$0] }
             guard !detections.isEmpty else { return nil }
             return .init(slotStart: group.slotStart, detections: detections,
                          totalSelectedReceivers: consensusReceiverCount)
         }
-    }
-    var consensusTargetMatches: [WebSDRAggregatedMessage] {
-        consensusMessages.filter(\.mentionsTarget)
+        cachedConsensusTargetMatches = cachedConsensusMessages.filter(\.mentionsTarget)
     }
     var availableUtahReceivers: [UtahWebSDR] {
         UtahWebSDR.all.filter { $0.bands.contains(selectedBand) }
@@ -658,6 +674,7 @@ final class WebSDRFT8Monitor: ObservableObject {
             removeAutomaticEndpoint(id)
         }
         consensusReceiverCount = wanted.count
+        rebuildConsensus()
         for endpoint in wanted where browsers[endpoint.id] == nil {
             startAutomaticEndpoint(endpoint, session: sessionID)
         }
@@ -667,31 +684,32 @@ final class WebSDRFT8Monitor: ObservableObject {
     private func removeAutomaticEndpoint(_ id: String) {
         browsers.removeValue(forKey: id)?.stop()
         recordingDecodeTasks.removeValue(forKey: id)?.cancel()
+        pendingRecordings.removeValue(forKey: id)
         recordedStreams.removeValue(forKey: id)
-        for key in Array(liveDecodeTasks.keys) where key.hasPrefix(id + "#") {
-            liveDecodeTasks.removeValue(forKey: key)?.cancel()
-            liveTimelines.removeValue(forKey: key)
-            livePreviousSlots.removeValue(forKey: key)
-        }
-        liveAudioAt.removeValue(forKey: id)
-        activeTapIDs.removeValue(forKey: id)
+        resetLiveAudio(for: id)
         receiverStatuses.removeValue(forKey: id)
     }
 
     private func startAutomaticEndpoint(_ endpoint: WebSDRAutomaticEndpoint, session: UUID) {
         guard let url = endpoint.tunedURL(for: selectedBand, dialHz: dialHz) else { return }
         let browser = WebSDRBrowserSession()
+        let generation = (endpointGeneration[endpoint.id] ?? 0) + 1
+        endpointGeneration[endpoint.id] = generation
         browsers[endpoint.id] = browser
         recordedStreams[endpoint.id] = RecordedStream()
         browser.onStatus = { [weak self, weak browser] message in
             guard let self, self.sessionID == session,
                   let browser, self.browsers[endpoint.id] === browser else { return }
+            if message == "Receiver audio interrupted; reconnecting…" {
+                self.resetLiveAudio(for: endpoint.id)
+            }
             self.receiverStatuses[endpoint.id] = message
             if self.messages.isEmpty { self.status = "\(endpoint.name): \(message)" }
         }
         browser.onRecording = { [weak self, weak browser] recording in
             guard let self, let browser, self.browsers[endpoint.id] === browser else { return }
-            self.queueRecording(recording, endpoint: endpoint, session: session)
+            self.queueRecording(recording, endpoint: endpoint, session: session,
+                                generation: generation)
         }
         browser.onAudio = { [weak self, weak browser] samples, endedAt, tapID in
             guard let self, let browser, self.browsers[endpoint.id] === browser else { return }
@@ -743,6 +761,8 @@ final class WebSDRFT8Monitor: ObservableObject {
         }
         stop()
         messages.removeAll()
+        rebuildConsensus()
+        decodeRevision &+= 1
         noDecodeWarning = nil
         seenIDs.removeAll()
         phaseSeconds = nil
@@ -758,6 +778,7 @@ final class WebSDRFT8Monitor: ObservableObject {
                 return
             }
             consensusReceiverCount = endpoints.count
+            rebuildConsensus()
             isMonitoring = true
             status = "Opening \(endpoints.count) WebSDR receiver\(endpoints.count == 1 ? "" : "s")…"
             for endpoint in endpoints { startAutomaticEndpoint(endpoint, session: startedSession) }
@@ -766,6 +787,7 @@ final class WebSDRFT8Monitor: ObservableObject {
             return
         }
         consensusReceiverCount = 1
+        rebuildConsensus()
         let selectedSource: any AudioSource
         if selectedInputUID == Self.systemAudioUID {
             let capture = SystemAudioFT8Source()
@@ -809,15 +831,19 @@ final class WebSDRFT8Monitor: ObservableObject {
         sessionID = UUID()
         for browser in browsers.values { browser.stop() }
         browsers.removeAll()
+        endpointGeneration.removeAll()
         for task in recordingDecodeTasks.values { task.cancel() }
         recordingDecodeTasks.removeAll()
+        pendingRecordings.removeAll()
         recordedStreams.removeAll()
         for task in liveDecodeTasks.values { task.cancel() }
         liveDecodeTasks.removeAll()
+        pendingLivePairs.removeAll()
         liveTimelines.removeAll()
         livePreviousSlots.removeAll()
         liveAudioAt.removeAll()
         activeTapIDs.removeAll()
+        liveStreamGeneration.removeAll()
         receiverStatuses.removeAll()
         noDecodeTask?.cancel()
         noDecodeTask = nil
@@ -847,6 +873,10 @@ final class WebSDRFT8Monitor: ObservableObject {
     private func consumeLiveAudio(_ samples: [Float], endedAt: Date, tapID: Int,
                                   endpoint: WebSDRAutomaticEndpoint, session: UUID) {
         guard session == sessionID else { return }
+        if let currentTapID = activeTapIDs[endpoint.id] {
+            if tapID < currentTapID { return }
+            if tapID > currentTapID { resetLiveAudio(for: endpoint.id) }
+        }
         if activeTapIDs[endpoint.id] == nil {
             guard samples.contains(where: { abs($0) > 0.000_1 }) else { return }
             activeTapIDs[endpoint.id] = tapID
@@ -861,6 +891,7 @@ final class WebSDRFT8Monitor: ObservableObject {
         liveTimelines[streamKey] = timeline
         if let gap = result.interruptionSeconds, gap > 3 {
             livePreviousSlots.removeValue(forKey: streamKey)
+            pendingLivePairs.removeValue(forKey: streamKey)
             receiverStatuses[endpoint.id] = "Audio interrupted for \(Int(gap.rounded())) s; resynchronizing"
         }
         for slot in result.slots {
@@ -868,59 +899,131 @@ final class WebSDRFT8Monitor: ObservableObject {
         }
     }
 
+    private func resetLiveAudio(for endpointID: String) {
+        liveStreamGeneration[endpointID, default: 0] &+= 1
+        let keys = Set(liveTimelines.keys)
+            .union(livePreviousSlots.keys)
+            .union(liveDecodeTasks.keys)
+            .union(pendingLivePairs.keys)
+        for key in keys where key.hasPrefix(endpointID + "#") {
+            liveDecodeTasks.removeValue(forKey: key)?.cancel()
+            pendingLivePairs.removeValue(forKey: key)
+            liveTimelines.removeValue(forKey: key)
+            livePreviousSlots.removeValue(forKey: key)
+        }
+        liveAudioAt.removeValue(forKey: endpointID)
+        activeTapIDs.removeValue(forKey: endpointID)
+    }
+
     private func queueLiveSlot(_ slot: AudioSlot, streamKey: String,
                                endpoint: WebSDRAutomaticEndpoint,
                                session: UUID) {
         let previousSlot = livePreviousSlots[streamKey]
         livePreviousSlots[streamKey] = slot
-        let previousTask = liveDecodeTasks[streamKey]
+        guard let previousSlot else { return }
+        let pair = LiveDecodePair(previous: previousSlot, current: slot)
+        if liveDecodeTasks[streamKey] != nil {
+            // Keep only the newest complete pair. A slow decoder must never
+            // retain an ever-growing chain of 15-second audio buffers.
+            pendingLivePairs[streamKey] = pair
+            return
+        }
+        startLiveDecode(pair, streamKey: streamKey, endpoint: endpoint, session: session,
+                        generation: liveStreamGeneration[endpoint.id, default: 0])
+    }
+
+    private func startLiveDecode(_ pair: LiveDecodePair, streamKey: String,
+                                 endpoint: WebSDRAutomaticEndpoint, session: UUID,
+                                 generation: Int) {
         liveDecodeTasks[streamKey] = Task { [weak self] in
-            await previousTask?.value
-            guard !Task.isCancelled else { return }
-            let across = await Task.detached(priority: .userInitiated) {
-                previousSlot.map {
-                    WebSDRCycleDecoder.decode(previous: $0.samples, next: slot.samples,
-                                              sampleRate: slot.sampleRate)
-                } ?? []
-            }.value
-            guard let self, !Task.isCancelled,
-                  session == self.sessionID, self.browsers[endpoint.id] != nil else { return }
-            let countBefore = self.messages.count
-            let start = slot.startTime ?? Date()
-            if let previousSlot {
-                let origin = previousSlot.startTime ?? start.addingTimeInterval(-15)
-                for detection in across {
-                    self.addRecordedMessage(detection.message,
-                                            cycleAt: origin.addingTimeInterval(detection.cycleOffsetSeconds),
-                                            signalLevelDbFS: detection.signalLevelDbFS,
-                                            endpoint: endpoint, session: session)
-                }
+            let worker = Task.detached(priority: .utility) {
+                WebSDRCycleDecoder.decode(previous: pair.previous.samples,
+                                          next: pair.current.samples,
+                                          sampleRate: pair.current.sampleRate)
             }
+            let across = await withTaskCancellationHandler {
+                await worker.value
+            } onCancel: {
+                worker.cancel()
+            }
+            guard let self else { return }
+            defer {
+                self.finishLiveDecode(streamKey: streamKey, endpoint: endpoint,
+                                      session: session, generation: generation)
+            }
+            guard !Task.isCancelled, session == self.sessionID,
+                  generation == self.liveStreamGeneration[endpoint.id, default: 0],
+                  Date().timeIntervalSince(pair.current.startTime ?? .distantPast) < 45,
+                  self.browsers[endpoint.id] != nil else { return }
+            let countBefore = self.messages.count
+            let start = pair.current.startTime ?? Date()
+            let origin = pair.previous.startTime ?? start.addingTimeInterval(-15)
+            for detection in across {
+                self.addRecordedMessage(detection.message,
+                                        cycleAt: origin.addingTimeInterval(detection.cycleOffsetSeconds),
+                                        signalLevelDbFS: detection.signalLevelDbFS,
+                                        endpoint: endpoint, session: session)
+            }
+            if self.messages.count > countBefore { self.finalizeRecordedMessages() }
             self.receiverStatuses[endpoint.id] = self.messages.count > countBefore
                 ? "Continuous audio · FT8 decoded"
                 : "Continuous audio · no FT8 in latest cycle"
         }
     }
 
+    private func finishLiveDecode(streamKey: String, endpoint: WebSDRAutomaticEndpoint,
+                                  session: UUID, generation: Int) {
+        guard session == sessionID, generation == liveStreamGeneration[endpoint.id, default: 0],
+              browsers[endpoint.id] != nil else { return }
+        liveDecodeTasks.removeValue(forKey: streamKey)
+        guard let pending = pendingLivePairs.removeValue(forKey: streamKey),
+              Date().timeIntervalSince(pending.current.startTime ?? .distantPast) < 45 else { return }
+        startLiveDecode(pending, streamKey: streamKey, endpoint: endpoint, session: session,
+                        generation: generation)
+    }
+
     private func queueRecording(_ recording: WebSDRRecording, endpoint: WebSDRAutomaticEndpoint,
-                                session: UUID) {
+                                session: UUID, generation: Int) {
+        guard generation == endpointGeneration[endpoint.id, default: 0] else { return }
         if let liveAt = liveAudioAt[endpoint.id], Date().timeIntervalSince(liveAt) < 5 { return }
-        let previous = recordingDecodeTasks[endpoint.id]
+        if recordingDecodeTasks[endpoint.id] != nil {
+            pendingRecordings[endpoint.id] = recording
+            return
+        }
+        startRecordingDecode(recording, endpoint: endpoint, session: session,
+                             generation: generation)
+    }
+
+    private func startRecordingDecode(_ recording: WebSDRRecording,
+                                      endpoint: WebSDRAutomaticEndpoint, session: UUID,
+                                      generation: Int) {
         recordingDecodeTasks[endpoint.id] = Task { [weak self] in
-            await previous?.value
-            guard !Task.isCancelled else { return }
-            await self?.consumeRecording(recording, endpoint: endpoint, session: session)
+            guard let self else { return }
+            await self.consumeRecording(recording, endpoint: endpoint, session: session,
+                                        generation: generation)
+            self.finishRecordingDecode(endpoint: endpoint, session: session,
+                                       generation: generation)
         }
     }
 
+    private func finishRecordingDecode(endpoint: WebSDRAutomaticEndpoint, session: UUID,
+                                       generation: Int) {
+        guard session == sessionID, generation == endpointGeneration[endpoint.id, default: 0],
+              browsers[endpoint.id] != nil else { return }
+        recordingDecodeTasks.removeValue(forKey: endpoint.id)
+        guard let pending = pendingRecordings.removeValue(forKey: endpoint.id),
+              Date().timeIntervalSince(pending.stoppedAt) < 45 else { return }
+        queueRecording(pending, endpoint: endpoint, session: session, generation: generation)
+    }
+
     private func consumeRecording(_ recording: WebSDRRecording, endpoint: WebSDRAutomaticEndpoint,
-                                  session: UUID) async {
-        guard session == sessionID else { return }
+                                  session: UUID, generation: Int) async {
+        guard session == sessionID, generation == endpointGeneration[endpoint.id, default: 0] else { return }
         var stream = recordedStreams[endpoint.id] ?? RecordedStream()
         let index = stream.nextIndex
         stream.nextIndex += 1
         let previous = stream.previous
-        let result = await Task.detached(priority: .userInitiated) {
+        let worker = Task.detached(priority: .utility) {
             let samples = WebSDRWAV.samples(at12kHz: recording.wav)
             let direct = (try? FT8Codec.decode(samples: samples, sampleRate: 12_000,
                                                protocol: .ft8, maxMessages: 64)) ?? []
@@ -932,8 +1035,16 @@ final class WebSDRFT8Monitor: ObservableObject {
                     onsetSeconds: Double($0.timeSeconds), frequencyHz: $0.frequencyHz)
             }
             return (samples, direct, across, levels)
-        }.value
-        guard !Task.isCancelled, session == sessionID, browsers[endpoint.id] != nil else { return }
+        }
+        let result = await withTaskCancellationHandler {
+            await worker.value
+        } onCancel: {
+            worker.cancel()
+        }
+        guard !Task.isCancelled, session == sessionID,
+              generation == endpointGeneration[endpoint.id, default: 0],
+              Date().timeIntervalSince(recording.stoppedAt) < 45,
+              browsers[endpoint.id] != nil else { return }
         let (samples, direct, across, levels) = result
         let mediaDuration = Double(samples.count) / 12_000
         let wallDuration = recording.stoppedAt.timeIntervalSince(recording.startedAt)
@@ -973,6 +1084,7 @@ final class WebSDRFT8Monitor: ObservableObject {
         receiverStatuses[endpoint.id] = "Receiving FT8 audio"
         let directOffsets = direct.map { Double($0.timeSeconds) }.sorted()
         let directCycle = began.addingTimeInterval(directOffsets.isEmpty ? 0 : directOffsets[directOffsets.count / 2])
+        let countBefore = messages.count
         for (index, message) in direct.enumerated() {
             addRecordedMessage(message, cycleAt: directCycle,
                                signalLevelDbFS: levels[index],
@@ -987,6 +1099,7 @@ final class WebSDRFT8Monitor: ObservableObject {
                                    endpoint: endpoint, session: session)
             }
         }
+        if messages.count > countBefore { finalizeRecordedMessages() }
         if direct.isEmpty, across.isEmpty, messages.isEmpty {
             status = "Recording \(selectedAutomaticEndpoints.count) receiver(s) · waiting for FT8…"
         }
@@ -1013,17 +1126,22 @@ final class WebSDRFT8Monitor: ObservableObject {
                               mentionsTarget: WebSDRMessageParser.mentions(activeTarget, in: message.text),
                               addressedToTarget: sender != nil))
         noDecodeWarning = nil
+        if endpoint.id == primaryAutomaticEndpoint?.id {
+            phaseSeconds = (cycleAt.timeIntervalSince1970 - cycle.timeIntervalSince1970 + 15)
+                .truncatingRemainder(dividingBy: 15)
+        }
+    }
+
+    private func finalizeRecordedMessages() {
         messages.sort {
             if $0.slotStart != $1.slotStart { return $0.slotStart > $1.slotStart }
             if $0.text != $1.text { return $0.text < $1.text }
             return $0.receiverID < $1.receiverID
         }
-        if messages.count > 2_000 { messages = Array(messages.prefix(2_000)) }
-        if seenIDs.count > 8_000 { seenIDs = Set(messages.map(\.id)) }
-        if endpoint.id == primaryAutomaticEndpoint?.id {
-            phaseSeconds = (cycleAt.timeIntervalSince1970 - cycle.timeIntervalSince1970 + 15)
-                .truncatingRemainder(dividingBy: 15)
-        }
+        if messages.count > 600 { messages.removeLast(messages.count - 600) }
+        if seenIDs.count > 1_200 { seenIDs = Set(messages.map(\.id)) }
+        rebuildConsensus()
+        decodeRevision &+= 1
         status = "\(messages.count) decoded · \(targetMatches.count) mention \(activeTarget) · \(browsers.count) receivers"
     }
 
@@ -1070,6 +1188,8 @@ final class WebSDRFT8Monitor: ObservableObject {
         }
         if messages.count > 500 { messages = Array(messages.prefix(500)) }
         if seenIDs.count > 1_000 { seenIDs = Set(messages.map(\.id)) }
+        rebuildConsensus()
+        decodeRevision &+= 1
         phaseSeconds = (observedAt.timeIntervalSince1970 - cycle.timeIntervalSince1970 + 15)
             .truncatingRemainder(dividingBy: 15)
         status = "\(messages.count) decoded · \(targetMatches.count) mention \(activeTarget)"

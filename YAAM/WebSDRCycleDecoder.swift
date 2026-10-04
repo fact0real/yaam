@@ -19,10 +19,12 @@ enum WebSDRCycleDecoder {
         let joined = previous + next
         let windowCount = Int(13.5 * Double(rate))
         guard joined.count >= windowCount else { return [] }
+        guard joined.contains(where: { abs($0) > 0.000_01 }) else { return [] }
         let maxStart = joined.count - windowCount
         let step = max(1, rate / 2)
         var detections: [Detection] = []
         for start in stride(from: 0, through: maxStart, by: step) {
+            if Task<Never, Never>.isCancelled { return [] }
             let window = Array(joined[start..<(start + windowCount)])
             guard let messages = try? FT8Codec.decode(samples: window, sampleRate: rate,
                                                      protocol: .ft8, maxMessages: 64) else { continue }
