@@ -290,7 +290,7 @@ extension AppState {
 
         let result = DuplicateQSOAnalyzer.clean(records: qsoRecords, review: review)
         guard result.removedCount > 0 else { return }
-        qsoRecords = result.records
+        qsoRecords = excludingSelfContacts(result.records)
         selectedRecordIDs.subtract(Set(review.selectedGroups.flatMap(\.recordIDs)))
         autoSaveActiveWorkspace(replaceMissingRecords: true)
         refreshAwardProgress()
@@ -322,7 +322,7 @@ extension AppState {
         guard createDestructiveCheckpointIfNeeded(reason: "Before consolidating duplicate QSOs") else { return 0 }
         let result = DuplicateQSOAnalyzer.clean(records: qsoRecords, review: fullReview)
         guard result.removedCount > 0 else { return 0 }
-        qsoRecords = result.records
+        qsoRecords = excludingSelfContacts(result.records)
         selectedRecordIDs.subtract(Set(fullReview.selectedGroups.flatMap(\.recordIDs)))
         autoSaveActiveWorkspace(replaceMissingRecords: true)
         refreshAwardProgress()

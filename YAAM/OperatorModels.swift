@@ -421,6 +421,7 @@ nonisolated enum QuickLogValidationError: LocalizedError, Equatable {
     case missingBand
     case missingMode
     case exactDuplicate
+    case selfContact
 
     var errorDescription: String? {
         switch self {
@@ -430,6 +431,7 @@ nonisolated enum QuickLogValidationError: LocalizedError, Equatable {
         case .missingBand: return "Select a band or enter a frequency that maps to a band."
         case .missingMode: return "Select an operating mode."
         case .exactDuplicate: return "This exact QSO is already present in the active station log."
+        case .selfContact: return "A station cannot log a QSO with its own callsign."
         }
     }
 }
@@ -1019,4 +1021,3 @@ public struct RBNMatrixSettings: Codable, Equatable, Sendable {
         self.beacons = beacons
     }
 }
-

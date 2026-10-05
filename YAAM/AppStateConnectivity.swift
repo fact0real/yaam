@@ -122,7 +122,7 @@ extension AppState {
             )
             if merge.added > 0 || merge.updated > 0 {
                 _ = try logbookDatabase?.createBackup(reason: "Before cloud merge")
-                qsoRecords = merge.records
+                qsoRecords = excludingSelfContacts(merge.records)
                 tableHeaders = merge.headers
                 try persistCurrentWorkspace(reason: "Cloud package merge")
                 refreshDatabaseSafetyState()

@@ -43,7 +43,7 @@ enum AwardSource: String, CaseIterable, Identifiable {
 
     var subtitle: String {
         switch self {
-        case .qrz:      return "Fetched live from QRZ.com Logbook"
+        case .qrz:      return "Award status reported by QRZ.com Logbook"
         case .eqsl:     return "Computed from eQSL-confirmed QSOs in log"
         case .clublog:  return "Personal DXCC matrix via Club Log API"
         case .combined: return "Union of all confirmed QSOs — all services"
@@ -111,10 +111,8 @@ struct QRZAwardsView: View {
     private var effectiveAwards: [QRZAwardSummary] {
         switch selectedSource {
         case .qrz:
-            let baseList = !appState.qrzAwardSummaries.isEmpty
-                ? appState.qrzAwardSummaries
-                : buildLogbookAwards(from: allConfirmedRecords)
-            return enrichAwards(baseList, records: allConfirmedRecords)
+            // Only QRZ can report an award as issued. Local QSO estimates belong to All Sources.
+            return appState.qrzAwardSummaries
         case .eqsl:
             return buildEQSLAwards(from: eqslRecords)
         case .clublog:
@@ -485,11 +483,17 @@ struct QRZAwardsView: View {
     private var statsRow: some View {
         HStack(spacing: 10) {
             switch selectedSource {
-            case .qrz, .combined:
+            case .qrz:
                 statCard("Awarded",   value: "\(earnedAwards.count)",              icon: "checkmark.seal.fill", color: .green)
                 statCard("Analyzed",  value: "\(effectiveAwards.count)",           icon: "square.grid.2x2.fill", color: selectedSource.accentColor)
                 statCard("Average",   value: "\(Int(avgProgress.rounded()))%",     icon: "gauge.with.dots.needle.50percent", color: .purple)
                 statCard("Closest",   value: bestProgressText,                     icon: "target", color: .orange)
+
+            case .combined:
+                statCard("Targets reached", value: "\(effectiveAwards.filter { $0.percentComplete >= 100 }.count)", icon: "scope", color: .green)
+                statCard("Estimated", value: "\(effectiveAwards.count)", icon: "square.grid.2x2.fill", color: selectedSource.accentColor)
+                statCard("Average", value: "\(Int(avgProgress.rounded()))%", icon: "gauge.with.dots.needle.50percent", color: .purple)
+                statCard("Closest", value: bestProgressText, icon: "target", color: .orange)
 
             case .eqsl:
                 let dxcc = Set(eqslRecords.map { $0["DXCC"] }.filter { !$0.isEmpty }).count
@@ -682,7 +686,9 @@ struct QRZAwardsView: View {
             emptyState
         } else {
             if !earnedAwards.isEmpty     { awardSection(title: "🏆 Awarded",     awards: earnedAwards) }
-            if !inProgressAwards.isEmpty { awardSection(title: "📈 In Progress", awards: inProgressAwards) }
+            if !inProgressAwards.isEmpty {
+                awardSection(title: selectedSource == .combined ? "📈 Local Progress Estimates" : "📈 In Progress", awards: inProgressAwards)
+            }
 
             let footer = currentStatusText
             if !footer.isEmpty && !footer.contains("confirmed") {
@@ -1142,7 +1148,7 @@ struct QRZAwardsView: View {
             ($0["GRIDSQUARE"].isEmpty ? $0["GRID"] : $0["GRIDSQUARE"]).prefix(4).uppercased()
         }.filter { $0.count == 4 })
         let wpx = Set(records.map { derivePrefix($0["CALL"]) }.filter { !$0.isEmpty })
-        return [
+        let estimates = [
             make("dxcc_100", "DX World (DXCC 100)",      dxccSet.count,  100, "dxcc",      "\(dxccSet.count) DXCC entities confirmed",   "Entities"),
             make("wac",      "Worked All Continents",     contSet.count,  6,   "continent", contSet.sorted().joined(separator: " · "),     "Continents"),
             make("was_50",   "Worked All States (WAS)",   stateSet.count, 50,  "was",       "\(stateSet.count) of 50 US states confirmed", "States"),
@@ -1150,290 +1156,18 @@ struct QRZAwardsView: View {
             make("wpx",      "CQ WPX (300 Prefixes)",     wpx.count,      300, "wpx",       "\(wpx.count) unique prefixes",                "Prefixes"),
             make("six_50",   "6m Magic Band (50 Grids)",  sixGrids.count, 50,  "vhf",       "\(sixGrids.count) 6m grids confirmed",        "6m Grids"),
         ]
-    }
-
-    private func enrichAwards(_ awards: [QRZAwardSummary], records: [QSORecordModel]) -> [QRZAwardSummary] {
-        guard !awards.isEmpty else { return awards }
-
-        var qsosByContinent: [String: Int] = [:]
-        var entitiesByContinent: [String: Set<String>] = [:]
-        var allConfirmedDXCC = Set<String>()
-        var allConfirmedStates = Set<String>()
-        var allConfirmedGrids = Set<String>()
-        var winterDays = Set<String>()
-
-        for record in records {
-            let cont = record["CONT"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-            let dxcc = record["DXCC"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-
-            if !cont.isEmpty {
-                qsosByContinent[cont, default: 0] += 1
-                if !dxcc.isEmpty, dxcc != "0", dxcc != "UNKNOWN" {
-                    entitiesByContinent[cont, default: []].insert(dxcc)
-                }
-            }
-            if !dxcc.isEmpty, dxcc != "0", dxcc != "UNKNOWN" {
-                allConfirmedDXCC.insert(dxcc)
-            }
-            let st = record["STATE"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-            if AwardEngine.countsAsUSState(record.fields) {
-                allConfirmedStates.insert(st)
-            }
-            let grid = (record["GRIDSQUARE"].isEmpty ? record["GRID"] : record["GRIDSQUARE"]).prefix(4).uppercased()
-            if grid.count == 4 {
-                allConfirmedGrids.insert(String(grid))
-            }
-            let cleanDate = record["QSO_DATE"].filter { $0.isNumber }
-            if cleanDate.count >= 8 {
-                let month = String(cleanDate.dropFirst(4).prefix(2))
-                if month == "12" || month == "01" || month == "02" {
-                    winterDays.insert(String(cleanDate.prefix(8)))
-                }
-            }
-        }
-
-        return awards.map { award in
-            // 1. If already earned, keep completed status clean
-            if award.earned {
-                return QRZAwardSummary(
-                    id: award.id,
-                    title: award.title,
-                    detail: award.detail.isEmpty ? "Issued by QRZ Logbook Awards" : award.detail,
-                    percentComplete: 100.0,
-                    status: award.status.isEmpty ? "Award received" : award.status,
-                    earned: true,
-                    progressAvailable: true,
-                    achievement: (award.achievement.isEmpty || award.achievement == "Not reported") ? "Award received" : award.achievement,
-                    awardType: award.awardType,
-                    ribbonURL: award.ribbonURL
-                )
-            }
-
-            // 2. Check if award already has a ratio like "X / Y Unit" in achievement
-            var fixedPercent = award.percentComplete
-            var parsedRatio: (curr: Int, target: Int)? = nil
-            if let match = award.achievement.range(of: #"(\d+)\s*/\s*(\d+)"#, options: .regularExpression) {
-                let parts = String(award.achievement[match]).components(separatedBy: "/")
-                if parts.count == 2,
-                   let curr = Int(parts[0].trimmingCharacters(in: .whitespaces)),
-                   let target = Int(parts[1].trimmingCharacters(in: .whitespaces)),
-                   target > 0 {
-                    parsedRatio = (curr, target)
-                    let mathPct = min(100.0, max(0.0, Double(curr) / Double(target) * 100.0))
-                    if abs(fixedPercent - mathPct) > 0.5 {
-                        fixedPercent = mathPct
-                    }
-                }
-            }
-
-            // 3. Does this award have valid progress from QRZ?
-            let hasValidProgress = award.progressAvailable
-                && award.achievement != "Not reported"
-                && !award.detail.contains("QRZ did not return analysis")
-                && (fixedPercent > 0 || (parsedRatio != nil && parsedRatio!.curr == 0))
-
-            if hasValidProgress {
-                return QRZAwardSummary(
-                    id: award.id,
-                    title: award.title,
-                    detail: award.detail,
-                    percentComplete: fixedPercent,
-                    status: award.status.isEmpty ? (fixedPercent >= 100 ? "Eligible to apply" : "In progress") : award.status,
-                    earned: fixedPercent >= 100,
-                    progressAvailable: true,
-                    achievement: award.achievement,
-                    awardType: award.awardType,
-                    ribbonURL: award.ribbonURL
-                )
-            }
-
-            // 4. Enrich / fallback from local confirmed logbook records
-            let norm = award.title.uppercased()
-
-            // A) Worked All Continents (WAC) sub-awards or individual continents
-            if norm.contains("WORKED ALL CONTINENTS") || norm.contains("WAC") || norm.contains("CONTINENT") {
-                let continentMap: [(name: String, code: String, title: String)] = [
-                    ("AFRICA",        "AF", "Africa"),
-                    ("ASIA",          "AS", "Asia"),
-                    ("EUROPE",        "EU", "Europe"),
-                    ("NORTH AMERICA", "NA", "North America"),
-                    ("SOUTH AMERICA", "SA", "South America"),
-                    ("OCEANIA",       "OC", "Oceania")
-                ]
-
-                if let found = continentMap.first(where: { norm.contains($0.name) }) {
-                    let count = qsosByContinent[found.code] ?? 0
-                    let achieved = count >= 1
-                    let pct: Double = achieved ? 100.0 : 0.0
-                    return QRZAwardSummary(
-                        id: award.id,
-                        title: award.title,
-                        detail: achieved ? "1 confirmed QSO in \(found.title)" : "No confirmed contacts in \(found.title) yet",
-                        percentComplete: pct,
-                        status: achieved ? "Eligible to apply" : "1 Continent remaining",
-                        earned: achieved,
-                        progressAvailable: true,
-                        achievement: "\(achieved ? 1 : 0) / 1 Continents",
-                        awardType: award.awardType.isEmpty ? "Mode: Mixed" : award.awardType,
-                        ribbonURL: award.ribbonURL
-                    )
-                }
-
-                // Global WAC (6 continents)
-                let confirmedContinents = continentMap.filter { (qsosByContinent[$0.code] ?? 0) > 0 }.count
-                let pct = min(100.0, Double(confirmedContinents) / 6.0 * 100.0)
-                let achieved = confirmedContinents >= 6
-                return QRZAwardSummary(
-                    id: award.id,
-                    title: award.title,
-                    detail: "\(confirmedContinents) of 6 continents confirmed in logbook",
-                    percentComplete: pct,
-                    status: achieved ? "Eligible to apply" : "\(6 - confirmedContinents) Continents remaining",
-                    earned: achieved,
-                    progressAvailable: true,
-                    achievement: "\(confirmedContinents) / 6 Continents",
-                    awardType: award.awardType.isEmpty ? "Mode: Mixed" : award.awardType,
-                    ribbonURL: award.ribbonURL
-                )
-            }
-
-            // B) Master of Radio Communication
-            if norm.contains("MASTER OF RADIO") || norm.contains("RADIO COMMUNICATION") {
-                let mrcTargets: [(name: String, code: String, target: Int, title: String)] = [
-                    ("AFRICA",        "AF", 76, "Africa"),
-                    ("ASIA",          "AS", 40, "Asia"),
-                    ("EUROPE",        "EU", 67, "Europe"),
-                    ("NORTH AMERICA", "NA", 49, "North America"),
-                    ("SOUTH AMERICA", "SA", 14, "South America"),
-                    ("OCEANIA",       "OC", 30, "Oceania")
-                ]
-
-                if let found = mrcTargets.first(where: { norm.contains($0.name) }) {
-                    let ents = entitiesByContinent[found.code]?.count ?? 0
-                    let pct = min(100.0, Double(ents) / Double(found.target) * 100.0)
-                    let achieved = ents >= found.target
-                    return QRZAwardSummary(
-                        id: award.id,
-                        title: award.title,
-                        detail: "\(ents) of \(found.target) \(found.title) DXCC entities confirmed",
-                        percentComplete: pct,
-                        status: achieved ? "Eligible to apply" : "\(max(0, found.target - ents)) Entities remaining",
-                        earned: achieved,
-                        progressAvailable: true,
-                        achievement: "\(ents) / \(found.target) Entities",
-                        awardType: award.awardType.isEmpty ? "Mode: Mixed" : award.awardType,
-                        ribbonURL: award.ribbonURL
-                    )
-                }
-            }
-
-            // C) 12 Days of QRZ
-            if norm.contains("12 DAYS") {
-                let count = winterDays.count
-                let pct = min(100.0, Double(count) / 12.0 * 100.0)
-                let achieved = count >= 12
-                return QRZAwardSummary(
-                    id: award.id,
-                    title: award.title,
-                    detail: "\(count) winter days logged with confirmed QSOs (Dec–Feb)",
-                    percentComplete: pct,
-                    status: achieved ? "Eligible to apply" : "\(max(0, 12 - count)) days remaining",
-                    earned: achieved,
-                    progressAvailable: true,
-                    achievement: "\(min(count, 12)) / 12 Winter Days",
-                    awardType: award.awardType.isEmpty ? "Mode: Mixed" : award.awardType,
-                    ribbonURL: award.ribbonURL
-                )
-            }
-
-            // D) QRZ 30th Anniversary Award
-            if norm.contains("30") && (norm.contains("YEAR") || norm.contains("ANNIVERSARY")) {
-                let count = records.count
-                let pct = min(100.0, Double(count) / 30.0 * 100.0)
-                let achieved = count >= 30
-                return QRZAwardSummary(
-                    id: award.id,
-                    title: award.title,
-                    detail: "\(count) confirmed QSOs in logbook (30 needed)",
-                    percentComplete: pct,
-                    status: achieved ? "Eligible to apply" : "\(max(0, 30 - count)) QSOs remaining",
-                    earned: achieved,
-                    progressAvailable: true,
-                    achievement: "\(min(count, 30)) / 30 Confirmed QSOs",
-                    awardType: award.awardType.isEmpty ? "Mode: Mixed" : award.awardType,
-                    ribbonURL: award.ribbonURL
-                )
-            }
-
-            // E) DX World / DXCC
-            if norm.contains("DX WORLD") || norm.contains("DXCC") {
-                let count = allConfirmedDXCC.count
-                let pct = min(100.0, Double(count) / 100.0 * 100.0)
-                let achieved = count >= 100
-                return QRZAwardSummary(
-                    id: award.id,
-                    title: award.title,
-                    detail: "\(count) DXCC entities confirmed",
-                    percentComplete: pct,
-                    status: achieved ? "Eligible to apply" : "\(max(0, 100 - count)) Entities remaining",
-                    earned: achieved,
-                    progressAvailable: true,
-                    achievement: "\(count) / 100 Entities",
-                    awardType: award.awardType.isEmpty ? "Mode: Mixed" : award.awardType,
-                    ribbonURL: award.ribbonURL
-                )
-            }
-
-            // F) Worked All States / WAS
-            if norm.contains("STATES") || norm.contains("WAS") {
-                let count = allConfirmedStates.count
-                let pct = min(100.0, Double(count) / 50.0 * 100.0)
-                let achieved = count >= 50
-                return QRZAwardSummary(
-                    id: award.id,
-                    title: award.title,
-                    detail: "\(count) of 50 US states confirmed",
-                    percentComplete: pct,
-                    status: achieved ? "Eligible to apply" : "\(max(0, 50 - count)) States remaining",
-                    earned: achieved,
-                    progressAvailable: true,
-                    achievement: "\(count) / 50 States",
-                    awardType: award.awardType.isEmpty ? "Mode: Mixed" : award.awardType,
-                    ribbonURL: award.ribbonURL
-                )
-            }
-
-            // G) Grid Master / VUCC
-            if norm.contains("GRID") || norm.contains("VUCC") {
-                let count = allConfirmedGrids.count
-                let pct = min(100.0, Double(count) / 100.0 * 100.0)
-                let achieved = count >= 100
-                return QRZAwardSummary(
-                    id: award.id,
-                    title: award.title,
-                    detail: "\(count) Maidenhead grids confirmed",
-                    percentComplete: pct,
-                    status: achieved ? "Eligible to apply" : "\(max(0, 100 - count)) Grids remaining",
-                    earned: achieved,
-                    progressAvailable: true,
-                    achievement: "\(count) / 100 Grids",
-                    awardType: award.awardType.isEmpty ? "Mode: Mixed" : award.awardType,
-                    ribbonURL: award.ribbonURL
-                )
-            }
-
-            // H) Default graceful fallback - never show "--" or "Not reported"
-            return QRZAwardSummary(
-                id: award.id,
-                title: award.title,
-                detail: award.detail.isEmpty || award.detail.contains("QRZ did not return") ? "Tracked in QRZ Logbook" : award.detail,
-                percentComplete: fixedPercent,
-                status: "In progress",
+        return estimates.map { estimate in
+            QRZAwardSummary(
+                id: estimate.id,
+                title: estimate.title,
+                detail: estimate.detail,
+                percentComplete: estimate.percentComplete,
+                status: estimate.percentComplete >= 100 ? "Local target reached" : estimate.status,
                 earned: false,
-                progressAvailable: true,
-                achievement: "\(Int(fixedPercent.rounded()))% complete",
-                awardType: award.awardType,
-                ribbonURL: award.ribbonURL
+                progressAvailable: estimate.progressAvailable,
+                achievement: estimate.achievement,
+                awardType: estimate.awardType,
+                ribbonURL: estimate.ribbonURL
             )
         }
     }

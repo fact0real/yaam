@@ -13,6 +13,7 @@ nonisolated enum LogbookDatabaseError: LocalizedError {
     case profileHasQSOs(Int)
     case corruptQSO(Int)
     case refusingEmptyOverwrite(Int)
+    case selfContact
 
     var errorDescription: String? {
         switch self {
@@ -22,6 +23,7 @@ nonisolated enum LogbookDatabaseError: LocalizedError {
         case .profileHasQSOs(let count): return "This station profile owns \(count) QSO(s). Move or export them before deleting the profile."
         case .corruptQSO(let order): return "QSO record #\(order) could not be decoded. The database was left unchanged."
         case .refusingEmptyOverwrite(let count): return "YAAM refused to replace \(count) saved QSO(s) with an empty workspace."
+        case .selfContact: return "A station cannot log a QSO with its own callsign."
         }
     }
 }
@@ -225,6 +227,54 @@ nonisolated final class LogbookDatabase: @unchecked Sendable {
         try queue.sync { try qsoCountInternal(profileID: profileID) }
     }
 
+    /// Removes impossible contacts from every station profile. A backup is made before any deletion.
+    func removeSelfContacts() throws -> Int {
+        let ids: [String] = try queue.sync {
+            let statement = try prepare("""
+                SELECT q.id, q.fields_json, p.callsign
+                FROM qsos q JOIN station_profiles p ON p.id = q.station_profile_id;
+                """)
+            defer { sqlite3_finalize(statement) }
+            var matches: [String] = []
+            while sqlite3_step(statement) == SQLITE_ROW {
+                let id = text(statement, 0)
+                let json = text(statement, 1)
+                guard let data = json.data(using: .utf8),
+                      let fields = try? JSONDecoder().decode([String: String].self, from: data) else { continue }
+                if SelfContactPolicy.isSelfContact(fields: fields, profileCallsign: text(statement, 2)) {
+                    matches.append(id)
+                }
+            }
+            return matches
+        }
+        guard !ids.isEmpty else { return 0 }
+        _ = try createBackup(reason: "Before removing self contacts", retainCount: 100)
+        try queue.sync {
+            try execute("BEGIN IMMEDIATE TRANSACTION;")
+            do {
+                let jobs = try prepare("DELETE FROM qsl_jobs WHERE qso_id = ?;")
+                let qsos = try prepare("DELETE FROM qsos WHERE id = ?;")
+                defer { sqlite3_finalize(jobs); sqlite3_finalize(qsos) }
+                for id in ids {
+                    sqlite3_reset(jobs)
+                    sqlite3_clear_bindings(jobs)
+                    bind(id, to: 1, in: jobs)
+                    try stepDone(jobs)
+                    sqlite3_reset(qsos)
+                    sqlite3_clear_bindings(qsos)
+                    bind(id, to: 1, in: qsos)
+                    try stepDone(qsos)
+                }
+                try insertAudit(action: "self-contact-cleanup", detail: "Removed \(ids.count) impossible QSO(s)", profileID: nil)
+                try execute("COMMIT;")
+            } catch {
+                try? execute("ROLLBACK;")
+                throw error
+            }
+        }
+        return ids.count
+    }
+
     func metadata(for key: String) throws -> String? {
         try queue.sync { try metadataValue(for: key) }
     }
@@ -369,6 +419,7 @@ nonisolated final class LogbookDatabase: @unchecked Sendable {
         replaceMissingRecords: Bool = true
     ) throws {
         try queue.sync {
+            let stationCallsign = try profileCallsignInternal(profileID: profileID)
             let savedCount = try qsoCountInternal(profileID: profileID)
             if replaceMissingRecords, records.isEmpty, savedCount > 0, !allowEmptyReplacement {
                 throw LogbookDatabaseError.refusingEmptyOverwrite(savedCount)
@@ -407,6 +458,7 @@ nonisolated final class LogbookDatabase: @unchecked Sendable {
                     sqlite3_reset(insertStatement)
                     sqlite3_clear_bindings(insertStatement)
                     let fields = CountryNameNormalizer.normalizedFields(record.fields).fields
+                    if SelfContactPolicy.isSelfContact(fields: fields, profileCallsign: stationCallsign) { continue }
                     let uniqueKey = Self.uniqueKey(fields: fields)
                     let jsonData = try JSONEncoder().encode(fields)
                     guard let json = String(data: jsonData, encoding: .utf8) else { continue }
@@ -446,6 +498,10 @@ nonisolated final class LogbookDatabase: @unchecked Sendable {
 
     func appendQSO(profileID: UUID, headers: [String], record: PersistedQSO) throws {
         try queue.sync {
+            let stationCallsign = try profileCallsignInternal(profileID: profileID)
+            guard !SelfContactPolicy.isSelfContact(fields: record.fields, profileCallsign: stationCallsign) else {
+                throw LogbookDatabaseError.selfContact
+            }
             try execute("BEGIN IMMEDIATE TRANSACTION;")
             do {
                 let fields = CountryNameNormalizer.normalizedFields(record.fields).fields
@@ -1245,6 +1301,13 @@ nonisolated final class LogbookDatabase: @unchecked Sendable {
             sqlite3_bind_double(statement, 5, timestamp)
             try stepDone(statement)
         }
+    }
+
+    private func profileCallsignInternal(profileID: UUID) throws -> String {
+        let statement = try prepare("SELECT callsign FROM station_profiles WHERE id = ? LIMIT 1;")
+        defer { sqlite3_finalize(statement) }
+        bind(profileID.uuidString, to: 1, in: statement)
+        return sqlite3_step(statement) == SQLITE_ROW ? text(statement, 0) : ""
     }
 
     private func qsoCountInternal(profileID: UUID?) throws -> Int {

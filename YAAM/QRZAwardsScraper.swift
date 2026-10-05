@@ -27,6 +27,7 @@ final class QRZAwardsScraper: NSObject, WKNavigationDelegate {
     private var usernameSubmitted = false
     private var passwordSubmitted = false
     private var flowPollCount = 0
+    private var awardsNavigationAttempts = 0
     private var requestID: UUID?
 
     override init() {
@@ -55,6 +56,7 @@ final class QRZAwardsScraper: NSObject, WKNavigationDelegate {
             self.usernameSubmitted = false
             self.passwordSubmitted = false
             self.flowPollCount = 0
+            self.awardsNavigationAttempts = 0
             self.timeoutTask = Task { @MainActor in
                 try? await Task.sleep(nanoseconds: 120_000_000_000)
                 guard !Task.isCancelled, self.requestID == requestID else { return }
@@ -96,6 +98,7 @@ final class QRZAwardsScraper: NSObject, WKNavigationDelegate {
         usernameSubmitted = false
         passwordSubmitted = false
         flowPollCount = 0
+        awardsNavigationAttempts = 0
 
         let activeContinuation = continuation
         continuation = nil
@@ -366,15 +369,31 @@ final class QRZAwardsScraper: NSObject, WKNavigationDelegate {
     private func openAwardsPage() {
         guard continuation != nil else { return }
         stage = .loadingAwards
+        awardsNavigationAttempts += 1
 
         let script = """
         (function() {
             if (document.querySelector('#issuedAwardsBlock, .issuedAwardsTable, #accordion .awardContainerHeader')) {
                 return { action: "visible" };
             }
+            var awardsLink = Array.from(document.querySelectorAll('a, button')).find(function(el) {
+                var title = (el.innerText || el.textContent || '').trim();
+                var rect = el.getBoundingClientRect();
+                return /^awards$/i.test(title) && rect.width > 1 && rect.height > 1;
+            });
+            if (awardsLink && !\(awardsNavigationAttempts > 1 ? "true" : "false")) {
+                awardsLink.click();
+                return { action: "QRZ Awards menu" };
+            }
             if (typeof lb_go === "function") {
-                lb_go("awards", "");
-                return { action: "lb_go('awards', '')" };
+                var selected = document.querySelector('#listbooks option:checked');
+                var book = selected ? selected.value : '';
+                if (!book) {
+                    var field = document.querySelector('input[name="sbook"], select[name="sbook"], #listbooks');
+                    book = field ? (field.value || '') : '';
+                }
+                lb_go("awards", book);
+                return { action: "QRZ awards navigation" };
             }
             var form = document.querySelector('form#lbmenu');
             if (form) {
@@ -434,7 +453,7 @@ final class QRZAwardsScraper: NSObject, WKNavigationDelegate {
             var awardHeaders = document.querySelectorAll('#accordion .awardContainerHeader').length;
             var bookOptions = document.querySelectorAll('#listbooks option').length;
             return {
-                ready: awardHeaders > 0 && (bookOptions > 0 || awardedRows > 0),
+                ready: awardHeaders > 0,
                 awardedRows: awardedRows,
                 awardHeaders: awardHeaders,
                 bookOptions: bookOptions,
@@ -479,8 +498,24 @@ final class QRZAwardsScraper: NSObject, WKNavigationDelegate {
                 return
             }
 
+            if attempt >= 8, awardHeaders == 0, awardedRows == 0,
+               let currentURL = self.webView.url,
+               currentURL.host?.lowercased() == "logbook.qrz.com",
+               currentURL.path == "/" || currentURL.path.isEmpty {
+                if self.awardsNavigationAttempts < 2 {
+                    self.stage = .authenticating
+                    self.inspectLoginOrLogbook()
+                } else {
+                    self.finish(QRZAwardsFetchResult(
+                        awards: [],
+                        message: "QRZ returned to Logbook instead of opening Awards. Sign in through QRZ Login, then refresh Awards."
+                    ))
+                }
+                return
+            }
+
             if attempt >= 90 {
-                let url = payload["url"] as? String ?? ""
+                let url = self.webView.url.map { "\($0.host ?? "qrz.com")\($0.path)" } ?? ""
                 self.finish(QRZAwardsFetchResult(
                     awards: [],
                     message: "QRZ Awards did not finish loading after \(lastAction). Rows: \(awardedRows), award definitions: \(awardHeaders), page: \(url)"
@@ -570,7 +605,7 @@ final class QRZAwardsScraper: NSObject, WKNavigationDelegate {
         let detail = (payload["detail"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let status = (payload["status"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let percent = min(max((payload["percent"] as? NSNumber)?.doubleValue ?? 0, 0), 100)
-        let earned = (payload["earned"] as? Bool) ?? (percent >= 100)
+        let earned = (payload["earned"] as? Bool) ?? false
         let progressAvailable = (payload["progressAvailable"] as? Bool) ?? earned
         let achievement = (payload["achievement"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let awardType = (payload["awardType"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)

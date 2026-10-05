@@ -170,6 +170,7 @@ public final class WavelogSyncEngine: ObservableObject {
                     toleranceSeconds: 300
                 )
                 for remoteRec in freshRecords {
+                    guard !appState.isSelfContact(remoteRec) else { continue }
                     let newModel = QSORecordModel(index: appState.qsoRecords.count + 1, fields: remoteRec)
                     appState.qsoRecords.append(newModel)
                     newImportedCount += 1

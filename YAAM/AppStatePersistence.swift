@@ -25,6 +25,15 @@ enum YAAMPersistenceError: LocalizedError {
 }
 
 extension AppState {
+    func isSelfContact(_ fields: [String: String]) -> Bool {
+        SelfContactPolicy.isSelfContact(fields: fields, profileCallsign: activeStationProfile?.normalizedCallsign ?? "")
+    }
+
+    func excludingSelfContacts(_ records: [QSORecordModel], profileCallsign: String? = nil) -> [QSORecordModel] {
+        let station = profileCallsign ?? activeStationProfile?.normalizedCallsign ?? ""
+        return records.filter { !SelfContactPolicy.isSelfContact(fields: $0.fields, profileCallsign: station) }
+    }
+
     var activeStationProfile: StationProfile? {
         guard let activeStationProfileID else { return nil }
         return stationProfiles.first { $0.id == activeStationProfileID }
@@ -117,6 +126,10 @@ extension AppState {
             try migrateLegacyMasterLogsIfNeeded(using: database)
             try migrateCountryNamesIfNeeded(using: database)
             let recoveredLegacyQSOCount = recoverLegacyNearDuplicateCleanupIfNeeded(using: database)
+            let removedSelfContacts = try database.removeSelfContacts()
+            if removedSelfContacts > 0 {
+                appendLog("Removed \(removedSelfContacts) impossible self-contact QSO(s) from all station profiles after creating a database backup.")
+            }
             stationProfiles = try database.loadStationProfiles()
             if !stationProfiles.contains(where: { $0.id == activeStationProfileID }) {
                 activeStationProfileID = stationProfiles.first?.id
@@ -341,15 +354,18 @@ extension AppState {
                 switch item.kind {
                 case .newQSO, .potentialConflict:
                     let fields = stationTaggedFields(item.incomingFields)
+                    guard !isSelfContact(fields) else { continue }
                     qsoRecords.append(QSORecordModel(index: qsoRecords.count + 1, fields: fields))
                     added += 1
                 case .confirmationUpdate:
                     guard let targetID = item.matchingRecordID,
                           let index = qsoRecords.firstIndex(where: { $0.id == targetID }) else { continue }
-                    qsoRecords[index].fields = ImportReviewAnalyzer.mergeUpdate(
+                    let mergedFields = ImportReviewAnalyzer.mergeUpdate(
                         incoming: item.incomingFields,
                         into: qsoRecords[index].fields
                     )
+                    guard !isSelfContact(mergedFields) else { continue }
+                    qsoRecords[index].fields = mergedFields
                     updated += 1
                 case .duplicate, .invalid:
                     continue

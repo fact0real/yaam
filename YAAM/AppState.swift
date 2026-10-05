@@ -2939,6 +2939,9 @@ class AppState: NSObject, ObservableObject {
         if let data = UserDefaults.standard.data(forKey: "cachedQRZAwards"),
            let cached = try? JSONDecoder().decode([QRZAwardSummary].self, from: data) {
             self.qrzAwardSummaries = cached
+            if !cached.isEmpty {
+                self.qrzAwardsStatus = "Showing saved QRZ award results. Refresh to check current status."
+            }
         }
     }
 
@@ -3851,9 +3854,9 @@ class AppState: NSObject, ObservableObject {
                 tableHeaders = workspace.headers.isEmpty
                     ? ["QSO_DATE", "TIME_ON", "CALL", "BAND", "MODE", "FREQ", "RST_SENT", "RST_RCVD", "COUNTRY", "COMMENT"]
                     : workspace.headers
-                qsoRecords = workspace.records.enumerated().map { offset, record in
+                qsoRecords = excludingSelfContacts(workspace.records.enumerated().map { offset, record in
                     QSORecordModel(id: record.id, index: offset + 1, fields: record.fields)
-                }
+                })
                 loadedWorkspaceProfileID = profileID
                 refreshEmailHistoryColumns()
                 appendLog("Loaded \(qsoRecords.count) QSOs for station profile \(currentStationCallsign) from the protected database.")
@@ -3877,7 +3880,7 @@ class AppState: NSObject, ObservableObject {
             guard let content = (try? String(contentsOfFile: url.path, encoding: .utf8)) ?? (try? String(contentsOfFile: url.path, encoding: .isoLatin1)) else { return }
             let (headers, records) = parseADIF(content: content)
             self.tableHeaders = headers
-            self.qsoRecords = records.enumerated().map { QSORecordModel(index: $0 + 1, fields: $1) }
+            self.qsoRecords = excludingSelfContacts(records.enumerated().map { QSORecordModel(index: $0 + 1, fields: $1) })
             self.refreshEmailHistoryColumns()
             self.appendLog("Master Logbook loaded successfully: \(self.qsoRecords.count) QSOs.")
         } else {
@@ -4266,7 +4269,7 @@ class AppState: NSObject, ObservableObject {
         }
 
         if changedFieldCount > 0 {
-            qsoRecords = mergedRecords
+            qsoRecords = excludingSelfContacts(mergedRecords)
         }
         return changedFieldCount
     }
@@ -4336,7 +4339,7 @@ class AppState: NSObject, ObservableObject {
                                 }
                             }
                             if summary.added > 0 || summary.updated > 0 || mergeResult.removedDuplicates > 0 {
-                                self.qsoRecords = mergeResult.records
+                                self.qsoRecords = self.excludingSelfContacts(mergeResult.records)
                                 self.autoSaveActiveWorkspace(
                                     replaceMissingRecords: mergeResult.removedDuplicates > 0
                                 )
@@ -4441,7 +4444,7 @@ class AppState: NSObject, ObservableObject {
                     : "Guest: \(url.deletingPathExtension().lastPathComponent) (SDR Control)"
                 selectedRecordIDs.removeAll()
                 tableHeaders = parsed.headers
-                qsoRecords = qsoModels
+                qsoRecords = excludingSelfContacts(qsoModels, profileCallsign: "")
                 refreshEmailHistoryColumns()
                 isLoading = false
                 var details = "Loaded \(parsed.records.count) \(parsed.format.title) QSO(s) in Guest Mode"
@@ -4508,7 +4511,7 @@ class AppState: NSObject, ObservableObject {
                     }
                 }
                 if summary.added > 0 || summary.updated > 0 || mergeResult.removedDuplicates > 0 {
-                    self.qsoRecords = mergeResult.records
+                    self.qsoRecords = self.excludingSelfContacts(mergeResult.records)
                     self.autoSaveActiveWorkspace(
                         replaceMissingRecords: mergeResult.removedDuplicates > 0
                     )
@@ -8519,6 +8522,14 @@ class AppState: NSObject, ObservableObject {
 
     func updateCell(recordID: UUID, header: String, newValue: String) {
         if let idx = qsoRecords.firstIndex(where: { $0.id == recordID }) {
+            if header == "CALL" || header == "STATION_CALLSIGN" {
+                var proposed = qsoRecords[idx].fields
+                proposed[header] = newValue
+                guard !isSelfContact(proposed) else {
+                    showNativeAlert(title: "Invalid contact", message: "A station cannot log a QSO with its own callsign.")
+                    return
+                }
+            }
             let oldVal = qsoRecords[idx][header]
             let call = qsoRecords[idx]["CALL"]
             qsoRecords[idx][header] = newValue

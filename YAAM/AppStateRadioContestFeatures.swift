@@ -195,6 +195,7 @@ extension AppState {
         }
 
         fields = stationTaggedFields(fields)
+        guard !isSelfContact(fields) else { return }
         let newRecord = QSORecordModel(index: qsoRecords.count + 1, fields: fields)
 
         guard !qsoRecords.contains(where: { $0.uniqueKey == newRecord.uniqueKey }) else {
@@ -258,6 +259,7 @@ extension AppState {
         ]
 
         fields = stationTaggedFields(fields)
+        guard !isSelfContact(fields) else { return }
         let newRecord = QSORecordModel(index: qsoRecords.count + 1, fields: fields)
 
         guard !qsoRecords.contains(where: { $0.uniqueKey == newRecord.uniqueKey }) else {
@@ -487,6 +489,7 @@ extension AppState {
         }
 
         fields = stationTaggedFields(fields)
+        guard !isSelfContact(fields) else { throw QuickLogValidationError.selfContact }
         let newRecord = QSORecordModel(index: qsoRecords.count + 1, fields: fields)
 
         guard !qsoRecords.contains(where: { $0.uniqueKey == newRecord.uniqueKey }) else {

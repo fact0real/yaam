@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.37.29 — 2026-10-05
+
+- Reject self-contact QSOs at logging and edit entry points, and filter incoming or merged records before they reach log views and statistics.
+
+## 1.37.28 — 2026-10-05
+
+- Remove a recursive log change observer that could crash the app during startup.
+
+## 1.37.27 — 2026-10-05
+
+- Repair QRZ Awards navigation, report QRZ refresh failures promptly, and keep saved results clearly labeled until refreshed.
+- Show an award as received only when QRZ reports it as issued; label combined logbook progress as a local estimate.
+- Back up the active database before removing self-contact QSOs from every station profile; reject future self-contact entries while preserving contacts made under a different station callsign.
+
 ## 1.37.26 — 2026-10-05
 
 - Bound FT8 decoding to the codec's 50-message table to prevent a busy WebSDR window from stalling reception.

@@ -911,7 +911,7 @@ extension AppState {
                 || !mergeResult.lotwUnmatchedRecords.isEmpty
                 || !mergeResult.qrzUnmatchedRecords.isEmpty
             if hasMergeChanges {
-                self.qsoRecords = mergeResult.records
+                self.qsoRecords = self.excludingSelfContacts(mergeResult.records)
                 let changedRecords = mergeResult.records.filter { mergeResult.changedRecordIDs.contains($0.id) }
                 self.rememberConfirmedRecords(changedRecords)
                 self.newlyConfirmedRecordIDs.formUnion(mergeResult.changedRecordIDs)
@@ -1132,7 +1132,7 @@ extension AppState {
         }
 
         if added > 0 {
-            qsoRecords = workingRecords
+            qsoRecords = excludingSelfContacts(workingRecords)
             let remoteHeaders = ["LOTW_QSL_RCVD", "QRZLOG_QSL_RCVD", "QSL_RCVD", "APP_YAAM_REMOTE_CONFIRMATION_IMPORTED"]
             let missingHeaders = remoteHeaders.filter { !tableHeaders.contains($0) }
             if !missingHeaders.isEmpty {

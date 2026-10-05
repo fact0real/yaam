@@ -659,6 +659,7 @@ final class MultiRigFT8Hub: ObservableObject {
         if !grid.isEmpty { fields["GRIDSQUARE"] = grid.uppercased() }
 
         fields = appState.stationTaggedFields(fields)
+        guard !appState.isSelfContact(fields) else { return }
         let newRecord = QSORecordModel(index: appState.qsoRecords.count + 1, fields: fields)
 
         guard !appState.qsoRecords.contains(where: { $0.uniqueKey == newRecord.uniqueKey }) else {

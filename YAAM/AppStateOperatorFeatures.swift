@@ -197,6 +197,7 @@ extension AppState {
         }
 
         fields = stationTaggedFields(fields)
+        guard !isSelfContact(fields) else { throw QuickLogValidationError.selfContact }
         let record = QSORecordModel(index: qsoRecords.count + 1, fields: fields)
         guard !qsoRecords.contains(where: { $0.uniqueKey == record.uniqueKey }) else {
             throw QuickLogValidationError.exactDuplicate
@@ -258,6 +259,7 @@ extension AppState {
 
     @MainActor
     func addFieldQSO(_ record: QSORecordModel) {
+        guard !isSelfContact(record.fields) else { return }
         var rec = record
         rec.index = qsoRecords.count + 1
         qsoRecords.append(rec)
