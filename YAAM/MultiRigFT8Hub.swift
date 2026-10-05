@@ -354,8 +354,8 @@ final class MultiRigSlot: ObservableObject, Identifiable {
         guard isEnabled else { return }
 
         // Configure callsign & grid identity
-        if let call = appState?.currentStationCallsign, !call.isEmpty {
-            let grid = appState?.activeStationProfile?.normalizedGrid ?? "LM55"
+        if let call = appState?.currentStationCallsign, !call.isEmpty, call != "DEFAULT" {
+            let grid = appState?.activeStationProfile?.normalizedGrid ?? ""
             engine.configureStation(callsign: call, grid: grid)
         }
 

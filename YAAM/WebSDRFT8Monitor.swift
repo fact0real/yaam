@@ -441,7 +441,6 @@ final class WebSDRFT8Monitor: ObservableObject {
     @Published private(set) var isMonitoring = false
     @Published private(set) var status = "Ready to decode system playback audio."
     @Published private(set) var phaseSeconds: Double?
-    @Published private(set) var clockOffsetSeconds: Double?
     @Published private(set) var receiverStatuses: [String: String] = [:]
     @Published private(set) var receiverHealth: [String: Bool] = [:]
     private var receiverHealthCheckedAt: [String: Date] = [:]
@@ -472,7 +471,6 @@ final class WebSDRFT8Monitor: ObservableObject {
     private var activeTapIDs: [String: Int] = [:]
     private var liveStreamGeneration: [String: Int] = [:]
     private var decodeTask: Task<Void, Never>?
-    private var clockTask: Task<Void, Never>?
     private var noDecodeTask: Task<Void, Never>?
     private var activeTarget = ""
     private var activeReceiverName = ""
@@ -521,6 +519,12 @@ final class WebSDRFT8Monitor: ObservableObject {
         decodeRevision &+= 1
         manualDialHz = nil
         status = "Preset \(WebSDRFrequency.formattedMHz(dialHz)) MHz USB · \(selectedBand). Start receive when ready."
+    }
+
+    func clearMessages() {
+        messages.removeAll()
+        rebuildConsensus()
+        decodeRevision &+= 1
     }
 
     var directedMessages: [WebSDRDecodedMessage] { messages.filter(\.addressedToTarget) }
@@ -595,12 +599,6 @@ final class WebSDRFT8Monitor: ObservableObject {
             ? .webSDR : receiver.tuningStyle
         return style.tunedURL(base, dialHz: dialHz)
     }
-    var estimatedDelayModuloCycle: Double? {
-        guard let phaseSeconds else { return nil }
-        let corrected = phaseSeconds + (clockOffsetSeconds ?? 0)
-        return (corrected + 15).truncatingRemainder(dividingBy: 15)
-    }
-
     func refreshInputs() { audioInputs = AudioDevices.inputDevices() }
     func openReceiver() { NSWorkspace.shared.open(activeReceiverURL ?? receiver.url) }
 
@@ -766,7 +764,6 @@ final class WebSDRFT8Monitor: ObservableObject {
         noDecodeWarning = nil
         seenIDs.removeAll()
         phaseSeconds = nil
-        clockOffsetSeconds = nil
         activeTarget = call
         activeReceiverName = receiver.id == "utah" ? "Utah #\(activeUtahReceiver?.number ?? 2)" : receiver.name
         sessionID = UUID()
@@ -782,7 +779,6 @@ final class WebSDRFT8Monitor: ObservableObject {
             isMonitoring = true
             status = "Opening \(endpoints.count) WebSDR receiver\(endpoints.count == 1 ? "" : "s")…"
             for endpoint in endpoints { startAutomaticEndpoint(endpoint, session: startedSession) }
-            clockTask = Task { await synchronizeClock(session: startedSession) }
             scheduleNoDecodeWarning(session: startedSession)
             return
         }
@@ -800,7 +796,6 @@ final class WebSDRFT8Monitor: ObservableObject {
         }
         isMonitoring = true
         status = "Listening to \(selectedInputUID == Self.systemAudioUID ? "system audio" : "selected input")…"
-        clockTask = Task { await synchronizeClock(session: startedSession) }
         scheduleNoDecodeWarning(session: startedSession)
         decodeTask = Task.detached(priority: .userInitiated) { [weak self] in
             var previous: AudioSlot?
@@ -850,8 +845,6 @@ final class WebSDRFT8Monitor: ObservableObject {
         noDecodeWarning = nil
         decodeTask?.cancel()
         decodeTask = nil
-        clockTask?.cancel()
-        clockTask = nil
         loopbackCapture?.stop()
         loopbackCapture = nil
         systemCapture?.stop()
@@ -1026,7 +1019,8 @@ final class WebSDRFT8Monitor: ObservableObject {
         let worker = Task.detached(priority: .utility) {
             let samples = WebSDRWAV.samples(at12kHz: recording.wav)
             let direct = (try? FT8Codec.decode(samples: samples, sampleRate: 12_000,
-                                               protocol: .ft8, maxMessages: 64)) ?? []
+                                               protocol: .ft8,
+                                               maxMessages: WebSDRCycleDecoder.maxMessagesPerWindow)) ?? []
             let across = previous.map {
                 WebSDRCycleDecoder.decode(previous: $0.samples, next: samples, sampleRate: 12_000)
             } ?? []
@@ -1158,8 +1152,6 @@ final class WebSDRFT8Monitor: ObservableObject {
         systemCapture = nil
         loopbackCapture = nil
         decodeTask = nil
-        clockTask?.cancel()
-        clockTask = nil
     }
 
     private func consume(_ message: FT8Message, observedAt: Date,
@@ -1195,26 +1187,4 @@ final class WebSDRFT8Monitor: ObservableObject {
         status = "\(messages.count) decoded · \(targetMatches.count) mention \(activeTarget)"
     }
 
-    private func synchronizeClock(session: UUID) async {
-        var observations: [(offset: Double, roundTrip: Double)] = []
-        for _ in 0..<3 {
-            var request = URLRequest(url: URL(string: "https://time.cloudflare.com/")!)
-            request.httpMethod = "HEAD"
-            request.timeoutInterval = 4
-            let sent = Date()
-            guard let (_, response) = try? await URLSession.shared.data(for: request),
-                  let http = response as? HTTPURLResponse,
-                  let header = http.value(forHTTPHeaderField: "Date") else { continue }
-            let received = Date()
-            let formatter = DateFormatter()
-            formatter.locale = Locale(identifier: "en_US_POSIX")
-            formatter.timeZone = TimeZone(secondsFromGMT: 0)
-            formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
-            guard let server = formatter.date(from: header) else { continue }
-            let midpoint = sent.addingTimeInterval(received.timeIntervalSince(sent) / 2)
-            observations.append((server.timeIntervalSince(midpoint), received.timeIntervalSince(sent)))
-        }
-        guard session == sessionID, let best = observations.min(by: { $0.roundTrip < $1.roundTrip }) else { return }
-        clockOffsetSeconds = best.offset
-    }
 }

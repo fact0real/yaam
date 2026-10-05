@@ -794,7 +794,7 @@ struct QRZAwardsView: View {
             ["Y","V","C","CONFIRMED"].contains($0["LOTW_QSL_RCVD"].uppercased())
         }
         let dxcc   = Set(lotwRecs.map { $0["DXCC"] }.filter { !$0.isEmpty }).count
-        let states = Set(lotwRecs.map { $0["STATE"].uppercased() }.filter { !$0.isEmpty }).count
+        let states = Set(lotwRecs.filter { AwardEngine.countsAsUSState($0.fields) }.map { $0["STATE"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased() }).count
         let grids  = Set(lotwRecs.filter { $0["BAND"].lowercased() == "6m" }.map {
             ($0["GRIDSQUARE"].isEmpty ? $0["GRID"] : $0["GRIDSQUARE"]).uppercased()
         }.filter { !$0.isEmpty }).count
@@ -1055,7 +1055,7 @@ struct QRZAwardsView: View {
 
         let total    = records.count
         let dxccSet  = Set(records.map { $0["DXCC"] }.filter { !$0.isEmpty && $0 != "0" && $0 != "UNKNOWN" })
-        let stateSet = Set(records.map { $0["STATE"].uppercased() }.filter { !$0.isEmpty })
+        let stateSet = Set(records.filter { AwardEngine.countsAsUSState($0.fields) }.map { $0["STATE"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased() })
         let contSet  = Set(records.map { $0["CONT"].uppercased() }.filter { !$0.isEmpty })
         let gridSet  = Set(records.map {
             ($0["GRIDSQUARE"].isEmpty ? $0["GRID"] : $0["GRIDSQUARE"]).prefix(4).uppercased()
@@ -1133,7 +1133,7 @@ struct QRZAwardsView: View {
 
     private func buildLogbookAwards(from records: [QSORecordModel]) -> [QRZAwardSummary] {
         let dxccSet  = Set(records.map { $0["DXCC"] }.filter { !$0.isEmpty })
-        let stateSet = Set(records.map { $0["STATE"].uppercased() }.filter { !$0.isEmpty })
+        let stateSet = Set(records.filter { AwardEngine.countsAsUSState($0.fields) }.map { $0["STATE"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased() })
         let contSet  = Set(records.map { $0["CONT"].uppercased() }.filter { !$0.isEmpty })
         let gridSet  = Set(records.map {
             ($0["GRIDSQUARE"].isEmpty ? $0["GRID"] : $0["GRIDSQUARE"]).prefix(4).uppercased()
@@ -1176,7 +1176,7 @@ struct QRZAwardsView: View {
                 allConfirmedDXCC.insert(dxcc)
             }
             let st = record["STATE"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-            if !st.isEmpty {
+            if AwardEngine.countsAsUSState(record.fields) {
                 allConfirmedStates.insert(st)
             }
             let grid = (record["GRIDSQUARE"].isEmpty ? record["GRID"] : record["GRIDSQUARE"]).prefix(4).uppercased()

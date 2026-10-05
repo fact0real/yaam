@@ -33,7 +33,11 @@ enum WebSDRConsensusBuilder {
                 guard abs(delta) <= 4 else { continue }
                 votes[delta, default: []].insert(text)
             }
-            if let winner = votes.max(by: { $0.value.count < $1.value.count }), winner.value.count >= 2 {
+            if let winner = votes.max(by: {
+                if $0.value.count != $1.value.count { return $0.value.count < $1.value.count }
+                if abs($0.key) != abs($1.key) { return abs($0.key) > abs($1.key) }
+                return $0.key > $1.key
+            }), winner.value.count >= 2 {
                 offsets[receiverID] = winner.key
             }
         }

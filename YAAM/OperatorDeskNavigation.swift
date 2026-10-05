@@ -270,7 +270,7 @@ nonisolated enum OperatorDeskDestination: String, CaseIterable, Identifiable {
         case .shackClock: "HamClock Mission Control"
         case .globeGrids: "3D Globe Grid Tracker GridTracker"
         case .signalFootprint: "PSKReporter RBN Reverse Beacon Network Signal Footprint Where Am I Heard Propagation"
-        case .hamTracker: "HamTracker Digital Callsign Monitor PSKReporter MQTT FT8 FT4 DXCluster Live Activity Track"
+        case .hamTracker: "HamTracker Digital Callsign Monitor WebSDR KiwiSDR PSKReporter MQTT FT8 FT4 DXCluster Live Activity Track"
         default: ""
         }
         let text = "\(title) \(detail) \(group.title) \(aliases)"

@@ -544,12 +544,16 @@ final class FT8EngineService: ObservableObject {
 
     /// Uses the already connected IC-7300MK2 path and the operator's established
     /// TX parity/audio routing. Receive-side WebSDR timestamps are not used for TX.
-    func prepareWebSDRReply(_ text: String, targetCallsign: String, grid: String,
+    func prepareWebSDRReply(_ text: String, stationCallsign: String, grid: String,
                             dialHz: UInt64, radio: IcomNetworkRadio,
                             usbOutputUID: String?) -> String? {
         guard operatingProtocol == .ft8 else { return "Select FT8 in Radio & Digital first." }
         guard !isTransmitScheduled else {
             return "A transmission is already queued; finish or cancel it first."
+        }
+        if let issue = WebSDRReplyGuard.dialIssue(dialHz: dialHz,
+                                                  ft8DialsHz: FT8BandPreset.common.map(\.frequencyHz)) {
+            return issue
         }
         let lanReady = radio.state.isConnected && radio.selectedModel == .ic7300MK2
         let usbReady = IcomUSBRadioDriver.shared.isConnected &&
@@ -568,7 +572,7 @@ final class FT8EngineService: ObservableObject {
         } else {
             return "Connect and select IC-7300MK2 over Icom LAN or USB CI-V in FT8 Station."
         }
-        configureStation(callsign: targetCallsign, grid: grid)
+        configureStation(callsign: stationCallsign, grid: grid)
         dialFrequencyHz = dialHz
         autoSequenceEnabled = false
         txText = text.uppercased()

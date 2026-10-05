@@ -328,7 +328,7 @@ struct QRZIncomingBulkEmailView: View {
                 if recipients[index].name == call,
                    let fetchedName = contact.name?.trimmingCharacters(in: .whitespacesAndNewlines),
                    !fetchedName.isEmpty {
-                    recipients[index].name = fetchedName
+                    recipients[index].name = appState.formatFirstName(from: fetchedName, fallbackCallsign: call)
                 }
                 recipients[index].isLookingUp = false
             }

@@ -5,6 +5,9 @@ import FT8Codec
 /// FT8Codec decodes only the first slot of a multi-slot buffer, so each
 /// candidate 13.5-second window must be passed to it separately.
 enum WebSDRCycleDecoder {
+    /// The pinned FT8 decoder has a 50-entry de-duplication table. A larger
+    /// request can leave its native loop unable to make progress.
+    nonisolated static let maxMessagesPerWindow = 50
     struct Detection {
         let message: FT8Message
         /// Seconds after the beginning of the first recording's audio.
@@ -27,7 +30,7 @@ enum WebSDRCycleDecoder {
             if Task<Never, Never>.isCancelled { return [] }
             let window = Array(joined[start..<(start + windowCount)])
             guard let messages = try? FT8Codec.decode(samples: window, sampleRate: rate,
-                                                     protocol: .ft8, maxMessages: 64) else { continue }
+                                                     protocol: .ft8, maxMessages: maxMessagesPerWindow) else { continue }
             for message in messages {
                 let offset = Double(start) / Double(rate) + Double(message.timeSeconds)
                 guard offset >= -0.5, offset <= Double(joined.count) / Double(rate) else { continue }

@@ -26,6 +26,19 @@ struct WebSDRConsensusRegression {
         precondition(repeated.count == 3,
                      "A repeating CQ alone must not claim cross-receiver consensus")
 
+        let tied = WebSDRConsensusBuilder.build([
+            sample("a-x1", "a", 0, "K1AAA W1BBB -10"),
+            sample("a-x2", "a", 1, "K1CCC W1DDD -09"),
+            sample("a-y1", "a", 2, "K1EEE W1FFF -08"),
+            sample("a-y2", "a", 3, "K1GGG W1HHH -07"),
+            sample("b-x1", "b", -1, "K1AAA W1BBB -10"),
+            sample("b-x2", "b", 0, "K1CCC W1DDD -09"),
+            sample("b-y1", "b", 3, "K1EEE W1FFF -08"),
+            sample("b-y2", "b", 4, "K1GGG W1HHH -07")
+        ], primaryReceiverID: "a")
+        precondition(tied.filter { $0.receiverIDs.count == 2 }.count == 2,
+                     "Equal votes must use a stable receiver offset")
+
         let equalRank = WebSDRConsensusBuilder.build([
             sample("z", "a", 0, "CQ Z9ZZZ ZZ99"),
             sample("a", "a", 0, "CQ A1AAA AA00")

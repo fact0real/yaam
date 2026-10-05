@@ -62,7 +62,9 @@ enum QRZIncomingBulkMail {
         let dates = recipient.qsoDates.isEmpty
             ? "the date shown in your QRZ request"
             : recipient.qsoDates.joined(separator: ", ")
-        return template
+        // With no known name the default greeting would read "Hi K1ABC (K1ABC),".
+        let noName = greeting.isEmpty || greeting.caseInsensitiveCompare(recipient.callsign) == .orderedSame
+        return (noName ? template.replacingOccurrences(of: "{name} ({callsign})", with: "{callsign}") : template)
             .replacingOccurrences(of: "{name}", with: greeting.isEmpty ? recipient.callsign : greeting)
             .replacingOccurrences(of: "{callsign}", with: recipient.callsign)
             .replacingOccurrences(of: "{qso_dates}", with: dates)

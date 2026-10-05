@@ -18,8 +18,7 @@ enum WebSDRFrequency {
 
     static func resolve(_ text: String, receiverBands: Set<String>,
                         antennaBands: Set<String>? = nil) -> Result<Selection, Error> {
-        let input = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: ",", with: ".")
+        let input = asciiFrequencyText(text).replacingOccurrences(of: ",", with: ".")
         guard let mhz = Double(input), mhz.isFinite, mhz > 0,
               input.filter({ $0 == "." }).count <= 1,
               let dialHz = Int(exactly: (mhz * 1_000_000).rounded()),
@@ -36,6 +35,35 @@ enum WebSDRFrequency {
             return .failure(.antennaDoesNotList(band))
         }
         return .success(.init(band: band, dialHz: dialHz))
+    }
+
+    /// Maps Persian (U+06F0...U+06F9) and Arabic-Indic (U+0660...U+0669) digits and the Arabic
+    /// decimal separator (U+066B) to ASCII, maps the Arabic comma (U+060C) to ",", which `resolve`
+    /// then treats like any other comma, drops the bidirectional marks U+200E, U+200F and U+061C
+    /// wherever they appear, trims, and drops a trailing "MHz" in any letter case.
+    private static func asciiFrequencyText(_ text: String) -> String {
+        var ascii = ""
+        for scalar in text.unicodeScalars {
+            switch scalar.value {
+            case 0x06F0...0x06F9:
+                ascii.unicodeScalars.append(Unicode.Scalar(UInt8(0x30 + scalar.value - 0x06F0)))
+            case 0x0660...0x0669:
+                ascii.unicodeScalars.append(Unicode.Scalar(UInt8(0x30 + scalar.value - 0x0660)))
+            case 0x066B:
+                ascii.append(".")
+            case 0x060C:
+                ascii.append(",")
+            case 0x200E, 0x200F, 0x061C:
+                continue
+            default:
+                ascii.unicodeScalars.append(scalar)
+            }
+        }
+        ascii = ascii.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let unit = ascii.range(of: "mhz", options: [.caseInsensitive, .backwards, .anchored]) {
+            ascii.removeSubrange(unit)
+        }
+        return ascii.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     static func formattedMHz(_ dialHz: Int) -> String {

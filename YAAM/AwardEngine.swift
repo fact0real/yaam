@@ -140,7 +140,7 @@ nonisolated enum AwardEngine {
             }
 
             let state = record["STATE"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-            if validUSStates.contains(state) {
+            if countsAsUSState(record.fields) {
                 statesWorked.insert(state)
                 if confirmed { statesConfirmed.insert(state) }
             }
@@ -259,7 +259,22 @@ nonisolated enum AwardEngine {
         return grids
     }
 
+    /// WAS counts a QSO only when STATE is one of the 50 US state codes and DXCC is 291 (USA),
+    /// 6 (Alaska) or 110 (Hawaii), or is unknown. A subdivision code of another entity may be the
+    /// same two letters as a US state, so any other DXCC number rules the QSO out. An empty, 0,
+    /// UNKNOWN or non-numeric DXCC is treated as unknown and the state counts: the FT8,
+    /// digital-mode and multi-rig QSO builders write no DXCC, and the quick-log DXCC box takes
+    /// free text.
+    static func countsAsUSState(_ fields: [String: String]) -> Bool {
+        let state = (fields["STATE"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard validUSStates.contains(state) else { return false }
+        guard let dxcc = cleanEntity(fields["DXCC"] ?? "") else { return true }
+        guard let entity = Int(dxcc) else { return true }
+        return usStateEntities.contains(entity)
+    }
+
     private static let validContinents: Set<String> = ["AF", "AS", "EU", "NA", "OC", "SA"]
+    private static let usStateEntities: Set<Int> = [291, 6, 110]
     private static let validUSStates: Set<String> = [
         "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", "HI", "ID", "IL", "IN", "IA", "KS",
         "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY",

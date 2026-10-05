@@ -109,12 +109,25 @@ public final class LoTWActivityDatabase: ObservableObject {
             request.setValue("YAAM-macOS-Logbook/1.0", forHTTPHeaderField: "User-Agent")
 
             let (data, response) = try await URLSession.shared.data(for: request)
-            guard let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else {
-                throw NSError(domain: "LoTWActivityDatabase", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed to download from ARRL (HTTP status)"])
+            let statusCode = (response as? HTTPURLResponse)?.statusCode
+            guard let statusCode, (200...299).contains(statusCode) else {
+                let detail = statusCode.map { "HTTP \($0)" } ?? "no HTTP response"
+                throw NSError(domain: "LoTWActivityDatabase", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed to download from ARRL (\(detail))"])
+            }
+
+            // A 2xx reply that is not the LoTW list (captive portal, maintenance page) must not replace the
+            // cache file or the map in memory: parse first and keep the previous data unless rows were found.
+            guard let newMap = Self.parseMap(data), !newMap.isEmpty else {
+                throw NSError(domain: "LoTWActivityDatabase", code: 2, userInfo: [NSLocalizedDescriptionKey: "ARRL returned a file that is not the LoTW activity list; keeping the previous data."])
+            }
+            let previousCount = lock.withLock { activityMap.count }
+            // A truncated but syntactically valid CSV must not replace a full cache.
+            if previousCount >= 10_000 && newMap.count < previousCount / 2 {
+                throw NSError(domain: "LoTWActivityDatabase", code: 3, userInfo: [NSLocalizedDescriptionKey: "ARRL returned an incomplete LoTW activity list; keeping the previous data."])
             }
 
             try data.write(to: cacheFileURL, options: .atomic)
-            let count = parseCSVData(data)
+            let count = install(newMap)
 
             DispatchQueue.main.async {
                 self.lastDatabaseUpdate = Date()
@@ -134,8 +147,27 @@ public final class LoTWActivityDatabase: ObservableObject {
 
     @discardableResult
     public func parseCSVData(_ data: Data) -> Int {
+        guard let map = Self.parseMap(data) else { return 0 }
+        return install(map)
+    }
+
+    private func install(_ map: [String: Date]) -> Int {
+        let total = map.count
+        lock.lock()
+        self.activityMap = map
+        lock.unlock()
+
+        DispatchQueue.main.async {
+            self.userCount = total
+            self.isLoaded = true
+        }
+
+        return total
+    }
+
+    private static func parseMap(_ data: Data) -> [String: Date]? {
         guard let content = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) else {
-            return 0
+            return nil
         }
 
         var map: [String: Date] = [:]
@@ -164,17 +196,7 @@ public final class LoTWActivityDatabase: ObservableObject {
             }
         }
 
-        let total = map.count
-        lock.lock()
-        self.activityMap = map
-        lock.unlock()
-
-        DispatchQueue.main.async {
-            self.userCount = total
-            self.isLoaded = true
-        }
-
-        return total
+        return map
     }
 
     private static func parseFastDate(_ str: String, calendar: Calendar, components: inout DateComponents) -> Date? {

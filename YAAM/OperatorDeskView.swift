@@ -3010,11 +3010,22 @@ private struct DXClusterPanel: View {
                             Text("Updating from ARRL...").font(.caption).foregroundStyle(.secondary)
                         } else {
                             Button("Update LoTW Database Now") {
-                                Task { try? await lotwDB.updateFromWeb() }
+                                Task {
+                                    do {
+                                        _ = try await lotwDB.updateFromWeb()
+                                    } catch {
+                                        appState.playActivitySound(.failure)
+                                    }
+                                }
                             }
                             .buttonStyle(.bordered)
                             .controlSize(.small)
                         }
+                    }
+                    if let message = lotwDB.lastErrorMessage {
+                        Text(message)
+                            .font(.caption)
+                            .foregroundStyle(.red)
                     }
                 }
                 .padding(4)

@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.37.26 — 2026-10-05
+
+- Bound FT8 decoding to the codec's 50-message table to prevent a busy WebSDR window from stalling reception.
+- Restrict WebSDR replies to the active station callsign, configured grid, and standard FT8 dial; clear prepared replies after retuning.
+- Correct QRZ award analysis and WAS state counting, secure QRZ credential entry to HTTPS QRZ pages, and improve QRZ bulk email greetings.
+- Accept Persian and Arabic-Indic digits in the WebSDR dial, preserve the LoTW activity cache on invalid or truncated updates, and show update errors.
+- Show single-receiver status, make consensus tie votes deterministic, improve WebSDR search, and remove unused network clock checks.
+
 ## 1.37.25 — 2026-10-03
 
 - Add 17 user-supplied receivers in Russia, South Korea, Saudi Arabia, Israel, and the United Kingdom to the WebSDR picker; place the Cherepovets receiver under Russia.

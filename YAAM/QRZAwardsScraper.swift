@@ -81,6 +81,11 @@ final class QRZAwardsScraper: NSObject, WKNavigationDelegate {
         webView.load(QRZWebKitSession.browserLikeRequest(url: url, timeoutInterval: 30))
     }
 
+    private static func isTrustedQRZURL(_ url: URL) -> Bool {
+        guard url.scheme?.lowercased() == "https", let host = url.host?.lowercased() else { return false }
+        return host == "qrz.com" || host.hasSuffix(".qrz.com")
+    }
+
     private func finish(_ result: QRZAwardsFetchResult) {
         timeoutTask?.cancel()
         timeoutTask = nil
@@ -139,6 +144,10 @@ final class QRZAwardsScraper: NSObject, WKNavigationDelegate {
 
     private func inspectLoginOrLogbook() {
         guard continuation != nil else { return }
+        guard let url = webView.url, Self.isTrustedQRZURL(url) else {
+            finish(QRZAwardsFetchResult(awards: [], message: "QRZ login left the secure QRZ website; credentials were not submitted."))
+            return
+        }
 
         webView.callAsyncJavaScript(
             Self.loginInspectionScript,
@@ -266,6 +275,10 @@ final class QRZAwardsScraper: NSObject, WKNavigationDelegate {
                     .find(function(el) { return visible(el) && pattern.test(text(el)); });
             }
 
+            if (location.protocol !== "https:" ||
+                !(location.hostname === "qrz.com" || location.hostname.endsWith(".qrz.com"))) {
+                return { action: "untrusted-page", url: location.href };
+            }
             var body = text(document.body);
             var url = location.href;
             var awardHeaders = document.querySelectorAll('#accordion .awardContainerHeader').length;
@@ -704,7 +717,7 @@ final class QRZAwardsScraper: NSObject, WKNavigationDelegate {
     function parseAnalysis(descriptor, rawHTML, issued) {
         var doc = new DOMParser().parseFromString(rawHTML, "text/html");
         var fullText = normalizedText(doc.body);
-        var loginResponse = !doc.querySelector("#login-form, input[name='username'], input[name='password']") || /Please Sign In to QRZ/i.test(fullText);
+        var loginResponse = !!doc.querySelector("#login-form, input[name='username'], input[name='password']") || /Please Sign In to QRZ/i.test(fullText);
         if (loginResponse) { throw new Error("QRZ session expired during award analysis"); }
 
         var ratio = findRatio(doc, fullText);
@@ -715,7 +728,7 @@ final class QRZAwardsScraper: NSObject, WKNavigationDelegate {
             percent = explicitPercent(rawHTML, doc, descriptor.id);
         }
 
-        var earned = !issued;
+        var earned = !!issued;
         var qualified = !earned && /congratulations|apply now|qualified|eligible to apply|you have achieved/i.test(fullText);
         if (earned) { percent = 100; }
         var progressAvailable = percent !== null;

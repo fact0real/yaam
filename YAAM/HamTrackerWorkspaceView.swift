@@ -69,6 +69,7 @@ public struct HamTrackerWorkspaceView: View {
     @AppStorage("icomNetworkModel") private var icomModelName = IcomNetworkModel.ic7300MK2.rawValue
     @State private var icomPassword = ""
     @State private var selectedWebSDRReply: WebSDRReplyPlan?
+    @State private var webSDRReplyDialHz: Int?
     @State private var webSDRReplyDraft = ""
     @State private var webSDRReplyStatus = ""
     @State private var selectedWebSDRTxParity: SlotParity = .even
@@ -194,8 +195,7 @@ public struct HamTrackerWorkspaceView: View {
         }
         .onChange(of: engine.targetCallsign) { _, _ in
             webSDR.stop()
-            selectedWebSDRReply = nil
-            webSDRReplyDraft = ""
+            discardWebSDRReply()
         }
     }
 
@@ -1475,10 +1475,12 @@ public struct HamTrackerWorkspaceView: View {
                 Text("\(state) · log").font(.system(size: 9))
                     .foregroundStyle(.secondary)
             }
-            if let plan = WebSDRReplyPlanner.plan(for: message.text,
+            if targetIsOwnCallsign,
+               let plan = WebSDRReplyPlanner.plan(for: message.text,
                                                   targetCallsign: engine.targetCallsign) {
                 Button {
                     selectedWebSDRReply = plan
+                    webSDRReplyDialHz = webSDR.dialHz
                     webSDRReplyDraft = plan.draft
                     selectedWebSDRTxParity = appState.ft8Engine.txParity
                     webSDRReplyStatus = ""
@@ -1784,6 +1786,8 @@ public struct HamTrackerWorkspaceView: View {
             }
             .onChange(of: webSDR.selectedReceiverID) { _, _ in
                 webSDR.stop()
+                webSDR.clearMessages()
+                discardWebSDRReply()
                 webSDR.normalizeSelection()
                 webSDR.checkReceiver(webSDR.receiver.id, url: webSDR.receiver.url)
                 webSDRFrequencyDraft = WebSDRFrequency.formattedMHz(webSDR.dialHz)
@@ -1798,6 +1802,8 @@ public struct HamTrackerWorkspaceView: View {
             .frame(width: 150)
             .onChange(of: webSDR.selectedBand) { _, _ in
                 webSDR.stop()
+                webSDR.clearMessages()
+                discardWebSDRReply()
                 webSDR.normalizeSelection()
                 webSDR.checkReceiver(webSDR.receiver.id, url: webSDR.receiver.url)
                 webSDRFrequencyDraft = WebSDRFrequency.formattedMHz(webSDR.dialHz)
@@ -1813,6 +1819,8 @@ public struct HamTrackerWorkspaceView: View {
                 .frame(width: 185)
                 .onChange(of: webSDR.selectedUtahReceiver) { _, _ in
                     webSDR.stop()
+                    webSDR.clearMessages()
+                    discardWebSDRReply()
                     if let receiver = webSDR.activeUtahReceiver {
                         webSDR.checkReceiver("utah-\(receiver.number)", url: receiver.url)
                     }
@@ -1869,6 +1877,7 @@ public struct HamTrackerWorkspaceView: View {
             if webSDR.manualDialHz != nil {
                 Button("Use band preset") {
                     webSDR.usePresetFrequency()
+                    discardWebSDRReply()
                     webSDRFrequencyDraft = WebSDRFrequency.formattedMHz(webSDR.dialHz)
                     webSDRFrequencyError = ""
                 }
@@ -1892,6 +1901,7 @@ public struct HamTrackerWorkspaceView: View {
     private func applyWebSDRFrequency() {
         webSDRFrequencyError = webSDR.applyManualFrequency(webSDRFrequencyDraft) ?? ""
         if webSDRFrequencyError.isEmpty {
+            discardWebSDRReply()
             webSDRFrequencyDraft = WebSDRFrequency.formattedMHz(webSDR.dialHz)
         }
     }
@@ -1973,7 +1983,7 @@ public struct HamTrackerWorkspaceView: View {
                 }
                 .font(.caption2)
             }
-            if webSDR.selectedAutomaticEndpoints.count > 1 {
+            if !webSDR.selectedAutomaticEndpoints.isEmpty {
                 Text(webSDR.selectedAutomaticEndpoints.map {
                     "\($0.flag) \($0.name): \(webSDR.receiverStatuses[$0.id] ?? "Connecting…")"
                 }.joined(separator: "   ·   "))
@@ -2138,34 +2148,63 @@ public struct HamTrackerWorkspaceView: View {
         .frame(width: 430)
     }
 
+    private var targetIsOwnCallsign: Bool {
+        WebSDRReplyGuard.targetIsOwnCallsign(engine.targetCallsign,
+                                             ownCallsign: appState.currentStationCallsign)
+    }
+
+    private func discardWebSDRReply() {
+        selectedWebSDRReply = nil
+        webSDRReplyDialHz = nil
+        webSDRReplyDraft = ""
+    }
+
     private func followLatestWebSDRReply() {
+        guard targetIsOwnCallsign else { return }
         guard let plan = webSDR.consensusTargetMatches.lazy.compactMap({
             WebSDRReplyPlanner.plan(for: $0.text, targetCallsign: engine.targetCallsign)
         }).first else { return }
         guard selectedWebSDRReply != plan || webSDRReplyDraft.isEmpty else { return }
         selectedWebSDRReply = plan
+        webSDRReplyDialHz = webSDR.dialHz
         webSDRReplyDraft = plan.draft
         selectedWebSDRTxParity = appState.ft8Engine.txParity
         webSDRReplyStatus = ""
     }
 
     private func queueWebSDRReply(_ plan: WebSDRReplyPlan) {
+        let ownCall = appState.currentStationCallsign
+        if let issue = WebSDRReplyGuard.identityIssue(target: engine.targetCallsign,
+                                                      ownCallsign: ownCall) {
+            webSDRReplyStatus = issue
+            return
+        }
+        if let issue = WebSDRReplyGuard.retuneIssue(plannedDialHz: webSDRReplyDialHz,
+                                                    currentDialHz: webSDR.dialHz) {
+            webSDRReplyStatus = issue
+            return
+        }
+        guard let grid = appState.activeStationProfile?.grid,
+              grid.range(of: #"^[A-Ra-r]{2}[0-9]{2}([A-Xa-x]{2})?$"#, options: .regularExpression) != nil else {
+            webSDRReplyStatus = "Set your station grid in Settings > Stations before queuing a reply."
+            return
+        }
         guard WebSDRReplyPlanner.isReady(webSDRReplyDraft, for: plan,
                                          targetCallsign: engine.targetCallsign) else {
             webSDRReplyStatus = "Enter your actual received report before transmitting."
             return
         }
         let ft8 = appState.ft8Engine
-        ft8.txParity = selectedWebSDRTxParity
         if let issue = ft8.prepareWebSDRReply(webSDRReplyDraft,
-                                               targetCallsign: engine.targetCallsign,
-                                               grid: appState.activeStationProfile?.grid ?? "LM55",
+                                               stationCallsign: ownCall,
+                                               grid: grid,
                                                dialHz: UInt64(webSDR.dialHz),
                                                radio: appState.icomNetworkRadio,
                                                usbOutputUID: webSDRFT8OutputDeviceUID) {
             webSDRReplyStatus = issue
             return
         }
+        ft8.txParity = selectedWebSDRTxParity
         ft8.scheduleTransmission()
         webSDRReplyStatus = ft8.status
     }
