@@ -453,6 +453,8 @@ final class WebSDRFT8Monitor: ObservableObject {
         var previous: AudioSlot?
         var nextIndex = 0
         var shortSegments = 0
+        var decodePhase: Double?
+        var searchIndex = 0
     }
     private var browsers: [String: WebSDRBrowserSession] = [:]
     private var endpointGeneration: [String: Int] = [:]
@@ -462,6 +464,8 @@ final class WebSDRFT8Monitor: ObservableObject {
     private var liveTimelines: [String: WebSDRAudioTimeline] = [:]
     private var livePreviousSlots: [String: AudioSlot] = [:]
     private var liveDecodeTasks: [String: Task<Void, Never>] = [:]
+    private var liveDecodePhase: [String: Double] = [:]
+    private var liveSearchIndex: [String: Int] = [:]
     private struct LiveDecodePair {
         let previous: AudioSlot
         let current: AudioSlot
@@ -833,6 +837,8 @@ final class WebSDRFT8Monitor: ObservableObject {
         recordedStreams.removeAll()
         for task in liveDecodeTasks.values { task.cancel() }
         liveDecodeTasks.removeAll()
+        liveDecodePhase.removeAll()
+        liveSearchIndex.removeAll()
         pendingLivePairs.removeAll()
         liveTimelines.removeAll()
         livePreviousSlots.removeAll()
@@ -900,6 +906,8 @@ final class WebSDRFT8Monitor: ObservableObject {
             .union(pendingLivePairs.keys)
         for key in keys where key.hasPrefix(endpointID + "#") {
             liveDecodeTasks.removeValue(forKey: key)?.cancel()
+            liveDecodePhase.removeValue(forKey: key)
+            liveSearchIndex.removeValue(forKey: key)
             pendingLivePairs.removeValue(forKey: key)
             liveTimelines.removeValue(forKey: key)
             livePreviousSlots.removeValue(forKey: key)
@@ -928,11 +936,16 @@ final class WebSDRFT8Monitor: ObservableObject {
     private func startLiveDecode(_ pair: LiveDecodePair, streamKey: String,
                                  endpoint: WebSDRAutomaticEndpoint, session: UUID,
                                  generation: Int) {
+        let preferredPhase = liveDecodePhase[streamKey]
+        let searchIndex = liveSearchIndex[streamKey] ?? 0
         liveDecodeTasks[streamKey] = Task { [weak self] in
             let worker = Task.detached(priority: .utility) {
                 WebSDRCycleDecoder.decode(previous: pair.previous.samples,
                                           next: pair.current.samples,
-                                          sampleRate: pair.current.sampleRate)
+                                          sampleRate: pair.current.sampleRate,
+                                          preferredPhaseSeconds: preferredPhase,
+                                          searchStartIndex: searchIndex,
+                                          searchWindowLimit: preferredPhase == nil && searchIndex == 0 ? nil : 6)
             }
             let across = await withTaskCancellationHandler {
                 await worker.value
@@ -948,6 +961,12 @@ final class WebSDRFT8Monitor: ObservableObject {
                   generation == self.liveStreamGeneration[endpoint.id, default: 0],
                   Date().timeIntervalSince(pair.current.startTime ?? .distantPast) < 45,
                   self.browsers[endpoint.id] != nil else { return }
+            if let first = across.first {
+                self.liveDecodePhase[streamKey] = first.audioOffsetSeconds.truncatingRemainder(dividingBy: 15)
+                self.liveSearchIndex[streamKey] = 0
+            } else {
+                self.liveSearchIndex[streamKey] = searchIndex + 6
+            }
             let countBefore = self.messages.count
             let start = pair.current.startTime ?? Date()
             let origin = pair.previous.startTime ?? start.addingTimeInterval(-15)
@@ -1016,14 +1035,19 @@ final class WebSDRFT8Monitor: ObservableObject {
         let index = stream.nextIndex
         stream.nextIndex += 1
         let previous = stream.previous
+        let decodePhase = stream.decodePhase
+        let searchIndex = stream.searchIndex
         let worker = Task.detached(priority: .utility) {
             let samples = WebSDRWAV.samples(at12kHz: recording.wav)
             let direct = (try? FT8Codec.decode(samples: samples, sampleRate: 12_000,
                                                protocol: .ft8,
                                                maxMessages: WebSDRCycleDecoder.maxMessagesPerWindow)) ?? []
-            let across = previous.map {
-                WebSDRCycleDecoder.decode(previous: $0.samples, next: samples, sampleRate: 12_000)
-            } ?? []
+            let across = direct.isEmpty ? (previous.map {
+                WebSDRCycleDecoder.decode(previous: $0.samples, next: samples, sampleRate: 12_000,
+                                          preferredPhaseSeconds: decodePhase,
+                                          searchStartIndex: searchIndex,
+                                          searchWindowLimit: decodePhase == nil && searchIndex == 0 ? nil : 6)
+            } ?? []) : []
             let levels = direct.map {
                 WebSDRSignalLevel.estimate(samples: samples, sampleRate: 12_000,
                     onsetSeconds: Double($0.timeSeconds), frequencyHz: $0.frequencyHz)
@@ -1040,6 +1064,12 @@ final class WebSDRFT8Monitor: ObservableObject {
               Date().timeIntervalSince(recording.stoppedAt) < 45,
               browsers[endpoint.id] != nil else { return }
         let (samples, direct, across, levels) = result
+        if let first = across.first {
+            stream.decodePhase = first.audioOffsetSeconds.truncatingRemainder(dividingBy: 15)
+            stream.searchIndex = 0
+        } else if direct.isEmpty, previous != nil {
+            stream.searchIndex += 6
+        }
         let mediaDuration = Double(samples.count) / 12_000
         let wallDuration = recording.stoppedAt.timeIntervalSince(recording.startedAt)
         guard abs(mediaDuration - wallDuration) <= 2.0 else {

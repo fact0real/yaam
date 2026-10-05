@@ -233,7 +233,9 @@ struct LocalActivityMatrixView: View {
                 inspectorDetailPane
                     .frame(minWidth: 320, idealWidth: 380, maxWidth: 460)
             }
+            .frame(maxHeight: .infinity)
         }
+        .frame(maxHeight: .infinity)
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
         .onAppear {
@@ -275,7 +277,10 @@ struct LocalActivityMatrixView: View {
         let peakCountry = countryCounts.max(by: { $0.value < $1.value })
         let peakCountryFlag = peakCountry != nil ? countryToFlag(peakCountry!.key) : "🌍"
 
-        return LazyVGrid(columns: [GridItem(.adaptive(minimum: 155, maximum: 230), spacing: 8)], spacing: 8) {
+        return LazyVGrid(
+            columns: Array(repeating: GridItem(.flexible(minimum: 130), spacing: 8), count: 5),
+            spacing: 8
+        ) {
             InsightCard(
                 title: "Peak Local Hour",
                 value: peakHour != nil ? String(format: "%02d:00 - %02d:00", peakHour!.key, (peakHour!.key + 1) % 24) : "N/A",
@@ -1333,6 +1338,7 @@ private struct InsightCard: View {
             Spacer()
         }
         .padding(8)
+        .frame(maxWidth: .infinity, minHeight: 72, maxHeight: 72, alignment: .leading)
         .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
         .cornerRadius(6)
         .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.gray.opacity(0.2), lineWidth: 1))

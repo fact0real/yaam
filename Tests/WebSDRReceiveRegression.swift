@@ -18,6 +18,12 @@ struct WebSDRReceiveRegression {
         let secondCycle = detections.first { $0.message.text == "CQ W9XYZ EN50" }!.cycleOffsetSeconds
         precondition(abs(secondCycle - firstCycle - 15) < 2,
                      "The two adjacent FT8 cycles must stay distinct")
+        let locked = WebSDRCycleDecoder.decode(
+            previous: Array(joined[..<split]), next: Array(joined[split...]), sampleRate: 12_000,
+            preferredPhaseSeconds: firstCycle.truncatingRemainder(dividingBy: 15),
+            searchStartIndex: 28, searchWindowLimit: 1)
+        precondition(locked.contains { $0.message.text == "CQ K1ABC FN42" },
+                     "A locked live decoder must keep receiving its phase")
 
         let concurrent = try FT8Codec.transmitAudio("CQ W9XYZ EN50", baseFrequencyHz: 2_000)
         let mixed = zip(first, concurrent).map { ($0 + $1) * 0.5 }

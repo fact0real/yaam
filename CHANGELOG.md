@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.37.31 — 2026-10-05
+
+- Reduce WebSDR audio bridge traffic and retire obsolete browser audio taps after reconnects.
+- Reuse the detected FT8 timing phase and bound fallback scans to keep long receive sessions responsive.
+- Limit oversized or stale browser audio messages before decoding them on the app's main thread.
+
+## 1.37.30 — 2026-10-05
+
+- Fit Activity Matrix into the available Statistics window height, and make its five insight cards equal sized.
+- Keep Country Bands details visible while the country list scrolls independently.
+- Compare today's QSOs with the average of the previous seven days up to the same local time in Visual Analytics.
+
 ## 1.37.29 — 2026-10-05
 
 - Reject self-contact QSOs at logging and edit entry points, and filter incoming or merged records before they reach log views and statistics.

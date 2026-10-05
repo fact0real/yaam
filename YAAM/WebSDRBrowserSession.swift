@@ -22,12 +22,14 @@ final class WebSDRBrowserSession: NSObject, WKNavigationDelegate, WKScriptMessag
     private var active = false
     private var listening = false
     private var lastAudioAt: Date?
+    private var latestTapID = 0
 
     func start(url: URL, listening: Bool) {
         stop()
         active = true
         self.listening = listening
         lastAudioAt = nil
+        latestTapID = 0
         let configuration = WKWebViewConfiguration()
         configuration.mediaTypesRequiringUserActionForPlayback = []
         let audioGate = WKUserScript(source: """
@@ -46,12 +48,22 @@ final class WebSDRBrowserSession: NSObject, WKNavigationDelegate, WKScriptMessag
                     this.__yaamTapped = true;
                     const context = this.context;
                     const tapID = window.__yaamNextTapID = (window.__yaamNextTapID || 0) + 1;
+                    // A reconnect can create a new audio node while the old one
+                    // remains alive. Keep one bridge tap per page.
+                    if (window.__yaamActiveTap) {
+                      window.__yaamActiveTap.onaudioprocess = null;
+                      window.__yaamActiveTap.disconnect();
+                    }
                     // Fewer bridge messages keep the main thread responsive on
                     // long sessions without changing the 12 kHz receive samples.
                     const tap = context.createScriptProcessor(8192, 1, 1);
+                    window.__yaamActiveTap = tap;
                     const silent = context.createGain();
                     silent.gain.value = 0;
+                    const pending = new Int16Array(12000);
+                    let pendingCount = 0;
                     tap.onaudioprocess = event => {
+                      if (window.__yaamActiveTap !== tap) return;
                       const input = event.inputBuffer.getChannelData(0);
                       const ratio = context.sampleRate / 12000;
                       const output = [];
@@ -66,30 +78,32 @@ final class WebSDRBrowserSession: NSObject, WKNavigationDelegate, WKScriptMessag
                       }
                       tap.__yaamPosition = position - input.length;
                       tap.__yaamLastSample = input[input.length - 1];
-                      const bytes = new Uint8Array(output.length * 2);
-                      let hasAudio = false;
                       for (let i = 0; i < output.length; i++) {
                         const value = output[i];
                         const pcm = Math.max(-32768, Math.min(32767, Math.round(value * 32767)));
-                        if (pcm !== 0) hasAudio = true;
-                        bytes[i * 2] = pcm & 255;
-                        bytes[i * 2 + 1] = (pcm >> 8) & 255;
+                        pending[pendingCount++] = pcm;
+                        if (pendingCount < pending.length) continue;
+                        const bytes = new Uint8Array(pending.buffer);
+                        let hasAudio = false;
+                        for (let j = 0; j < pendingCount; j++) {
+                          if (pending[j] !== 0) { hasAudio = true; break; }
+                        }
+                        if (hasAudio) {
+                          let binary = '';
+                          for (let j = 0; j < bytes.length; j++) binary += String.fromCharCode(bytes[j]);
+                          window.webkit.messageHandlers.yaamAudio.postMessage({
+                            pcm: btoa(binary), endedAt: Date.now(), tapID
+                          });
+                        }
+                        pendingCount = 0;
                       }
-                      // Abandoned WebSDR audio nodes can continue emitting silence.
-                      // Do not send those buffers over the WebKit message bridge.
-                      if (!hasAudio) return;
-                      let binary = '';
-                      for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-                      window.webkit.messageHandlers.yaamAudio.postMessage({
-                        pcm: btoa(binary), endedAt: Date.now(), tapID
-                      });
                     };
                     connect.call(this, tap);
                     connect.call(tap, silent);
                     connect.call(silent, destination);
-                    window.__yaamTapNodes = window.__yaamTapNodes || [];
-                    window.__yaamTapNodes.push([tap, silent]);
                   }
+                  window.__yaamGains.forEach(g => g.disconnect());
+                  window.__yaamGains.length = 0;
                   const gate = this.context.createGain();
                   gate.gain.value = window.__yaamListen ? 1 : 0;
                   window.__yaamGains.push(gate);
@@ -145,9 +159,12 @@ final class WebSDRBrowserSession: NSObject, WKNavigationDelegate, WKScriptMessag
         guard active, message.name == "yaamAudio", onAudio != nil,
               let body = message.body as? [String: Any],
               let encoded = body["pcm"] as? String,
-              let bytes = Data(base64Encoded: encoded),
               let milliseconds = body["endedAt"] as? NSNumber,
-              let tapID = body["tapID"] as? NSNumber else { return }
+              let tapID = body["tapID"] as? NSNumber,
+              encoded.count <= 64_000, tapID.intValue >= latestTapID,
+              let bytes = Data(base64Encoded: encoded),
+              bytes.count <= 24_000 else { return }
+        latestTapID = tapID.intValue
         let samples: [Float] = bytes.withUnsafeBytes { buffer in
             let count = buffer.count / 2
             return (0..<count).map { index in
@@ -158,6 +175,15 @@ final class WebSDRBrowserSession: NSObject, WKNavigationDelegate, WKScriptMessag
         guard !samples.isEmpty else { return }
         if samples.contains(where: { abs($0) > 0.000_1 }) { lastAudioAt = Date() }
         onAudio?(samples, Date(timeIntervalSince1970: milliseconds.doubleValue / 1_000), tapID.intValue)
+    }
+
+    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        guard active, self.webView === webView else { return }
+        latestTapID = 0
+        if lastAudioAt != nil {
+            lastAudioAt = nil
+            onStatus?("Receiver audio interrupted; reconnecting…")
+        }
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {

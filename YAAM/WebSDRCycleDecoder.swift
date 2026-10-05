@@ -17,7 +17,10 @@ enum WebSDRCycleDecoder {
         let signalLevelDbFS: Double?
     }
 
-    nonisolated static func decode(previous: [Float], next: [Float], sampleRate rate: Int) -> [Detection] {
+    nonisolated static func decode(previous: [Float], next: [Float], sampleRate rate: Int,
+                                   preferredPhaseSeconds: Double? = nil,
+                                   searchStartIndex: Int = 0,
+                                   searchWindowLimit: Int? = nil) -> [Detection] {
         guard rate > 0 else { return [] }
         let joined = previous + next
         let windowCount = Int(13.5 * Double(rate))
@@ -25,33 +28,57 @@ enum WebSDRCycleDecoder {
         guard joined.contains(where: { abs($0) > 0.000_01 }) else { return [] }
         let maxStart = joined.count - windowCount
         let step = max(1, rate / 2)
+        let searchStarts = Array(stride(from: 0, through: maxStart, by: step))
         var detections: [Detection] = []
-        for start in stride(from: 0, through: maxStart, by: step) {
-            if Task<Never, Never>.isCancelled { return [] }
-            let window = Array(joined[start..<(start + windowCount)])
-            guard let messages = try? FT8Codec.decode(samples: window, sampleRate: rate,
-                                                     protocol: .ft8, maxMessages: maxMessagesPerWindow) else { continue }
-            for message in messages {
-                let offset = Double(start) / Double(rate) + Double(message.timeSeconds)
-                guard offset >= -0.5, offset <= Double(joined.count) / Double(rate) else { continue }
-                if let prior = detections.firstIndex(where: {
-                    $0.message.text == message.text &&
-                    abs($0.message.frequencyHz - message.frequencyHz) <= 5 &&
-                    abs($0.audioOffsetSeconds - offset) < 6
-                }) {
-                    if message.score > detections[prior].message.score {
-                        detections[prior] = Detection(message: message,
-                                                      audioOffsetSeconds: offset,
-                                                      cycleOffsetSeconds: offset,
-                                                      signalLevelDbFS: nil)
+        var preferredStarts: [Int] = []
+        if let preferredPhaseSeconds, preferredPhaseSeconds.isFinite {
+            let phase = preferredPhaseSeconds.truncatingRemainder(dividingBy: 15)
+            for offset in [-0.5, 0.0, 0.5] {
+                let start = Int(((phase + offset) * Double(rate)).rounded())
+                if start >= 0, start <= maxStart { preferredStarts.append(start) }
+            }
+        }
+
+        func scan(_ starts: [Int]) {
+            for start in starts {
+                if Task<Never, Never>.isCancelled { return }
+                let window = Array(joined[start..<(start + windowCount)])
+                guard let messages = try? FT8Codec.decode(samples: window, sampleRate: rate,
+                                                         protocol: .ft8, maxMessages: maxMessagesPerWindow) else { continue }
+                for message in messages {
+                    let offset = Double(start) / Double(rate) + Double(message.timeSeconds)
+                    guard offset >= -0.5, offset <= Double(joined.count) / Double(rate) else { continue }
+                    if let prior = detections.firstIndex(where: {
+                        $0.message.text == message.text &&
+                        abs($0.message.frequencyHz - message.frequencyHz) <= 5 &&
+                        abs($0.audioOffsetSeconds - offset) < 6
+                    }) {
+                        if message.score > detections[prior].message.score {
+                            detections[prior] = Detection(message: message,
+                                                          audioOffsetSeconds: offset,
+                                                          cycleOffsetSeconds: offset,
+                                                          signalLevelDbFS: nil)
+                        }
+                    } else {
+                        detections.append(Detection(message: message,
+                                                    audioOffsetSeconds: offset,
+                                                    cycleOffsetSeconds: offset,
+                                                    signalLevelDbFS: nil))
                     }
-                } else {
-                    detections.append(Detection(message: message,
-                                                audioOffsetSeconds: offset,
-                                                cycleOffsetSeconds: offset,
-                                                signalLevelDbFS: nil))
                 }
             }
+        }
+        scan(preferredStarts)
+        if detections.isEmpty {
+            let starts: [Int]
+            if let searchWindowLimit, searchWindowLimit > 0, searchWindowLimit < searchStarts.count {
+                starts = (0..<searchWindowLimit).map {
+                    searchStarts[(searchStartIndex + $0) % searchStarts.count]
+                }
+            } else {
+                starts = searchStarts
+            }
+            scan(starts.filter { !preferredStarts.contains($0) })
         }
         let sorted = detections.sorted { $0.audioOffsetSeconds < $1.audioOffsetSeconds }
         guard !sorted.isEmpty else { return [] }

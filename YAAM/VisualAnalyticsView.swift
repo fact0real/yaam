@@ -107,6 +107,7 @@ struct VisualAnalyticsData: Sendable {
     let availableBands: [String]
     let availableModes: [String]
     let quickKPIs: VisualKPIs
+    let todayComparison: TodayActivityComparison
     let hourlyRateSeries: [HourlyRatePoint]
     let modeDistribution: [(mode: String, count: Int)]
     let azimuthSectors: [AzimuthSectorData]
@@ -121,6 +122,7 @@ struct VisualAnalyticsData: Sendable {
         availableBands: ["All"],
         availableModes: ["All"],
         quickKPIs: .empty,
+        todayComparison: TodayActivityComparison(todayCount: 0, previousDayCounts: Array(repeating: 0, count: 7)),
         hourlyRateSeries: [],
         modeDistribution: [],
         azimuthSectors: [],
@@ -140,7 +142,7 @@ private enum FastADIFDateParser {
         return cal
     }()
 
-    static func parse(dateRaw: String?, timeRaw: String?) -> (date: Date, hour: Int, hourLabel: String)? {
+    static func parse(dateRaw: String?, timeRaw: String?) -> (date: Date, preciseDate: Date, hour: Int, hourLabel: String)? {
         guard let d = dateRaw?.trimmingCharacters(in: .whitespacesAndNewlines), d.count >= 8 else { return nil }
         let t = (timeRaw ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -151,9 +153,13 @@ private enum FastADIFDateParser {
         let day = Int(String(dChars[6..<8])) ?? 1
 
         var h = 0
+        var minute = 0
+        var second = 0
         if t.count >= 2 {
             let tChars = Array(t)
             h = Int(String(tChars[0..<2])) ?? 0
+            if tChars.count >= 4 { minute = Int(String(tChars[2..<4])) ?? 0 }
+            if tChars.count >= 6 { second = Int(String(tChars[4..<6])) ?? 0 }
         }
 
         var comps = DateComponents()
@@ -167,8 +173,9 @@ private enum FastADIFDateParser {
         comps.second = 0
 
         guard let date = utcCalendar.date(from: comps) else { return nil }
+        let preciseDate = date.addingTimeInterval(TimeInterval(minute * 60 + second))
         let label = String(format: "%02d-%02d %02d:00", m, day, h)
-        return (date: date, hour: h, hourLabel: label)
+        return (date: date, preciseDate: preciseDate, hour: h, hourLabel: label)
     }
 }
 
@@ -344,6 +351,9 @@ struct VisualAnalyticsView: View {
             metricsHeaderStrip(kpis: data.quickKPIs)
                 .padding(.horizontal, 4)
 
+            todayComparisonStrip(data.todayComparison)
+                .padding(.horizontal, 4)
+
             Divider()
 
             // Main Active Visual Tab (Instant switch from precomputed data)
@@ -384,6 +394,58 @@ struct VisualAnalyticsView: View {
             modeFilter: selectedModeFilter,
             homeCoord: myHomeCoord
         )
+    }
+
+    private func todayComparisonStrip(_ comparison: TodayActivityComparison) -> some View {
+        let average = comparison.previousDailyAverage
+        let difference = comparison.differenceFromAverage
+        let isAhead = difference >= 0
+
+        return HStack(spacing: 14) {
+            Image(systemName: "chart.bar.xaxis")
+                .font(.title3)
+                .foregroundStyle(Color.accentColor)
+                .frame(width: 28)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Today vs previous 7 days")
+                    .font(.subheadline.weight(.semibold))
+                Text("Same local time of day · current band and mode filters")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 8)
+
+            VStack(alignment: .trailing, spacing: 2) {
+                Text("\(comparison.todayCount)")
+                    .font(.title3.monospacedDigit().weight(.bold))
+                Text("Today")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(average.formatted(.number.precision(.fractionLength(1))))
+                    .font(.title3.monospacedDigit().weight(.semibold))
+                Text("7-day average")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            Text(average > 0
+                 ? String(format: "%+.0f%%", difference / average * 100)
+                 : "No baseline")
+                .font(.caption.monospacedDigit().weight(.bold))
+                .foregroundStyle(average > 0 ? (isAhead ? Color.green : Color.orange) : Color.secondary)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 5)
+                .background((average > 0 ? (isAhead ? Color.green : Color.orange) : Color.gray).opacity(0.1), in: Capsule())
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .background(Color.accentColor.opacity(0.045), in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.accentColor.opacity(0.14), lineWidth: 1))
     }
 
     // MARK: - Metrics Header Strip
@@ -1243,6 +1305,7 @@ struct VisualAnalyticsView: View {
         var hourlyMap: [String: (date: Date, count: Int, bands: [String: Int])] = [:]
         var modeMap: [String: Int] = [:]
         var diurnalMap: [String: [Int: Int]] = [:]
+        var todayCounter = TodayActivityComparisonCounter(now: Date(), calendar: .current)
 
         // 24 Azimuth sectors (15 deg each)
         let sectorCount = 24
@@ -1286,6 +1349,7 @@ struct VisualAnalyticsView: View {
 
             // 1. Date / Hourly / Diurnal
             if let dt = FastADIFDateParser.parse(dateRaw: r.fields["QSO_DATE"], timeRaw: r.fields["TIME_ON"]) {
+                todayCounter.include(dt.preciseDate)
                 var current = hourlyMap[dt.hourLabel] ?? (date: dt.date, count: 0, bands: [:])
                 current.count += 1
                 current.bands[r.band, default: 0] += 1
@@ -1436,6 +1500,7 @@ struct VisualAnalyticsView: View {
             availableBands: sortedBands,
             availableModes: sortedModes,
             quickKPIs: kpis,
+            todayComparison: todayCounter.result,
             hourlyRateSeries: hourlySeries,
             modeDistribution: modeDist,
             azimuthSectors: sectors,

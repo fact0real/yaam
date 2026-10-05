@@ -109,7 +109,52 @@ struct StatisticsView: View {
     var body: some View {
         let stats = currentSnapshot
 
-        ScrollView {
+        return Group {
+            if selectedTab == 4 || selectedTab == 6 {
+                statisticsContent(stats: stats)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    statisticsContent(stats: stats)
+                }
+            }
+        }
+        .frame(
+            minWidth: isEmbeddedInTab ? 0 : 760,
+            idealWidth: 1180,
+            maxWidth: .infinity,
+            minHeight: isEmbeddedInTab ? 0 : 620,
+            idealHeight: 780,
+            maxHeight: .infinity
+        )
+        .sheet(item: $selectedCountryBandDetails) { selection in
+            StatisticsCountryBandDetailSheet(
+                selection: selection,
+                opportunityByRecordID: Dictionary(
+                    uniqueKeysWithValues: currentSnapshot.followUpCandidates.map { ($0.record.id, $0.opportunity) }
+                ),
+                onShowInLog: showRecordInLog,
+                onPreviewQSL: previewQSL,
+                onOpenQRZ: openQRZ
+            )
+            .environmentObject(appState)
+        }
+        .onAppear {
+            appState.refreshOwnerQRZRankIfNeeded()
+            if let cached = appState.cachedStatisticsSnapshot, cached.totalQSOCount > 0 {
+                self.snapshot = cached
+                if selectedCoverageCountry == nil {
+                    selectedCoverageCountry = cached.countryBandCoverage.first?.country
+                }
+            }
+            refreshSnapshot(force: false)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .amateurBandsConfigurationDidChange)) { _ in
+            refreshSnapshot(force: true)
+        }
+    }
+
+    private func statisticsContent(stats: StatisticsSnapshot) -> some View {
         VStack(spacing: 14) {
             // Header Bar
             WrappingControlsLayout(spacing: 10) {
@@ -507,10 +552,15 @@ struct StatisticsView: View {
             }
             
             }
-            .frame(minHeight: 520)
+            .frame(
+                minHeight: selectedTab == 4 || selectedTab == 6 ? 0 : 520,
+                maxHeight: selectedTab == 4 || selectedTab == 6 ? .infinity : nil
+            )
 
             if !isEmbeddedInTab {
-                Spacer()
+                if selectedTab != 4 && selectedTab != 6 {
+                    Spacer()
+                }
                 Divider()
                 
                 HStack {
@@ -522,40 +572,6 @@ struct StatisticsView: View {
             }
         }
         .padding(16)
-        }
-        .frame(
-            minWidth: isEmbeddedInTab ? 0 : 760,
-            idealWidth: 1180,
-            maxWidth: .infinity,
-            minHeight: isEmbeddedInTab ? 0 : 620,
-            idealHeight: 780,
-            maxHeight: .infinity
-        )
-        .sheet(item: $selectedCountryBandDetails) { selection in
-            StatisticsCountryBandDetailSheet(
-                selection: selection,
-                opportunityByRecordID: Dictionary(
-                    uniqueKeysWithValues: currentSnapshot.followUpCandidates.map { ($0.record.id, $0.opportunity) }
-                ),
-                onShowInLog: showRecordInLog,
-                onPreviewQSL: previewQSL,
-                onOpenQRZ: openQRZ
-            )
-            .environmentObject(appState)
-        }
-        .onAppear {
-            appState.refreshOwnerQRZRankIfNeeded()
-            if let cached = appState.cachedStatisticsSnapshot, cached.totalQSOCount > 0 {
-                self.snapshot = cached
-                if selectedCoverageCountry == nil {
-                    selectedCoverageCountry = cached.countryBandCoverage.first?.country
-                }
-            }
-            refreshSnapshot(force: false)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .amateurBandsConfigurationDidChange)) { _ in
-            refreshSnapshot(force: true)
-        }
     }
 
     private var statisticsTabPicker: some View {
@@ -939,6 +955,7 @@ guard !callsign.isEmpty, let url = URL(string: urlString) else { return }
                     .padding(.vertical, 4)
                 }
                 .frame(width: 250)
+                .frame(maxHeight: .infinity)
                 .background(Color(NSColor.textBackgroundColor))
 
                 Divider()
@@ -1029,7 +1046,9 @@ guard !callsign.isEmpty, let url = URL(string: urlString) else { return }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
+            .frame(maxHeight: .infinity)
         }
+        .frame(maxHeight: .infinity)
         .background(Color(NSColor.textBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: 6))
         .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.gray.opacity(0.3), lineWidth: 1))
