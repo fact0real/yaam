@@ -51,6 +51,7 @@ struct FT8StationView: View {
     @State private var showChecksheetPopover = false
     @State private var showCabrilloExportSheet = false
     @State private var showWSJTXBridgeSheet = false
+    @State private var upperContentHeight: CGFloat = 320
 
     private var icomModel: Binding<IcomNetworkModel> {
         Binding(
@@ -71,80 +72,47 @@ struct FT8StationView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            // 1. Top Professional Control Ribbon
-            topControlRibbon
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-                .background(Color(nsColor: .windowBackgroundColor))
+        GeometryReader { geometry in
+            let compact = geometry.size.width < 1_050
+            let spectrumHeight = min(compact ? 170 : 220, max(110, geometry.size.height * 0.23))
+            let upperLimit = max(100, geometry.size.height - spectrumHeight - 210 - 38)
 
-            Divider()
-
-            // 2. Radio Connection Panel (Prominently visible when disconnected or when toggled)
-            if showHardwareSettings || !radioPathConnected {
-                radioConnectionPanel
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(Color(nsColor: .controlBackgroundColor).opacity(0.45))
-                Divider()
-            }
-
-            // 2.5 Gold Standard Contest Command Ribbon & Live Multipliers HUD
-            if engine.isContestMode {
-                contestCommandHUD
-                Divider()
-                contestQueueHUD
-                Divider()
-            }
-
-            // 3. Smart Auto-Hunter AI HUD Ribbon
-            autoHunterHUD
-                .padding(.horizontal, 14)
-                .padding(.vertical, 6)
-                .background(Color.accentColor.opacity(0.04))
-
-            stationAlertBanners
-
-            Divider()
-
-            // 3.8 Live Radio Transceiver Meters HUD (RF Power, SWR, ALC, S-Meter)
-            if radioPathConnected {
-                radioMetersHUD
-                Divider()
-            }
-
-            // 4. SDR-Control Style RF Spectrum & Color Waterfall Display
-            FT8SpectrumWaterfallView(
-                engine: engine,
-                onSelectRxFrequency: { freq in
-                    engine.rxAudioFrequencyHz = freq
-                    if engine.lockTxRxFreq {
-                        engine.txAudioFrequencyHz = freq
-                    }
-                },
-                onSelectTxFrequency: { freq in
-                    engine.txAudioFrequencyHz = freq
-                    if engine.lockTxRxFreq {
-                        engine.rxAudioFrequencyHz = freq
-                    }
+            VStack(spacing: 0) {
+                ScrollView(.vertical, showsIndicators: true) {
+                    upperStationControls
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { upperContentHeight = $0 }
                 }
-            )
-            .frame(height: 220)
-            .background(Color.black)
+                .frame(height: min(upperContentHeight, upperLimit))
 
-            Divider()
+                Divider()
 
-            // 5. Dual-Pane Decoded Signal Windows (Band Activity vs Rx Frequency)
-            dualPaneConsole
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                FT8SpectrumWaterfallView(
+                    engine: engine,
+                    onSelectRxFrequency: { freq in
+                        engine.rxAudioFrequencyHz = freq
+                        if engine.lockTxRxFreq { engine.txAudioFrequencyHz = freq }
+                    },
+                    onSelectTxFrequency: { freq in
+                        engine.txAudioFrequencyHz = freq
+                        if engine.lockTxRxFreq { engine.rxAudioFrequencyHz = freq }
+                    }
+                )
+                .frame(height: spectrumHeight)
+                .background(Color.black)
 
-            Divider()
+                Divider()
 
-            // 6. Bottom Status Bar
-            bottomStatusBar
-                .padding(.horizontal, 14)
-                .padding(.vertical, 6)
-                .background(Color(nsColor: .controlBackgroundColor).opacity(0.35))
+                dualPaneConsole(compact: compact)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                Divider()
+
+                bottomStatusBar
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 6)
+                    .background(Color(nsColor: .controlBackgroundColor).opacity(0.35))
+            }
         }
         .onAppear {
             loadIdentity()
@@ -192,6 +160,50 @@ struct FT8StationView: View {
                 WSJTXLiveStreamView(wsjtx: appState.wsjtxListener)
             }
             .frame(minWidth: 880, idealWidth: 980, minHeight: 560, idealHeight: 660)
+        }
+    }
+
+    private var upperStationControls: some View {
+        VStack(spacing: 0) {
+            topControlRibbon
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(Color(nsColor: .windowBackgroundColor))
+            Divider()
+
+            if showHardwareSettings || !radioPathConnected {
+                radioConnectionPanel
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(Color(nsColor: .controlBackgroundColor).opacity(0.45))
+                Divider()
+            }
+
+            if engine.isContestMode {
+                ScrollView(.horizontal, showsIndicators: true) {
+                    contestCommandHUD
+                        .fixedSize(horizontal: true, vertical: false)
+                }
+                Divider()
+                ScrollView(.horizontal, showsIndicators: true) {
+                    contestQueueHUD
+                        .frame(minWidth: 760)
+                }
+                Divider()
+            }
+
+            autoHunterHUD
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
+                .background(Color.accentColor.opacity(0.04))
+
+            stationAlertBanners
+            Divider()
+
+            if radioPathConnected {
+                radioMetersHUD
+                Divider()
+            }
         }
     }
 
@@ -293,7 +305,12 @@ struct FT8StationView: View {
     // MARK: - 1. Top Control Ribbon
 
     private var topControlRibbon: some View {
-        HStack(spacing: 10) {
+        VStack(alignment: .leading, spacing: 7) {
+            Label("RECEIVE & TUNE", systemImage: "waveform.path")
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.secondary)
+
+            WrappingControlsLayout(spacing: 8) {
             // Radio Connection Setup Toggle Button
             Button {
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
@@ -481,7 +498,15 @@ struct FT8StationView: View {
             .tint(appState.wsjtxListener.state.isListening ? Color.green : Color.secondary)
             .help("Open 2-Way WSJT-X / JTDX Live Stream & 1-Click Reply Console")
 
-            Spacer()
+            }
+
+            Divider()
+
+            Label("TRANSMIT & LOG", systemImage: "antenna.radiowaves.left.and.right")
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.secondary)
+
+            WrappingControlsLayout(spacing: 8) {
 
             // TX Armed Button (Redesigned matching RX)
             Button {
@@ -623,6 +648,7 @@ struct FT8StationView: View {
             .buttonStyle(.bordered)
             .disabled(engine.dxCall.isEmpty)
             .help("Log current QSO to YAAM Log Table")
+            }
         }
     }
 
@@ -641,8 +667,8 @@ struct FT8StationView: View {
 
     private var radioConnectionPanel: some View {
         VStack(alignment: .leading, spacing: 10) {
-            // Row 1: Header Title & Subtitle on Left, Status + Station Info + Dismiss on Right
-            HStack(spacing: 12) {
+            // Keep identity and connection state visible as the window narrows.
+            WrappingControlsLayout(spacing: 8) {
                 Label("Radio & Audio Connection Setup", systemImage: "cable.connector.horizontal")
                     .font(.subheadline.weight(.bold))
                     .foregroundStyle(.primary)
@@ -650,8 +676,6 @@ struct FT8StationView: View {
                 Text("Transceiver Interface & Telemetry")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
-
-                Spacer(minLength: 12)
 
                 HStack(spacing: 8) {
                     // Connection Status Indicator Pill
@@ -670,16 +694,6 @@ struct FT8StationView: View {
                         in: Capsule()
                     )
 
-                    HStack(spacing: 6) {
-                        Text("Station: \(engine.myCall.isEmpty ? "No Call" : engine.myCall)")
-                            .font(.caption.monospacedDigit().weight(.bold))
-                        Text("Grid: \(engine.myGrid.isEmpty ? "----" : engine.myGrid)")
-                            .font(.caption.monospacedDigit().weight(.bold))
-                    }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3.5)
-                    .background(Color.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: 5))
-
                     if radioPathConnected {
                         Button {
                             withAnimation { showHardwareSettings = false }
@@ -692,6 +706,12 @@ struct FT8StationView: View {
                         .help("Dismiss connection panel")
                     }
                 }
+
+                Text("Station: \(engine.myCall.isEmpty ? "No Call" : engine.myCall) · Grid: \(engine.myGrid.isEmpty ? "----" : engine.myGrid)")
+                    .font(.caption.monospacedDigit().weight(.bold))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3.5)
+                    .background(Color.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: 5))
             }
 
             // Row 2: Transceiver Path Selector (Responsive Capsules, Zero Overlap)
@@ -745,6 +765,21 @@ struct FT8StationView: View {
                 xiegu6100Settings
             } else {
                 coreAudioSettings
+            }
+
+            if (engine.audioPath == .icomLAN && icomModel.wrappedValue == .ic7300MK2)
+                || (engine.audioPath == .icomUSB && icomUSB.model == .ic7300MK2) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Label("IC-7300MK2 receive check", systemImage: "checklist")
+                        .font(.caption.weight(.bold))
+                    Text("Connect the radio, confirm its dial frequency and mode, then start RX and check decoded signals. Arm TX only when the receive path is verified.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(8)
+                .background(Color.accentColor.opacity(0.07), in: RoundedRectangle(cornerRadius: 7))
             }
 
             // Live Diagnostic Status & Error Banner
@@ -822,7 +857,7 @@ struct FT8StationView: View {
 
     private var tx500Settings: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .bottom, spacing: 12) {
+            WrappingControlsLayout(spacing: 12) {
                 field("USB Serial CAT (AD-514/AD-502)", width: 220) {
                     Picker("Serial Port", selection: Binding(get: { tx500.selectedPort }, set: { tx500.selectedPort = $0 })) {
                         if tx500.availablePorts.isEmpty {
@@ -869,13 +904,11 @@ struct FT8StationView: View {
                 .buttonStyle(.borderedProminent)
                 .tint(tx500.isConnected ? .secondary : .blue)
 
-                Spacer()
-
                 statusPill(tx500.isConnected ? "TX-500 Connected" : (tx500.isConnecting ? "Connecting..." : "TX-500 Offline"), active: tx500.isConnected)
             }
 
             // Checklist & Firmware Bug #1 Notice
-            HStack(spacing: 12) {
+            WrappingControlsLayout(spacing: 12) {
                 HStack(spacing: 4) {
                     Image(systemName: "checkmark.seal.fill")
                         .foregroundStyle(Color.green)
@@ -884,8 +917,6 @@ struct FT8StationView: View {
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
-
-                Spacer()
 
                 Toggle("Preserve DIG Mode", isOn: Binding(get: { tx500.preserveDIGMode }, set: { tx500.preserveDIGMode = $0 }))
                     .font(.caption2)
@@ -899,7 +930,7 @@ struct FT8StationView: View {
 
     private var fx4crSettings: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .bottom, spacing: 12) {
+            WrappingControlsLayout(spacing: 12) {
                 field("Transport Link", width: 140) {
                     Picker("Transport", selection: Binding(get: { fx4cr.connectionType }, set: { fx4cr.connectionType = $0 })) {
                         ForEach(FX4CRConnectionType.allCases) { t in
@@ -955,8 +986,6 @@ struct FT8StationView: View {
                 .buttonStyle(.borderedProminent)
                 .tint(fx4cr.isConnected ? .secondary : .blue)
 
-                Spacer()
-
                 statusPill(fx4cr.isConnected ? "FX-4CR Linked" : (fx4cr.isConnecting ? "Connecting..." : "FX-4CR Offline"), active: fx4cr.isConnected)
             }
         }
@@ -964,7 +993,7 @@ struct FT8StationView: View {
 
     private var xiegu6100Settings: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .bottom, spacing: 12) {
+            WrappingControlsLayout(spacing: 12) {
                 field("Serial Port (DEV Port)", width: 220) {
                     Picker("Serial Port", selection: Binding(get: { xiegu.selectedPort }, set: { xiegu.selectedPort = $0 })) {
                         if xiegu.availablePorts.isEmpty {
@@ -1022,8 +1051,6 @@ struct FT8StationView: View {
                 .buttonStyle(.borderedProminent)
                 .tint(xiegu.isConnected ? .secondary : .blue)
 
-                Spacer()
-
                 statusPill(xiegu.isConnected ? "X6100 Linked" : (xiegu.isConnecting ? "Connecting..." : "X6100 Offline"), active: xiegu.isConnected)
             }
         }
@@ -1031,7 +1058,7 @@ struct FT8StationView: View {
 
     private var icomUSBSettings: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .bottom, spacing: 12) {
+            WrappingControlsLayout(spacing: 12) {
                 field("Radio Model", width: 140) {
                     Picker("Model", selection: Binding(get: { icomUSB.model }, set: { icomUSB.model = $0 })) {
                         ForEach(IcomUSBModel.allCases) { m in
@@ -1109,13 +1136,11 @@ struct FT8StationView: View {
                 .buttonStyle(.borderedProminent)
                 .tint(icomUSB.isConnected ? .secondary : .blue)
 
-                Spacer()
-
                 statusPill(icomUSB.isConnected ? "\(icomUSB.model.rawValue) Linked" : (icomUSB.isConnecting ? "Connecting..." : "Icom Offline"), active: icomUSB.isConnected)
             }
 
             // Pre-flight settings info and Audio Codec status
-            HStack(spacing: 12) {
+            WrappingControlsLayout(spacing: 12) {
                 HStack(spacing: 6) {
                     Image(systemName: "checkmark.seal.fill")
                         .foregroundStyle(Color.blue)
@@ -1124,8 +1149,6 @@ struct FT8StationView: View {
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
-
-                Spacer()
 
                 HStack(spacing: 8) {
                     Text("CI-V Addr: 0x\(icomUSB.customCivAddressHex)")
@@ -1156,7 +1179,7 @@ struct FT8StationView: View {
     }
 
     private var icomSettings: some View {
-        HStack(alignment: .bottom, spacing: 10) {
+        WrappingControlsLayout(spacing: 10) {
             field("Radio Model", width: 140) {
                 Picker("Radio", selection: icomModel) {
                     ForEach(IcomNetworkModel.allCases) { model in Text(model.rawValue).tag(model) }
@@ -1210,8 +1233,6 @@ struct FT8StationView: View {
             .buttonStyle(.borderedProminent)
             .tint(radio.state.canDisconnect ? .secondary : .blue)
 
-            Spacer()
-
             statusPill(
                 radio.state.isConnected ? "Connected to \(radio.radioName.isEmpty ? "Icom LAN" : radio.radioName)" : (radio.state.isTransitioning ? "Connecting..." : (radio.state.isFailed ? "Failed" : "Not Connected")),
                 active: radio.state.isConnected
@@ -1220,7 +1241,7 @@ struct FT8StationView: View {
     }
 
     private var coreAudioSettings: some View {
-        HStack(alignment: .bottom, spacing: 12) {
+        WrappingControlsLayout(spacing: 12) {
             field("Input Audio", width: 230) {
                 Picker("Input", selection: $inputDeviceUID) {
                     Text("System Default").tag("")
@@ -1239,8 +1260,6 @@ struct FT8StationView: View {
                 Image(systemName: "arrow.clockwise")
             }
             .help("Refresh Core Audio Devices")
-
-            Spacer()
 
             statusPill(rig.state.isConnected ? "rigctld Connected" : "rigctld Disconnected", active: rig.state.isConnected)
         }
@@ -1697,7 +1716,7 @@ struct FT8StationView: View {
     // MARK: - 3. Smart Auto-Hunter HUD
 
     private var autoHunterHUD: some View {
-        HStack(spacing: 12) {
+        WrappingControlsLayout(spacing: 12) {
             Toggle(isOn: $engine.autoHunterEnabled) {
                 HStack(spacing: 5) {
                     Image(systemName: "target")
@@ -1729,14 +1748,10 @@ struct FT8StationView: View {
                 .font(.caption2)
                 .controlSize(.small)
 
-            Divider().frame(height: 16)
-
             Text(engine.autoHunterStatus)
                 .font(.caption2)
                 .foregroundStyle(engine.autoHunterEnabled ? Color.primary : Color.secondary)
                 .lineLimit(1)
-
-            Spacer()
 
             if engine.autoHunterEnabled {
                 HStack(spacing: 4) {
@@ -1754,25 +1769,39 @@ struct FT8StationView: View {
 
     // MARK: - 4. Dual-Pane Decoded Signal Windows
 
-    private var dualPaneConsole: some View {
-        HStack(spacing: 0) {
-            // Left Window: Band Activity
-            VStack(alignment: .leading, spacing: 0) {
-                bandActivityHeader
-                bandActivityList
+    @ViewBuilder
+    private func dualPaneConsole(compact: Bool) -> some View {
+        if compact {
+            VStack(spacing: 0) {
+                bandActivityPane
+                Divider()
+                rxFrequencyPane
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-            Divider()
-
-            // Right Window: Rx Frequency / Focused QSO Stream
-            VStack(alignment: .leading, spacing: 0) {
-                rxFrequencyStreamHeader
-                rxFrequencyStreamList
+            .frame(minHeight: 200, maxHeight: .infinity)
+        } else {
+            HStack(spacing: 0) {
+                bandActivityPane
+                Divider()
+                rxFrequencyPane
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .frame(minHeight: 200, maxHeight: .infinity)
         }
-        .frame(minHeight: 260, maxHeight: .infinity)
+    }
+
+    private var bandActivityPane: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            bandActivityHeader
+            bandActivityList
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var rxFrequencyPane: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            rxFrequencyStreamHeader
+            rxFrequencyStreamList
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // Left Pane Components
@@ -2238,7 +2267,7 @@ struct FT8StationView: View {
 
     // MARK: - Live Radio Transceiver Meters HUD (RF Power, SWR, ALC, S-Meter)
     private var radioMetersHUD: some View {
-        HStack(spacing: 16) {
+        WrappingControlsLayout(spacing: 16) {
             // Radio Model & PTT status badge
             HStack(spacing: 6) {
                 Circle()
@@ -2252,8 +2281,6 @@ struct FT8StationView: View {
             .padding(.vertical, 3)
             .background((engine.state == .transmitting ? Color.red : Color.green).opacity(0.12))
             .cornerRadius(4)
-
-            Divider().frame(height: 18)
 
             // RF Power Meter (Po)
             HStack(spacing: 6) {
@@ -2270,8 +2297,6 @@ struct FT8StationView: View {
                     .foregroundStyle(engine.state == .transmitting ? Color.cyan : Color.secondary)
                     .frame(width: 42, alignment: .trailing)
             }
-
-            Divider().frame(height: 18)
 
             // SWR Meter
             HStack(spacing: 6) {
@@ -2291,8 +2316,6 @@ struct FT8StationView: View {
                     .frame(width: 28, alignment: .trailing)
             }
 
-            Divider().frame(height: 18)
-
             // ALC Meter
             HStack(spacing: 6) {
                 Text("ALC")
@@ -2311,8 +2334,6 @@ struct FT8StationView: View {
                     .frame(width: 34, alignment: .trailing)
             }
 
-            Divider().frame(height: 18)
-
             // S-Meter / RX Signal Level
             HStack(spacing: 6) {
                 Text("SIG")
@@ -2330,7 +2351,6 @@ struct FT8StationView: View {
                     .frame(width: 28, alignment: .trailing)
             }
 
-            Spacer()
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 5)
@@ -2675,4 +2695,3 @@ struct ContestChecksheetPopoverView: View {
         DigitalContestBandMatrixView(engine: engine, onOpenCabrilloExport: onOpenCabrilloExport)
     }
 }
-

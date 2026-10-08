@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.37.32 — 2026-10-08
+
+- Reorganize FT8 Station controls into receive and transmit groups that wrap to fit the window.
+- Keep radio connection settings scrollable on short displays and adapt Icom LAN/USB setup to narrow windows.
+- Resize the spectrum with the window, stack decode streams on narrow displays, and show an IC-7300MK2 receive check sequence.
+
 ## 1.37.31 — 2026-10-05
 
 - Reduce WebSDR audio bridge traffic and retire obsolete browser audio taps after reconnects.
