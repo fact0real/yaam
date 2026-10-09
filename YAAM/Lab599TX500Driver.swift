@@ -89,12 +89,7 @@ public final class Lab599TX500Driver: ObservableObject {
     }
 
     public var sMeterDescription: String {
-        if sMeterValue <= 9.0 {
-            return "S\(Int(sMeterValue))"
-        } else {
-            let overDB = Int((sMeterValue - 9.0) * 10)
-            return "S9+\(overDB)dB"
-        }
+        Lab599TX500SMeter.description(forUnits: sMeterValue)
     }
 
     // MARK: - Internal Transport & Polling
@@ -228,7 +223,7 @@ public final class Lab599TX500Driver: ObservableObject {
     /// Polls current frequency, mode, S-meter, and power
     public func queryRadioStatus() {
         guard isConnected else { return }
-        sendRaw("FA;MD;SM;PC;")
+        sendRaw("FA;MD;\(Lab599TX500SMeter.readCommand)PC;")
     }
 
     /// Tunes VFO-A to target frequency in Hz
@@ -404,12 +399,10 @@ public final class Lab599TX500Driver: ObservableObject {
                     self.mode = txMode.name
                 }
             }
-        // S-Meter: SM0005 (0 to 15)
+        // S-Meter: SM + P1 (always 0) + P2 (0000 to 0030), e.g. SM00015 (Lab599 CAT guide rev.3, p.9)
         } else if response.hasPrefix("SM") {
-            let sStr = response.dropFirst(2).trimmingCharacters(in: .whitespaces)
-            if let rawVal = Double(sStr) {
-                // Kenwood SM is 0000 to 0015 (or 0030 for +60dB scale)
-                self.sMeterValue = min(15.0, rawVal)
+            if let units = Lab599TX500SMeter.units(fromReply: response) {
+                self.sMeterValue = units
             }
         // Power Control: PC010 (Watts)
         } else if response.hasPrefix("PC") {
@@ -439,7 +432,7 @@ public final class Lab599TX500Driver: ObservableObject {
             Task { @MainActor [weak self] in
                 guard let self = self, self.isConnected, !self.isTransmitting else { return }
                 // Poll frequency and S-meter
-                self.sendRaw("FA;SM;")
+                self.sendRaw("FA;\(Lab599TX500SMeter.readCommand)")
             }
         }
         timer.resume()

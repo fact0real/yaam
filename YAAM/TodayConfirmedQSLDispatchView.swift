@@ -295,11 +295,11 @@ Warm 73,
                 .foregroundColor(.blue)
 
             VStack(alignment: .leading, spacing: 1) {
-                Text(station.callsign.isEmpty ? "EP2AES" : station.callsign)
+                Text(station.callsign.isEmpty ? TransmitIdentity.callsignNotSetLabel : station.callsign)
                     .font(.system(size: 11, weight: .bold, design: .monospaced))
                     .foregroundColor(.primary)
 
-                Text("\(station.grid.isEmpty ? "LM55" : station.grid) · \(station.powerWatts)W")
+                Text("\(station.grid.isEmpty ? TransmitIdentity.locatorNotSetLabel : station.grid) · \(station.powerWatts)W")
                     .font(.system(size: 9.5))
                     .foregroundColor(.secondary)
             }

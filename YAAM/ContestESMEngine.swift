@@ -71,6 +71,9 @@ public final class ContestESMEngine: ObservableObject {
     @Published public var transmittedCharsCount: Int = 0
     @Published public var isTransmitting: Bool = false
     @Published public var statusMessage: String = "Ready"
+    /// Why the last key press or function key was not sent (no callsign of the operator, or one that is not
+    /// accepted); empty otherwise. Shown in the ESM ribbon; cleared when the active station profile changes.
+    @Published public var transmitRefusal: String = ""
 
     // Custom Macro Templates
     @Published public var f1CQ: String = "CQ TEST {MYCALL} {MYCALL} K"
@@ -133,20 +136,23 @@ public final class ContestESMEngine: ObservableObject {
 
         evaluateState(callsign: callsign, rcvdExchange: rcvdExchange)
 
+        // A branch that keys the transmitter stops, and changes nothing, when executeMacro refuses it (no
+        // callsign of the operator, or one that is not accepted). The "Ready to log" branch keys nothing and
+        // always logs.
         switch currentState {
         case .idleCQ:
             // Send F1 CQ
-            executeMacro(f1CQ, call: callsign, sentExch: sentExchange, rcvdExch: rcvdExchange)
+            guard executeMacro(f1CQ, call: callsign, sentExch: sentExchange, rcvdExch: rcvdExchange) else { return }
             statusMessage = "Calling CQ..."
 
         case .callEntered:
             // Send F2 His Call + Exchange
-            executeMacro(f2Exch, call: callsign, sentExch: sentExchange, rcvdExch: rcvdExchange)
+            guard executeMacro(f2Exch, call: callsign, sentExch: sentExchange, rcvdExch: rcvdExchange) else { return }
             statusMessage = "Sent exchange to \(callsign). Awaiting report..."
 
         case .exchEntered:
             // Send F3 TU + Next CQ and Log QSO!
-            executeMacro(f3TU, call: callsign, sentExch: sentExchange, rcvdExch: rcvdExchange)
+            guard executeMacro(f3TU, call: callsign, sentExch: sentExchange, rcvdExch: rcvdExchange) else { return }
             let logged = onLogQSO()
             if logged {
                 initialCallRecorded = ""
@@ -156,7 +162,7 @@ public final class ContestESMEngine: ObservableObject {
 
         case .callCorrected:
             // Send F5 Corrected Call + TU and Log QSO!
-            executeMacro(f5HisCallTU, call: callsign, sentExch: sentExchange, rcvdExch: rcvdExchange)
+            guard executeMacro(f5HisCallTU, call: callsign, sentExch: sentExchange, rcvdExch: rcvdExchange) else { return }
             let logged = onLogQSO()
             if logged {
                 initialCallRecorded = ""
@@ -166,13 +172,13 @@ public final class ContestESMEngine: ObservableObject {
 
         case .spCallStation:
             // S&P: Send F4 My Callsign
-            executeMacro(f4MyCall, call: callsign, sentExch: sentExchange, rcvdExch: rcvdExchange)
+            guard executeMacro(f4MyCall, call: callsign, sentExch: sentExchange, rcvdExch: rcvdExchange) else { return }
             statusMessage = "Called \(callsign). Listening for response..."
 
         case .spSendExch:
             // S&P: Send F2 My Exchange
             let macro = "599 {EXCH}"
-            executeMacro(macro, call: callsign, sentExch: sentExchange, rcvdExch: rcvdExchange)
+            guard executeMacro(macro, call: callsign, sentExch: sentExchange, rcvdExch: rcvdExchange) else { return }
             currentState = .spLogReady
             statusMessage = "Sent exchange to \(callsign)."
 
@@ -186,13 +192,30 @@ public final class ContestESMEngine: ObservableObject {
         }
     }
 
-    @Published public var myCallsign: String = "EP2AES"
+    @Published public var myCallsign: String = ""
     @Published public var nextSerial: Int = 1
+
+    /// Gives the engine the operator's callsign from the active station profile. The contest screen calls this
+    /// when it appears and when the profile changes, so the function keys work before the Enter key has been
+    /// pressed. A placeholder such as NOCALL is stored as empty. Clears an old refusal.
+    public func setStationCallsign(_ callsign: String?) {
+        myCallsign = TransmitIdentity.enteredCallsign(callsign)
+        transmitRefusal = ""
+    }
 
     // MARK: - Macro Templating & Execution
 
-    public func executeMacro(_ template: String, call: String, sentExch: String, rcvdExch: String) {
-        let myCall = self.myCallsign.isEmpty ? "EP2AES" : self.myCallsign
+    /// Expands the macro and hands it to the CW keyer. Returns false, and sends nothing, when the operator's
+    /// callsign is not set or not accepted (the reason is in `transmitRefusal`, which the ribbon shows).
+    @discardableResult
+    public func executeMacro(_ template: String, call: String, sentExch: String, rcvdExch: String) -> Bool {
+        let myCall = TransmitIdentity.normalized(myCallsign)
+        if let issue = CWKeyerService.shared.refusalReason(myCall: myCall) {
+            transmitRefusal = issue
+            statusMessage = issue
+            return false
+        }
+        transmitRefusal = ""
         let serialStr = String(format: "%03d", nextSerial)
 
         let text = template
@@ -206,7 +229,8 @@ public final class ContestESMEngine: ObservableObject {
         self.isTransmitting = true
 
         // Transmit via CW Keyer Service
-        CWKeyerService.shared.send(text: text)
+        CWKeyerService.shared.send(text: text, myCall: myCall)
+        return true
     }
 
     // MARK: - Abort / Wipe (Esc / Alt+W)

@@ -67,6 +67,11 @@ public final class RigControlEngine: ObservableObject {
     @Published public var isPTT: Bool = false
     @Published public var lastError: String? = nil
     @Published public var lastResponseTime = Date()
+    /// Flrig only: what flrig says (no radio selected / radio not answering / reports NAME). See FlrigLink.
+    @Published public private(set) var flrigLink: FlrigLink = .idle
+    /// Flrig only: set when a release of PTT could not be confirmed (flrig still reports PTT on, or YAAM could not read
+    /// it). Also part of lastError. Shown next to the connection pill. See FlrigPTTRelease.
+    @Published public private(set) var flrigPTTWarning: String? = nil
 
     // Formatted Telemetry
     public var frequencyMHz: Double {
@@ -82,17 +87,30 @@ public final class RigControlEngine: ObservableObject {
         AmateurBandPlan.band(forMHz: frequencyMHz) ?? "HF"
     }
 
+    /// Text for the connection pill. For flrig it says what flrig reports, never "radio connected".
+    public var statusLabel: String {
+        guard driverType == .flrig else { return isConnected ? rigModel : "CAT Offline" }
+        switch flrigLink {
+        case .reporting, .noRadio, .radioNotAnswering, .unexpected: return flrigLink.summary
+        case .idle, .unreachable: return "CAT Offline"
+        }
+    }
+
     public var sMeterDescription: String {
         if sMeterValue <= 9.0 {
             return "S\(Int(sMeterValue))"
         } else {
-            let overDB = Int((sMeterValue - 9.0) * 10)
+            // Round, do not truncate: 10.2 - 9.0 is 1.1999999999999993 in binary floating point, which would show 11 dB, not 12.
+            let overDB = Int(((sMeterValue - 9.0) * 10).rounded())
             return "S9+\(overDB)dB"
         }
     }
 
     private var pollingTask: Task<Void, Never>?
     private var tcpConnection: NWConnection?
+    private let flrigChain = FlrigCommandChain()
+    private var flrigErrors = FlrigErrorState()
+    private var flrigPTTWatchdog: Task<Void, Never>?
 
     private init() {
         let savedDriver = UserDefaults.standard.string(forKey: "rigDriverType") ?? RigDriverType.flrig.rawValue
@@ -109,6 +127,7 @@ public final class RigControlEngine: ObservableObject {
 
     deinit {
         pollingTask?.cancel()
+        flrigPTTWatchdog?.cancel()
         tcpConnection?.cancel()
     }
 
@@ -146,6 +165,10 @@ public final class RigControlEngine: ObservableObject {
     }
 
     public func disconnect() {
+        // A queued key-down must be followed by a release even if the operator disconnects immediately.
+        if driverType == .flrig && isPTT { flrigEnqueue(.setPTT(false)) }
+        flrigPTTWatchdog?.cancel()
+        flrigPTTWatchdog = nil
         pollingTask?.cancel()
         pollingTask = nil
         tcpConnection?.cancel()
@@ -165,6 +188,12 @@ public final class RigControlEngine: ObservableObject {
         }
         isConnected = false
         isConnecting = false
+        if driverType == .flrig {
+            flrigLink = .idle
+            flrigErrors = FlrigErrorState()
+            lastError = nil
+            flrigPTTWarning = nil
+        }
     }
 
     public func toggleConnection() {
@@ -182,13 +211,17 @@ public final class RigControlEngine: ObservableObject {
             self.mode = mode
         }
 
+        if driverType == .flrig {
+            // Queued here, not inside the Task below: flrig gets the commands in the order they were issued.
+            flrigEnqueue(.setVFO(hz: Double(frequencyHz)))
+            if let mode = mode, !mode.isEmpty { flrigEnqueue(.setMode(mode)) }
+            return
+        }
+
         Task {
             switch driverType {
             case .flrig:
-                _ = await flrigCall(method: "rig.set_vfo", param: String(frequencyHz))
-                if let mode = mode, !mode.isEmpty {
-                    _ = await flrigCall(method: "rig.set_mode", param: mode)
-                }
+                break   // queued above
             case .rigctld:
                 sendRigctldCommand("F \(frequencyHz)\n")
                 if let mode = mode, !mode.isEmpty {
@@ -227,10 +260,14 @@ public final class RigControlEngine: ObservableObject {
 
     public func setMode(_ newMode: String) {
         self.mode = newMode
+        if driverType == .flrig {
+            flrigEnqueue(.setMode(newMode))
+            return
+        }
         Task {
             switch driverType {
             case .flrig:
-                _ = await flrigCall(method: "rig.set_mode", param: newMode)
+                break   // queued above
             case .rigctld:
                 sendRigctldCommand("M \(newMode) 2400\n")
             case .tx500:
@@ -249,10 +286,14 @@ public final class RigControlEngine: ObservableObject {
 
     public func setPower(_ watts: Int) {
         self.powerWatts = watts
+        if driverType == .flrig {
+            flrigEnqueue(.setPower(watts: watts))
+            return
+        }
         Task {
             switch driverType {
             case .flrig:
-                _ = await flrigCall(method: "rig.set_power", param: String(watts))
+                break   // queued above
             case .rigctld:
                 let fraction = Double(watts) / 100.0
                 sendRigctldCommand("l RFPOWER \(fraction)\n")
@@ -275,7 +316,18 @@ public final class RigControlEngine: ObservableObject {
         self.isPTT = transmit
         switch driverType {
         case .flrig:
-            Task { _ = await flrigCall(method: "rig.set_ptt", param: transmit ? "1" : "0") }
+            flrigEnqueue(.setPTT(transmit))
+            flrigPTTWatchdog?.cancel()
+            flrigPTTWatchdog = nil
+            if transmit {
+                // A stalled audio task must not leave flrig keyed indefinitely.
+                flrigPTTWatchdog = Task { [weak self] in
+                    try? await Task.sleep(for: .seconds(120))
+                    guard !Task.isCancelled, let self, self.driverType == .flrig, self.isPTT else { return }
+                    NSLog("[flrig] PTT watchdog released a transmission after 120 seconds")
+                    self.setPTT(false)
+                }
+            }
         case .rigctld:
             sendRigctldCommand(transmit ? "T 1\n" : "T 0\n")
         case .tx500:
@@ -562,113 +614,130 @@ public final class RigControlEngine: ObservableObject {
     // MARK: - Flrig XML-RPC Engine
     private func startFlrigPolling() {
         pollingTask?.cancel()
+        flrigLink = .idle
+        flrigErrors = FlrigErrorState()
+        flrigPTTWarning = nil
         pollingTask = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self = self else { return }
 
-                await self.pollFlrigTelemetry()
+                // A poll that is cancelled (Disconnect) throws and leaves without changing anything.
+                do { try await self.pollFlrigTelemetry() } catch { return }
                 try? await Task.sleep(nanoseconds: 600_000_000) // Poll every 600ms
             }
         }
     }
 
-    private func pollFlrigTelemetry() async {
-        let xcvr = await flrigCall(method: "rig.get_xcvr")
-        if let model = xcvr, !model.isEmpty {
-            self.rigModel = model
-            self.isConnected = true
-            self.isConnecting = false
-        } else {
-            // Check if get_vfo succeeds even if get_xcvr is empty
-            let testVFO = await flrigCall(method: "rig.get_vfo")
-            if testVFO != nil {
-                self.isConnected = true
-                self.isConnecting = false
-            } else {
-                self.isConnected = false
-                return
-            }
+    private func pollFlrigTelemetry() async throws {
+        // rig.get_xcvr does not touch the radio. "NONE" (no radio selected in flrig) and "" (a radio that never
+        // answered) mean that flrig's other answers are made up (14070000, USB): they are not read, and YAAM is not
+        // "connected". Nothing here can tell that a radio was switched off later; flrig keeps reporting its name and frequency.
+        // After every await the task may have been cancelled (the user pressed Disconnect): then nothing is applied.
+        let link = FlrigXMLRPC.link(forXcvr: try await flrigQuery(.getXcvr))
+        if link != flrigLink {
+            flrigLink = link
+            flrigErrors.linkChanged()
+            flrigLogOnce(link.problem)
+            flrigPublishError()
         }
+        guard let model = link.radioName else {
+            self.isConnected = false
+            return
+        }
+        self.rigModel = model
+        self.isConnected = true
+        self.isConnecting = false
 
         // 1. Frequency
-        if let vfoStr = await flrigCall(method: "rig.get_vfo") {
-            if let hz = UInt64(vfoStr.trimmingCharacters(in: .whitespacesAndNewlines)) {
+        if let vfoStr = try await flrigText(.getVFO) {
+            if let hz = UInt64(vfoStr) {
                 self.frequencyHz = hz
-            } else if let dbl = Double(vfoStr.trimmingCharacters(in: .whitespacesAndNewlines)) {
+            } else if let dbl = Double(vfoStr) {
                 self.frequencyHz = UInt64(dbl)
             }
         }
 
         // 2. Mode
-        if let modeStr = await flrigCall(method: "rig.get_mode") {
-            let clean = modeStr.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !clean.isEmpty { self.mode = clean }
-        }
+        if let clean = try await flrigText(.getMode), !clean.isEmpty { self.mode = clean }
 
         // 3. Power
-        if let pwrStr = await flrigCall(method: "rig.get_power") {
-            if let p = Int(pwrStr.trimmingCharacters(in: .whitespacesAndNewlines)) {
-                self.powerWatts = p
-            }
-        }
+        if let pwrStr = try await flrigText(.getPower), let p = Int(pwrStr) { self.powerWatts = p }
 
         // 4. S-Meter
-        if let sStr = await flrigCall(method: "rig.get_smeter") {
-            if let val = Double(sStr.trimmingCharacters(in: .whitespacesAndNewlines)) {
-                self.sMeterValue = min(15.0, max(0.0, val))
-            }
+        if let sStr = try await flrigText(.getSmeter), let val = Double(sStr) {
+            self.sMeterValue = min(15.0, max(0.0, val))
+        }
+
+        // 5. PTT, only while a warning that the radio may be keyed is shown: flrig reporting PTT off ends it.
+        if flrigErrors.pttWarning != nil, let ptt = try await flrigText(.getPTT).flatMap({ Int($0) }),
+           flrigErrors.pttObserved(keyed: ptt == 1) {
+            isPTT = false   // flrig reports PTT off: the warning ends
+            flrigPublishError()
         }
 
         self.lastResponseTime = Date()
     }
 
-    private func flrigCall(method: String, param: String? = nil) async -> String? {
-        guard let url = URL(string: "http://\(host):\(port)") else { return nil }
+    /// A query. nil = no usable HTTP answer. A fault comes back as .fault, never as a value, and is kept as the error.
+    /// Throws only when the polling task was cancelled.
+    private func flrigQuery(_ command: FlrigCommand) async throws -> FlrigReply? {
+        let reply = try await FlrigTransport.send(command, host: host, port: port, timeout: 1.5)
+        try Task.checkCancellation()
+        if case .fault(_, let message)? = reply { flrigRefused(command, message) }
+        return reply
+    }
 
-        var paramXML = ""
-        if let param = param {
-            paramXML = "<param><value><string>\(param)</string></value></param>"
-        }
+    private func flrigText(_ command: FlrigCommand) async throws -> String? {
+        try await flrigQuery(command)?.text
+    }
 
-        let xml = """
-        <?xml version="1.0"?>
-        <methodCall>
-            <methodName>\(method)</methodName>
-            <params>\(paramXML)</params>
-        </methodCall>
-        """
-
-        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: 1.5)
-        request.httpMethod = "POST"
-        request.setValue("text/xml", forHTTPHeaderField: "Content-Type")
-        request.httpBody = xml.data(using: .utf8)
-
-        do {
-            let (data, _) = try await URLSession.shared.data(for: request)
-            return parseXMLRPCResponse(data)
-        } catch {
-            return nil
+    /// A command for flrig, behind every command queued before it. Returns at once; the answer is handled when it comes.
+    /// rig.set_ptt 0 is read back and repeated inside the same job (FlrigPTTRelease): the release stays the last
+    /// command, and nothing else is sent between it, the read-back and the repeats.
+    private func flrigEnqueue(_ command: FlrigCommand) {
+        let host = self.host, port = self.port
+        flrigChain.enqueue {
+            let send: FlrigSequences.Send = { await FlrigTransport.sendUncancelled($0, host: host, port: port, timeout: 1.5) }
+            let outcome: FlrigOutcome
+            if command.isPTTRelease {
+                outcome = await FlrigPTTRelease.release(send: send, pause: { try? await Task.sleep(nanoseconds: $0) })
+            } else {
+                outcome = FlrigOutcome(method: command.method, reply: await send(command))
+            }
+            await self.flrigReport(outcome)
         }
     }
 
-    private func parseXMLRPCResponse(_ data: Data) -> String? {
-        guard let str = String(data: data, encoding: .utf8) else { return nil }
+    /// A fault is kept as the error until flrig accepts a command or the link changes; it is not thrown away.
+    /// A release that flrig did not confirm is kept as a warning and written to the system log.
+    private func flrigReport(_ outcome: FlrigOutcome) {
+        flrigErrors.record(outcome)
+        flrigLogOnce(flrigErrors.commandFault)
+        if let line = outcome.releaseCheck?.logLine { NSLog("[flrig] %@", line) }
+        switch outcome.releaseCheck {
+        case .stillKeyed?: isPTT = true    // flrig reports PTT on
+        case .released?: isPTT = false     // flrig reports PTT off
+        default: break
+        }
+        flrigPublishError()
+    }
 
-        // Extract value between <value>...</value> or <string>...</string>
-        if let start = str.range(of: "<string>"), let end = str.range(of: "</string>") {
-            return String(str[start.upperBound..<end.lowerBound])
-        }
-        if let start = str.range(of: "<double>"), let end = str.range(of: "</double>") {
-            return String(str[start.upperBound..<end.lowerBound])
-        }
-        if let start = str.range(of: "<i4>"), let end = str.range(of: "</i4>") {
-            return String(str[start.upperBound..<end.lowerBound])
-        }
-        if let start = str.range(of: "<value>"), let end = str.range(of: "</value>") {
-            let inner = String(str[start.upperBound..<end.lowerBound])
-            return inner.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
-        }
-        return nil
+    private func flrigRefused(_ command: FlrigCommand, _ message: String) {
+        flrigErrors.refused(command.method, message)
+        flrigLogOnce(flrigErrors.commandFault)
+        flrigPublishError()
+    }
+
+    /// lastError changes only when its text changes, so a problem that persists is not published at every poll.
+    private func flrigPublishError() {
+        let text = flrigErrors.text(for: flrigLink)
+        if text != lastError { lastError = text }
+        if flrigErrors.pttWarning != flrigPTTWarning { flrigPTTWarning = flrigErrors.pttWarning }
+    }
+
+    /// Writes a problem to the system log once, not at every poll.
+    private func flrigLogOnce(_ problem: String?) {
+        if let line = flrigErrors.newProblemToLog(problem) { NSLog("[flrig] %@", line) }
     }
 
     // MARK: - Hamlib rigctld TCP Engine

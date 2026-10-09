@@ -233,6 +233,13 @@ public struct JS8StationView: View {
             Divider()
 
             // Message Composer
+            if !engine.transmitRefusal.isEmpty {
+                Text(engine.transmitRefusal)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 10)
+            }
             HStack(spacing: 8) {
                 TextField("Type JS8 directed or broadcast message...", text: $messageInputText)
                     .textFieldStyle(.roundedBorder)
@@ -293,7 +300,8 @@ public struct JS8StationView: View {
         let text = messageInputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         let target = engine.selectedStation?.callsign ?? "@ALLCALL"
-        engine.sendMessage(text: text, to: target)
-        messageInputText = ""
+        if engine.sendMessage(text: text, to: target) {
+            messageInputText = ""
+        }
     }
 }

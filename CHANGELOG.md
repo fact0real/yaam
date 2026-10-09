@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.37.34 — 2026-10-09
+
+- Require the operator's own callsign before CW and digital transmissions, including JS8 and SSTV audio; require a valid locator for FT8/FT4 standard messages.
+- Remove built-in station, park, and locator defaults from entry screens and previews.
+- Correct flrig XML-RPC parameter types, command ordering, CW commands, connection reporting, and PTT release verification with a visible warning and a 120-second watchdog.
+- Correct TX-500 S-meter requests and scaling, and keep stored and exchanged dates Gregorian with Latin digits across Mac calendar settings.
+- Add Catalan and Spanish translations for selected interface text.
+- Bind the built-in radio emulator servers to loopback and reject unknown rigctld commands.
+
 ## 1.37.33 — 2026-10-09
 
 - Unify FT8 Station ribbon heights, keep SNR on one line, and show the newest RX stream entries first.

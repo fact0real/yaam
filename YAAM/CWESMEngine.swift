@@ -220,9 +220,7 @@ final class CWESMEngine: ObservableObject {
         appState: AppState
     ) -> (previewText: String, morseText: String) {
         let keyer = CWKeyerService.shared
-        let myCall = appState.activeStationProfile?.callsign.isEmpty == false
-            ? (appState.activeStationProfile?.callsign ?? "EP2AES")
-            : "EP2AES"
+        let myCall = TransmitIdentity.usableCallsign(appState.activeStationProfile?.callsign) ?? TransmitIdentity.callsignPreviewToken
         let targetCall = appState.quickLogDraft.callsign
         let rst = appState.quickLogDraft.rstSent.isEmpty ? "599" : appState.quickLogDraft.rstSent
         let name = appState.quickLogDraft.name
@@ -242,7 +240,7 @@ final class CWESMEngine: ObservableObject {
             keyer.expandMacro(
                 tmpl,
                 myCall: myCall,
-                call: targetCall.isEmpty ? "W1AW" : targetCall,
+                call: targetCall.isEmpty ? "DXCALL" : targetCall,
                 rst: rst,
                 name: name,
                 qth: qth,
@@ -284,9 +282,7 @@ final class CWESMEngine: ObservableObject {
         saveQSO: () -> Void
     ) {
         let keyer = CWKeyerService.shared
-        let myCall = appState.activeStationProfile?.callsign.isEmpty == false
-            ? (appState.activeStationProfile?.callsign ?? "EP2AES")
-            : "EP2AES"
+        let myCall = appState.activeStationProfile?.normalizedCallsign ?? ""
         let targetCall = appState.quickLogDraft.callsign
         let rst = appState.quickLogDraft.rstSent.isEmpty ? "599" : appState.quickLogDraft.rstSent
         let name = appState.quickLogDraft.name
@@ -301,6 +297,16 @@ final class CWESMEngine: ObservableObject {
         let exch = appState.quickLogDraft.receivedExchange.isEmpty ? "001" : appState.quickLogDraft.receivedExchange
         let band = appState.quickLogDraft.band
         let freq = appState.quickLogDraft.frequencyMHz
+
+        // Every action that keys the transmitter asks this first. Without the operator's own callsign (or with
+        // one that is not accepted) it keys nothing, counts no step of the exchange as sent, logs nothing, and
+        // shows the reason on the quick-log screen. Prompting for a callsign keys nothing and needs no check.
+        func mayKey() -> Bool {
+            guard let issue = keyer.refusalReason(myCall: myCall) else { return true }
+            lastExecutedActionDescription = issue
+            appState.quickLogStatus = issue
+            return false
+        }
 
         func transmit(_ template: String) {
             keyer.send(
@@ -319,11 +325,13 @@ final class CWESMEngine: ObservableObject {
 
         switch action {
         case .sendCQ(let template):
+            guard mayKey() else { return }
             transmit(template)
             lastExecutedActionDescription = "Sent CQ"
             focusCallsign()
 
         case .sendExchange(let call, let template):
+            guard mayKey() else { return }
             transmit(template)
             hasSentExchangeInCurrentQSO = true
             lastExecutedActionDescription = "Sent Exch to \(call)"
@@ -332,6 +340,7 @@ final class CWESMEngine: ObservableObject {
             }
 
         case .sendTUAndLog(let template):
+            guard mayKey() else { return }
             transmit(template)
             lastExecutedActionDescription = "Sent TU & Logged"
             hasSentExchangeInCurrentQSO = false
@@ -340,6 +349,7 @@ final class CWESMEngine: ObservableObject {
             focusCallsign()
 
         case .sendMyCall(let template):
+            guard mayKey() else { return }
             transmit(template)
             hasSentCallInCurrentQSO = true
             lastExecutedActionDescription = "Sent My Call"
@@ -348,6 +358,7 @@ final class CWESMEngine: ObservableObject {
             }
 
         case .sendMyExchangeAndLog(let template):
+            guard mayKey() else { return }
             transmit(template)
             lastExecutedActionDescription = "Sent Exch & Logged"
             hasSentExchangeInCurrentQSO = false

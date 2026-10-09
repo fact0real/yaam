@@ -85,7 +85,7 @@ public struct CWPileupSimulatorView: View {
                 Text("DE")
                     .font(.system(size: 11, weight: .bold, design: .monospaced))
                     .foregroundColor(.secondary)
-                Text(sim.myCallsign.isEmpty ? "EP2AES" : sim.myCallsign.uppercased())
+                Text(sim.myCallsign.isEmpty ? TransmitIdentity.callsignNotSetLabel : sim.myCallsign.uppercased())
                     .font(.system(size: 13, weight: .bold, design: .monospaced))
                     .foregroundColor(.primary)
             }
@@ -528,14 +528,19 @@ public struct CWPileupSimulatorView: View {
         }
     }
 
+    /// The operator's callsign as the simulator shows it in button labels; a neutral token until one is typed.
+    private var shownCallsign: String {
+        sim.myCallsign.isEmpty ? TransmitIdentity.callsignPreviewToken : sim.myCallsign.uppercased()
+    }
+
     private var esmButtonSubtitle: String {
         switch sim.state {
         case .idle, .paused:
-            return sim.draftCallsign.isEmpty ? "F1: CQ TEST \(sim.myCallsign)" : "F2: \(sim.draftCallsign) 5NN \(String(format: "%03d", sim.draftSerialSent))"
+            return sim.draftCallsign.isEmpty ? "F1: CQ TEST \(shownCallsign)" : "F2: \(sim.draftCallsign) 5NN \(String(format: "%03d", sim.draftSerialSent))"
         case .pileupCalling:
             return sim.draftCallsign.isEmpty ? "No call selected" : "Addressing \(sim.draftCallsign)"
         case .stationResponding:
-            return "F3: TU \(sim.myCallsign) TEST"
+            return "F3: TU \(shownCallsign) TEST"
         case .transmittingCQ, .transmittingExchange, .transmittingTU:
             return "Press Esc to Abort"
         }
@@ -770,7 +775,7 @@ public struct CWPileupSimulatorView: View {
                     HStack {
                         Text("My Callsign:")
                             .frame(width: 140, alignment: .leading)
-                        TextField("EP2AES", text: $sim.myCallsign)
+                        TextField(TransmitIdentity.callsignPlaceholder, text: $sim.myCallsign)
                             .textFieldStyle(.roundedBorder)
                     }
 

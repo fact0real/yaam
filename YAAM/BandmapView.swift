@@ -1127,7 +1127,7 @@ public struct BandmapView: View {
                         Image(systemName: "location.north.line.fill")
                             .foregroundColor(.green)
                             .font(.system(size: 9))
-                        Text("Origin: \(stationCallsign) (\(stationGrid))")
+                        Text("Origin: \(stationCallsign) (\(stationGrid.isEmpty ? TransmitIdentity.locatorNotSetLabel : stationGrid))")
                             .font(.system(size: 9, weight: .medium))
                             .foregroundColor(.secondary)
                         Spacer()
@@ -1475,13 +1475,11 @@ public struct BandmapView: View {
     }
 
     private var stationCallsign: String {
-        let call = appState.currentStationCallsign
-        return (call.isEmpty || call == "DEFAULT" || call == "NOCALL") ? "EP2AES" : call
+        TransmitIdentity.usableCallsign(appState.currentStationCallsign) ?? TransmitIdentity.callsignNotSetLabel
     }
 
     private var stationGrid: String {
-        let grid = appState.activeStationProfile?.normalizedGrid ?? ""
-        return grid.isEmpty ? "LM55" : grid
+        appState.activeStationProfile?.normalizedGrid ?? ""
     }
 
     private var stationCoordinate: GeoCoordinate {

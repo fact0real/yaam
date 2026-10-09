@@ -541,6 +541,11 @@ extension AppState {
             latitude: Double(profile.latitude),
             longitude: Double(profile.longitude)
         )
+
+        // A refusal that a screen shows for the previous callsign no longer applies. The quick-log status line
+        // is shared with other messages, so only a refusal is taken off it.
+        if TransmitIdentity.isIdentityRefusal(quickLogStatus) { quickLogStatus = "Ready" }
+        NotificationCenter.default.post(name: TransmitIdentity.identityChanged, object: nil)
     }
 
     private func migrateLegacyMasterLogsIfNeeded(using database: LogbookDatabase) throws {

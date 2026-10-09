@@ -1876,11 +1876,7 @@ class QRZWebKitScraper: NSObject, WKNavigationDelegate {
 
 // MARK: - Global Application State Manager (Workspace Architecture)
 class AppState: NSObject, ObservableObject {
-    static let adifDateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyyMMdd"
-        return formatter
-    }()
+    static let adifDateFormatter: DateFormatter = GregorianDate.formatter("yyyyMMdd")
 
     var currentVersion: String {
         return Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.14.4"
@@ -2499,9 +2495,7 @@ class AppState: NSObject, ObservableObject {
         var records = qsoRecords
         
         if filterCriteria.isActive {
-            let formatter = DateFormatter()
-            formatter.dateFormat = "yyyyMMdd"
-            formatter.timeZone = TimeZone(secondsFromGMT: 0)
+            let formatter = GregorianDate.formatter("yyyyMMdd", timeZone: TimeZone(secondsFromGMT: 0))
             
             let startStr = formatter.string(from: filterCriteria.startDate)
             let endStr = formatter.string(from: filterCriteria.endDate)
@@ -7797,12 +7791,8 @@ class AppState: NSObject, ObservableObject {
     }
 
     // MARK: - Today's Confirmed QSOs
-    private static let todayUTCFormatter: DateFormatter = {
-        let df = DateFormatter()
-        df.dateFormat = "yyyyMMdd"
-        df.timeZone = TimeZone(secondsFromGMT: 0)
-        return df
-    }()
+    private static let todayUTCFormatter: DateFormatter =
+        GregorianDate.formatter("yyyyMMdd", timeZone: TimeZone(secondsFromGMT: 0))
 
     func isTodayConfirmed(record: QSORecordModel, todayLocal: String, todayUTC: String) -> Bool {
         guard record.isConfirmed else { return false }
@@ -8004,7 +7994,7 @@ class AppState: NSObject, ObservableObject {
         for record in records {
             let cleanCall = QSLCardRenderer.cleanFileComponent(record["CALL"].isEmpty ? "CONTACT" : record["CALL"])
             let cleanDate = QSLCardRenderer.cleanFileComponent(record["QSO_DATE"].isEmpty ? "DATE" : record["QSO_DATE"])
-            let cleanStation = QSLCardRenderer.cleanFileComponent(station.callsign.isEmpty ? "EP2AES" : station.callsign)
+            let cleanStation = QSLCardRenderer.cleanFileComponent(station.callsign.isEmpty ? TransmitIdentity.callsignPreviewToken : station.callsign)
             let fileName = "\(cleanStation)_QSL_\(cleanCall)_\(cleanDate).pdf"
             let fileURL = folderURL.appendingPathComponent(fileName)
 
@@ -8211,9 +8201,7 @@ class AppState: NSObject, ObservableObject {
         let lastLoTWSyncDate = isFirstFullSync ? nil : (UserDefaults.standard.object(forKey: "lastLoTWSyncDate") as? Date)
         let lastQRZSyncDate = forceFullSync ? nil : (UserDefaults.standard.object(forKey: "lastQRZSyncDate") as? Date)
         
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "yyyy-MM-dd"
-        dateFormatter.timeZone = TimeZone(secondsFromGMT: 0)
+        let dateFormatter = GregorianDate.formatter("yyyy-MM-dd", timeZone: TimeZone(secondsFromGMT: 0))
         
         let lotwSinceDateString = lastLoTWSyncDate != nil ? dateFormatter.string(from: lastLoTWSyncDate!) : "1900-01-01"
         let qrzSinceDateString = lastQRZSyncDate.map { dateFormatter.string(from: $0) }

@@ -1656,7 +1656,7 @@ public struct QSLHubStudioView: View {
             VStack(alignment: .leading, spacing: 10) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Callsign / Username:").font(.caption.bold())
-                    TextField("Callsign (e.g. \(appState.activeStationProfile?.callsign ?? "EP2AES"))", text: $promptEQSLUsername)
+                    TextField(TransmitIdentity.callsignPlaceholder, text: $promptEQSLUsername)
                         .textFieldStyle(.roundedBorder)
                 }
 

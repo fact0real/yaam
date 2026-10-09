@@ -138,7 +138,7 @@ public enum DigitalContestCabrilloService {
             if options.grid.isEmpty {
                 issues.append(CabrilloIssue(isError: true, message: "GRID-LOCATOR is mandatory for CQ WW Digi contest logs.", callsign: nil))
             } else if options.grid.count < 4 {
-                issues.append(CabrilloIssue(isError: true, message: "GRID-LOCATOR must be at least 4 characters (e.g. KM32).", callsign: nil))
+                issues.append(CabrilloIssue(isError: true, message: "GRID-LOCATOR must be at least 4 characters.", callsign: nil))
             }
         }
 

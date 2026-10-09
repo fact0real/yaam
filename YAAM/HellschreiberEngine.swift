@@ -107,7 +107,12 @@ public final class HellschreiberEngine: ObservableObject {
     @Published public var signalStrengthDb: Double = 0.0
 
     // Station Settings
-    @Published public var myCallsign: String = "EP2YAAM"
+    /// The operator's saved callsign as entered; empty when none is set. The transmit buttons refuse while it is
+    /// empty or not accepted.
+    public var myCallsign: String { TransmitIdentity.savedEnteredCallsign() }
+    /// Why the last transmission was refused (no callsign of the operator, or one that is not accepted); empty
+    /// otherwise. The screen clears it when the active station profile changes.
+    @Published public var txRefusal: String = ""
     @Published public var targetCallsign: String = ""
 
     // Logging Callback
@@ -277,6 +282,11 @@ public final class HellschreiberEngine: ObservableObject {
     // MARK: - Hellschreiber Audio Transmitter
 
     public func queueTextForTransmission(_ text: String) {
+        if let issue = TransmitIdentity.callsignRefusal(myCallsign) {
+            txRefusal = issue
+            return
+        }
+        txRefusal = ""
         txBufferText += text
         if !isTransmitting {
             startTransmission()
@@ -285,6 +295,10 @@ public final class HellschreiberEngine: ObservableObject {
 
     public func startTransmission() {
         guard !txBufferText.isEmpty, !isTransmitting else { return }
+        if let issue = TransmitIdentity.callsignRefusal(myCallsign) {
+            txRefusal = issue
+            return
+        }
         isTransmitting = true
 
         txTask = Task.detached(priority: .userInitiated) { [weak self] in

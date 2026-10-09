@@ -441,7 +441,7 @@ public struct CWDecoderView: View {
 
                     // Action 1: Transmit Suggested Reply
                     Button {
-                        assistant.sendSuggestedReply(myCall: appState.activeStationProfile?.callsign ?? "EP2AES")
+                        assistant.sendSuggestedReply(myCall: appState.activeStationProfile?.normalizedCallsign ?? "")
                     } label: {
                         HStack(spacing: 4) {
                             Image(systemName: "paperplane.fill")
@@ -483,6 +483,13 @@ public struct CWDecoderView: View {
                 .padding(10)
                 .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
                 .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.accentColor.opacity(0.35), lineWidth: 1))
+            }
+
+            // Why "Send Reply" sent nothing (no callsign of the operator, or one that is not accepted)
+            if !keyer.transmitRefusal.isEmpty {
+                Text(keyer.transmitRefusal)
+                    .font(.caption)
+                    .foregroundColor(.orange)
             }
         }
         .padding(10)

@@ -31,9 +31,16 @@ public struct RigControlToolbarView: View {
                         .font(.system(size: 11))
                         .foregroundStyle(rig.isConnected ? Color.green : Color.secondary)
 
-                    Text(rig.isConnected ? rig.rigModel : "CAT Offline")
+                    Text(rig.statusLabel)
                         .font(.system(size: 11, weight: .bold))
                         .foregroundStyle(rig.isConnected ? Color.primary : Color.secondary)
+
+                    // flrig: a release of PTT that could not be confirmed. The text is in the popover and in the help tag.
+                    if rig.flrigPTTWarning != nil {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.orange)
+                    }
 
                     Image(systemName: "chevron.down")
                         .font(.system(size: 8, weight: .semibold))
@@ -51,7 +58,7 @@ public struct RigControlToolbarView: View {
                 )
             }
             .buttonStyle(.plain)
-            .help("Configure Transceiver CAT Control")
+            .help(rig.flrigPTTWarning.map { Text(verbatim: $0) } ?? Text("Configure Transceiver CAT Control"))
             .popover(isPresented: $showConfigPopover) {
                 RigConfigPopoverView(rig: rig)
             }
@@ -582,7 +589,7 @@ struct RigConfigPopoverView: View {
             }
 
             // Live Connection Status or Error Banner
-            if let err = rig.lastError, !rig.isConnected {
+            if let err = rig.lastError, !rig.isConnected || rig.driverType == .flrig {
                 HStack(spacing: 8) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundStyle(.orange)
@@ -611,7 +618,7 @@ struct RigConfigPopoverView: View {
                             return "\(rig.host):\(rig.port)"
                         }
                     }()
-                    Text("Connected to \(rig.rigModel) on \(dest)")
+                    Text(rig.driverType == .flrig ? "\(rig.flrigLink.detail) (\(dest))" : "Connected to \(rig.rigModel) on \(dest)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Spacer()
@@ -634,7 +641,7 @@ struct RigConfigPopoverView: View {
 
                 Spacer()
 
-                Button(rig.isConnected ? "Disconnect Transceiver" : "Connect Transceiver") {
+                Button(rig.isConnected || (rig.driverType == .flrig && rig.isConnecting) ? "Disconnect Transceiver" : "Connect Transceiver") {
                     rig.toggleConnection()
                 }
                 .buttonStyle(.borderedProminent)
@@ -648,6 +655,7 @@ struct RigConfigPopoverView: View {
     private func driverCard(title: String, subtitle: String, icon: String, driver: RigDriverType) -> some View {
         let isSelected = rig.driverType == driver
         return Button {
+            if rig.driverType != driver { rig.disconnect() }
             rig.driverType = driver
             rig.port = driver.defaultPort
             if driver != .disabled {

@@ -50,7 +50,10 @@ public struct ON4KSTView: View {
         }
         .onAppear {
             if inputCallsign.isEmpty {
-                inputCallsign = appState.activeStationProfile?.callsign ?? "EP2AES"
+                inputCallsign = appState.activeStationProfile?.normalizedCallsign ?? ""
+            }
+            if kst.myGrid.isEmpty {
+                kst.myGrid = appState.activeStationProfile?.normalizedGrid ?? ""
             }
         }
     }
@@ -246,7 +249,7 @@ public struct ON4KSTView: View {
 
     private var filteredMessages: [ON4KSTMessage] {
         if showOnlyDirected {
-            let myCall = (appState.activeStationProfile?.callsign ?? "EP2AES").uppercased()
+            let myCall = (appState.activeStationProfile?.callsign ?? "").uppercased()
             return kst.messages.filter { $0.isDirected || $0.recipient?.uppercased() == myCall || $0.text.localizedCaseInsensitiveContains(myCall) }
         }
         return kst.messages
@@ -308,7 +311,7 @@ public struct ON4KSTView: View {
     // MARK: - Message Card
 
     private func messageCard(_ msg: ON4KSTMessage) -> some View {
-        let isMe = msg.sender.uppercased() == (appState.activeStationProfile?.callsign ?? "EP2AES").uppercased()
+        let isMe = msg.sender.uppercased() == (appState.activeStationProfile?.callsign ?? "").uppercased()
 
         return VStack(alignment: .leading, spacing: 6) {
             // Header: Sender, Recipient, Badges, Full Date & Time

@@ -429,8 +429,8 @@ public final class RoverModeEngine: ObservableObject {
     // MARK: - Telemetry & Geometry Diagnostics
 
     public func telemetry(homeGrid: String, roverGridOverride: String? = nil) -> RoverTelemetry? {
-        let currentRover = roverGridOverride ?? activeSession?.targetGrid ?? "LL46"
-        let effectiveHome = homeGrid.isEmpty ? "LM35" : homeGrid
+        guard let currentRover = roverGridOverride ?? activeSession?.targetGrid else { return nil }
+        let effectiveHome = homeGrid
 
         guard let homeBox = MaidenheadGridEngine.boundingBox(for: effectiveHome),
               let roverBox = MaidenheadGridEngine.boundingBox(for: currentRover) else {

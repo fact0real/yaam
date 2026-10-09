@@ -223,6 +223,11 @@ public struct SSTVStudioView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(engine.isTransmitting ? .red : .orange)
+                if !engine.transmitRefusal.isEmpty {
+                    Text(engine.transmitRefusal)
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
             }
             .padding(10)
             .background(Color(NSColor.controlBackgroundColor).opacity(0.4))

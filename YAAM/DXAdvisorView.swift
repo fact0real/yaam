@@ -834,7 +834,7 @@ struct DXAdvisorView: View {
 
             stationSummary
             HStack(spacing: 12) {
-                TextField("Destination grid, e.g. JN11", text: $destinationGrid)
+                TextField("Destination grid", text: $destinationGrid)
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 210)
                 if let origin = stationCoordinate,

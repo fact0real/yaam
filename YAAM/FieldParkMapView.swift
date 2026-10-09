@@ -68,7 +68,7 @@ public struct FieldParkMapView: View {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(.secondary)
 
-                TextField("Search park ref (e.g. EP-0005, K-0001), name...", text: $searchQuery)
+                TextField("Search park reference or name", text: $searchQuery)
                     .textFieldStyle(.plain)
 
                 if !searchQuery.isEmpty {

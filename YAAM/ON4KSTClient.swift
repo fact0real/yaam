@@ -105,8 +105,8 @@ public final class ON4KSTClient: ObservableObject {
     @Published public var onlineUsers: [ON4KSTUser] = []
     @Published public var statusMessage: String = "Disconnected"
     @Published public var serverHost: String = "chat.on4kst.com"
-    @Published public var myCallsign: String = "EP2AES"
-    @Published public var myGrid: String = "LN35ir"
+    @Published public var myCallsign: String = ""
+    @Published public var myGrid: String = ""
 
     private var connection: NWConnection?
     private var receiveBuffer: String = ""
@@ -127,10 +127,12 @@ public final class ON4KSTClient: ObservableObject {
         disconnect()
 
         let cleanCall = callsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        guard !cleanCall.isEmpty else {
-            self.statusMessage = "Please enter your station callsign"
+        guard !TransmitIdentity.isPlaceholderCallsign(cleanCall) else {
+            self.statusMessage = TransmitIdentity.callsignMissingMessage
             return
         }
+        // Messages are posted under the callsign that logged in, never under a built-in one.
+        self.myCallsign = cleanCall
 
         // Clear any stale or sample messages before a fresh connection
         self.messages = []
@@ -336,7 +338,7 @@ public final class ON4KSTClient: ObservableObject {
         }
 
         // Echo locally
-        let myCall = self.myCallsign.isEmpty ? "EP2AES" : self.myCallsign
+        let myCall = self.myCallsign.isEmpty ? TransmitIdentity.callsignNotSetLabel : self.myCallsign
         let msg = ON4KSTMessage(
             sender: myCall,
             recipient: recipient,
@@ -348,9 +350,13 @@ public final class ON4KSTClient: ObservableObject {
     }
 
     public func sendCQ(frequencyMHz: String, mode: String = "FT8", beamHeading: String = "") {
-        let myCall = self.myCallsign.isEmpty ? "EP2AES" : self.myCallsign
-        let grid = self.myGrid.isEmpty ? "LN35ir" : self.myGrid
-        var text = "CQ \(frequencyMHz) \(mode) de \(myCall) in \(grid)"
+        guard !TransmitIdentity.isPlaceholderCallsign(myCallsign) else {
+            statusMessage = TransmitIdentity.callsignMissingMessage
+            return
+        }
+        var text = "CQ \(frequencyMHz) \(mode) de \(myCallsign)"
+        // The locator is added only when it is set, as its valid 4, 6, 8 or 10 characters.
+        if let grid = TransmitIdentity.locator(myGrid) { text += " in \(grid)" }
         if !beamHeading.isEmpty {
             text += " beam \(beamHeading)°"
         }

@@ -62,8 +62,9 @@ public struct QSLLabelDesignerView: View {
             }
         }
         .onAppear {
-            config.stationCallsign = appState.activeStationProfile?.callsign ?? "EP2AES"
-            config.stationGrid = appState.activeStationProfile?.grid ?? "LN35ir"
+            config.stationCallsign = appState.activeStationProfile?.normalizedCallsign ?? ""
+            config.stationGrid = appState.activeStationProfile?.normalizedGrid ?? ""
+            config.stationQTH = appState.activeStationProfile?.qth ?? ""
             regeneratePreview()
         }
     }

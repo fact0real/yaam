@@ -173,6 +173,7 @@ struct FT8StationView: View {
             }
         }
         .onChange(of: appState.activeStationProfileID) { _, _ in loadIdentity() }
+        .onChange(of: appState.activeStationProfile) { _, _ in loadIdentity() }
         .onChange(of: engine.audioPath) { _, _ in engine.stopMonitoring() }
         .onChange(of: radio.state) { _, state in
             if !state.isConnected, engine.audioPath == .icomLAN { engine.stopMonitoring() }
@@ -2368,11 +2369,11 @@ struct FT8StationView: View {
                 Image(systemName: "antenna.radiowaves.left.and.right")
                     .font(.caption2)
                     .foregroundStyle(.blue)
-                Text(engine.myCall.isEmpty ? "EP2AES" : engine.myCall)
+                Text(engine.myCall.isEmpty ? TransmitIdentity.callsignNotSetLabel : engine.myCall)
                     .font(.system(size: 11, weight: .bold, design: .monospaced))
                 Text("·")
                     .foregroundStyle(.secondary)
-                Text(engine.myGrid.isEmpty ? "LM55" : engine.myGrid)
+                Text(engine.myGrid.isEmpty ? TransmitIdentity.locatorNotSetLabel : engine.myGrid)
                     .font(.system(size: 11, weight: .semibold, design: .monospaced))
             }
             .padding(.horizontal, 8)

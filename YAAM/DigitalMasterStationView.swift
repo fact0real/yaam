@@ -117,7 +117,7 @@ public struct DigitalMasterStationView: View {
                 Circle()
                     .fill(Color.green)
                     .frame(width: 6, height: 6)
-                Text(appState.currentStationCallsign.isEmpty ? "EP2YAAM" : appState.currentStationCallsign)
+                Text(TransmitIdentity.usableCallsign(appState.currentStationCallsign) ?? TransmitIdentity.callsignNotSetLabel)
                     .font(.system(size: 11, weight: .bold, design: .monospaced))
                     .foregroundColor(.primary)
             }

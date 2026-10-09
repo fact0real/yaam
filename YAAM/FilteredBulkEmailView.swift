@@ -113,7 +113,7 @@ struct FilteredBulkEmailView: View {
         if let first = appState.qsoRecords.first(where: { !$0["STATION_CALLSIGN"].isEmpty })?["STATION_CALLSIGN"] {
             return first.uppercased()
         }
-        return "EP2AES"
+        return TransmitIdentity.callsignPreviewToken
     }
 
     private var resolvedMyName: String {

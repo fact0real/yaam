@@ -28,6 +28,7 @@ public struct AzimuthalAndFlatMapCanvas: View {
     public var showBalloonTracks: Bool
     public var azimuthalRangeKm: Double
     public var stationCallsign: String
+    public var stationLocator: String
     public var onSelectMarker: (Globe3DMarker) -> Void
     public var onSelectGrid: (String) -> Void
 
@@ -63,7 +64,8 @@ public struct AzimuthalAndFlatMapCanvas: View {
         showDRAPLayer: Bool = true,
         showBalloonTracks: Bool = true,
         azimuthalRangeKm: Double = 20015.0,
-        stationCallsign: String = "EP2AES",
+        stationCallsign: String = "",
+        stationLocator: String = "",
         onSelectMarker: @escaping (Globe3DMarker) -> Void,
         onSelectGrid: @escaping (String) -> Void
     ) {
@@ -82,6 +84,7 @@ public struct AzimuthalAndFlatMapCanvas: View {
         self.showBalloonTracks = showBalloonTracks
         self.azimuthalRangeKm = azimuthalRangeKm
         self.stationCallsign = stationCallsign
+        self.stationLocator = stationLocator
         self.onSelectMarker = onSelectMarker
         self.onSelectGrid = onSelectGrid
     }
@@ -127,8 +130,7 @@ public struct AzimuthalAndFlatMapCanvas: View {
                         .font(.system(size: 11, weight: .semibold, design: .monospaced))
                         .foregroundColor(currentTheme == .classicLight ? Color(red: 0.15, green: 0.20, blue: 0.25) : Color(red: 0.70, green: 0.80, blue: 0.90))
 
-                    let grid = MaidenheadGridEngine.locator(from: homeCoordinate)
-                    Text("\(stationCallsign.isEmpty ? "EP2AES" : stationCallsign) · \(grid) · Great-Circle")
+                    Text("\(stationCallsign.isEmpty ? TransmitIdentity.callsignNotSetLabel : stationCallsign) · \(stationLocator.isEmpty ? TransmitIdentity.locatorNotSetLabel : stationLocator) · Great-Circle")
                         .font(.system(size: 9, weight: .medium, design: .monospaced))
                         .foregroundColor(Color.secondary)
                 }
@@ -999,7 +1001,7 @@ public struct AzimuthalAndFlatMapCanvas: View {
         context.stroke(pointer, with: .color(badgeStroke), lineWidth: 1.2)
 
         // Callsign Text
-        let stationCall = stationCallsign.isEmpty ? "EP2AES" : stationCallsign
+        let stationCall = stationCallsign.isEmpty ? TransmitIdentity.callsignNotSetLabel : stationCallsign
         context.draw(
             Text(stationCall)
                 .font(.system(size: 11, weight: .bold))

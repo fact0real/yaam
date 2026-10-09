@@ -12,7 +12,8 @@ import SwiftUI
 
 public struct WinKeyerView: View {
     @ObservedObject private var wk = WinKeyerDriver.shared
-    @State private var testInput: String = "CQ CQ DE EP2AES K"
+    @State private var testInput: String = ""
+    @State private var testNotice: String = ""
 
     public init() {}
 
@@ -36,6 +37,10 @@ public struct WinKeyerView: View {
         .padding(18)
         .onAppear {
             wk.refreshPorts()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: TransmitIdentity.identityChanged)) { _ in
+            // A refusal shown for the previous profile no longer applies.
+            testNotice = ""
         }
     }
 
@@ -194,6 +199,16 @@ public struct WinKeyerView: View {
         .cornerRadius(10)
     }
 
+    /// Keys the typed text, but only when the operator's own callsign is set.
+    private func sendTest() {
+        if let issue = TransmitIdentity.savedCallsignRefusal() {
+            testNotice = issue
+            return
+        }
+        testNotice = ""
+        wk.sendMorseText(testInput)
+    }
+
     // MARK: - Test Transmitter Card
 
     private var testTransmitterCard: some View {
@@ -201,15 +216,21 @@ public struct WinKeyerView: View {
             Text("Interactive Keyer Test")
                 .font(.subheadline.bold())
 
+            if !testNotice.isEmpty {
+                Text(testNotice)
+                    .font(.caption)
+                    .foregroundColor(.orange)
+            }
+
             HStack(spacing: 10) {
                 TextField("Enter Morse message to send...", text: $testInput)
                     .textFieldStyle(.roundedBorder)
                     .onSubmit {
-                        wk.sendMorseText(testInput)
+                        sendTest()
                     }
 
                 Button {
-                    wk.sendMorseText(testInput)
+                    sendTest()
                 } label: {
                     Label("Send Morse", systemImage: "play.fill")
                 }

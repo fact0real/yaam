@@ -101,6 +101,7 @@ public final class SSTVEngine: ObservableObject {
     @Published public var operatingMode: SSTVMode = .martinM1
     @Published public var isListening: Bool = false
     @Published public var isTransmitting: Bool = false
+    @Published public private(set) var transmitRefusal: String = ""
     @Published public var isSimulationActive: Bool = false
     @Published public var currentScanline: Int = 0
     @Published public var scanProgress: Double = 0.0
@@ -115,8 +116,10 @@ public final class SSTVEngine: ObservableObject {
     @Published public var syncPulseDetected: Bool = false
 
     // Station Settings
-    @Published public var myCallsign: String = "EP2YAAM"
-    @Published public var myGrid: String = "LL35"
+    /// The operator's saved callsign; empty when none is set.
+    public var myCallsign: String { TransmitIdentity.savedOperatorCallsign() ?? "" }
+    /// The operator's saved locator; empty when none is set.
+    public var myGrid: String { TransmitIdentity.savedOperatorLocator() ?? "" }
     @Published public var targetCallsign: String = ""
 
     // Logging Callback
@@ -262,7 +265,6 @@ public final class SSTVEngine: ObservableObject {
         resetPixelBuffer()
 
         currentScanline = 0
-        targetCallsign = "W1AW"
 
         let totalLines = operatingMode.height
         let width = operatingMode.width
@@ -344,6 +346,11 @@ public final class SSTVEngine: ObservableObject {
 
     public func transmitTestCard() {
         guard !isTransmitting else { return }
+        if let issue = TransmitIdentity.savedCallsignRefusal() {
+            transmitRefusal = issue
+            return
+        }
+        transmitRefusal = ""
         isTransmitting = true
 
         txTask = Task.detached(priority: .userInitiated) { [weak self] in

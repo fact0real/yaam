@@ -293,7 +293,7 @@ struct FeedbackView: View {
                         Text("Your Callsign")
                             .font(.subheadline.bold())
 
-                        TextField("Callsign (e.g. EP2AES)", text: $callsignText)
+                        TextField(TransmitIdentity.callsignPlaceholder, text: $callsignText)
                             .textFieldStyle(.roundedBorder)
                             .font(.system(.body, design: .monospaced))
                     }

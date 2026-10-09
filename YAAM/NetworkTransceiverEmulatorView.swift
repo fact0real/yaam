@@ -15,8 +15,8 @@ struct NetworkTransceiverEmulatorView: View {
     @Environment(\.openWindow) private var openWindow
 
     @State private var selectedTab: Int = 0
-    @State private var newSignalCallsign: String = "EP2AES"
-    @State private var newSignalGrid: String = "LL45"
+    @State private var newSignalCallsign: String = ""
+    @State private var newSignalGrid: String = ""
     @State private var newSignalSNR: Double = -8.0
     @State private var newSignalAudioFreq: Double = 1450.0
     @State private var newSignalSlot: FT8SlotParity = .even
@@ -1131,9 +1131,11 @@ struct NetworkTransceiverEmulatorView: View {
     private func injectCustomFT8() {
         let call = newSignalCallsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased().replacingOccurrences(of: " ", with: "")
         let grid = newSignalGrid.trimmingCharacters(in: .whitespacesAndNewlines).uppercased().prefix(4)
-        let cleanCall = call.isEmpty ? "EP2AES" : call
-        let cleanGrid = grid.isEmpty ? "LL45" : String(grid)
-        let msg = "CQ \(cleanCall) \(cleanGrid)"
+        guard !call.isEmpty else {
+            showFeedback("Enter a callsign for the test signal first.")
+            return
+        }
+        let msg = grid.isEmpty ? "CQ \(call)" : "CQ \(call) \(grid)"
 
         let sig = SyntheticSignalProfile(
             message: msg,

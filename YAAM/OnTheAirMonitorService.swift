@@ -91,7 +91,7 @@ public final class OnTheAirMonitorService: ObservableObject {
     @Published public var sessionMaxDistanceKm: Double = 0.0
     @Published public var sessionMaxDXCall: String = ""
     @Published public var currentCallsign: String = ""
-    @Published public var homeGrid: String = "LM35"
+    @Published public var homeGrid: String = ""
     @Published public var homeLatitude: Double = 35.6892
     @Published public var homeLongitude: Double = 51.3890
 
@@ -183,7 +183,7 @@ public final class OnTheAirMonitorService: ObservableObject {
             ("EA8URL", "IL18", 14074000, "FT8", -9)
         ]
 
-        let myGrid = homeGrid.isEmpty ? "LM35" : homeGrid
+        let myGrid = homeGrid
         let myCoord: GeoCoordinate
         if let c = gridToCoordinate(myGrid) {
             myCoord = GeoCoordinate(latitude: c.latitude, longitude: c.longitude)
@@ -205,7 +205,7 @@ public final class OnTheAirMonitorService: ObservableObject {
 
             let spot = OnAirSpot(
                 id: "sample-\(index)-\(s.call)",
-                senderCall: currentCallsign.isEmpty ? "EP2AES" : currentCallsign,
+                senderCall: currentCallsign.isEmpty ? TransmitIdentity.callsignNotSetLabel : currentCallsign,
                 senderGrid: s.grid,
                 listenerCall: s.call,
                 listenerGrid: s.grid,

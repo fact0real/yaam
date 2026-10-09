@@ -209,7 +209,7 @@ public struct HamTrackerWorkspaceView: View {
                     .foregroundStyle(.secondary)
                     .font(.system(size: 13, weight: .bold))
 
-                TextField("Callsign (e.g. EP2AES, W1AW)", text: $engine.targetCallsign)
+                TextField("Callsign", text: $engine.targetCallsign)
                     .textFieldStyle(.plain)
                     .font(.system(size: 14, weight: .bold, design: .monospaced))
                     .frame(width: 170)
@@ -1723,7 +1723,7 @@ public struct HamTrackerWorkspaceView: View {
 
     private var webSDRReceiverControls: some View {
         HStack(spacing: 8) {
-            Text("WEBSDR FT8 · \(appState.activeStationProfile?.grid.isEmpty == false ? appState.activeStationProfile?.grid ?? "LM55rr" : "LM55rr")")
+            Text("WEBSDR FT8 · \(appState.activeStationProfile?.grid.isEmpty == false ? appState.activeStationProfile?.grid ?? TransmitIdentity.locatorNotSetLabel : TransmitIdentity.locatorNotSetLabel)")
                 .font(.caption.bold())
                 .fixedSize()
             Button {

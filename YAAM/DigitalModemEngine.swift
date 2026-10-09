@@ -387,6 +387,9 @@ public final class DigitalModemEngine: ObservableObject {
     // Station Settings
     @Published public var myCallsign: String = ""
     @Published public var myGrid: String = ""
+    /// Why the last transmission was refused (no callsign of the operator, or one that is not accepted); empty
+    /// otherwise. The station screen clears it when the active station profile changes.
+    @Published public var txRefusal: String = ""
     @Published public var macros: [DigitalMacro] = DigitalMacro.standardPresets
 
     // Logging Callback
@@ -855,11 +858,11 @@ public final class DigitalModemEngine: ObservableObject {
 
     public func expandMacroTemplate(_ template: String) -> String {
         var text = template
-        text = text.replacingOccurrences(of: "{MYCALL}", with: myCallsign.isEmpty ? "EP2YAAM" : myCallsign.uppercased())
+        text = text.replacingOccurrences(of: "{MYCALL}", with: TransmitIdentity.usableCallsign(myCallsign) ?? "")
         text = text.replacingOccurrences(of: "{CALL}", with: targetCallsign.isEmpty ? "CQ" : targetCallsign.uppercased())
         text = text.replacingOccurrences(of: "{SENTRST}", with: targetReportSent)
         text = text.replacingOccurrences(of: "{RCVD_RST}", with: targetReportReceived)
-        text = text.replacingOccurrences(of: "{MYGRID}", with: myGrid.isEmpty ? "LL35" : myGrid.uppercased())
+        text = text.replacingOccurrences(of: "{MYGRID}", with: TransmitIdentity.locator(myGrid) ?? "")
         text = text.replacingOccurrences(of: "{SERIAL}", with: String(format: "%03d", targetSerial))
         text = text.replacingOccurrences(of: "{OP}", with: "HAM")
         return text
@@ -873,6 +876,11 @@ public final class DigitalModemEngine: ObservableObject {
     // MARK: - Transmission Engine (AFSK & PSK Audio Synthesis)
 
     public func queueTextForTransmission(_ text: String) {
+        if let issue = TransmitIdentity.callsignRefusal(myCallsign) {
+            txRefusal = issue
+            return
+        }
+        txRefusal = ""
         txBufferText += text
         txRemainingText = txBufferText
         if !isTransmitting {
@@ -882,6 +890,10 @@ public final class DigitalModemEngine: ObservableObject {
 
     public func startTransmission() {
         guard !txRemainingText.isEmpty, !isTransmitting else { return }
+        if let issue = TransmitIdentity.callsignRefusal(myCallsign) {
+            txRefusal = issue
+            return
+        }
         isTransmitting = true
         RigControlEngine.shared.setPTT(true)
         if Lab599TX500Driver.shared.isConnected {

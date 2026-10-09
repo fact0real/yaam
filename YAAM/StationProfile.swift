@@ -122,7 +122,7 @@ nonisolated struct StationProfile: Identifiable, Codable, Equatable, Sendable {
             return "Station callsign is required."
         }
         if !normalizedGrid.isEmpty, GridLocator.fourCharacterGrid(from: normalizedGrid) == nil {
-            return "Grid Locator must begin with a valid Maidenhead square such as LM55."
+            return "Grid Locator must begin with a valid Maidenhead square: two letters from A to R, then two digits."
         }
         if let validFrom, let validTo, validTo < validFrom {
             return "The validity end date cannot be earlier than the start date."

@@ -31,8 +31,8 @@ public struct HamClockShackView: View {
 
     // Map Presentation
     @State private var mapProjection: MapProjectionMode = .azimuthal
-    @State private var dxCallsignInput: String = "W1AW"
-    @State private var dxGridInput: String = "FN31pr"
+    @State private var dxCallsignInput: String = ""
+    @State private var dxGridInput: String = ""
     @State private var selectedAuxPane: HamClockPaneTab = .spaceWeather
     @State private var showSDOZoomModal: Bool = false
     @State private var showQRCodeModal: Bool = false
@@ -72,6 +72,11 @@ public struct HamClockShackView: View {
 
     private var dxCoordinate: GeoCoordinate {
         MaidenheadGridEngine.coordinate(for: dxGridInput)
+    }
+
+    /// False while no DX locator has been entered or resolved: the DX figures then show a dash.
+    private var hasDX: Bool {
+        MaidenheadGridEngine.boundingBox(for: dxGridInput) != nil
     }
 
     private var deSunTimes: (sunrise: String, sunset: String) {
@@ -341,7 +346,7 @@ public struct HamClockShackView: View {
                     .font(.system(size: 11, weight: .black, design: .monospaced))
                     .foregroundStyle(nightMode ? Color.red : Color.cyan)
                 Spacer()
-                Text(appState.activeStationProfile?.callsign ?? "EP2AES")
+                Text(TransmitIdentity.usableCallsign(appState.activeStationProfile?.callsign) ?? TransmitIdentity.callsignNotSetLabel)
                     .font(.system(size: 14, weight: .black, design: .monospaced))
                     .foregroundStyle(nightMode ? Color.red : Color.white)
             }
@@ -418,19 +423,19 @@ public struct HamClockShackView: View {
             Grid(horizontalSpacing: 8, verticalSpacing: 4) {
                 GridRow {
                     Text("Distance:").font(.caption2).foregroundStyle(.secondary)
-                    Text(String(format: "%.0f km (%.0f mi)", dxDistKm, dxDistKm * GeodesicMath.kmToMiles))
+                    Text(hasDX ? String(format: "%.0f km (%.0f mi)", dxDistKm, dxDistKm * GeodesicMath.kmToMiles) : "—")
                         .font(.system(size: 10, weight: .bold, design: .monospaced))
                     Text("SP Heading:").font(.caption2).foregroundStyle(.secondary)
-                    Text(String(format: "%03.0f° %@", dxSpBearing, GeodesicMath.compassCardinal(for: dxSpBearing)))
+                    Text(hasDX ? String(format: "%03.0f° %@", dxSpBearing, GeodesicMath.compassCardinal(for: dxSpBearing)) : "—")
                         .font(.system(size: 10, weight: .black, design: .monospaced))
                         .foregroundStyle(nightMode ? Color.red : Color.green)
                 }
                 GridRow {
                     Text("DX Sun:").font(.caption2).foregroundStyle(.secondary)
-                    Text("\(dxSunTimes.sunrise) / \(dxSunTimes.sunset)")
+                    Text(hasDX ? "\(dxSunTimes.sunrise) / \(dxSunTimes.sunset)" : "—")
                         .font(.system(size: 9.5, weight: .medium, design: .monospaced))
                     Text("LP Heading:").font(.caption2).foregroundStyle(.secondary)
-                    Text(String(format: "%03.0f°", dxLpBearing))
+                    Text(hasDX ? String(format: "%03.0f°", dxLpBearing) : "—")
                         .font(.system(size: 10, weight: .bold, design: .monospaced))
                         .foregroundStyle(.secondary)
                 }
@@ -446,6 +451,7 @@ public struct HamClockShackView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(nightMode ? .red : .green)
+                .disabled(!hasDX)
 
                 Button {
                     rotatorService.turnTo(azimuth: dxLpBearing)
@@ -454,6 +460,7 @@ public struct HamClockShackView: View {
                         .font(.system(size: 10, weight: .bold))
                 }
                 .buttonStyle(.bordered)
+                .disabled(!hasDX)
             }
             .padding(.top, 4)
         }
@@ -526,7 +533,8 @@ public struct HamClockShackView: View {
                 showDRAPLayer: true,
                 showBalloonTracks: true,
                 azimuthalRangeKm: 20015.0,
-                stationCallsign: appState.activeStationProfile?.callsign ?? "EP2AES",
+                stationCallsign: appState.activeStationProfile?.callsign ?? "",
+                stationLocator: appState.effectiveStationGrid,
                 onSelectMarker: { _ in },
                 onSelectGrid: { grid in
                     self.dxGridInput = grid
@@ -1142,6 +1150,7 @@ public struct HamClockShackView: View {
     }
 
     private func updatePropagationMatrix() {
+        guard hasDX else { return }
         let sfi = Double(appState.propagationSnapshot.solarFlux.filter(\.isNumber)) ?? 145.0
         hfPropEngine.calculateCircuit(
             de: homeCoordinate,

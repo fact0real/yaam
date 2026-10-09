@@ -75,7 +75,7 @@ public struct ClubMembershipView: View {
                         Image(systemName: "magnifyingglass")
                             .foregroundColor(.secondary)
 
-                        TextField("Enter callsign (e.g. W1AW, K6VVA, DL1ABC, EP2AES)...", text: $searchCallsign)
+                        TextField("Enter callsign...", text: $searchCallsign)
                             .textFieldStyle(.roundedBorder)
                             .font(.system(.body, design: .monospaced))
                             .onSubmit {

@@ -128,7 +128,7 @@ public struct OnTheAirHUDPopoverView: View {
     @AppStorage("onAirVoiceAlerts") private var voiceAlertsEnabled = false
 
     private var personalPSKMapURL: URL {
-        let call = service.currentCallsign.isEmpty ? "EP2AES" : service.currentCallsign
+        let call = service.currentCallsign
         return URL(string: "https://pskreporter.info/pskmap.html?preset&callsign=\(call)&timerange=900")!
     }
 
@@ -167,7 +167,7 @@ public struct OnTheAirHUDPopoverView: View {
                         }
                     }
 
-                    Text("Home Grid: \(service.homeGrid) · 15-Minute PSK Reporter Telemetry")
+                    Text("Home Grid: \(service.homeGrid.isEmpty ? TransmitIdentity.locatorNotSetLabel : service.homeGrid) · 15-Minute PSK Reporter Telemetry")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }

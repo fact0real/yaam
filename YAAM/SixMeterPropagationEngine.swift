@@ -303,7 +303,7 @@ public final class SixMeterPropagationEngine: ObservableObject {
     // Reference home station coordinates (defaults to Tehran / EP if profile not loaded)
     public var homeLatitude: Double = 35.6892
     public var homeLongitude: Double = 51.3890
-    public var homeGrid: String = "LM35"
+    public var homeGrid: String = ""
 
     private var autoRefreshTask: Task<Void, Never>?
     private var lastAnnouncedOpeningTime: Date?

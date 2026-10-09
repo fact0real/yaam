@@ -60,7 +60,7 @@ struct LeaderboardView: View {
                     .foregroundColor(.secondary)
                 
                 TextField(
-                    "Enter callsigns to compare or track (e.g. AA3B, YB5QZ, EA1DR)...",
+                    "Enter callsigns to compare or track...",
                     text: Binding(
                         get: { appState.leaderboardSearchCallsign },
                         set: {
@@ -1761,18 +1761,8 @@ struct Leaderboard360RadarView: View {
         let totalActiveDays = sortedKeys.count
         let avgConfirmed = totalActiveDays > 0 ? Double(totalConfirmed) / Double(totalActiveDays) : 0.0
 
-        let todayUTC: String = {
-            let fmt = DateFormatter()
-            fmt.dateFormat = "yyyyMMdd"
-            fmt.timeZone = TimeZone(secondsFromGMT: 0)
-            return fmt.string(from: Date())
-        }()
-        let todayLocal: String = {
-            let fmt = DateFormatter()
-            fmt.dateFormat = "yyyyMMdd"
-            fmt.timeZone = TimeZone.current
-            return fmt.string(from: Date())
-        }()
+        let todayUTC = GregorianDate.formatter("yyyyMMdd", timeZone: TimeZone(secondsFromGMT: 0)).string(from: Date())
+        let todayLocal = GregorianDate.formatter("yyyyMMdd", timeZone: TimeZone.current).string(from: Date())
 
         let todayEntry = dayCounts[todayLocal] ?? dayCounts[todayUTC] ?? (0, 0)
 

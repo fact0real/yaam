@@ -82,9 +82,10 @@ final class MacCalendarService {
         location: String,
         completion: ((Bool, String) -> Void)?
     ) {
-        let dateFormatter = DateFormatter()
-        dateFormatter.timeZone = TimeZone(secondsFromGMT: 0)
-        dateFormatter.dateFormat = isAllDay ? "yyyyMMdd" : "yyyyMMdd'T'HHmmss'Z'"
+        let dateFormatter = GregorianDate.formatter(
+            isAllDay ? "yyyyMMdd" : "yyyyMMdd'T'HHmmss'Z'",
+            timeZone: TimeZone(secondsFromGMT: 0)
+        )
 
         let startStr = dateFormatter.string(from: startDate)
         let endStr = dateFormatter.string(from: endDate)

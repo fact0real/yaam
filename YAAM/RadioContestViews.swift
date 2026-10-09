@@ -263,15 +263,15 @@ struct RadioBridgePanel: View {
     private var flrigSection: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack {
-                sectionTitle("FLRig (W1HKJ XML-RPC)", icon: "antenna.radiowaves.left.and.right", active: flrig.isConnected, subtitle: flrig.isConnected ? "Connected to \(flrig.host):\(flrig.port)" : (flrig.lastError ?? "Ready to connect"))
+                sectionTitle("FLRig (W1HKJ XML-RPC)", icon: "antenna.radiowaves.left.and.right", active: flrig.isConnected, subtitle: flrig.isConnected ? "\(flrig.link.summary) · \(flrig.host):\(flrig.port)" : (flrig.link == .idle ? "Ready to connect" : flrig.link.summary))
                 Spacer()
                 Button {
-                    flrig.isConnected ? flrig.disconnect() : flrig.connect(host: flrigHost, port: flrigPort)
+                    flrig.isPolling ? flrig.disconnect() : flrig.connect(host: flrigHost, port: flrigPort)
                 } label: {
-                    Label(flrig.isConnected ? "Disconnect" : "Connect FLRig", systemImage: flrig.isConnected ? "xmark.circle" : "link")
+                    Label(flrig.isPolling ? "Disconnect" : "Connect FLRig", systemImage: flrig.isPolling ? "xmark.circle" : "link")
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(flrig.isConnected ? .secondary : .blue)
+                .tint(flrig.isPolling ? .secondary : .blue)
             }
 
             HStack(alignment: .bottom, spacing: 12) {
@@ -282,6 +282,14 @@ struct RadioBridgePanel: View {
                     TextField("12345", value: $flrigPort, format: .number).textFieldStyle(.roundedBorder)
                 }
                 Spacer()
+            }
+
+            // A release of PTT that could not be confirmed (the card's STATE below shows what flrig last reported)
+            if let warning = flrig.pttWarning {
+                Label(warning, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption.bold())
+                    .foregroundColor(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             if flrig.isConnected {
@@ -360,7 +368,7 @@ struct RadioBridgePanel: View {
                 ContentUnavailableView(
                     "FLRig Not Connected",
                     systemImage: "antenna.radiowaves.left.and.right",
-                    description: Text("Launch FLRig on your Mac or local network with XML-RPC enabled on port 12345 to control your transceiver.")
+                    description: Text(flrig.link == .idle ? "Launch FLRig on your Mac or local network with XML-RPC enabled on port 12345 to control your transceiver." : flrig.link.detail)
                 )
                 .frame(maxWidth: .infinity, minHeight: 160)
             }
@@ -540,7 +548,13 @@ struct ContestPanel: View {
             }
         }
         .environment(\.timeZone, TimeZone(secondsFromGMT: 0)!)
-        .onAppear { hydrateDraft() }
+        .onAppear {
+            hydrateDraft()
+            syncESMStation()
+        }
+        .onChange(of: appState.activeStationProfile) { _, _ in
+            syncESMStation()
+        }
         .sheet(isPresented: $showCabrilloInspector) {
             CabrilloInspectorSheet()
         }
@@ -822,7 +836,7 @@ struct ContestPanel: View {
                     Text("CALLSIGN")
                         .font(.system(size: 9, weight: .bold))
                         .foregroundStyle(.secondary)
-                    TextField("DL1AAA", text: $inputCall)
+                    TextField("Callsign", text: $inputCall)
                         .font(.title3.monospaced().weight(.bold))
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 170)
@@ -982,8 +996,13 @@ struct ContestPanel: View {
         .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
     }
 
+    /// The ESM engine needs the operator's callsign before the first function key or Enter press.
+    private func syncESMStation() {
+        ContestESMEngine.shared.setStationCallsign(appState.activeStationProfile?.normalizedCallsign)
+    }
+
     private func triggerESM(session: ContestSession) {
-        ContestESMEngine.shared.myCallsign = appState.activeStationProfile?.callsign ?? "EP2AES"
+        syncESMStation()
         ContestESMEngine.shared.nextSerial = session.nextSerial
 
         ContestESMEngine.shared.handleEnterPressed(

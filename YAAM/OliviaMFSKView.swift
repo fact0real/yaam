@@ -49,6 +49,10 @@ public struct OliviaMFSKView: View {
                 .cornerRadius(10)
         }
         .padding(10)
+        .onReceive(NotificationCenter.default.publisher(for: TransmitIdentity.identityChanged)) { _ in
+            // A refusal shown for the previous profile no longer applies.
+            engine.txRefusal = ""
+        }
     }
 
     // MARK: - 1. Top Control Bar
@@ -253,6 +257,17 @@ public struct OliviaMFSKView: View {
     // MARK: - 4. TX Controls & 1-Click Logging
 
     private var txControlBar: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if !engine.txRefusal.isEmpty {
+                Text(engine.txRefusal)
+                    .font(.caption)
+                    .foregroundColor(.orange)
+            }
+            txControlButtons
+        }
+    }
+
+    private var txControlButtons: some View {
         HStack(spacing: 8) {
             // Quick Macros
             Button("CQ") { engine.queueTextForTransmission("CQ CQ DE \(engine.myCallsign) \(engine.myCallsign) K ") }.buttonStyle(.bordered).font(.caption2)

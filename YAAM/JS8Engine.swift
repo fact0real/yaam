@@ -98,6 +98,7 @@ public final class JS8Engine: ObservableObject {
     @Published public var audioOffsetHz: Double = 1500.0
     @Published public var isListening: Bool = false
     @Published public var isTransmitting: Bool = false
+    @Published public private(set) var transmitRefusal: String = ""
     @Published public var isSimulationActive: Bool = false
 
     // Timing & Slots
@@ -112,8 +113,10 @@ public final class JS8Engine: ObservableObject {
 
     // Metrics
     @Published public var audioInputLevel: Float = 0.0
-    @Published public var myCallsign: String = "EP2YAAM"
-    @Published public var myGrid: String = "LL35"
+    /// The operator's saved callsign; empty when none is set.
+    public var myCallsign: String { TransmitIdentity.savedOperatorCallsign() ?? "" }
+    /// The operator's saved locator; empty when none is set.
+    public var myGrid: String { TransmitIdentity.savedOperatorLocator() ?? "" }
 
     // Logging Callback
     public var logQSOHandler: ((_ call: String, _ mode: String, _ rstSent: String, _ rstRcvd: String, _ freqHz: UInt64, _ band: String) -> Void)?
@@ -212,9 +215,15 @@ public final class JS8Engine: ObservableObject {
 
     // MARK: - Messaging & Transmit
 
-    public func sendMessage(text: String, to target: String) {
+    @discardableResult
+    public func sendMessage(text: String, to target: String) -> Bool {
         let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !clean.isEmpty else { return }
+        guard !clean.isEmpty else { return false }
+        if let issue = TransmitIdentity.savedCallsignRefusal() {
+            transmitRefusal = issue
+            return false
+        }
+        transmitRefusal = ""
 
         let dest = target.isEmpty ? "@ALLCALL" : target.uppercased()
         let newMsg = JS8Message(
@@ -228,6 +237,7 @@ public final class JS8Engine: ObservableObject {
 
         // Synthesize 8-GFSK audio transmission
         transmitJS8Message(newMsg)
+        return true
     }
 
     private func transmitJS8Message(_ msg: JS8Message) {
@@ -299,11 +309,13 @@ public final class JS8Engine: ObservableObject {
         guard !isSimulationActive else { return }
         isSimulationActive = true
 
+        // The simulated stations call the operator; without a saved callsign they call a neutral token.
+        let me = myCallsign.isEmpty ? TransmitIdentity.callsignPreviewToken : myCallsign
         let sampleTraffic: [(call: String, grid: String, snr: Int, msg: String)] = [
             ("OH2XYZ", "KP20", -8, "@ALLCALL CQ CQ IN HELSINKI"),
-            ("JA7YRR", "QM08", -12, "\(myCallsign): SNR?"),
+            ("JA7YRR", "QM08", -12, "\(me): SNR?"),
             ("W3LPL", "FM19", -5, "@ALLCALL HEARTBEAT FM19"),
-            ("HB9BZA", "JN47", -9, "\(myCallsign): RR 73 FROM GENEVA"),
+            ("HB9BZA", "JN47", -9, "\(me): RR 73 FROM GENEVA"),
             ("DL1ABC", "JO42", -6, "@ALLCALL CQ CQ DE DL1ABC")
         ]
 
@@ -342,7 +354,7 @@ public final class JS8Engine: ObservableObject {
                 // Append chat message
                 let msg = JS8Message(
                     fromCall: item.call,
-                    toCall: item.msg.contains(self.myCallsign) ? self.myCallsign : "@ALLCALL",
+                    toCall: item.msg.contains(me) ? me : "@ALLCALL",
                     text: item.msg,
                     isOutgoing: false,
                     snrDb: item.snr

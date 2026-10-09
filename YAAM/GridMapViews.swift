@@ -399,7 +399,8 @@ public struct GlobeAndGridTrackerWorkspaceView: View {
                 showTrafficArcs: showTrafficArcs,
                 showCountryLabels: showCountryLabels,
                 azimuthalRangeKm: azimuthalRangeKm,
-                stationCallsign: appState.isRoverActive ? "ROVER · \(appState.effectiveStationGrid)" : (appState.activeStationProfile?.callsign ?? "EP2AES"),
+                stationCallsign: appState.isRoverActive ? "ROVER · \(appState.effectiveStationGrid)" : (appState.activeStationProfile?.callsign ?? ""),
+                stationLocator: appState.effectiveStationGrid,
                 onSelectMarker: { marker in
                     selectedMarker = marker
                     selectedGridDetail = nil

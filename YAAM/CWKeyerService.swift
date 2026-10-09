@@ -102,6 +102,9 @@ public final class CWKeyerService: ObservableObject {
     @Published public var activeBufferText: String = ""
     @Published public var currentlyTransmittingChar: String = ""
     @Published public var sentHistory: [String] = []
+    /// Why the last send was refused (no callsign of the operator, or one that is not accepted), empty after a
+    /// send that went out. It is cleared when the active station profile changes.
+    @Published public var transmitRefusal: String = ""
     @Published public var cwdaemonHost: String = "127.0.0.1"
     @Published public var cwdaemonPort: Int = 6789
 
@@ -377,6 +380,14 @@ public final class CWKeyerService: ObservableObject {
 
     // MARK: - Send Transmission
 
+    /// Why a send under this callsign would be refused, or nil when it may go. Every way into the keyer
+    /// (macro buttons, live text, Auto-CQ, the Enter key, the decoder's reply) asks this. Audio Sidetone Only
+    /// plays the Morse on this Mac and keys no radio, so it needs no callsign.
+    public func refusalReason(myCall: String) -> String? {
+        if transmissionMode == .audioOnly { return nil }
+        return TransmitIdentity.callsignRefusal(myCall)
+    }
+
     public func send(
         text: String,
         myCall: String = "",
@@ -403,6 +414,13 @@ public final class CWKeyerService: ObservableObject {
         ).trimmingCharacters(in: .whitespacesAndNewlines)
 
         guard !expanded.isEmpty else { return }
+
+        // Nothing is keyed unless the operator's own callsign is set; checked before an earlier send is stopped.
+        if let issue = refusalReason(myCall: myCall) {
+            transmitRefusal = issue
+            return
+        }
+        transmitRefusal = ""
 
         stopTransmitOnly()
         self.isTransmitting = true
@@ -609,6 +627,11 @@ public final class CWKeyerService: ObservableObject {
         band: String = "",
         freq: String = ""
     ) {
+        if let issue = refusalReason(myCall: myCall) {
+            transmitRefusal = issue
+            return
+        }
+        transmitRefusal = ""
         stopAutoCQ()
         isAutoCQActive = true
 
@@ -679,9 +702,9 @@ public final class CWKeyerService: ObservableObject {
         } else if rigControlClientRef?.state.isConnected == true {
             rigControlClientRef?.setKeyerSpeed(wpm)
             rigControlClientRef?.sendMorse(text)
-        // Priority 4: FLRig XML-RPC rig.send_morse
+        // Priority 4: FLRig XML-RPC rig.cwio_text (flrig's own keyer; flrig has no rig.send_morse)
         } else if FLRigClient.shared.isConnected {
-            try? await FLRigClient.shared.sendMorse(text)
+            try? await FLRigClient.shared.sendMorse(text, wpm: wpm)
         }
     }
 

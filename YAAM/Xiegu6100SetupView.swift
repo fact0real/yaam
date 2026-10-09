@@ -16,7 +16,7 @@ public struct Xiegu6100SetupView: View {
     @ObservedObject var cwKeyer = CWKeyerService.shared
 
     @State private var testFrequencyStr: String = "14.074000"
-    @State private var testCWMessage: String = "TEST DE EP2AES"
+    @State private var testCWNotice: String = ""
     @State private var isTestingPTT: Bool = false
     @State private var isTestingCW: Bool = false
 
@@ -49,6 +49,10 @@ public struct Xiegu6100SetupView: View {
         .onAppear {
             xiegu.refreshPorts()
             xiegu.scanAudioDevices()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: TransmitIdentity.identityChanged)) { _ in
+            // A refusal shown for the previous profile no longer applies.
+            testCWNotice = ""
         }
     }
 
@@ -395,8 +399,14 @@ public struct Xiegu6100SetupView: View {
 
                     // CW Test
                     Button {
+                        // A test text identifies the station, so it is sent only with the operator's own saved callsign.
+                        guard let call = TransmitIdentity.savedOperatorCallsign() else {
+                            testCWNotice = TransmitIdentity.savedCallsignRefusal() ?? TransmitIdentity.callsignMissingMessage
+                            return
+                        }
+                        testCWNotice = ""
                         isTestingCW = true
-                        xiegu.sendMorse("TEST YAAM DE X6100")
+                        xiegu.sendMorse("TEST DE \(call)")
                         DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
                             isTestingCW = false
                         }
@@ -405,6 +415,12 @@ public struct Xiegu6100SetupView: View {
                     }
                     .buttonStyle(.bordered)
                     .disabled(!xiegu.isConnected || isTestingCW)
+
+                    if !testCWNotice.isEmpty {
+                        Text(testCWNotice)
+                            .font(.caption)
+                            .foregroundColor(.orange)
+                    }
 
                     // Synchronize RigControlEngine
                     Button {

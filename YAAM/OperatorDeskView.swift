@@ -1420,7 +1420,7 @@ private struct QuickLogPanel: View {
                         .font(.system(size: 22))
                         .foregroundStyle(Color.accentColor)
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(appState.activeStationProfile?.callsign.isEmpty == false ? (appState.activeStationProfile?.callsign ?? "EP2AES") : "EP2AES")
+                        Text(TransmitIdentity.usableCallsign(appState.activeStationProfile?.callsign) ?? TransmitIdentity.callsignNotSetLabel)
                             .font(.system(size: 15, weight: .bold, design: .monospaced))
                         Text(appState.activeStationProfile?.name.isEmpty == false ? (appState.activeStationProfile?.name ?? "Station Operator") : "Station Operator")
                             .font(.caption)
@@ -3035,7 +3035,7 @@ private struct DXClusterPanel: View {
                 Text("Watchlist")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                TextField("K1ABC, EP2XYZ, 3B7M", text: $watchlistText)
+                TextField("Callsigns, comma separated", text: $watchlistText)
                     .textFieldStyle(.roundedBorder)
             }
 
@@ -3100,7 +3100,7 @@ private struct DXClusterPanel: View {
                                 }
 
                                 HStack(spacing: 12) {
-                                    TextField("DXCC Entity (e.g. Iran)", text: $rule.dxccEntity)
+                                    TextField("DXCC entity", text: $rule.dxccEntity)
                                         .textFieldStyle(.roundedBorder)
 
                                     Picker("Band", selection: $rule.band) {
@@ -3164,7 +3164,7 @@ private struct DXClusterPanel: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("DX Station Callsign:")
                     .font(.caption)
-                TextField("e.g. EP2AES", text: $spotCallInput)
+                TextField("Callsign", text: $spotCallInput)
                     .textFieldStyle(.roundedBorder)
             }
 
@@ -3178,7 +3178,7 @@ private struct DXClusterPanel: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Comment:")
                     .font(.caption)
-                TextField("599 in Tehran TNX", text: $spotCommentInput)
+                TextField("Comment", text: $spotCommentInput)
                     .textFieldStyle(.roundedBorder)
             }
 

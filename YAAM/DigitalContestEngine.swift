@@ -101,7 +101,7 @@ public enum DigitalContestType: String, CaseIterable, Identifiable, Sendable, Co
 
     public var exchangeDescription: String {
         switch self {
-        case .cqWWDigi: return "4-char Grid (e.g. KM32)"
+        case .cqWWDigi: return "4-character locator"
         case .arrlRoundup: return "Serial / State (e.g. 001 or CA)"
         case .generalContest: return "Serial / Grid / Zone"
         }

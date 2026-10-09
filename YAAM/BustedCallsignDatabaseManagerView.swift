@@ -17,7 +17,7 @@ struct BustedCallsignDatabaseManagerView: View {
     @EnvironmentObject var appState: AppState
 
     // Interactive Testing Sandbox State
-    @State private var testCallsign: String = "DL1ABD"
+    @State private var testCallsign: String = ""
     @State private var testMode: String = "CW"
     @State private var testResult: BustedCallsignSuggestion? = nil
 
@@ -339,7 +339,7 @@ struct BustedCallsignDatabaseManagerView: View {
                     .foregroundStyle(.secondary)
 
                 HStack(spacing: 8) {
-                    TextField("Test Callsign (e.g. DL1ABD or EP2AEC)", text: $testCallsign)
+                    TextField("Callsign to test", text: $testCallsign)
                         .textFieldStyle(.roundedBorder)
                         .font(.system(.body, design: .monospaced).weight(.bold))
                         .frame(maxWidth: 240)

@@ -259,9 +259,7 @@ public final class LocalClusterServer: ObservableObject {
             .prefix(30)
             .padding(toLength: 30, withPad: " ", startingAt: 0)
 
-        let formatter = DateFormatter()
-        formatter.dateFormat = "HHmm"
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        let formatter = GregorianDate.formatter("HHmm", timeZone: TimeZone(secondsFromGMT: 0))
         let timeStr = formatter.string(from: spot.lastSeenAt)
 
         return "DX de \(spotterField) \(freqStr)  \(callField) \(commentField) \(timeStr)Z\r\n"

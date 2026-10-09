@@ -16,7 +16,7 @@ public struct Lab599TX500SetupView: View {
     @ObservedObject var cwKeyer = CWKeyerService.shared
 
     @State private var testFrequencyStr: String = "14.074000"
-    @State private var testCWMessage: String = "TEST DE EP2AES"
+    @State private var testCWNotice: String = ""
     @State private var isTestingPTT: Bool = false
     @State private var isTestingCW: Bool = false
 
@@ -49,6 +49,10 @@ public struct Lab599TX500SetupView: View {
         .onAppear {
             tx500.refreshPorts()
             tx500.scanAudioDevices()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: TransmitIdentity.identityChanged)) { _ in
+            // A refusal shown for the previous profile no longer applies.
+            testCWNotice = ""
         }
     }
 
@@ -345,6 +349,12 @@ public struct Lab599TX500SetupView: View {
                 .buttonStyle(.bordered)
                 .disabled(!tx500.isConnected || isTestingCW)
 
+                if !testCWNotice.isEmpty {
+                    Text(testCWNotice)
+                        .font(.caption)
+                        .foregroundColor(.orange)
+                }
+
                 Spacer()
 
                 // Set as Active Universal Rig Driver
@@ -435,8 +445,14 @@ public struct Lab599TX500SetupView: View {
 
     private func testCWSend() {
         guard tx500.isConnected else { return }
+        // A test text identifies the station, so it is sent only with the operator's own saved callsign.
+        guard let call = TransmitIdentity.savedOperatorCallsign() else {
+            testCWNotice = TransmitIdentity.savedCallsignRefusal() ?? TransmitIdentity.callsignMissingMessage
+            return
+        }
+        testCWNotice = ""
         isTestingCW = true
-        tx500.sendMorse(testCWMessage, wpm: cwKeyer.wpm)
+        tx500.sendMorse("TEST DE \(call)", wpm: cwKeyer.wpm)
         DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
             self.isTestingCW = false
         }

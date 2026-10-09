@@ -362,18 +362,18 @@ public final class HamClockRemoteWebServer: ObservableObject {
             <div class="grid-container">
                 <div>
                     <div class="card">
-                        <div class="card-title">DE • STATION <span id="deCall">EP2AES</span></div>
-                        <div class="metric-row"><span>Grid:</span><span class="metric-val" id="deGrid">LL35se</span></div>
-                        <div class="metric-row"><span>Sunrise:</span><span class="metric-val val-yellow" id="deSunrise">05:48 UTC</span></div>
-                        <div class="metric-row"><span>Sunset:</span><span class="metric-val val-orange" id="deSunset">18:14 UTC</span></div>
-                        <div class="metric-row"><span>Temperature:</span><span class="metric-val" id="deTemp">24.5°C</span></div>
+                        <div class="card-title">DE • STATION <span id="deCall">—</span></div>
+                        <div class="metric-row"><span>Grid:</span><span class="metric-val" id="deGrid">—</span></div>
+                        <div class="metric-row"><span>Sunrise:</span><span class="metric-val val-yellow" id="deSunrise">—</span></div>
+                        <div class="metric-row"><span>Sunset:</span><span class="metric-val val-orange" id="deSunset">—</span></div>
+                        <div class="metric-row"><span>Temperature:</span><span class="metric-val" id="deTemp">—</span></div>
                     </div>
 
                     <div class="card">
-                        <div class="card-title">DX • TARGET <span id="dxCall">W1AW</span></div>
-                        <div class="metric-row"><span>Distance:</span><span class="metric-val" id="dxDist">9,554 km</span></div>
-                        <div class="metric-row"><span>Short Path:</span><span class="metric-val val-green" id="dxSP">321° NW</span></div>
-                        <div class="metric-row"><span>Long Path:</span><span class="metric-val" id="dxLP">141° SE</span></div>
+                        <div class="card-title">DX • TARGET <span id="dxCall">—</span></div>
+                        <div class="metric-row"><span>Distance:</span><span class="metric-val" id="dxDist">—</span></div>
+                        <div class="metric-row"><span>Short Path:</span><span class="metric-val val-green" id="dxSP">—</span></div>
+                        <div class="metric-row"><span>Long Path:</span><span class="metric-val" id="dxLP">—</span></div>
                         <button class="rotator-btn" onclick="turnRotator()">ROTATE ANTENNA (SP)</button>
                     </div>
                 </div>
@@ -465,11 +465,11 @@ public final class HamClockRemoteWebServer: ObservableObject {
             "localTime": clock.localTimeFormatted,
             "siderealTime": clock.localSiderealTime,
             "solarTime": clock.localSolarTime,
-            "deCall": "EP2AES",
-            "deGrid": "LL35se",
-            "dxCall": "W1AW",
-            "dxDistance": "9,554 km",
-            "dxSP": "321° NW",
+            "deCall": "—",
+            "deGrid": "—",
+            "dxCall": "—",
+            "dxDistance": "—",
+            "dxSP": "—",
             "sfi": "148",
             "kp": String(format: "%.1f", aurora.currentKp),
             "bz": String(format: "%+.1f nT", aurora.currentBz),

@@ -306,7 +306,12 @@ public final class StationWeatherSafetyEngine: ObservableObject {
         guard isEnabled else { return }
 
         let targetGrid = (forcedGrid ?? stationGrid).trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        let effectiveGrid = targetGrid.isEmpty ? "LM55" : targetGrid
+        guard !targetGrid.isEmpty else {
+            resolvedGrid = ""
+            fetchError = "Set your locator in Settings > Stations to see the weather at your station."
+            return
+        }
+        let effectiveGrid = targetGrid
         resolvedGrid = effectiveGrid
 
         guard let coords = coordinate(fromMaidenhead: effectiveGrid) else {

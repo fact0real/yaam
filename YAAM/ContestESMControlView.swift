@@ -123,6 +123,14 @@ public struct ContestESMControlView: View {
                 macroButton("F7: ?", macro: esm.f7Question)
                 macroButton("F8: AGN", macro: esm.f8AGN)
             }
+
+            // Why a function key or Enter sent nothing (no callsign of the operator, or one that is not accepted)
+            if !esm.transmitRefusal.isEmpty {
+                Text(esm.transmitRefusal)
+                    .font(.caption)
+                    .foregroundColor(.orange)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
         .padding(10)
         .background(Color(NSColor.controlBackgroundColor).opacity(0.8))

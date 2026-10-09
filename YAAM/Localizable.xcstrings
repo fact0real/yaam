@@ -1,0 +1,4066 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "(Optional)" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "(Opcional)"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "(Opcional)"
+          }
+        }
+      }
+    },
+    "2-Factor Authentication (2FA / MFA)" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Autenticació de dos factors (2FA / MFA)"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Autenticación de dos factores (2FA / MFA)"
+          }
+        }
+      }
+    },
+    "6m Watch" : {
+      "comment" : "Not extracted yet: the code keeps this text in a String value (OperatorDeskNavigation.swift:96), so the app shows it in English until that value is a LocalizedStringKey or comes from String(localized:).",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vigilància de 6m"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vigilancia de 6m"
+          }
+        }
+      }
+    },
+    "=RX" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "=TX" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "About YAAM" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Quant a YAAM"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Acerca de YAAM"
+          }
+        }
+      }
+    },
+    "Academy" : {
+      "comment" : "Morse lessons. Not extracted yet: the code keeps this text in a String value (OperatorDeskNavigation.swift:108), so the app shows it in English until that value is a LocalizedStringKey or comes from String(localized:).",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Acadèmia"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Academia"
+          }
+        }
+      }
+    },
+    "Activity Console..." : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Consola d'activitat..."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Consola de actividad..."
+          }
+        }
+      }
+    },
+    "ADIF Live Sync" : {
+      "comment" : "Not extracted yet: the code keeps this text in a String value (SettingsView.swift:86), so the app shows it in English until that value is a LocalizedStringKey or comes from String(localized:).",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sincronització ADIF en directe"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sincronización ADIF en directo"
+          }
+        }
+      }
+    },
+    "AI Log Assistant" : {
+      "comment" : "Not extracted yet: the code keeps this text in a String value (SettingsView.swift:91), so the app shows it in English until that value is a LocalizedStringKey or comes from String(localized:).",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Assistent d'IA del registre"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Asistente de IA del registro"
+          }
+        }
+      }
+    },
+    "All" : {
+      "comment" : "Kept in English by project rule (the code reads this text back). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "All Bands" : {
+      "comment" : "Kept in English by project rule (the code reads this text back). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "All bands" : {
+      "comment" : "Kept in English by project rule (the code reads this text back). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "All Modes" : {
+      "comment" : "Kept in English by project rule (the code reads this text back). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Amateur Bands" : {
+      "comment" : "Not extracted yet: the code keeps this text in a String value (SettingsView.swift:71), so the app shows it in English until that value is a LocalizedStringKey or comes from String(localized:).",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bandes de radioaficionat"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bandas de radioaficionado"
+          }
+        }
+      }
+    },
+    "Ans" : {
+      "comment" : "Kept in English by project rule (FT8 or FT4 transmit, start or stop button). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Answer on %@" : {
+      "comment" : "Kept in English by project rule (FT8 or FT4 transmit, start or stop button). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Antenna Rotator" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rotor d'antena"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rotor de antena"
+          }
+        }
+      }
+    },
+    "Antenna Weather Radar" : {
+      "comment" : "Not extracted yet: the code keeps this text in a String value (SettingsView.swift:90), so the app shows it in English until that value is a LocalizedStringKey or comes from String(localized:).",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Radar meteorològic d'antenes"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Radar meteorológico de antenas"
+          }
+        }
+      }
+    },
+    "Apply" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aplica"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aplicar"
+          }
+        }
+      }
+    },
+    "Arm TX" : {
+      "comment" : "Kept in English by project rule (FT8 or FT4 transmit, start or stop button). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "ARRL Sect" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Audio Decoder" : {
+      "comment" : "Not extracted yet: the code keeps this text in a String value (OperatorDeskNavigation.swift:110), so the app shows it in English until that value is a LocalizedStringKey or comes from String(localized:).",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Descodificador d'àudio"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Decodificador de audio"
+          }
+        }
+      }
+    },
+    "Auto-Connect on Launch" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connecta automàticament en iniciar"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Conectar automáticamente al iniciar"
+          }
+        }
+      }
+    },
+    "Auto-Pilot Armed — Ready to Call" : {
+      "comment" : "Kept in English by project rule (FT8 or FT4 transmit, start or stop button). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Auto-Pilot: ACTIVE" : {
+      "comment" : "Kept in English by project rule (FT8 or FT4 transmit, start or stop button). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Auto-Pilot: OFF" : {
+      "comment" : "Kept in English by project rule (FT8 or FT4 transmit, start or stop button). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Autonomous Wait & Pounce (W&P) Engine" : {
+      "comment" : "Wait & Pounce is the FT8/FT4 method of waiting for a station to finish a QSO and then calling it.",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Motor autònom Wait & Pounce (W&P)"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Motor autónomo Wait & Pounce (W&P)"
+          }
+        }
+      }
+    },
+    "Awaiting QSL" : {
+      "comment" : "Kept in English by project rule (the code reads this text back). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Awards" : {
+      "comment" : "Amateur radio awards (DXCC, WAS, ...). Not extracted yet: the code keeps this text in a String value (ContentView.swift:1258), so the app shows it in English until that value is a LocalizedStringKey or comes from String(localized:).",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diplomes"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diplomas"
+          }
+        }
+      }
+    },
+    "Back to Top" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Torna a dalt"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Volver arriba"
+          }
+        }
+      }
+    },
+    "Backfill Missing QRZ Names & Emails" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recupera els noms i correus que falten de QRZ"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recuperar los nombres y correos que faltan de QRZ"
+          }
+        }
+      }
+    },
+    "BAND" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Band" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Band:" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Bandmap" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mapa de bandes"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mapa de bandas"
+          }
+        }
+      }
+    },
+    "Batch QSL & Reminders" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "QSL per lots i recordatoris"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "QSL por lotes y recordatorios"
+          }
+        }
+      }
+    },
+    "Blank" : {
+      "comment" : "Kept in English by project rule (the code reads this text back). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Bulk Email & Contact Enrichment" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Correu massiu i enriquiment de contactes"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Correo masivo y enriquecimiento de contactos"
+          }
+        }
+      }
+    },
+    "Bulk Email Contacts..." : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Envia correu massiu als contactes..."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enviar correo masivo a los contactos..."
+          }
+        }
+      }
+    },
+    "Busted Callsigns & Verification" : {
+      "comment" : "A \"busted call\" is a callsign copied wrongly. Not extracted yet: the code keeps this text in a String value (SettingsView.swift:94), so the app shows it in English until that value is a LocalizedStringKey or comes from String(localized:).",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Indicatius mal copiats i verificació"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Indicativos mal copiados y verificación"
+          }
+        }
+      }
+    },
+    "CALL" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Call" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Call %@ (Reply)" : {
+      "comment" : "Kept in English by project rule (FT8 or FT4 transmit, start or stop button). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Call CQ" : {
+      "comment" : "Kept in English by project rule (FT8 or FT4 transmit, start or stop button). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Call Now" : {
+      "comment" : "Kept in English by project rule (FT8 or FT4 transmit, start or stop button). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Call Roster" : {
+      "comment" : "Not extracted yet: the code keeps this text in a String value (OperatorDeskNavigation.swift:92), so the app shows it in English until that value is a LocalizedStringKey or comes from String(localized:).",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Llista d'indicatius"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lista de indicativos"
+          }
+        }
+      }
+    },
+    "CALL:" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Callbook & Station Details" : {
+      "comment" : "\"Callbook\" is the directory of licensed stations (QRZ.com, HamQTH).",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Callbook i detalls de l'estació"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Callbook y detalles de la estación"
+          }
+        }
+      }
+    },
+    "Calling..." : {
+      "comment" : "Kept in English by project rule (FT8 or FT4 transmit, start or stop button). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "CALLSIGN" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Callsign" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Callsign or entity" : {
+      "comment" : "Search field; an entity is a DXCC entity (country or territory).",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Indicatiu o entitat"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Indicativo o entidad"
+          }
+        }
+      }
+    },
+    "Callsign:" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Callsign: " : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Cancel" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cancel·la"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cancelar"
+          }
+        }
+      }
+    },
+    "Cancel TX" : {
+      "comment" : "Kept in English by project rule (FT8 or FT4 transmit, start or stop button). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Check for Updates..." : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cerca actualitzacions..."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Buscar actualizaciones..."
+          }
+        }
+      }
+    },
+    "CHECKLOG" : {
+      "comment" : "Kept in English by project rule (the code reads this text back). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Choose..." : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tria..."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Elegir..."
+          }
+        }
+      }
+    },
+    "Clear" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Neteja"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Limpiar"
+          }
+        }
+      }
+    },
+    "Clear Band and Mode filters" : {
+      "comment" : "Names «Band» and «Mode», which stay English on screen; keep the names as written, in the same quotes.",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Neteja els filtres «Band» i «Mode»"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Quitar los filtros «Band» y «Mode»"
+          }
+        }
+      }
+    },
+    "Clear Row Selection" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Treu la selecció de files"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Quitar la selección de filas"
+          }
+        }
+      }
+    },
+    "Close" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tanca"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cerrar"
+          }
+        }
+      }
+    },
+    "Cloud & Companion" : {
+      "comment" : "Not extracted yet: the code keeps this text in a String value (OperatorDeskNavigation.swift:120), so the app shows it in English until that value is a LocalizedStringKey or comes from String(localized:).",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Núvol i aplicació auxiliar"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nube y aplicación auxiliar"
+          }
+        }
+      }
+    },
+    "Club Log Integration" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Integració amb Club Log"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Integración con Club Log"
+          }
+        }
+      }
+    },
+    "Club Log Spots" : {
+      "comment" : "Not extracted yet: the code keeps this text in a String value (OperatorDeskNavigation.swift:90), so the app shows it in English until that value is a LocalizedStringKey or comes from String(localized:).",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spots de Club Log"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spots de Club Log"
+          }
+        }
+      }
+    },
+    "Club Memberships" : {
+      "comment" : "Not extracted yet: the code keeps this text in a String value (OperatorDeskNavigation.swift:116), so the app shows it in English until that value is a LocalizedStringKey or comes from String(localized:).",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Afiliació a clubs"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Afiliación a clubes"
+          }
+        }
+      }
+    },
+    "Clubs & Rosters" : {
+      "comment" : "Not extracted yet: the code keeps this text in a String value (SettingsView.swift:84), so the app shows it in English until that value is a LocalizedStringKey or comes from String(localized:).",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Clubs i llistes de socis"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Clubes y listas de socios"
+          }
+        }
+      }
+    },
+    "Columns" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Columnes"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Columnas"
+          }
+        }
+      }
+    },
+    "Configure Transceiver CAT Control" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Configura el control CAT del transceptor"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Configurar el control CAT del transceptor"
+          }
+        }
+      }
+    },
+    "Confirmation Reconciliation..." : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Conciliació de confirmacions..."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Conciliación de confirmaciones..."
+          }
+        }
+      }
+    },
+    "Confirmed" : {
+      "comment" : "Kept in English by project rule (the code reads this text back). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Confirmed (Y)" : {
+      "comment" : "Kept in English by project rule (the code reads this text back). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Connect" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connecta"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Conectar"
+          }
+        }
+      }
+    },
+    "Connect Transceiver" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connecta el transceptor"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Conectar el transceptor"
+          }
+        }
+      }
+    },
+    "Contacted POTA reference" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Contacted SOTA reference" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "CONTACTS" : {
+      "comment" : "Upper-case label.",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "CONTACTES"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "CONTACTOS"
+          }
+        }
+      }
+    },
+    "Contest & Awards" : {
+      "comment" : "Group title. Not extracted yet: the code keeps this text in a String value (OperatorDeskNavigation.swift:16), so the app shows it in English until that value is a LocalizedStringKey or comes from String(localized:).",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Concursos i diplomes"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Concursos y diplomas"
+          }
+        }
+      }
+    },
+    "Contest & Exchange" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Concurs i intercanvi"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Concurso e intercambio"
+          }
+        }
+      }
+    },
+    "Contest Calendar" : {
+      "comment" : "Not extracted yet: the code keeps this text in a String value (OperatorDeskNavigation.swift:114), so the app shows it in English until that value is a LocalizedStringKey or comes from String(localized:).",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Calendari de concursos"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Calendario de concursos"
+          }
+        }
+      }
+    },
+    "Contest Operations" : {
+      "comment" : "Not extracted yet: the code keeps this text in a String value (OperatorDeskNavigation.swift:113), so the app shows it in English until that value is a LocalizedStringKey or comes from String(localized:).",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Operativa de concursos"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Operativa de concursos"
+          }
+        }
+      }
+    },
+    "Convert & Export" : {
+      "comment" : "Not extracted yet: the code keeps this text in a String value (ContentView.swift:1262), so the app shows it in English until that value is a LocalizedStringKey or comes from String(localized:).",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Conversió i exportació"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Conversión y exportación"
+          }
+        }
+      }
+    },
+    "COUNTRY" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Country" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Country:" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "CQ" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Custom period" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Període personalitzat"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Período personalizado"
+          }
+        }
+      }
+    },
+    "CW" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "CW Workstation" : {
+      "comment" : "Group title. Not extracted yet: the code keeps this text in a String value (OperatorDeskNavigation.swift:15), so the app shows it in English until that value is a LocalizedStringKey or comes from String(localized:).",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Estació CW"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Estación CW"
+          }
+        }
+      }
+    },
+    "Daily Rank Backfill" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recuperació diària del rànquing"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recuperación diaria del ranking"
+          }
+        }
+      }
+    },
+    "Data Safety & Backups" : {
+      "comment" : "Not extracted yet: the code keeps this text in a String value (SettingsView.swift:89), so the app shows it in English until that value is a LocalizedStringKey or comes from String(localized:).",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Seguretat de les dades i còpies de seguretat"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Seguridad de los datos y copias de seguridad"
+          }
+        }
+      }
+    },
+    "dB" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Delete QSO" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Elimina el QSO"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Eliminar el QSO"
+          }
+        }
+      }
+    },
+    "Deselect All" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Desselecciona-ho tot"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Deseleccionar todo"
+          }
+        }
+      }
+    },
+    "DIGI" : {
+      "comment" : "Kept in English by project rule (the code reads this text back). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Digital Callsign Monitor" : {
+      "comment" : "Not extracted yet: the code keeps this text in a String value (OperatorDeskNavigation.swift:93), so the app shows it in English until that value is a LocalizedStringKey or comes from String(localized:).",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Monitor d'indicatius digitals"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Monitor de indicativos digitales"
+          }
+        }
+      }
+    },
+    "Digital Suite" : {
+      "comment" : "RTTY, PSK, Hell, Olivia, JS8, SSTV. Not extracted yet: the code keeps this text in a String value (OperatorDeskNavigation.swift:105), so the app shows it in English until that value is a LocalizedStringKey or comes from String(localized:).",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Suite digital"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Suite digital"
+          }
+        }
+      }
+    },
+    "Disarm All TX" : {
+      "comment" : "Kept in English by project rule (FT8 or FT4 transmit, start or stop button). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Disarm Wait & Pounce Target" : {
+      "comment" : "Kept in English by project rule (FT8 or FT4 transmit, start or stop button). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Disconnect" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Desconnecta"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Desconectar"
+          }
+        }
+      }
+    },
+    "Disconnect Transceiver" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Desconnecta el transceptor"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Desconectar el transceptor"
+          }
+        }
+      }
+    },
+    "Done" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fet"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hecho"
+          }
+        }
+      }
+    },
+    "Download LoTW Cloud Logbook..." : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Baixa el registre de LoTW del núvol..."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Descargar el registro de LoTW de la nube..."
+          }
+        }
+      }
+    },
+    "DT" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "DURATION" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Duration" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Duration:" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "DX" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "DX Activity" : {
+      "comment" : "Group title. Not extracted yet: the code keeps this text in a String value (OperatorDeskNavigation.swift:13), so the app shows it in English until that value is a LocalizedStringKey or comes from String(localized:).",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Activitat DX"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Actividad DX"
+          }
+        }
+      }
+    },
+    "DX Advisor" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Assessor DX"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Asesor DX"
+          }
+        }
+      }
+    },
+    "DX CALL" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "DX callsign" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "DX News" : {
+      "comment" : "Not extracted yet: the code keeps this text in a String value (OperatorDeskNavigation.swift:97), so the app shows it in English until that value is a LocalizedStringKey or comes from String(localized:).",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Notícies DX"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Noticias DX"
+          }
+        }
+      }
+    },
+    "DX:" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Edit" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Edita"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Editar"
+          }
+        }
+      }
+    },
+    "Email (%lld)" : {
+      "comment" : "%lld is the number of contacts.",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Correu (%lld)"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Correo (%lld)"
+          }
+        }
+      }
+    },
+    "Email (SMTP)" : {
+      "comment" : "Not extracted yet: the code keeps this text in a String value (SettingsView.swift:88), so the app shows it in English until that value is a LocalizedStringKey or comes from String(localized:).",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Correu electrònic (SMTP)"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Correo electrónico (SMTP)"
+          }
+        }
+      }
+    },
+    "Email Address:" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Adreça electrònica:"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dirección de correo electrónico:"
+          }
+        }
+      }
+    },
+    "Email QSL Card" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Envia la targeta QSL per correu"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enviar la tarjeta QSL por correo"
+          }
+        }
+      }
+    },
+    "EMERGENCY STOP" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PARADA D'EMERGÈNCIA"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PARADA DE EMERGENCIA"
+          }
+        }
+      }
+    },
+    "Emulator" : {
+      "comment" : "Not extracted yet: the code keeps this text in a String value (OperatorDeskNavigation.swift:106), so the app shows it in English until that value is a LocalizedStringKey or comes from String(localized:).",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Emulador"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Emulador"
+          }
+        }
+      }
+    },
+    "Enable Wait & Pounce Engine" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Activa el motor Wait & Pounce"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Activar el motor Wait & Pounce"
+          }
+        }
+      }
+    },
+    "END UTC" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Engage #1 (%@)" : {
+      "comment" : "Kept in English by project rule (FT8 or FT4 transmit, start or stop button). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Enrich All Contacts (QRZ Emails)..." : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enriqueix tots els contactes (correus de QRZ)..."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enriquecer todos los contactos (correos de QRZ)..."
+          }
+        }
+      }
+    },
+    "Enrich QSOs" : {
+      "comment" : "Adds data from the online callbook (for example name and e-mail) and the QRZ ranks to the logged QSOs.",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enriqueix els QSO"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enriquecer los QSO"
+          }
+        }
+      }
+    },
+    "Enrich Selected (%lld)" : {
+      "comment" : "%lld is the number of selected QSOs.",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enriqueix la selecció (%lld)"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enriquecer la selección (%lld)"
+          }
+        }
+      }
+    },
+    "Enrichment & Ranks" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enriquiment i rànquings"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enriquecimiento y rankings"
+          }
+        }
+      }
+    },
+    "Enter a callsign to see its entity and logging history." : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Escriu un indicatiu per veure'n l'entitat i l'historial de registre."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Escribe un indicativo para ver su entidad y su historial de registro."
+          }
+        }
+      }
+    },
+    "Enter a DX callsign. Press Space to advance to the next field." : {
+      "comment" : "Names «DX callsign», which stays English on screen; keep the name as written, in the same quotes.",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Escriu un indicatiu al camp «DX callsign». Prem Espai per passar al camp següent."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Escribe un indicativo en el campo «DX callsign». Pulsa Espacio para pasar al campo siguiente."
+          }
+        }
+      }
+    },
+    "Enter your station Grid Locator in Settings to calculate path distance, bearing, local day/night and band suggestions." : {
+      "comment" : "Names «Grid Locator», which stays English on screen; keep the name as written, in the same quotes. Not extracted yet: the code keeps this text in a String value (DXAdvisorView.swift:907), so the app shows it in English until that value is a LocalizedStringKey or comes from String(localized:).",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Escriu el localitzador de la teva estació al camp «Grid Locator» de la configuració per calcular la distància del trajecte, l'azimut, el dia i la nit locals i els suggeriments de banda."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Escribe el localizador de tu estación en el campo «Grid Locator» de la configuración para calcular la distancia del trayecto, el acimut, el día y la noche locales y las sugerencias de banda."
+          }
+        }
+      }
+    },
+    "eQSL" : {
+      "comment" : "Kept in English by project rule (the code reads this text back). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "eQSL.cc Integration & Graphic Card Downloader" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Integració amb eQSL.cc i baixada de targetes gràfiques"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Integración con eQSL.cc y descarga de tarjetas gráficas"
+          }
+        }
+      }
+    },
+    "Error" : {
+      "comment" : "Kept in English by project rule (the code reads this text back). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Esc to Wipe" : {
+      "comment" : "Hint: the Escape key clears the form.",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Esc per esborrar"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Esc para borrar"
+          }
+        }
+      }
+    },
+    "Export (%lld)" : {
+      "comment" : "%lld is the number of QSOs.",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Exporta (%lld)"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Exportar (%lld)"
+          }
+        }
+      }
+    },
+    "Export ADIF" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Exporta ADIF"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Exportar ADIF"
+          }
+        }
+      }
+    },
+    "Export Database Logs..." : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Exporta els registres de la base de dades..."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Exportar los registros de la base de datos..."
+          }
+        }
+      }
+    },
+    "Export Filtered Log As..." : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Exporta el registre filtrat com a..."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Exportar el registro filtrado como..."
+          }
+        }
+      }
+    },
+    "External ADIF Sync" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sincronització ADIF externa"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sincronización ADIF externa"
+          }
+        }
+      }
+    },
+    "Filter recent..." : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Filtra els recents..."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Filtrar recientes..."
+          }
+        }
+      }
+    },
+    "Filters" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Filtres"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Filtros"
+          }
+        }
+      }
+    },
+    "Filters Active" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Filtres actius"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Filtros activos"
+          }
+        }
+      }
+    },
+    "Fit Window to Screen Width" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ajusta la finestra a l'amplada de la pantalla"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ajustar la ventana al ancho de la pantalla"
+          }
+        }
+      }
+    },
+    "Freq" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Freq (MHz)" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "FREQ:" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Freq:" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "FREQUENCY" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Frequency" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Frequency (MHz)" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "FT4" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "FT8" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "FT8 Station" : {
+      "comment" : "Not extracted yet: the code keeps this text in a String value (OperatorDeskNavigation.swift:103), so the app shows it in English until that value is a LocalizedStringKey or comes from String(localized:).",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Estació FT8"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Estación FT8"
+          }
+        }
+      }
+    },
+    "Full QSL History Reconciliation..." : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Conciliació de tot l'historial de QSL..."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Conciliación de todo el historial de QSL..."
+          }
+        }
+      }
+    },
+    "Generate QSL Card" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Genera la targeta QSL"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Generar la tarjeta QSL"
+          }
+        }
+      }
+    },
+    "Globe & Grids" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Grayline" : {
+      "comment" : "The gray line is the day/night terminator on the map.",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Línia grisa"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Línea gris"
+          }
+        }
+      }
+    },
+    "GRID" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Grid" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Grid Locator" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Grid locator" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Grid Locator is required for per-band country opportunity ranking." : {
+      "comment" : "Names «Grid Locator», which stays English on screen; keep the name as written, in the same quotes. Not extracted yet: the code keeps this text in a String value (DXAdvisorView.swift:955), so the app shows it in English until that value is a LocalizedStringKey or comes from String(localized:).",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cal un localitzador al camp «Grid Locator» per classificar per banda les oportunitats de països."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hace falta un localizador en «Grid Locator» para clasificar por banda las oportunidades de países."
+          }
+        }
+      }
+    },
+    "Grid Square:" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Grid:" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "HALT TX" : {
+      "comment" : "Kept in English by project rule (FT8 or FT4 transmit, start or stop button). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Halt TX" : {
+      "comment" : "Kept in English by project rule (FT8 or FT4 transmit, start or stop button). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Hamlib rotctld" : {
+      "comment" : "Kept in English by project rule (the code reads this text back). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "HAMQTH Integration & Online Log" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Integració amb HAMQTH i registre en línia"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Integración con HAMQTH y registro en línea"
+          }
+        }
+      }
+    },
+    "HIGH" : {
+      "comment" : "Kept in English by project rule (the code reads this text back). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "HRDLog.net Online Logbook" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Registre en línia HRDLog.net"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Registro en línea HRDLog.net"
+          }
+        }
+      }
+    },
+    "IC-7300MK2" : {
+      "comment" : "Kept in English by project rule (the code reads this text back). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Import Log File..." : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Importa un fitxer de registre..."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Importar un archivo de registro..."
+          }
+        }
+      }
+    },
+    "Import New Log..." : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Importa un registre nou..."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Importar un registro nuevo..."
+          }
+        }
+      }
+    },
+    "Keyer & Memories" : {
+      "comment" : "Not extracted yet: the code keeps this text in a String value (OperatorDeskNavigation.swift:107), so the app shows it in English until that value is a LocalizedStringKey or comes from String(localized:).",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keyer i memòries"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keyer y memorias"
+          }
+        }
+      }
+    },
+    "Lab599 Discovery TX-500" : {
+      "comment" : "Kept in English by project rule (the code reads this text back). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Labels & Printing" : {
+      "comment" : "Not extracted yet: the code keeps this text in a String value (OperatorDeskNavigation.swift:118), so the app shows it in English until that value is a LocalizedStringKey or comes from String(localized:).",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Etiquetes i impressió"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Etiquetas e impresión"
+          }
+        }
+      }
+    },
+    "Leaderboard" : {
+      "comment" : "Not extracted yet: the code keeps this text in a String value (ContentView.swift:1259), so the app shows it in English until that value is a LocalizedStringKey or comes from String(localized:).",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Classificació"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Clasificación"
+          }
+        }
+      }
+    },
+    "LIVE UTC" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Load Next 1000" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Carrega els 1000 següents"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cargar los 1000 siguientes"
+          }
+        }
+      }
+    },
+    "Loading contacts…" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Carregant els contactes…"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cargando los contactos…"
+          }
+        }
+      }
+    },
+    "LOG" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Log" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Log Actions" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Accions del registre"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Acciones del registro"
+          }
+        }
+      }
+    },
+    "Log Anyway" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Registra igualment"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Registrar de todos modos"
+          }
+        }
+      }
+    },
+    "Log anyway" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Registra igualment"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Registrar de todos modos"
+          }
+        }
+      }
+    },
+    "Log Assistant" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Assistent del registre"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Asistente del registro"
+          }
+        }
+      }
+    },
+    "Log Assistant..." : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Assistent del registre..."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Asistente del registro..."
+          }
+        }
+      }
+    },
+    "LOG QSO" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Log QSO" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Log Sources & Automation" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fonts del registre i automatització"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fuentes del registro y automatización"
+          }
+        }
+      }
+    },
+    "Log Statistics" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Estadístiques del registre"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Estadísticas del registro"
+          }
+        }
+      }
+    },
+    "Log Statistics & Confirmation Breakdown" : {
+      "comment" : "Window title.",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Estadístiques del registre i desglossament de confirmacions"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Estadísticas del registro y desglose de confirmaciones"
+          }
+        }
+      }
+    },
+    "Log Statistics in Separate Window..." : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Estadístiques del registre en una finestra separada..."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Estadísticas del registro en una ventana aparte..."
+          }
+        }
+      }
+    },
+    "Log Table" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "LoTW" : {
+      "comment" : "Kept in English by project rule (the code reads this text back). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "LoTW Active" : {
+      "comment" : "Kept in English by project rule (the code reads this text back). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "LoTW/QRZ Confirmation" : {
+      "comment" : "Kept in English by project rule (the code reads this text back). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "LOW" : {
+      "comment" : "Kept in English by project rule (the code reads this text back). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Maidenhead Grid Square:" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Manage Stations" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gestiona les estacions"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gestionar las estaciones"
+          }
+        }
+      }
+    },
+    "Manual Watchlist & ATNO Hunter" : {
+      "comment" : "ATNO = All Time New One, an entity never worked before.",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Llista de seguiment manual i caçador d'ATNO"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lista de seguimiento manual y cazador de ATNO"
+          }
+        }
+      }
+    },
+    "Message" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "MOBILE" : {
+      "comment" : "Kept in English by project rule (the code reads this text back). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "MODE" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Mode" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Mode:" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "MULTI-OP" : {
+      "comment" : "Kept in English by project rule (the code reads this text back). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Multi-Rig FT8" : {
+      "comment" : "Several transceivers working at the same time.",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "FT8 multiequip"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "FT8 multiequipo"
+          }
+        }
+      }
+    },
+    "My Call" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "My Callsign:" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "My POTA reference" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "My SOTA reference" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Name" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Needed" : {
+      "comment" : "Kept in English by project rule (the code reads this text back). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "No Log Loaded" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cap registre carregat"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ningún registro cargado"
+          }
+        }
+      }
+    },
+    "No serial ports found" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No s'ha trobat cap port sèrie"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No se ha encontrado ningún puerto serie"
+          }
+        }
+      }
+    },
+    "Not worked" : {
+      "comment" : "Kept in English by project rule (the code reads this text back). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "OK" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "D'acord"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aceptar"
+          }
+        }
+      }
+    },
+    "ON4KST Chat" : {
+      "comment" : "Not extracted yet: the code keeps this text in a String value (OperatorDeskNavigation.swift:98), so the app shows it in English until that value is a LocalizedStringKey or comes from String(localized:).",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Xat ON4KST"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chat ON4KST"
+          }
+        }
+      }
+    },
+    "ON4KST DX Chat" : {
+      "comment" : "Not extracted yet: the code keeps this text in a String value (SettingsView.swift:87), so the app shows it in English until that value is a LocalizedStringKey or comes from String(localized:).",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Xat DX ON4KST"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chat DX ON4KST"
+          }
+        }
+      }
+    },
+    "ON4KST Real-Time Propagation & Chat Network" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Xarxa de xat i propagació en temps real ON4KST"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Red de chat y propagación en tiempo real ON4KST"
+          }
+        }
+      }
+    },
+    "Open Feedback in Separate Window..." : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Obre els comentaris en una finestra separada..."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Abrir los comentarios en una ventana aparte..."
+          }
+        }
+      }
+    },
+    "Open in Separate Window" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Obre en una finestra separada"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Abrir en una ventana aparte"
+          }
+        }
+      }
+    },
+    "Open Log Table" : {
+      "comment" : "Names «Log Table», which stays English on screen; keep the name as written, in the same quotes.",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Obre «Log Table»"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Abrir «Log Table»"
+          }
+        }
+      }
+    },
+    "Operating" : {
+      "comment" : "Group title. Not extracted yet: the code keeps this text in a String value (OperatorDeskNavigation.swift:12), so the app shows it in English until that value is a LocalizedStringKey or comes from String(localized:).",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Operativa"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Operativa"
+          }
+        }
+      }
+    },
+    "Operator Desk" : {
+      "comment" : "The workspace with Quick Log, DX cluster, CW, digital modes, QSL tools. Not extracted yet: the code keeps this text in a String value (ContentView.swift:1256), so the app shows it in English until that value is a LocalizedStringKey or comes from String(localized:).",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Taula de l'operador"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mesa del operador"
+          }
+        }
+      }
+    },
+    "Password" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Contrasenya"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Contraseña"
+          }
+        }
+      }
+    },
+    "Period" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Període"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Período"
+          }
+        }
+      }
+    },
+    "Pileup Trainer" : {
+      "comment" : "Not extracted yet: the code keeps this text in a String value (OperatorDeskNavigation.swift:111), so the app shows it in English until that value is a LocalizedStringKey or comes from String(localized:).",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Entrenador de pileups"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Entrenador de pileups"
+          }
+        }
+      }
+    },
+    "Port" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Port"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Puerto"
+          }
+        }
+      }
+    },
+    "PORTABLE" : {
+      "comment" : "Kept in English by project rule (the code reads this text back). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Portable" : {
+      "comment" : "Not extracted yet: the code keeps this text in a String value (OperatorDeskNavigation.swift:88), so the app shows it in English until that value is a LocalizedStringKey or comes from String(localized:).",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Portàtil"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Portátil"
+          }
+        }
+      }
+    },
+    "Portable Activity (POTA / SOTA / IOTA)" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Activitat portàtil (POTA / SOTA / IOTA)"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Actividad portátil (POTA / SOTA / IOTA)"
+          }
+        }
+      }
+    },
+    "Possible duplicate QSO" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Possible QSO duplicat"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Posible QSO duplicado"
+          }
+        }
+      }
+    },
+    "Preparing station data…" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Preparant les dades de l'estació…"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Preparando los datos de la estación…"
+          }
+        }
+      }
+    },
+    "Progress" : {
+      "comment" : "Kept in English by project rule (the code reads this text back). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "PTT" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Q-Codes & Prosigns" : {
+      "comment" : "Not extracted yet: the code keeps this text in a String value (OperatorDeskNavigation.swift:109), so the app shows it in English until that value is a LocalizedStringKey or comes from String(localized:).",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Codis Q i prosignes"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Códigos Q y prosignos"
+          }
+        }
+      }
+    },
+    "QRP" : {
+      "comment" : "Kept in English by project rule (the code reads this text back). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "QRZ" : {
+      "comment" : "Kept in English by project rule (the code reads this text back). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "QRZ Incoming Requests..." : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sol·licituds entrants de QRZ..."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Solicitudes entrantes de QRZ..."
+          }
+        }
+      }
+    },
+    "QRZ Logbook Rank" : {
+      "comment" : "Not extracted yet: the code keeps this text in a String value (SettingsView.swift:77), so the app shows it in English until that value is a LocalizedStringKey or comes from String(localized:).",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rànquing de QRZ Logbook"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ranking de QRZ Logbook"
+          }
+        }
+      }
+    },
+    "QRZ Login..." : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inicia la sessió a QRZ..."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Iniciar sesión en QRZ..."
+          }
+        }
+      }
+    },
+    "QRZ Rank API" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "API del rànquing de QRZ"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "API del ranking de QRZ"
+          }
+        }
+      }
+    },
+    "QRZ.com Integration" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Integració amb QRZ.com"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Integración con QRZ.com"
+          }
+        }
+      }
+    },
+    "QSL & Data" : {
+      "comment" : "Group title. Not extracted yet: the code keeps this text in a String value (OperatorDeskNavigation.swift:17), so the app shows it in English until that value is a LocalizedStringKey or comes from String(localized:).",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "QSL i dades"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "QSL y datos"
+          }
+        }
+      }
+    },
+    "QSL Card Request" : {
+      "comment" : "Kept in English by project rule (the code reads this text back). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "QSL Hub" : {
+      "comment" : "Not extracted yet: the code keeps this text in a String value (OperatorDeskNavigation.swift:117), so the app shows it in English until that value is a LocalizedStringKey or comes from String(localized:).",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Centre de QSL"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Centro de QSL"
+          }
+        }
+      }
+    },
+    "QSO Notes & Comments" : {
+      "comment" : "Not extracted yet: the code keeps this text in a String value (OperatorDeskView.swift:1193), so the app shows it in English until that value is a LocalizedStringKey or comes from String(localized:).",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Notes i comentaris del QSO"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Notas y comentarios del QSO"
+          }
+        }
+      }
+    },
+    "QTH" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Queue next TX slot" : {
+      "comment" : "Kept in English by project rule (FT8 or FT4 transmit, start or stop button). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Quick Log" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Quick Notes:" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Notes ràpides:"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Notas rápidas:"
+          }
+        }
+      }
+    },
+    "Quick RST:" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Radio & Digital" : {
+      "comment" : "Group title. Not extracted yet: the code keeps this text in a String value (OperatorDeskNavigation.swift:14), so the app shows it in English until that value is a LocalizedStringKey or comes from String(localized:).",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ràdio i digital"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Radio y digital"
+          }
+        }
+      }
+    },
+    "Radio Bridge" : {
+      "comment" : "Not extracted yet: the code keeps this text in a String value (OperatorDeskNavigation.swift:99), so the app shows it in English until that value is a LocalizedStringKey or comes from String(localized:).",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pont de ràdio"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Puente de radio"
+          }
+        }
+      }
+    },
+    "RCVD RST" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Ready" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A punt"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Listo"
+          }
+        }
+      }
+    },
+    "Recent Station QSOs" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "QSO recents de l'estació"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "QSO recientes de la estación"
+          }
+        }
+      }
+    },
+    "Recv Exch" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Refresh" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Actualitza"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Actualizar"
+          }
+        }
+      }
+    },
+    "Refresh serial ports" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Actualitza els ports sèrie"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Actualizar los puertos serie"
+          }
+        }
+      }
+    },
+    "Remind Recent Unconfirmed Batch..." : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Envia un recordatori als contactes recents sense confirmar..."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enviar un recordatorio a los contactos recientes sin confirmar..."
+          }
+        }
+      }
+    },
+    "Remove Key" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Elimina la clau"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Eliminar la clave"
+          }
+        }
+      }
+    },
+    "Remove Password" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Elimina la contrasenya"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Eliminar la contraseña"
+          }
+        }
+      }
+    },
+    "Reply" : {
+      "comment" : "Kept in English by project rule (FT8 or FT4 transmit, start or stop button). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Reply in WSJT-X ⚡️" : {
+      "comment" : "Kept in English by project rule (FT8 or FT4 transmit, start or stop button). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Reply to %@" : {
+      "comment" : "Kept in English by project rule (FT8 or FT4 transmit, start or stop button). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Reply via YAAM FT8 Modem ⚡️" : {
+      "comment" : "Kept in English by project rule (FT8 or FT4 transmit, start or stop button). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Reset" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Restableix"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Restablecer"
+          }
+        }
+      }
+    },
+    "Reset Default Columns" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Restableix les columnes per defecte"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Restablecer las columnas predeterminadas"
+          }
+        }
+      }
+    },
+    "Reveal Activity Audit Log in Finder..." : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mostra al Finder el registre d'auditoria d'activitat..."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mostrar en el Finder el registro de auditoría de actividad..."
+          }
+        }
+      }
+    },
+    "Review Duplicate QSOs..." : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Revisa els QSO duplicats..."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Revisar los QSO duplicados..."
+          }
+        }
+      }
+    },
+    "Review Entry" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Revisa l'entrada"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Revisar la entrada"
+          }
+        }
+      }
+    },
+    "Rotate to Bearing" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gira cap a l'azimut"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Girar al acimut"
+          }
+        }
+      }
+    },
+    "Rotator" : {
+      "comment" : "Antenna rotator. Not extracted yet: the code keeps this text in a String value (OperatorDeskNavigation.swift:102), so the app shows it in English until that value is a LocalizedStringKey or comes from String(localized:).",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rotor"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rotor"
+          }
+        }
+      }
+    },
+    "ROVER" : {
+      "comment" : "Kept in English by project rule (the code reads this text back). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "RST Recv" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "RST Sent" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "RTTY" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "RX" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "RX:" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Save" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Desa"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Guardar"
+          }
+        }
+      }
+    },
+    "Save As..." : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Desa com a..."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Guardar como..."
+          }
+        }
+      }
+    },
+    "Save Credentials" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Desa les credencials"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Guardar las credenciales"
+          }
+        }
+      }
+    },
+    "Save Log" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Desa el registre"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Guardar el registro"
+          }
+        }
+      }
+    },
+    "Search settings..." : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cerca a la configuració..."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Buscar en la configuración..."
+          }
+        }
+      }
+    },
+    "Select All" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Selecciona-ho tot"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Seleccionar todo"
+          }
+        }
+      }
+    },
+    "Select All QSOs" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Selecciona tots els QSO"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Seleccionar todos los QSO"
+          }
+        }
+      }
+    },
+    "Selected (%lld)" : {
+      "comment" : "%lld is the number of selected QSOs.",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Seleccionats (%lld)"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Seleccionados (%lld)"
+          }
+        }
+      }
+    },
+    "Send" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Envia"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enviar"
+          }
+        }
+      }
+    },
+    "Send Recent QSL Cards Batch..." : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Envia un lot de targetes QSL recents..."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enviar un lote de tarjetas QSL recientes..."
+          }
+        }
+      }
+    },
+    "Sent" : {
+      "comment" : "Kept in English by project rule (the code reads this text back). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Sent Exch" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "SENT RST" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Serial" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Serial Port" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Port sèrie"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Puerto serie"
+          }
+        }
+      }
+    },
+    "Shack Clock" : {
+      "comment" : "\"Shack\" is the operating room of a radio station.",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rellotge de l'estació"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reloj de la estación"
+          }
+        }
+      }
+    },
+    "Show All Columns" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mostra totes les columnes"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mostrar todas las columnas"
+          }
+        }
+      }
+    },
+    "Showing %@ of %@ QSOs" : {
+      "comment" : "Both %@ are already formatted numbers.",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Es mostren %@ de %@ QSO"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Se muestran %@ de %@ QSO"
+          }
+        }
+      }
+    },
+    "Sign Out" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tanca la sessió"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cerrar sesión"
+          }
+        }
+      }
+    },
+    "Signal Footprint (PSK & RBN)" : {
+      "comment" : "Not extracted yet: the code keeps this text in a String value (OperatorDeskNavigation.swift:95), so the app shows it in English until that value is a LocalizedStringKey or comes from String(localized:).",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Petjada del senyal (PSK i RBN)"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Huella de la señal (PSK y RBN)"
+          }
+        }
+      }
+    },
+    "SINGLE-OP" : {
+      "comment" : "Kept in English by project rule (the code reads this text back). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "SKED" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Snipe" : {
+      "comment" : "Kept in English by project rule (FT8 or FT4 transmit, start or stop button). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "SNR" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Space Weather" : {
+      "comment" : "Kept in English by project rule (the code reads this text back). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "SRX (Recv #)" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "SSB" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Start All" : {
+      "comment" : "Kept in English by project rule (FT8 or FT4 transmit, start or stop button). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Start Listener" : {
+      "comment" : "Kept in English by project rule (FT8 or FT4 transmit, start or stop button). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Start receive" : {
+      "comment" : "Kept in English by project rule (FT8 or FT4 transmit, start or stop button). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Start UDP Listener (Port %@)" : {
+      "comment" : "Kept in English by project rule (FT8 or FT4 transmit, start or stop button). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "START UTC" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "State / Prov" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "STATION" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Station" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Station callsign" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Station Profiles" : {
+      "comment" : "Not extracted yet: the code keeps this text in a String value (SettingsView.swift:70), so the app shows it in English until that value is a LocalizedStringKey or comes from String(localized:).",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Perfils d'estació"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Perfiles de estación"
+          }
+        }
+      }
+    },
+    "Station Weather & Antenna Safety Radar" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Radar meteorològic de l'estació i seguretat d'antenes"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Radar meteorológico de la estación y seguridad de antenas"
+          }
+        }
+      }
+    },
+    "Stats" : {
+      "comment" : "Not extracted yet: the code keeps this text in a String value (ContentView.swift:1257), so the app shows it in English until that value is a LocalizedStringKey or comes from String(localized:).",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Estadístiques"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Estadísticas"
+          }
+        }
+      }
+    },
+    "Status" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Estat"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Estado"
+          }
+        }
+      }
+    },
+    "Stop All" : {
+      "comment" : "Kept in English by project rule (FT8 or FT4 transmit, start or stop button). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Stop Listener" : {
+      "comment" : "Kept in English by project rule (FT8 or FT4 transmit, start or stop button). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Stop receive" : {
+      "comment" : "Kept in English by project rule (FT8 or FT4 transmit, start or stop button). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Stored in macOS Keychain" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Desat al clauer del macOS"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Guardado en el llavero de macOS"
+          }
+        }
+      }
+    },
+    "STX (Sent #)" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Submit Feedback & Suggestions..." : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Envia comentaris i suggeriments..."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enviar comentarios y sugerencias..."
+          }
+        }
+      }
+    },
+    "Submode" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Sync & Cloud" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sincronització i núvol"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sincronización y nube"
+          }
+        }
+      }
+    },
+    "Sync Confirmations (LoTW & QRZ)" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sincronitza les confirmacions (LoTW i QRZ)"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sincronizar confirmaciones (LoTW y QRZ)"
+          }
+        }
+      }
+    },
+    "Sync New QSLs (LoTW & QRZ)" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sincronitza les QSL noves (LoTW i QRZ)"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sincronizar las QSL nuevas (LoTW y QRZ)"
+          }
+        }
+      }
+    },
+    "Sync Now" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sincronitza ara"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sincronizar ahora"
+          }
+        }
+      }
+    },
+    "System Default" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Predeterminat del sistema"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Predeterminado del sistema"
+          }
+        }
+      }
+    },
+    "This callsign is already in your log on the same band and mode." : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aquest indicatiu ja és al teu registre, a la mateixa banda i mode."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Este indicativo ya está en tu registro, en la misma banda y modo."
+          }
+        }
+      }
+    },
+    "Time" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Time zone" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fus horari"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zona horaria"
+          }
+        }
+      }
+    },
+    "Today" : {
+      "comment" : "Kept in English by project rule (the code reads this text back). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Tools" : {
+      "comment" : "Menu title.",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Eines"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Herramientas"
+          }
+        }
+      }
+    },
+    "Tools & Services" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Eines i serveis"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Herramientas y servicios"
+          }
+        }
+      }
+    },
+    "Transceiver & Signal Parameters" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Transceptor i paràmetres del senyal"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Transceptor y parámetros de la señal"
+          }
+        }
+      }
+    },
+    "Transceiver CAT Control" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Control CAT del transceptor"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Control CAT del transceptor"
+          }
+        }
+      }
+    },
+    "Transceiver Control Interface (TCI)" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Interfície de control del transceptor (TCI)"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Interfaz de control del transceptor (TCI)"
+          }
+        }
+      }
+    },
+    "Transceiver Emulator" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Emulador de transceptor"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Emulador de transceptor"
+          }
+        }
+      }
+    },
+    "TX" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Tx %lld" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Tx %lld: %@" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "TX:" : {
+      "comment" : "Kept in English by project rule (radio label, section or protocol term). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Unconfirmed" : {
+      "comment" : "Kept in English by project rule (the code reads this text back). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Username" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nom d'usuari"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nombre de usuario"
+          }
+        }
+      }
+    },
+    "Username:" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nom d'usuari:"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nombre de usuario:"
+          }
+        }
+      }
+    },
+    "VFO A" : {
+      "comment" : "Kept in English by project rule (the code reads this text back). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "VFO B" : {
+      "comment" : "Kept in English by project rule (the code reads this text back). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Voice Alerts & TTS" : {
+      "comment" : "Not extracted yet: the code keeps this text in a String value (SettingsView.swift:92), so the app shows it in English until that value is a LocalizedStringKey or comes from String(localized:).",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Alertes de veu i síntesi de parla"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Alertas de voz y síntesis de habla"
+          }
+        }
+      }
+    },
+    "Watchlist" : {
+      "comment" : "Kept in English by project rule (the code reads this text back). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "Wavelog & Cloudlog Server Integration" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Integració amb servidors Wavelog i Cloudlog"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Integración con servidores Wavelog y Cloudlog"
+          }
+        }
+      }
+    },
+    "WinKeyer & Hardware" : {
+      "comment" : "Not extracted yet: the code keeps this text in a String value (OperatorDeskNavigation.swift:112), so the app shows it in English until that value is a LocalizedStringKey or comes from String(localized:).",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "WinKeyer i maquinari"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "WinKeyer y hardware"
+          }
+        }
+      }
+    },
+    "Wipe" : {
+      "comment" : "Button label (also the Escape key): clears the QSO entry form.",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Esborra"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Borrar"
+          }
+        }
+      }
+    },
+    "Worked" : {
+      "comment" : "Worked = a QSO is in the log (not necessarily confirmed).",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Treballat"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Trabajado"
+          }
+        }
+      }
+    },
+    "YAAM" : {
+      "comment" : "Kept in English by project rule (the code reads this text back). Reviewed by EA3JIC.",
+      "shouldTranslate" : false
+    },
+    "YAAM Activity Console" : {
+      "comment" : "Window title.",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Consola d'activitat de YAAM"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Consola de actividad de YAAM"
+          }
+        }
+      }
+    },
+    "YAAM Feedback & Suggestions" : {
+      "comment" : "Window title.",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Comentaris i suggeriments de YAAM"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Comentarios y sugerencias de YAAM"
+          }
+        }
+      }
+    },
+    "YAAM Help & FAQ" : {
+      "comment" : "Window title.",
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ajuda i preguntes freqüents de YAAM"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ayuda y preguntas frecuentes de YAAM"
+          }
+        }
+      }
+    },
+    "YAAM User Guide & Documentation" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Guia d'usuari i documentació de YAAM"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Guía de usuario y documentación de YAAM"
+          }
+        }
+      }
+    },
+    "Your recent contacts will appear here." : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aquí apareixeran els teus contactes recents."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tus contactos recientes aparecerán aquí."
+          }
+        }
+      }
+    },
+    "Zero-Click Cloud Outbox" : {
+      "localizations" : {
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Safata de sortida al núvol sense clics"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bandeja de salida a la nube sin clics"
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}

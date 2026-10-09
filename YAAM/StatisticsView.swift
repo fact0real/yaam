@@ -1056,7 +1056,7 @@ guard !callsign.isEmpty, let url = URL(string: urlString) else { return }
 
     private var confirmedProgressView: some View {
         let summary = progressSummary
-        let ownerCall = appState.currentStationCallsign.isEmpty ? "EP2AES" : appState.currentStationCallsign
+        let ownerCall = appState.currentStationCallsign
         let ownerConfirmedCount = appState.qsoRecords.filter(\.isConfirmed).count
 
         return ScrollView {

@@ -13,6 +13,7 @@ import SwiftUI
 public struct DigitalModemStationView: View {
     @EnvironmentObject private var appState: AppState
     @ObservedObject var engine: DigitalModemEngine
+    @ObservedObject private var rig = RigControlEngine.shared
 
     @State private var isCustomPitchPresented = false
     @State private var pitchInputText = "1500"
@@ -78,15 +79,18 @@ public struct DigitalModemStationView: View {
         .onAppear {
             syncStationInfo()
         }
+        .onChange(of: appState.activeStationProfile) { _, _ in
+            syncStationInfo()
+        }
     }
 
     private func syncStationInfo() {
-        if engine.myCallsign.isEmpty {
-            engine.myCallsign = appState.currentStationCallsign
-        }
-        if engine.myGrid.isEmpty, let grid = appState.activeStationProfile?.grid {
-            engine.myGrid = grid
-        }
+        // The operator's own values from the active profile. A placeholder (DEFAULT, NOCALL) is stored as empty and
+        // a locator as its valid part; the engine then refuses to transmit without an accepted callsign.
+        engine.myCallsign = TransmitIdentity.enteredCallsign(appState.activeStationProfile?.callsign)
+        engine.myGrid = TransmitIdentity.locator(appState.activeStationProfile?.grid) ?? ""
+        // A refusal shown for the previous profile no longer applies.
+        engine.txRefusal = ""
     }
 
     // MARK: - 1. Top Operating Control Ribbon
@@ -351,6 +355,22 @@ public struct DigitalModemStationView: View {
             if engine.isTransmitting {
                 ProgressView(value: engine.txProgress, total: 1.0)
                     .tint(.orange)
+                    .padding(.horizontal, 8)
+            }
+
+            // flrig: PTT may still be on after the transmission (the release check is in FlrigXMLRPC.swift)
+            if let warning = rig.flrigPTTWarning {
+                Label(warning, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption.bold())
+                    .foregroundColor(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 8)
+            }
+
+            if !engine.txRefusal.isEmpty {
+                Text(engine.txRefusal)
+                    .font(.caption)
+                    .foregroundColor(.orange)
                     .padding(.horizontal, 8)
             }
 

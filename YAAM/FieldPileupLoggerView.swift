@@ -25,10 +25,10 @@ public struct FieldPileupLoggerView: View {
 
     // Session Start / Config Sheet
     @State private var showStartSessionSheet: Bool = false
-    @State private var sessionParkRef: String = "EP-0005"
-    @State private var sessionParkName: String = "Lar National Park"
+    @State private var sessionParkRef: String = ""
+    @State private var sessionParkName: String = ""
     @State private var sessionProgram: FieldProgramType = .pota
-    @State private var sessionGrid: String = "LM35"
+    @State private var sessionGrid: String = ""
 
     // UI Feedback
     @State private var dupeWarning: String? = nil
@@ -250,7 +250,7 @@ public struct FieldPileupLoggerView: View {
                         .font(.system(size: 10, weight: .bold))
                         .foregroundStyle(isHighContrast ? Color.yellow : Color.secondary)
 
-                    TextField("EP2XXX, W1AW, ...", text: $inputCallsign)
+                    TextField("Callsign(s)", text: $inputCallsign)
                         .font(.system(size: 24, weight: .black, design: .monospaced))
                         .textCase(.uppercase)
                         .focused($isCallsignFocused)
@@ -294,7 +294,7 @@ public struct FieldPileupLoggerView: View {
                         .font(.system(size: 10, weight: .bold))
                         .foregroundStyle(isHighContrast ? Color.yellow : Color.orange)
 
-                    TextField("e.g. K-0020", text: $inputContactedRef)
+                    TextField("Reference", text: $inputContactedRef)
                         .font(.system(size: 16, weight: .bold, design: .monospaced))
                         .textCase(.uppercase)
                         .focused($isRefFocused)
@@ -537,7 +537,7 @@ public struct FieldPileupLoggerView: View {
                 }
                 .pickerStyle(.segmented)
 
-                TextField("Park/Summit Reference (e.g. EP-0005 or K-0001):", text: $sessionParkRef)
+                TextField("Park or summit reference:", text: $sessionParkRef)
                 TextField("Location / Park Name:", text: $sessionParkName)
                 TextField("Maidenhead Grid Square:", text: $sessionGrid)
             }
@@ -554,12 +554,13 @@ public struct FieldPileupLoggerView: View {
                         reference: sessionParkRef,
                         parkName: sessionParkName,
                         callsign: call,
-                        grid: sessionGrid
+                        grid: sessionGrid.isEmpty ? (appState.activeStationProfile?.normalizedGrid ?? "") : sessionGrid
                     )
                     showStartSessionSheet = false
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.green)
+                .disabled(sessionParkRef.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
             .padding(16)
         }

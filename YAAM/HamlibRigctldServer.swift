@@ -52,7 +52,8 @@ nonisolated final class HamlibRigctldServer: @unchecked Sendable {
         addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
         addr.sin_family = sa_family_t(AF_INET)
         addr.sin_port = port.bigEndian
-        addr.sin_addr = in_addr(s_addr: INADDR_ANY)
+        // The emulator accepts PTT commands and has no authentication. Keep it on this Mac.
+        addr.sin_addr = in_addr(s_addr: in_addr_t(INADDR_LOOPBACK).bigEndian)
 
         let bindResult = withUnsafePointer(to: &addr) { ptr in
             ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) {
@@ -203,7 +204,7 @@ nonisolated final class HamlibRigctldServer: @unchecked Sendable {
             return "\(ptt ? 1 : 0)\n"
 
         case "T", "\\set_ptt":
-            if tokens.count >= 2 {
+            if tokens.count >= 2, tokens[1] == "0" || tokens[1] == "1" {
                 let val = tokens[1] == "1"
                 setPTT?(val)
                 return "RPRT 0\n"
@@ -249,8 +250,7 @@ nonisolated final class HamlibRigctldServer: @unchecked Sendable {
             return ""
 
         default:
-            // Generic Hamlib ACK
-            return "RPRT 0\n"
+            return "RPRT -1\n"
         }
     }
 

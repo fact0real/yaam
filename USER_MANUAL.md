@@ -87,7 +87,7 @@ The command-line `tqsl` binary packages contacts, signs them using your ARRL pri
 ### 2.2 In-Depth Guide to the Default Station Location Field
 Located in `Settings > LoTW`, you will find:
 ```text
-Default Station Location (e.g. EP2AES-Home):
+Default Station Location (e.g. Home):
 ```
 This field is the linchpin of your digital signing workflow.
 
@@ -179,6 +179,7 @@ Connect your transceiver’s headphone/line-out audio to your Mac or import reco
 * Native USB serial communication with **K1EL WinKeyer** chipsets (WK2, WK3). Microsecond-precision hardware keying eliminates USB jitter.
 * Full support for Iambic A, Iambic B, Ultimatic, and Bug modes.
 * Direct DTR/RTS serial line keying support.
+* **Your own callsign is required to transmit.** CW (keyer, Auto-CQ, contest Enter key and function keys, decoder reply), RTTY/PSK, Hellschreiber, Olivia, JS8, the SSTV test card, FT8/FT4 and the hardware test texts send nothing until the active station profile in `Settings > Stations` has your callsign (FT8/FT4 also need your locator). The reason is shown on the screen where you pressed the key: "Set your callsign in Settings > Stations before transmitting." when none is entered, or a message that the callsign is not accepted when it is entered but does not look like a callsign. The `Audio Sidetone Only` mode keys no radio and does not need one.
 
 ### 3.6 Comprehensive Q-Code and Contest Abbreviation Lexicon
 Built-in reference library for instant lookup of standard Q-codes (QTH, QSL, QSY, QRM, QRN) and contest abbreviations (5NN, TU, BK).
@@ -542,8 +543,8 @@ Ensure your TX-500 has the following settings configured in its hardware menu:
 ### 23.6 Diagnostics Workbench
 Access the dedicated diagnostics workbench via **Preferences -> Lab599 TX-500** or the Rig Control toolbar card:
 * **Interactive PTT Test:** 1-second pulse test to verify relay engagement without full RF burst.
-* **CW Test Burst:** Sends a brief test string (`TEST EP2AES`) to verify CAT buffer timing.
-* **Live S-Meter & Power Bar:** Displays real-time signal strength (`SM;`) and transmitter status (`IF;` / `PC;`).
+* **CW Test Burst:** Sends a brief test string (`TEST DE` followed by the callsign saved in `Settings > Stations`) to verify CAT buffer timing. Without a saved callsign it sends nothing and shows "Set your callsign in Settings > Stations before transmitting."
+* **Live S-Meter & Power Bar:** Displays real-time signal strength (`SM0;`, the radio's 0 to 30 count shown as S0 to S9+60 dB) and transmitter status (`IF;` / `PC;`).
 
 ---
 
@@ -601,7 +602,7 @@ YAAM offers two distinct Morse code transmission modes for the X6100:
 ### 24.6 Diagnostics Workbench, S-Meter, SWR & ALC Real-Time Telemetry
 Open **Settings -> Xiegu X6100** or the **Rig Control Toolbar** card to access the diagnostics workbench:
 * **Interactive 1-Second PTT Pulse:** Confirms relay engagement without broadcasting sustained RF carrier.
-* **CW Burst Test:** Sends a test burst (`TEST EP2AES`) to verify CI-V command 17 buffer operation.
+* **CW Burst Test:** Sends a test burst (`TEST DE` followed by the callsign saved in `Settings > Stations`) to verify CI-V command 17 buffer operation. Without a saved callsign it sends nothing and shows "Set your callsign in Settings > Stations before transmitting."
 * **Live Telemetry Bars:**
   * **S-Meter:** Real-time signal strength from `S0` to `S9+60dB` via command `15 02`.
   * **SWR Meter:** Reflected power monitoring via command `15 12`.
@@ -686,7 +687,7 @@ Located under **Operator Desk → Operating → Portable** (or accessible by sea
 * **1-Click CAT QSY:** Instantly commands the connected transceiver (TX-500, IC-705, FX-4CR, Xiegu, FLRig, or Hamlib) to jump directly to any spotted station's exact frequency and mode.
 
 ### 26.3 Offline Park & Summit Directory with Native MapKit
-* **Zero-Internet Dependency:** Bundles an offline curated database of international parks and summits with instant sub-millisecond search by reference (e.g. `EP-0005`, `K-0001`, `W6/NC-423`), name, or country.
+* **Zero-Internet Dependency:** Bundles an offline curated database of international parks and summits with instant sub-millisecond search by reference, name, or country.
 * **Proximity Calculation:** Automatically calculates distance in kilometers from your current station or Rover GPS coordinates.
 * **MapKit Visual Explorer:** Interactive Apple Maps pins showing park boundaries and operator location with 1-click activation session launcher.
 
@@ -737,7 +738,7 @@ Located under **Operator Desk → DX Activity → Digital Callsign Monitor** (or
 * **CLI Partner Diagnostic:** Supports executing `python3 ham_tracker.py [CALLSIGN] --partner` with full real-time terminal output in the diagnostic sheet.
 
 ### 27.7 WebSDR FT8 Receive
-* Choose **WebSDR RX · FT8** at the top of Digital Callsign Monitor for a dedicated full-width view. Reception stays off until you press **Start receive**. The active Yaam station profile supplies the initial callsign, and 20 m FT8 (14.074 MHz) is selected by default. The profile grid is shown; LM55rr is the fallback.
+* Choose **WebSDR RX · FT8** at the top of Digital Callsign Monitor for a dedicated full-width view. Reception stays off until you press **Start receive**. The active Yaam station profile supplies the initial callsign, and 20 m FT8 (14.074 MHz) is selected by default. The profile locator is shown; without one the header reads "Locator not set".
 * Compatible classic WebSDRs open in the background, tune FT8 USB with a roughly 3 kHz passband, and decode receiver audio without a microphone. The directory has more than 20 receivers, including DF0HTE, Twente, Utah, KFS, Hack Green, NA5B, Maasbree, SO8OO, DK0TE, K3FEF, Bordeaux, Paraibuna, and Poços de Caldas. Site WAV recording is a fallback when continuous audio is unavailable. Other receiver links need System Audio. The receiver picker shows green for a reachable site, red for an unavailable site, and gray while checking. Reachability does not guarantee usable audio or FT8 activity. Only listed FT8 frequencies for the chosen receiver can be selected. If no message decodes after 90 seconds, YAAM suggests checking the receiver or band. **Receivers** lets you select parallel receivers by region without closing as choices change. Large selections use more CPU, memory, and network bandwidth.
 * The receiver menu shows country flags. The decoded list defaults to the target callsign, groups messages by receive cycle, colors even and odd groups pale green and blue, and displays cycle times on 00/15/30/45 second boundaries. Consecutive `:15` and `:45` groups are separate odd cycles. Identical messages heard by multiple selected receivers appear once with all receiver names; a majority has a purple highlight. The flag beside the message identifies its transmitting callsign, while flags beside receiver names identify listening sites. The per-signal **dBFS** is estimated audio level, not calibrated RF SNR.
 * Automatic WebSDR audio does not use macOS Screen Recording permission. Other receiver links use **System Audio** or a virtual loopback input. System Audio permission is requested only by its explicit button. Reopen Yaam after granting it. Ad-hoc signed development builds may need a new grant after each installation.

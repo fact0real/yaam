@@ -206,11 +206,15 @@ swiftc -parse-as-library Tests/WavelogDownloadDedupRegression.swift YAAM/QSOIden
 ```
 
 ### 8.3 Key Regression Suites to Check Before Commits:
+- `LocalizationCatalogRegression.swift`: Checks `YAAM/Localizable.xcstrings` (Catalan and Spanish): a key kept in English has `shouldTranslate: false`, one of three fixed comments and no translation, every other key has `ca` and `es` text with the same format specifiers, every key is a string literal of the code, fixed lists pin the kept terms, the FT8 and FT4 buttons and the texts that the code reads back, and `knownRegions` lists `ca` and `es`. It reads the sources and the project file, so run it from the repository root: `swiftc -parse-as-library Tests/LocalizationCatalogRegression.swift -o /tmp/l10n && /tmp/l10n .`
 - `OperatorDeskNavigationRegression.swift`: Verifies all 26 legacy deep links, CW subroutes, unique tool ownership, group restoration, and old-name search aliases. Compile alongside `YAAM/OperatorDeskNavigation.swift` to run without starting station services.
 - `QSOIdentityRegression.swift`: Ensures deduplication keys never regress.
 - `ConfirmationSyncRegression.swift`: Verifies LoTW and QRZ record merging.
 - `CountryFlagLookupRegression.swift`: Validates country canonicalization and emoji flag generation.
 - `FT8StationEngineRegression.swift`: Tests FT8 audio framing and sequencer state transitions.
+- `TransmitIdentityRegression.swift`: Verifies the one check (`YAAM/TransmitIdentity.swift`) that every transmit path asks before it keys a transmitter: the operator's own callsign and, for FT8/FT4, locator; the callsign shape switch; the refusal messages; and, in the source text, where each refusal sits. Compile it with `YAAM/TransmitIdentity.swift` and `YAAM/GridLocator.swift`, and run it from the repository root.
+- `NoBuiltInIdentityRegression.swift`: Verifies that no screen, prompt, message or starting value carries a built-in callsign, locator (4 to 10 characters), place or park reference that is not the operator's, in any letter case, and that no statement puts one into a field. Credits, documentation, reference data, demo content and the built-in home position are listed with the number of lines each holds; a file must hold exactly that number. With the argument `--list` it prints that list with the line numbers found now. Compile it with `YAAM/TransmitIdentity.swift` and `YAAM/GridLocator.swift`, and run it from the repository root.
+- `TransmitGatesBehaviourRegression.swift` and `TransmitGatesFT8Regression.swift`: Run the real CW keyer, contest Enter and function keys, RTTY/PSK engine and FT8/FT4 engine against stand-ins for the radio drivers (`Tests/Support/`) and check what would be handed to the radio. The compile commands are in the file headers; the FT8 one needs the ft8-808 package build.
 
 ---
 
@@ -221,6 +225,7 @@ swiftc -parse-as-library Tests/WavelogDownloadDedupRegression.swift YAAM/QSOIden
 3. **Respect Timezone Semantics:**
    - All logbook storage and ADIF exchanges **MUST** remain in strict **UTC**.
    - Local time conversions (`TimeZone.current`) are strictly for presentation layer views (such as `LocalActivityMatrixView` and `ClubLogSpotsView`).
+4. **Dates Kept or Shared Use `GregorianDate`:** A date or time that is stored in a record or file, compared with a stored value (`QSO_DATE`, `TIME_ON`), or sent to another program is written and read with `GregorianDate.formatter(_:timeZone:)` (and `GregorianDate.localCalendar` for date arithmetic) from `YAAM/GregorianDate.swift`, so it stays Gregorian with ASCII digits whatever calendar and digits the Mac is set to. Dates that are only shown on screen are outside this guideline.
 
 ---
 

@@ -98,7 +98,7 @@ public struct SpotArchiveView: View {
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(.secondary)
-                TextField("Search callsign (e.g. 3Y0*, EP*, W1AW)", text: $searchQuery)
+                TextField("Search callsign (use * as a wildcard)", text: $searchQuery)
                     .textFieldStyle(.plain)
                     .onSubmit { performSearch() }
                 if !searchQuery.isEmpty {

@@ -12,7 +12,7 @@ nonisolated struct QRZRankDailyQuota: Codable, Equatable, Sendable {
 
     init(
         date: Date = Date(),
-        calendar: Calendar = .current,
+        calendar: Calendar = GregorianDate.localCalendar,
         attemptedRequests: Int = 0,
         successfulRequests: Int = 0
     ) {
@@ -21,14 +21,14 @@ nonisolated struct QRZRankDailyQuota: Codable, Equatable, Sendable {
         self.successfulRequests = max(0, min(self.attemptedRequests, successfulRequests))
     }
 
-    mutating func resetIfNeeded(date: Date = Date(), calendar: Calendar = .current) {
+    mutating func resetIfNeeded(date: Date = Date(), calendar: Calendar = GregorianDate.localCalendar) {
         guard dayKey != Self.dayKey(for: date, calendar: calendar) else { return }
         dayKey = Self.dayKey(for: date, calendar: calendar)
         attemptedRequests = 0
         successfulRequests = 0
     }
 
-    mutating func recordAttempt(date: Date = Date(), calendar: Calendar = .current) {
+    mutating func recordAttempt(date: Date = Date(), calendar: Calendar = GregorianDate.localCalendar) {
         resetIfNeeded(date: date, calendar: calendar)
         attemptedRequests += 1
     }
@@ -37,7 +37,7 @@ nonisolated struct QRZRankDailyQuota: Codable, Equatable, Sendable {
         successfulRequests = min(attemptedRequests, successfulRequests + 1)
     }
 
-    static func dayKey(for date: Date, calendar: Calendar = .current) -> String {
+    static func dayKey(for date: Date, calendar: Calendar = GregorianDate.localCalendar) -> String {
         let parts = calendar.dateComponents([.year, .month, .day], from: date)
         return String(
             format: "%04d-%02d-%02d",

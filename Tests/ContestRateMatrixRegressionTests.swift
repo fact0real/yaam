@@ -40,9 +40,7 @@ public struct ContestRateMatrixRegressionTests {
 
         // Create test QSOs across multiple bands with valid date/times
         let now = Date()
-        let formatter = DateFormatter()
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
-        formatter.dateFormat = "yyyyMMdd HHmmss"
+        let formatter = GregorianDate.formatter("yyyyMMdd HHmmss", timeZone: TimeZone(secondsFromGMT: 0))
 
         let d1 = formatter.string(from: now.addingTimeInterval(-120)) // 2 mins ago
         let d2 = formatter.string(from: now.addingTimeInterval(-240)) // 4 mins ago

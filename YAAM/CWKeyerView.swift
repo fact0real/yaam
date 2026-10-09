@@ -15,6 +15,7 @@ public struct CWKeyerView: View {
     @EnvironmentObject private var appState: AppState
     @ObservedObject private var keyer = CWKeyerService.shared
     @ObservedObject private var esm = CWESMEngine.shared
+    @ObservedObject private var flRig = FLRigClient.shared
 
     @State private var liveInputText: String = ""
     @State private var editingMacro: CWMacro? = nil
@@ -54,6 +55,7 @@ public struct CWKeyerView: View {
             } else if appState.cwWorkstationSection == 0 {
                 topControlBar
                 liveStatusHUD
+                flrigPTTWarningBanner
                 bankSelectorBar
                 macroGrid
                 autoCQAndTokenBar
@@ -71,6 +73,10 @@ public struct CWKeyerView: View {
         .padding(14)
         .background(Color(NSColor.controlBackgroundColor).opacity(0.45))
         .cornerRadius(12)
+        .onChange(of: appState.activeStationProfile) { _, _ in
+            // A refusal shown for the previous profile no longer applies.
+            keyer.transmitRefusal = ""
+        }
         .sheet(item: $editingMacro) { macro in
             MacroEditorSheet(macro: macro) { updatedLabel, updatedTemplate in
                 keyer.updateMacro(
@@ -328,6 +334,24 @@ public struct CWKeyerView: View {
         }
     }
 
+    // MARK: - flrig: PTT may still be on
+
+    /// Shown when flrig still reports PTT on after Stop (YAAM repeated the release), or YAAM could not read it.
+    private var flrigPTTWarningBanner: some View {
+        Group {
+            if let warning = flRig.pttWarning {
+                Label(warning, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption.bold())
+                    .foregroundColor(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(8)
+                    .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.orange.opacity(0.3), lineWidth: 1))
+            }
+        }
+    }
+
     // MARK: - Bank Selector Bar
 
     private var bankSelectorBar: some View {
@@ -413,7 +437,7 @@ public struct CWKeyerView: View {
                     keyer.toggleAutoCQ(
                         template: firstMacro,
                         myCall: currentMyCall,
-                        call: currentTargetCall,
+                        call: appState.quickLogDraft.callsign,
                         rst: currentRST,
                         name: currentName,
                         qth: currentQTH,
@@ -493,6 +517,12 @@ public struct CWKeyerView: View {
                 .disabled(liveInputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
 
+            if !keyer.transmitRefusal.isEmpty {
+                Text(keyer.transmitRefusal)
+                    .font(.caption)
+                    .foregroundColor(.orange)
+            }
+
             // Recent Sent Messages
             if !keyer.sentHistory.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -523,12 +553,19 @@ public struct CWKeyerView: View {
 
     // MARK: - Helpers
 
+    /// The operator's callsign as sent. Empty when none is set; the keyer then refuses to send.
     private var currentMyCall: String {
-        appState.activeStationProfile?.callsign ?? "EP2AES"
+        appState.activeStationProfile?.normalizedCallsign ?? ""
     }
 
+    /// The operator's callsign as shown in previews: a neutral token when none is set.
+    private var previewMyCall: String {
+        TransmitIdentity.usableCallsign(appState.activeStationProfile?.callsign) ?? TransmitIdentity.callsignPreviewToken
+    }
+
+    /// The station worked, as shown in previews only.
     private var currentTargetCall: String {
-        appState.quickLogDraft.callsign.isEmpty ? "W1AW" : appState.quickLogDraft.callsign
+        appState.quickLogDraft.callsign.isEmpty ? "DXCALL" : appState.quickLogDraft.callsign
     }
 
     private var currentRST: String {
@@ -565,7 +602,7 @@ public struct CWKeyerView: View {
     private func evaluateMacro(_ template: String) -> String {
         return keyer.expandMacro(
             template,
-            myCall: currentMyCall,
+            myCall: previewMyCall,
             call: currentTargetCall,
             rst: currentRST,
             name: currentName,

@@ -18,7 +18,7 @@ public struct RoverModePillView: View {
     public init() {}
 
     private var homeGrid: String {
-        appState.activeStationProfile?.grid ?? "LM35"
+        appState.activeStationProfile?.grid ?? ""
     }
 
     public var body: some View {

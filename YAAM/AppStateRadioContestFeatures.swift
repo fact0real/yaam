@@ -77,8 +77,8 @@ extension AppState {
                 guard let self else { return }
                 if let call = notif.userInfo?["callsign"] as? String,
                    let hz = notif.userInfo?["deltaHz"] as? UInt32 {
-                    if self.ft8Engine.transmitArmed {
-                        self.ft8Engine.txText = "\(call) \(self.currentStationCallsign) \(self.activeStationProfile?.grid ?? "")"
+                    if self.ft8Engine.transmitArmed, let text = self.ft8Engine.directedGridMessage(to: call) {
+                        self.ft8Engine.txText = text
                         self.ft8Engine.txAudioFrequencyHz = Float(hz)
                     }
                 }

@@ -218,13 +218,13 @@ struct StationProfilesSettingsView: View {
             if !statusMessage.isEmpty {
                 Divider()
                 HStack {
-                    Image(systemName: statusMessage.hasPrefix("Saved") ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                    Image(systemName: TransmitIdentity.isPlainSavedStatus(statusMessage) ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
                     Text(statusMessage)
-                        .lineLimit(2)
+                        .lineLimit(3)
                     Spacer()
                 }
                 .font(.caption)
-                .foregroundStyle(statusMessage.hasPrefix("Saved") ? .green : .orange)
+                .foregroundStyle(TransmitIdentity.isPlainSavedStatus(statusMessage) ? .green : .orange)
                 .padding(10)
             }
         }
@@ -277,7 +277,8 @@ struct StationProfilesSettingsView: View {
                 original = saved
             }
             qrzAPIKey = ""
-            statusMessage = showSuccess ? "Saved securely." : ""
+            // Saving is never blocked, but a callsign that transmitting will not accept is reported here.
+            statusMessage = showSuccess ? TransmitIdentity.stationStatus("Saved securely.", callsign: draft.callsign, grid: draft.grid) : ""
             return true
         } catch {
             statusMessage = error.localizedDescription
@@ -290,7 +291,8 @@ struct StationProfilesSettingsView: View {
               let profile = appState.stationProfiles.first(where: { $0.id == draft.id }) else { return }
         do {
             try appState.activateStationProfile(profile)
-            statusMessage = "Saved and activated. The Master Log now shows this station."
+            statusMessage = TransmitIdentity.stationStatus("Saved and activated. The Master Log now shows this station.",
+                                                           callsign: profile.callsign, grid: profile.grid)
         } catch {
             statusMessage = error.localizedDescription
         }

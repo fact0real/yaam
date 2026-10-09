@@ -113,9 +113,9 @@ public struct QSLLabelTemplate: Identifiable, Sendable {
 public struct QSLLabelConfig: Sendable {
     public var template: QSLLabelTemplate = QSLLabelTemplate.standardTemplates[0]
     public var startLabelIndex: Int = 0 // 0-based offset to skip used labels on sheet
-    public var stationCallsign: String = "EP2AES"
-    public var stationGrid: String = "LN35ir"
-    public var stationQTH: String = "Tehran, Iran"
+    public var stationCallsign: String = ""
+    public var stationGrid: String = ""
+    public var stationQTH: String = ""
     public var qslConfirmationText: String = "PSE QSL" // or "TNX QSL"
     public var includeBorder: Bool = true
     public var includeMyInfo: Bool = true
@@ -285,7 +285,7 @@ enum QSLLabelEngine {
         hDiv.stroke()
 
         // 4. Station Footer Row: From EP2AES · Grid: LN35ir · 73!
-        let footerText = "DE \(config.stationCallsign) · LOC: \(config.stationGrid) · 73 de YAAM"
+        let footerText = "DE \(config.stationCallsign.isEmpty ? TransmitIdentity.callsignNotSetLabel : config.stationCallsign) · LOC: \(config.stationGrid.isEmpty ? TransmitIdentity.locatorNotSetLabel : config.stationGrid) · 73 de YAAM"
         let footerStr = NSAttributedString(string: footerText, attributes: [
             .font: NSFont.systemFont(ofSize: 6.0, weight: .semibold),
             .foregroundColor: NSColor.darkGray

@@ -20,6 +20,7 @@ public struct CWHardwareSetupSheet: View {
     @ObservedObject private var xiegu = Xiegu6100Driver.shared
 
     @State private var selectedTab: Int = 0
+    @State private var testNotice: String = ""
 
     public init() {}
 
@@ -133,6 +134,10 @@ public struct CWHardwareSetupSheet: View {
                 }
             default: break
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: TransmitIdentity.identityChanged)) { _ in
+            // A refusal shown for the previous profile no longer applies.
+            testNotice = ""
         }
     }
 
@@ -443,17 +448,30 @@ public struct CWHardwareSetupSheet: View {
                 }
             }
 
-            settingsGroup("FLRig XML-RPC (rig.send_morse)") {
+            settingsGroup("FLRig XML-RPC (rig.cwio_text)") {
                 HStack(spacing: 8) {
                     Circle()
                         .fill(FLRigClient.shared.isConnected ? Color.green : Color.secondary)
                         .frame(width: 8, height: 8)
-                    Text(FLRigClient.shared.isConnected ? "FLRig Connected — rig.send_morse available" : "FLRig Offline")
+                    Text(FLRigClient.shared.link.summary)
                         .font(.callout)
                 }
 
                 if FLRigClient.shared.isConnected {
-                    Text("YAAM will send Morse text directly via FLRig's XML-RPC `rig.send_morse` command. The transceiver's internal CW keyer handles the timing.")
+                    Text("YAAM sends the text to flrig with `rig.cwio_text` and the speed with `rig.cwio_set_wpm` (it replaces the speed set in flrig). flrig makes the Morse timing itself and keys the line chosen in flrig's \"CW keying\" window (a DTR or RTS line of a serial port). If flrig has no CW line set up it still accepts the text and nothing is keyed. Stop sends `rig.cwio_send 0` and `rig.set_ptt 0`, then reads `rig.get_ptt`; if flrig still reports PTT on, YAAM sends `rig.set_ptt 0` again (up to 3 times) and, if the radio stays keyed or the state cannot be read, shows a warning here and in CW.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    // A command flrig refused stays here until flrig accepts the next one (or the link changes). A release of
+                    // PTT that could not be confirmed (flrig.pttWarning) comes first and stays until PTT is read as off.
+                    if let refused = flRig.lastError {
+                        Label(refused, systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption)
+                            .foregroundColor(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                } else {
+                    Text("\(FLRigClient.shared.link.detail) Connect it in Operator Desk > Radio & Digital > FLRig.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -483,7 +501,7 @@ public struct CWHardwareSetupSheet: View {
 
                     HStack(spacing: 8) {
                         Text("④").foregroundColor(.accentColor).bold()
-                        Text("FLRig XML-RPC (rig.send_morse method)")
+                        Text("FLRig XML-RPC (rig.cwio_text method)")
                     }.font(.callout)
 
                     Button {
@@ -578,11 +596,17 @@ public struct CWHardwareSetupSheet: View {
                         .buttonStyle(.bordered)
 
                         Button {
-                            tx500.sendMorse("TEST DE \(keyer.macros.first?.template.contains("CQ") == true ? "EP2AES" : "YAAM")", wpm: keyer.wpm)
+                            sendIdentifiedTest { tx500.sendMorse($0, wpm: keyer.wpm) }
                         } label: {
                             Label("Send Test Text", systemImage: "paperplane.fill")
                         }
                         .buttonStyle(.bordered)
+
+                        if !testNotice.isEmpty {
+                            Text(testNotice)
+                                .font(.caption)
+                                .foregroundColor(.orange)
+                        }
 
                         Button {
                             keyer.transmissionMode = .lab599TX500
@@ -691,12 +715,20 @@ public struct CWHardwareSetupSheet: View {
                         .buttonStyle(.bordered)
 
                         Button {
-                            xiegu.setKeyerSpeed(keyer.wpm)
-                            xiegu.sendMorse("TEST YAAM DE X6100")
+                            sendIdentifiedTest {
+                                xiegu.setKeyerSpeed(keyer.wpm)
+                                xiegu.sendMorse($0)
+                            }
                         } label: {
                             Label("Send Test Text", systemImage: "paperplane.fill")
                         }
                         .buttonStyle(.bordered)
+
+                        if !testNotice.isEmpty {
+                            Text(testNotice)
+                                .font(.caption)
+                                .foregroundColor(.orange)
+                        }
 
                         Button {
                             keyer.transmissionMode = .xiegu6100
@@ -803,11 +835,17 @@ public struct CWHardwareSetupSheet: View {
                         .buttonStyle(.bordered)
 
                         Button {
-                            fx4cr.sendMorse("TEST DE \(keyer.macros.first?.template.contains("CQ") == true ? "EP2AES" : "YAAM")", wpm: keyer.wpm)
+                            sendIdentifiedTest { fx4cr.sendMorse($0, wpm: keyer.wpm) }
                         } label: {
                             Label("Send Test Text", systemImage: "paperplane.fill")
                         }
                         .buttonStyle(.bordered)
+
+                        if !testNotice.isEmpty {
+                            Text(testNotice)
+                                .font(.caption)
+                                .foregroundColor(.orange)
+                        }
 
                         Button {
                             keyer.transmissionMode = .fx4cr
@@ -923,12 +961,20 @@ public struct CWHardwareSetupSheet: View {
                         .buttonStyle(.bordered)
 
                         Button {
-                            icom.setKeyerSpeed(keyer.wpm)
-                            icom.sendMorse("TEST YAAM DE ICOM")
+                            sendIdentifiedTest {
+                                icom.setKeyerSpeed(keyer.wpm)
+                                icom.sendMorse($0)
+                            }
                         } label: {
                             Label("Send Test Text", systemImage: "paperplane.fill")
                         }
                         .buttonStyle(.bordered)
+
+                        if !testNotice.isEmpty {
+                            Text(testNotice)
+                                .font(.caption)
+                                .foregroundColor(.orange)
+                        }
 
                         Button {
                             keyer.transmissionMode = .icomUSB
@@ -944,6 +990,16 @@ public struct CWHardwareSetupSheet: View {
     }
 
     // MARK: - Helpers
+
+    /// A test text identifies the station, so it is sent only with the operator's own saved callsign.
+    private func sendIdentifiedTest(_ transmit: (String) -> Void) {
+        guard let call = TransmitIdentity.savedOperatorCallsign() else {
+            testNotice = TransmitIdentity.savedCallsignRefusal() ?? TransmitIdentity.callsignMissingMessage
+            return
+        }
+        testNotice = ""
+        transmit("TEST DE \(call)")
+    }
 
     private func settingsGroup<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 10) {

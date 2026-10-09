@@ -630,7 +630,7 @@ struct AddCompetitorModalView: View {
             Divider()
 
             Form {
-                TextField("Callsign (e.g. EP2LMA, DL7ON):", text: $callsign)
+                TextField("Callsign:", text: $callsign)
                     .font(.headline.monospaced())
 
                 TextField("Operator Name / Club (Optional):", text: $name)

@@ -30,6 +30,8 @@ public struct DigitalCallRosterView: View {
     @State private var showingUDPConfigPopover = false
     @State private var showingDetailSheet = false
     @State private var selectedEntryForDetail: DigitalRosterEntry? = nil
+    /// Why the last reply sent nothing (no callsign or locator of the operator, or one that is not accepted).
+    @State private var replyNotice: String = ""
 
     public enum RosterFilterMode: String, CaseIterable, Identifiable {
         case neededOnly = "⚡️ Needed"
@@ -111,6 +113,16 @@ public struct DigitalCallRosterView: View {
             filterAndStatsBar
             Divider()
 
+            if !replyNotice.isEmpty {
+                Text(replyNotice)
+                    .font(.caption)
+                    .foregroundColor(.orange)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 4)
+                Divider()
+            }
+
             if filteredEntries.isEmpty {
                 emptyRosterState
             } else {
@@ -141,6 +153,10 @@ public struct DigitalCallRosterView: View {
                let match = roster.entries.first(where: { $0.callsign == call }) {
                 callStation(match)
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: TransmitIdentity.identityChanged)) { _ in
+            // A refusal shown for the previous profile no longer applies.
+            replyNotice = ""
         }
         .onChange(of: appState.qsoRecordsRevision) { _, _ in
             roster.rebuildLogCache(records: appState.qsoRecords)
@@ -1171,9 +1187,20 @@ public struct DigitalCallRosterView: View {
                 if let match = appState.ft8Engine.decodedRows.first(where: { $0.callerCall == entry.callsign }) {
                     appState.ft8Engine.selectForReply(match)
                 } else {
-                    appState.ft8Engine.txText = "\(entry.callsign) \(appState.currentStationCallsign) \(appState.activeStationProfile?.grid ?? "")"
-                    appState.ft8Engine.txAudioFrequencyHz = Float(entry.deltaFrequencyHz)
-                    appState.ft8Engine.transmitArmed = true
+                    // The engine takes the operator's callsign and locator from the active profile, as the FT8 screen does.
+                    appState.ft8Engine.configureStation(
+                        callsign: appState.currentStationCallsign,
+                        grid: appState.activeStationProfile?.normalizedGrid ?? ""
+                    )
+                    if let text = appState.ft8Engine.directedGridMessage(to: entry.callsign) {
+                        replyNotice = ""
+                        appState.ft8Engine.txText = text
+                        appState.ft8Engine.txAudioFrequencyHz = Float(entry.deltaFrequencyHz)
+                        appState.ft8Engine.transmitArmed = true
+                    } else {
+                        replyNotice = TransmitIdentity.refusal(callsign: appState.ft8Engine.myCall, grid: appState.ft8Engine.myGrid)
+                            ?? TransmitIdentity.noMessageText
+                    }
                 }
             } else {
                 appState.wsjtxListener.sendReply(to: raw)

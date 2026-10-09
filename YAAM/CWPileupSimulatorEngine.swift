@@ -173,7 +173,7 @@ public final class CWPileupSimulatorEngine: ObservableObject {
     public static let shared = CWPileupSimulatorEngine()
 
     // MARK: - Published Operator Configuration
-    @Published public var myCallsign: String = "EP2AES"
+    @Published public var myCallsign: String = ""
     @Published public var difficulty: CWPileupDifficulty = .contester
     @Published public var baseWPM: Int = 26
     @Published public var centerPitchHz: Double = 650.0
@@ -373,7 +373,7 @@ public final class CWPileupSimulatorEngine: ObservableObject {
         guard isRunning else { return }
         stopAudioPlayback()
 
-        let call = myCallsign.isEmpty ? "EP2AES" : myCallsign.uppercased()
+        let call = myCallsign.isEmpty ? TransmitIdentity.callsignPreviewToken : myCallsign.uppercased()
         let cqText = "CQ TEST \(call)"
         state = .transmittingCQ
         currentTransmittingText = cqText
@@ -411,7 +411,7 @@ public final class CWPileupSimulatorEngine: ObservableObject {
     public func executeSendTUAndLog() {
         stopAudioPlayback()
 
-        let call = myCallsign.isEmpty ? "EP2AES" : myCallsign.uppercased()
+        let call = myCallsign.isEmpty ? TransmitIdentity.callsignPreviewToken : myCallsign.uppercased()
         let tuText = "TU \(call) TEST"
         state = .transmittingTU
         currentTransmittingText = tuText

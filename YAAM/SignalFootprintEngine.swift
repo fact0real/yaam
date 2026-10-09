@@ -190,7 +190,7 @@ public final class SignalFootprintEngine: ObservableObject {
     @Published public var sessionMaxDXCountry: String = ""
     @Published public var sessionMaxDXBearing: Double = 0.0
     @Published public var stationCallsign: String = ""
-    @Published public var homeGrid: String = "LM35"
+    @Published public var homeGrid: String = ""
     @Published public var homeCoordinate: GeoCoordinate = GeoCoordinate(latitude: 35.6892, longitude: 51.3890)
     @Published public var audioAlertsEnabled: Bool = true
     @Published public var voiceAlertsEnabled: Bool = false
@@ -578,7 +578,7 @@ public final class SignalFootprintEngine: ObservableObject {
         ]
 
         var newSpots: [SignalFootprintSpot] = []
-        let call = stationCallsign.isEmpty ? "EP2AES" : stationCallsign
+        let call = stationCallsign.isEmpty ? TransmitIdentity.callsignNotSetLabel : stationCallsign
 
         for (index, s) in sampleStations.enumerated() {
             let targetCoord: GeoCoordinate

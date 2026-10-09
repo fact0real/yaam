@@ -1639,7 +1639,7 @@ public final class HamTrackerEngine: ObservableObject {
     // MARK: - Search History Persistence
 
     private func loadRecentSearches() {
-        recentSearches = UserDefaults.standard.stringArray(forKey: "hamTracker.recentSearches") ?? ["EP2AES", "W1AW", "K1ABC"]
+        recentSearches = UserDefaults.standard.stringArray(forKey: "hamTracker.recentSearches") ?? []
     }
 
     private func saveRecentSearch(_ call: String) {

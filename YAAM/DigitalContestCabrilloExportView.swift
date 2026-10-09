@@ -271,14 +271,14 @@ public struct DigitalContestCabrilloExportView: View {
                 HStack(spacing: 12) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Callsign *").font(.caption.weight(.bold)).foregroundStyle(.secondary)
-                        TextField("e.g. EP2LMA", text: $options.callsign)
+                        TextField(TransmitIdentity.callsignPlaceholder, text: $options.callsign)
                             .textFieldStyle(.roundedBorder)
                             .font(.system(size: 13, weight: .bold, design: .monospaced))
                     }
 
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Grid Locator *").font(.caption.weight(.bold)).foregroundStyle(.secondary)
-                        TextField("e.g. KM32", text: $options.grid)
+                        TextField(TransmitIdentity.locatorPlaceholder, text: $options.grid)
                             .textFieldStyle(.roundedBorder)
                             .font(.system(size: 13, weight: .bold, design: .monospaced))
                     }
@@ -340,7 +340,7 @@ public struct DigitalContestCabrilloExportView: View {
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Operators (Comma or space separated)").font(.caption.weight(.bold)).foregroundStyle(.secondary)
-                    TextField("e.g. EP2LMA", text: $options.operators)
+                    TextField("Operator callsigns", text: $options.operators)
                         .textFieldStyle(.roundedBorder)
                 }
 

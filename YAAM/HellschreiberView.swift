@@ -81,6 +81,10 @@ public struct HellschreiberView: View {
                 .cornerRadius(10)
         }
         .padding(10)
+        .onReceive(NotificationCenter.default.publisher(for: TransmitIdentity.identityChanged)) { _ in
+            // A refusal shown for the previous profile no longer applies.
+            engine.txRefusal = ""
+        }
     }
 
     // MARK: - 1. Top Control Bar
@@ -339,6 +343,12 @@ public struct HellschreiberView: View {
                 }
             }
 
+            if !engine.txRefusal.isEmpty {
+                Text(engine.txRefusal)
+                    .font(.caption)
+                    .foregroundColor(.orange)
+            }
+
             // TX Buffer Input
             HStack(spacing: 8) {
                 TextField("Type message and press Enter to transmit in Feld Hell...", text: $engine.txBufferText)
@@ -368,9 +378,9 @@ public struct HellschreiberView: View {
         }
     }
 
-    private func macroBtn(_ label: String, text: String) -> some View {
+    private func macroBtn(_ label: String, text: @autoclosure @escaping () -> String) -> some View {
         Button(label) {
-            engine.queueTextForTransmission(text)
+            engine.queueTextForTransmission(text())
         }
         .buttonStyle(.bordered)
         .font(.system(size: 10.5, weight: .semibold, design: .monospaced))

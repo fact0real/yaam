@@ -558,15 +558,20 @@ final class FT8EngineService: ObservableObject {
     }
 
     func configureStation(callsign: String, grid: String) {
-        if myCall != callsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() {
+        let enteredCall = TransmitIdentity.enteredCallsign(callsign)
+        if myCall != enteredCall {
             workedCallsThisSession.removeAll()
             workedEntitiesThisSession.removeAll()
             workedGridsThisSession.removeAll()
             latestOpportunityAlert = nil
         }
-        myCall = callsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        myGrid = String(grid.trimmingCharacters(in: .whitespacesAndNewlines).uppercased().prefix(4))
+        myCall = enteredCall
+        myGrid = TransmitIdentity.ft8Locator(grid) ?? String(TransmitIdentity.normalized(grid).prefix(4))
         contestEngine.configureContest(type: contestEngine.contestType, myCall: myCall, myGrid: myGrid)
+        if case .failed(let message) = state, TransmitIdentity.isIdentityRefusal(message) {
+            state = decodeTask == nil ? .idle : .monitoring
+            status = "FT8 engine is ready"
+        }
     }
 
     /// Uses the already connected IC-7300MK2 path and the operator's established
@@ -839,10 +844,20 @@ final class FT8EngineService: ObservableObject {
         rxAudioFrequencyHz = txAudioFrequencyHz
     }
 
+    /// "<dx> <my call> <my grid>", or nil while the operator's callsign or locator is not usable.
+    func directedGridMessage(to dx: String) -> String? {
+        if let issue = TransmitIdentity.refusal(callsign: myCall, grid: myGrid) {
+            fail(issue)
+            return nil
+        }
+        return TransmitIdentity.gridMessage(to: dx, callsign: myCall, grid: myGrid)
+    }
+
     func generateStandardMessage(index: Int) -> String {
-        guard !myCall.isEmpty else { return "" }
+        // No message is prepared without the operator's own callsign and locator; no default is substituted.
+        guard TransmitIdentity.refusal(callsign: myCall, grid: myGrid) == nil else { return "" }
         let target = dxCall.isEmpty ? "CQ" : dxCall
-        let grid = myGrid.isEmpty ? "----" : myGrid
+        let grid = myGrid
         let rep = dxReport.isEmpty ? "-10" : dxReport
 
         switch index {
@@ -1216,6 +1231,11 @@ final class FT8EngineService: ObservableObject {
         let message = txText.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         guard !message.isEmpty else {
             fail("Enter or prepare a transmission message first.")
+            return
+        }
+        // The sender in the message must be the operator, and any locator in it must be the operator's own.
+        if let issue = TransmitIdentity.ft8MessageRefusal(message, callsign: myCall, grid: myGrid) {
+            fail(issue)
             return
         }
 
@@ -2065,12 +2085,8 @@ final class FT8EngineService: ObservableObject {
     }
 
     private func validateIdentity() -> Bool {
-        guard myCall.contains(where: \.isNumber), myCall.count >= 3 else {
-            fail("Set a valid station callsign before operating FT8.")
-            return false
-        }
-        guard myGrid.count == 4 else {
-            fail("Set a valid four-character Maidenhead Grid in the active station profile.")
+        if let issue = TransmitIdentity.refusal(callsign: myCall, grid: myGrid) {
+            fail(issue)
             return false
         }
         return true

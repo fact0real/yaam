@@ -192,7 +192,8 @@ nonisolated final class IcomNetworkServer: @unchecked Sendable {
         addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
         addr.sin_family = sa_family_t(AF_INET)
         addr.sin_port = port.bigEndian
-        addr.sin_addr = in_addr(s_addr: INADDR_ANY)
+        // The emulator uses sample credentials and accepts radio controls; expose it to local clients only.
+        addr.sin_addr = in_addr(s_addr: in_addr_t(INADDR_LOOPBACK).bigEndian)
 
         let bindRes = withUnsafePointer(to: &addr) { ptr in
             ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) {

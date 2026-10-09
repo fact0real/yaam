@@ -605,7 +605,7 @@ struct SettingsView: View {
                             .font(.caption)
                             .foregroundColor(.secondary)
 
-                        TextField("e.g. 3Y0J, VK0AW, DP0GVN, FT4YM", text: Binding(
+                        TextField("Callsigns, comma separated", text: Binding(
                             get: { WaitAndPounceEngine.shared.watchlistText },
                             set: { WaitAndPounceEngine.shared.watchlistText = $0 }
                         ))
@@ -913,7 +913,7 @@ struct SettingsView: View {
                 SecureField("New password (blank keeps the saved password):", text: $lotwPassword)
                     .textFieldStyle(.roundedBorder)
 
-                TextField("Default Station Location (e.g. EP2AES-Home):", text: $lotwStationLocation)
+                TextField("Default Station Location (e.g. Home):", text: $lotwStationLocation)
                     .textFieldStyle(.roundedBorder)
 
                 Text("Station Location name defined in TQSL for this callsign (also synced with active Station Profile).")
@@ -1321,7 +1321,7 @@ struct SettingsView: View {
                         }
                     } else {
                         Button {
-                            let call = appState.activeStationProfile?.callsign ?? "EP2AES"
+                            let call = appState.activeStationProfile?.callsign ?? ""
                             ON4KSTClient.shared.connect(callsign: call)
                         } label: {
                             Label("Connect to ON4KST", systemImage: "bubble.left.and.bubble.right.fill")

@@ -244,7 +244,7 @@ public struct Globe3DSceneView: NSViewRepresentable {
 
             // 1. Plot Home Station Marker (Prominent Glowing Beacon)
             let homePos = cartesianCoordinate(lat: home.latitude, lon: home.longitude, radius: Double(earthRadius + 0.08))
-            let homePin = createPinNode(color: .systemGreen, isHome: true, label: "📡 HOME [EP2AES]", flag: "🇮🇷")
+            let homePin = createPinNode(color: .systemGreen, isHome: true, label: "📡 HOME", flag: "📍")
             homePin.position = homePos
             markersContainer.addChildNode(homePin)
 

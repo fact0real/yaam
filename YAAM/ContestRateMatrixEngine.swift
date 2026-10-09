@@ -63,12 +63,8 @@ public final class ContestRateMatrixEngine: ObservableObject {
 
     public static let supportedBands = ["160M", "80M", "40M", "20M", "15M", "10M", "6M"]
 
-    private static let adifDateFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "yyyyMMdd HHmmss"
-        f.timeZone = TimeZone(secondsFromGMT: 0)
-        return f
-    }()
+    private static let adifDateFormatter: DateFormatter =
+        GregorianDate.formatter("yyyyMMdd HHmmss", timeZone: TimeZone(secondsFromGMT: 0))
 
     private init() {
         reset()

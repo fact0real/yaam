@@ -25,8 +25,11 @@ public struct RoverModeControlSheet: View {
     @State private var validationError: String?
 
     private var homeGrid: String {
-        let g = appState.activeStationProfile?.grid ?? "LM35"
-        return g.isEmpty ? "LM35" : g
+        appState.activeStationProfile?.normalizedGrid ?? ""
+    }
+
+    private var homeGridLabel: String {
+        homeGrid.isEmpty ? TransmitIdentity.locatorNotSetLabel : homeGrid
     }
 
     private var homeCall: String {
@@ -174,7 +177,7 @@ public struct RoverModeControlSheet: View {
                     roverEngine.deactivate()
                     dismiss()
                 } label: {
-                    Label("Return to Home (\(homeGrid))", systemImage: "house.fill")
+                    Label("Return to Home (\(homeGridLabel))", systemImage: "house.fill")
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.red)
@@ -204,7 +207,7 @@ public struct RoverModeControlSheet: View {
                 // Input and Validation
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
-                        TextField("e.g. LL46 or LL46wr", text: $inputGrid)
+                        TextField(TransmitIdentity.locatorPlaceholder, text: $inputGrid)
                             .textFieldStyle(.roundedBorder)
                             .font(.system(size: 16, weight: .bold, design: .monospaced))
                             .frame(width: 170)
@@ -223,7 +226,7 @@ public struct RoverModeControlSheet: View {
                         }
                     }
 
-                    Text("Enter 4 or 6 character Maidenhead locator (e.g. Kish Island LL46)")
+                    Text("Enter a 4 or 6 character Maidenhead locator")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -419,7 +422,7 @@ public struct RoverModeControlSheet: View {
                         .font(.caption)
                         .frame(width: 80, alignment: .leading)
 
-                    TextField("Optional (e.g. Kish POTA AS-166)", text: $sessionLabel)
+                    TextField("Optional label", text: $sessionLabel)
                         .textFieldStyle(.roundedBorder)
                 }
 
@@ -493,7 +496,7 @@ public struct RoverModeControlSheet: View {
 
                         Spacer()
 
-                        Text("Home: \(homeCall) (\(homeGrid))")
+                        Text("Home: \(homeCall) (\(homeGridLabel))")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
@@ -582,8 +585,8 @@ public struct RoverModeControlSheet: View {
             selectedDuration = session.duration
             stampInOutgoingQSOs = session.stampInOutgoingQSOs
         } else {
-            inputGrid = "LL46" // Default to Kish Island
-            sessionLabel = "Kish Island POTA AS-166"
+            inputGrid = ""
+            sessionLabel = ""
             selectedDuration = .fourHours
             stampInOutgoingQSOs = false
         }
@@ -597,7 +600,7 @@ public struct RoverModeControlSheet: View {
             return
         }
         if GridLocator.fourCharacterGrid(from: clean) == nil {
-            validationError = "Invalid Maidenhead format (e.g. LL46)"
+            validationError = "Invalid Maidenhead format"
             return
         }
         validationError = nil

@@ -118,7 +118,7 @@ public struct SignalFootprintWorkspaceView: View {
 
     // MARK: - Station Info Sync
     private func syncStationInfo() {
-        let call = appState.activeStationProfile?.normalizedCallsign ?? appState.activeStationProfile?.callsign ?? "EP2AES"
+        let call = appState.activeStationProfile?.normalizedCallsign ?? ""
         let grid = appState.effectiveStationGrid
         let coord = appState.effectiveStationCoordinate
         engine.setStation(callsign: call, grid: grid, latitude: coord.latitude, longitude: coord.longitude)
@@ -140,9 +140,9 @@ public struct SignalFootprintWorkspaceView: View {
 
                 VStack(alignment: .leading, spacing: 1) {
                     HStack(spacing: 5) {
-                        Text(engine.stationCallsign.isEmpty ? "EP2AES" : engine.stationCallsign)
+                        Text(engine.stationCallsign.isEmpty ? TransmitIdentity.callsignNotSetLabel : engine.stationCallsign)
                             .font(.system(.title3, design: .monospaced).weight(.heavy))
-                        Text(engine.homeGrid)
+                        Text(engine.homeGrid.isEmpty ? TransmitIdentity.locatorNotSetLabel : engine.homeGrid)
                             .font(.system(size: 11, weight: .bold, design: .monospaced))
                             .padding(.horizontal, 5)
                             .padding(.vertical, 1.5)
@@ -247,7 +247,7 @@ public struct SignalFootprintWorkspaceView: View {
                     Toggle("Audio Chime on Spot", isOn: $engine.audioAlertsEnabled)
                     Toggle("Voice Speech Announcement", isOn: $engine.voiceAlertsEnabled)
                     Divider()
-                    Link("Open My PSKReporter Map Online", destination: URL(string: "https://pskreporter.info/pskmap.html?preset&callsign=\(engine.stationCallsign.isEmpty ? "EP2AES" : engine.stationCallsign)")!)
+                    Link("Open My PSKReporter Map Online", destination: URL(string: "https://pskreporter.info/pskmap.html?preset&callsign=\(engine.stationCallsign)")!)
                 } label: {
                     Image(systemName: "ellipsis.circle")
                 }
@@ -357,6 +357,7 @@ public struct SignalFootprintWorkspaceView: View {
                 showCountryLabels: showCountryLabels,
                 azimuthalRangeKm: azimuthalRangeKm,
                 stationCallsign: engine.stationCallsign,
+                stationLocator: engine.homeGrid,
                 onSelectMarker: { marker in
                     handleMarkerSelection(marker)
                 },
