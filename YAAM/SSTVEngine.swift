@@ -103,6 +103,8 @@ public final class SSTVEngine: ObservableObject {
     @Published public var isTransmitting: Bool = false
     @Published public private(set) var transmitRefusal: String = ""
     @Published public var isSimulationActive: Bool = false
+    /// The QSO shown for confirmation. Nothing is saved until the operator presses Record QSO (logConfirmedQSO).
+    @Published public var pendingLog: SSTVLogDraft?
     @Published public var currentScanline: Int = 0
     @Published public var scanProgress: Double = 0.0
 
@@ -406,11 +408,69 @@ public final class SSTVEngine: ObservableObject {
         }
     }
 
-    // MARK: - 1-Click Logging
+    // MARK: - Logging (confirmed by the operator)
 
+    /// LOG SSTV QSO opens the confirmation; it saves nothing by itself. The callsign is the one typed in CALL, or empty.
     public func logCurrentQSO() {
-        guard !targetCallsign.isEmpty else { return }
-        logQSOHandler?(targetCallsign, "SSTV", "595", "595", 14_230_000, "20m")
+        pendingLog = SSTVLogDraft(callsign: targetCallsign, frequencyHz: 14_230_000, band: "20m")
+    }
+
+    /// Record QSO: saves the confirmed QSO and returns true; a draft that is not complete is not saved.
+    @discardableResult
+    public func logConfirmedQSO(_ draft: SSTVLogDraft) -> Bool {
+        guard draft.isComplete else { return false }
+        logQSOHandler?(draft.cleanCallsign, "SSTV", draft.cleanRSVSent, draft.cleanRSVReceived, draft.frequencyHz, draft.band)
         targetCallsign = ""
+        pendingLog = nil
+        return true
+    }
+
+    /// Discard QSO: closes the confirmation and saves nothing.
+    public func discardPendingLog() {
+        pendingLog = nil
+    }
+}
+
+// MARK: - SSTV QSO Confirmation
+
+/// What the operator sees and confirms before an SSTV QSO is saved.
+public struct SSTVLogDraft: Identifiable, Equatable, Sendable {
+    public let id = UUID()
+    public var callsign: String
+    public var rsvSent: String = ""
+    public var rsvReceived: String = ""
+    public let frequencyHz: UInt64
+    public let band: String
+
+    public init(callsign: String, frequencyHz: UInt64, band: String) {
+        self.callsign = callsign
+        self.frequencyHz = frequencyHz
+        self.band = band
+    }
+
+    public var cleanCallsign: String { callsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() }
+    public var cleanRSVSent: String { rsvSent.trimmingCharacters(in: .whitespacesAndNewlines) }
+    public var cleanRSVReceived: String { rsvReceived.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    /// Both reports are needed: logDigitalModemQSO writes 599 for an empty report, which is not an SSTV report.
+    public var isComplete: Bool {
+        Self.isValidCallsign(cleanCallsign) && Self.isValidRSV(cleanRSVSent) && Self.isValidRSV(cleanRSVReceived)
+    }
+
+    /// The same rule as the Quick Log (AppState.isValidOperatorCallsign): 3 to 20 characters, letters and digits,
+    /// only A-Z, 0-9, "/" and "-".
+    public static func isValidCallsign(_ callsign: String) -> Bool {
+        guard (3...20).contains(callsign.count),
+              callsign.contains(where: \.isLetter),
+              callsign.contains(where: \.isNumber) else { return false }
+        let allowed = CharacterSet.uppercaseLetters.union(.decimalDigits).union(CharacterSet(charactersIn: "/-"))
+        return callsign.unicodeScalars.allSatisfy { allowed.contains($0) }
+    }
+
+    /// RSV: readability 1-5, signal strength 1-9, video (picture) quality 1-5, in ASCII digits as ADIF stores them.
+    public static func isValidRSV(_ report: String) -> Bool {
+        let digits = report.unicodeScalars.compactMap { ("0"..."9").contains($0) ? Int($0.value) - 48 : nil }
+        guard report.unicodeScalars.count == 3, digits.count == 3 else { return false }
+        return (1...5).contains(digits[0]) && (1...9).contains(digits[1]) && (1...5).contains(digits[2])
     }
 }

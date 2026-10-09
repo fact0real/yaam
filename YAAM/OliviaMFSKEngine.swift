@@ -442,7 +442,7 @@ public final class OliviaMFSKEngine: ObservableObject {
                     self.simPIdx += 1
                 }
 
-                self.appendDecodedChar(ch)
+                self.appendPracticeChar(ch)
 
                 // Random tone activity illumination
                 let n = self.config.toneCount
@@ -461,6 +461,14 @@ public final class OliviaMFSKEngine: ObservableObject {
         simTimer?.invalidate()
         simTimer = nil
         isSimulationActive = false
+    }
+
+    /// The practice text goes to the terminal only: nothing is taken from it into CALL.
+    private func appendPracticeChar(_ ch: Character) {
+        rxText.append(ch)
+        if rxText.count > 6000 {
+            rxText = String(rxText.suffix(5000))
+        }
     }
 
     // MARK: - 1-Click Logging
