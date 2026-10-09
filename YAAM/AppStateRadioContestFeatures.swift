@@ -117,6 +117,10 @@ extension AppState {
                 self?.logDigitalModemQSO(call: call, mode: mode, sentRST: sent, rcvdRST: rcvd, freqHz: freqHz, band: band)
             }
         }
+        // Digital Suite QSOs that were confirmed, or needed no confirmation, are saved here
+        DigitalQSOConfirmationCenter.shared.record = { [weak self] draft in
+            self?.recordDigitalModemQSO(draft)
+        }
 
         ft8Engine.isCountryWorkedOnBand = { [weak self] country, band in
             guard let self else { return true }
@@ -234,7 +238,39 @@ extension AppState {
         playActivitySound(.success)
     }
 
+    /// A QSO from a Digital Suite engine. The engines pass a fixed frequency and band (14.0x MHz, "20m"), so those are
+    /// not used: the frequency comes from the radio, and the operator confirms the QSO first when there is no radio,
+    /// when something is missing, for SSTV, or when the Digital Suite setting says "Always".
     func logDigitalModemQSO(call: String, mode: String, sentRST: String, rcvdRST: String, freqHz: UInt64, band: String) {
+        let draft = DigitalQSODraft(callsign: call, mode: mode, reportSent: sentRST, reportReceived: rcvdRST,
+                                    radioFrequencyHz: currentRadioFrequencyHz())
+        DigitalQSOConfirmationCenter.shared.submit(draft, setting: .current)
+    }
+
+    /// Saves a Digital Suite QSO with the frequency and band of the draft.
+    func recordDigitalModemQSO(_ draft: DigitalQSODraft) {
+        guard draft.isComplete, let freqHz = draft.frequencyHz, let band = draft.band else { return }
+        saveDigitalModemQSO(call: draft.cleanCallsign, mode: draft.mode, sentRST: draft.cleanReportSent,
+                            rcvdRST: draft.cleanReportReceived, freqHz: freqHz, band: band)
+    }
+
+    /// The frequency of the connected radio, or nil: TCI, FLRig and rigctld in the bandmap's order (BandmapView), then
+    /// the Icom network radio and the direct drivers. A source is read only while it is connected; the drivers all
+    /// start at 14.074 MHz.
+    func currentRadioFrequencyHz() -> UInt64? {
+        RadioFrequency.firstConnected([
+            .init(isConnected: TCIClient.shared.isConnected, frequencyHz: TCIClient.shared.vfoAFrequencyHz),
+            .init(isConnected: FLRigClient.shared.isConnected, frequencyHz: UInt64(max(0, FLRigClient.shared.frequencyHz.rounded()))),
+            .init(isConnected: rigControlClient.state.isConnected, frequencyHz: rigControlClient.snapshot?.frequencyHz ?? 0),
+            .init(isConnected: icomNetworkRadio.state.isConnected, frequencyHz: icomNetworkRadio.snapshot?.frequencyHz ?? 0),
+            .init(isConnected: Lab599TX500Driver.shared.isConnected, frequencyHz: Lab599TX500Driver.shared.frequencyHz),
+            .init(isConnected: IcomUSBRadioDriver.shared.isConnected, frequencyHz: IcomUSBRadioDriver.shared.frequencyHz),
+            .init(isConnected: Xiegu6100Driver.shared.isConnected, frequencyHz: Xiegu6100Driver.shared.frequencyHz),
+            .init(isConnected: FX4CRDriver.shared.isConnected, frequencyHz: FX4CRDriver.shared.frequencyHz)
+        ])
+    }
+
+    private func saveDigitalModemQSO(call: String, mode: String, sentRST: String, rcvdRST: String, freqHz: UInt64, band: String) {
         let cleanCall = call.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         guard !cleanCall.isEmpty else { return }
 

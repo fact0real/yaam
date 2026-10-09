@@ -42,6 +42,7 @@ public enum DigitalSuiteSection: String, CaseIterable, Identifiable, Sendable {
 public struct DigitalMasterStationView: View {
     @EnvironmentObject private var appState: AppState
     @State private var activeSection: DigitalSuiteSection = .rttyPSK
+    @ObservedObject private var confirmations = DigitalQSOConfirmationCenter.shared
 
     public init() {}
 
@@ -72,6 +73,9 @@ public struct DigitalMasterStationView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
             wireLoggingCallbacks()
+        }
+        .sheet(item: $confirmations.pending) { draft in
+            DigitalQSOConfirmationSheet(center: confirmations, draft: draft)
         }
     }
 
@@ -109,6 +113,8 @@ public struct DigitalMasterStationView: View {
                     .buttonStyle(.plain)
                 }
             }
+
+            DigitalQSOConfirmationModePicker()
 
             Spacer()
 

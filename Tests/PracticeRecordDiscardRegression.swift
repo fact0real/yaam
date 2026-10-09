@@ -2,7 +2,8 @@
 //  PracticeRecordDiscardRegression.swift
 //  YAAM
 //
-//  The practice (SSTV and Olivia) puts no callsign in CALL, and an SSTV QSO is saved only with Record QSO.
+//  The practice (SSTV and Olivia) puts no callsign in CALL. With patch 41, LOG SSTV QSO hands the callsign to the
+//  Digital Suite's confirmation, where Record QSO and Discard QSO are (DigitalQSOConfirmationRegression).
 //  Run from the repository root:
 //    swiftc -parse-as-library Tests/PracticeRecordDiscardRegression.swift YAAM/SSTVEngine.swift YAAM/OliviaMFSKEngine.swift \
 //      YAAM/TransmitIdentity.swift YAAM/GridLocator.swift -o prd && ./prd
@@ -50,36 +51,15 @@ struct PracticeRecordDiscardRegression {
         check("Olivia practice text reached the terminal", practiceText.contains("CQ CQ DE G4ABC"), "rxText = \(practiceText.prefix(30))")
         check("Olivia practice puts no callsign in CALL", oliviaCall.isEmpty, "CALL = \(oliviaCall)")
 
-        // 2. Record QSO: one QSO, with what the operator confirmed
-        var logged: [Logged] = []
-        sstv.logQSOHandler = { logged.append(Logged(call: $0, mode: $1, sent: $2, rcvd: $3, freqHz: $4, band: $5)) }
+        // 2. LOG SSTV QSO saves nothing by itself: it hands the callsign to the Digital Suite, which always asks first.
+        //    Record QSO and Discard QSO are checked in DigitalQSOConfirmationRegression (patch 41).
+        var handed: [Logged] = []
+        sstv.logQSOHandler = { handed.append(Logged(call: $0, mode: $1, sent: $2, rcvd: $3, freqHz: $4, band: $5)) }
         sstv.targetCallsign = "EA3JIC"
         sstv.logCurrentQSO()
-        check("LOG SSTV QSO opens the confirmation with the callsign from CALL, and saves nothing",
-              sstv.pendingLog?.callsign == "EA3JIC" && logged.isEmpty, "\(logged)")
-        guard var draft = sstv.pendingLog else {
-            check("the confirmation is open", false)
-            return finish()
-        }
-        check("Record QSO without the RSV reports saves nothing", sstv.logConfirmedQSO(draft) == false && logged.isEmpty)
-        draft.rsvSent = "595"
-        draft.rsvReceived = "575"
-        sstv.logConfirmedQSO(draft)
-        check("Record QSO saves one QSO with the values confirmed", logged == [
-            Logged(call: "EA3JIC", mode: "SSTV", sent: "595", rcvd: "575", freqHz: 14_230_000, band: "20m")
-        ], "\(logged)")
-
-        // 3. Discard QSO: nothing
-        sstv.targetCallsign = "EP2AES"
-        sstv.logCurrentQSO()
-        sstv.discardPendingLog()
-        check("Discard QSO saves nothing and closes the confirmation", logged.count == 1 && sstv.pendingLog == nil, "\(logged)")
-
-        // The two buttons, in the view
-        let view = (try? String(contentsOfFile: "YAAM/SSTVStudioView.swift", encoding: .utf8)) ?? ""
-        check("the confirmation has Record QSO and Discard QSO",
-              view.contains("Button(\"Record QSO\")") && view.contains("Button(\"Discard QSO\", role: .cancel)")
-              && view.contains(".sheet(item: $engine.pendingLog)"))
+        check("LOG SSTV QSO hands only the callsign: no fixed reports, frequency or band", handed == [
+            Logged(call: "EA3JIC", mode: "SSTV", sent: "", rcvd: "", freqHz: 0, band: "")
+        ], "\(handed)")
         finish()
     }
 

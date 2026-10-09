@@ -46,9 +46,6 @@ public struct SSTVStudioView: View {
                 .cornerRadius(10)
         }
         .padding(10)
-        .sheet(item: $engine.pendingLog) { draft in
-            SSTVLogConfirmationSheet(engine: engine, draft: draft)
-        }
     }
 
     // MARK: - 1. Top Control Bar
@@ -311,52 +308,5 @@ public struct SSTVStudioView: View {
             .buttonStyle(.borderedProminent)
             .tint(.blue)
         }
-    }
-}
-
-// MARK: - 5. QSO Confirmation
-
-/// Shown by LOG SSTV QSO. Nothing is saved or uploaded until Record QSO is pressed.
-struct SSTVLogConfirmationSheet: View {
-    @ObservedObject var engine: SSTVEngine
-    @State private var draft: SSTVLogDraft
-
-    init(engine: SSTVEngine, draft: SSTVLogDraft) {
-        self.engine = engine
-        self._draft = State(initialValue: draft)
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Record this SSTV QSO?")
-                .font(.headline)
-
-            Form {
-                TextField("Callsign", text: $draft.callsign)
-                TextField("RSV sent", text: $draft.rsvSent)
-                TextField("RSV received", text: $draft.rsvReceived)
-                LabeledContent("Frequency", value: String(format: "%.3f MHz", Double(draft.frequencyHz) / 1_000_000))
-                LabeledContent("Band", value: draft.band)
-            }
-
-            Text("Callsign and both RSV reports are needed (RSV: readability 1-5, signal 1-9, video 1-5).")
-                .font(.caption2)
-                .foregroundColor(.secondary)
-
-            HStack {
-                Spacer()
-                Button("Discard QSO", role: .cancel) {
-                    engine.discardPendingLog()
-                }
-                .keyboardShortcut(.cancelAction)
-                Button("Record QSO") {
-                    engine.logConfirmedQSO(draft)
-                }
-                .keyboardShortcut(.defaultAction)
-                .disabled(!draft.isComplete)
-            }
-        }
-        .padding(16)
-        .frame(width: 340)
     }
 }
