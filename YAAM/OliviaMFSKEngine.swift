@@ -299,17 +299,20 @@ public final class OliviaMFSKEngine: ObservableObject {
         return nil
     }
 
-    private func appendDecodedChar(_ ch: Character) {
+    /// Not private, so a standalone test can feed decoded text one character at a time.
+    func appendDecodedChar(_ ch: Character) {
         rxText.append(ch)
         if rxText.count > 6000 {
             rxText = String(rxText.suffix(5000))
         }
 
-        // Auto-detect callsign in recent text
-        let words = rxText.components(separatedBy: .whitespacesAndNewlines)
+        // Auto-detect a callsign only once its word is complete (a space or a new line follows it). Characters arrive
+        // one at a time, and a word still arriving ("G4A" of "G4ABC") would otherwise be taken and kept.
+        guard ch.isWhitespace else { return }
+        let words = rxText.split(whereSeparator: \.isWhitespace)
         if let lastWord = words.last, lastWord.count >= 3 && lastWord.count <= 7 {
             let upper = lastWord.uppercased()
-            if upper.contains(where: { $0.isNumber }) && upper.contains(where: { $0.isLetter }) && targetCallsign.isEmpty && upper != myCallsign {
+            if upper.contains(where: { $0.isNumber }) && upper.contains(where: { $0.isLetter }) && targetCallsign.isEmpty && upper != myCallsign.uppercased() {
                 targetCallsign = upper
             }
         }
