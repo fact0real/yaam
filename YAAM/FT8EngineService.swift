@@ -195,28 +195,29 @@ nonisolated struct FT8DecodedRow: Identifiable, Sendable, Equatable {
     let isCQ: Bool
     let callerCall: String?
     let callerGrid: String?
-    let countryName: String
-    let countryFlag: String
-    let continent: String
+    var countryName: String
+    var countryFlag: String
+    var continent: String
+    var loggedSubdivision: String?
     let distanceKm: Double?
     var isNewDXCC: Bool
     var isNewGrid: Bool
     var isNewCall: Bool
     var contestStatus: DecodedContestStatus = .none
 
-    init(message: FT8Message, slotStart: Date, myCall: String, myGrid: String = "") {
+    init(message: FT8Message, slotStart: Date, myCall: String, myGrid: String = "", timeCorrection: Float = 0) {
         self.id = UUID()
         self.slotStart = slotStart
         self.text = message.text
         self.audioFrequencyHz = message.frequencyHz
-        self.timeOffset = message.timeSeconds
+        self.timeOffset = message.timeSeconds + timeCorrection
         self.syncScore = message.score
         self.estimatedSNR = message.snrDb
         let p = QSOMessages.parse(message.text)
         self.parsed = p
         self.isDirectedToMe = p?.toCall == myCall.uppercased()
         self.isCQ = p?.isCQ == true || message.text.hasPrefix("CQ ")
-        let caller = p?.deCall ?? Self.extractCaller(from: message.text)
+        let caller = p?.deCall.flatMap { FT8MessageIdentity.callsign($0) } ?? FT8MessageIdentity.sender(in: message.text)
         self.callerCall = caller
         self.callerGrid = p?.grid
         if let caller, !caller.isEmpty {
@@ -225,7 +226,7 @@ nonisolated struct FT8DecodedRow: Identifiable, Sendable, Equatable {
             self.countryFlag = info.flagEmoji
             self.continent = info.continent
         } else {
-            self.countryName = ""
+            self.countryName = "Unresolved callsign"
             self.countryFlag = "🌐"
             self.continent = "??"
         }
@@ -240,13 +241,6 @@ nonisolated struct FT8DecodedRow: Identifiable, Sendable, Equatable {
         self.contestStatus = .none
     }
 
-    private static func extractCaller(from msg: String) -> String? {
-        let parts = msg.split(separator: " ").map(String.init)
-        if parts.count >= 2 && parts[0] == "CQ" {
-            return parts.count >= 3 && parts[1].count <= 4 ? parts[2] : parts[1]
-        }
-        return parts.first
-    }
 }
 
 nonisolated struct FT8SignalPeak: Identifiable, Sendable {
@@ -331,10 +325,11 @@ nonisolated enum SmartHunterCriteria: String, CaseIterable, Identifiable, Sendab
 nonisolated final class IcomFT8AudioSource: AudioSource, @unchecked Sendable {
     private let lock = NSLock()
     private var accumulator: SlotAccumulator
+    private var decimator = FT8AudioDecimator()
     private let spectrum = StreamingSpectrum(
-        sampleRate: 48_000,
-        fftSize: 8192,
-        hop: 2048,
+        sampleRate: 12_000,
+        fftSize: 2048,
+        hop: 1024,
         fMin: 200,
         fMax: 3_000
     )
@@ -342,12 +337,12 @@ nonisolated final class IcomFT8AudioSource: AudioSource, @unchecked Sendable {
     private var frameSink: (@Sendable (SpectrumFrame) -> Void)?
 
     init(slotSeconds: Double = 15.0) {
-        self.accumulator = SlotAccumulator(sampleRate: 48_000, slotSeconds: slotSeconds)
+        self.accumulator = SlotAccumulator(sampleRate: 12_000, slotSeconds: slotSeconds)
     }
 
     func setSlotSeconds(_ slotSeconds: Double) {
         lock.lock()
-        self.accumulator = SlotAccumulator(sampleRate: 48_000, slotSeconds: slotSeconds)
+        self.accumulator = SlotAccumulator(sampleRate: 12_000, slotSeconds: slotSeconds)
         lock.unlock()
     }
 
@@ -382,9 +377,10 @@ nonisolated final class IcomFT8AudioSource: AudioSource, @unchecked Sendable {
     func push(_ samples: [Float], at time: Date) {
         guard !samples.isEmpty else { return }
         lock.lock()
-        let completed = accumulator.add(samples, at: time)
+        let filtered = decimator.process(samples)
+        let completed = accumulator.add(filtered, at: time)
         var frames: [SpectrumFrame] = []
-        spectrum.push(samples, at: time) { frames.append($0) }
+        spectrum.push(filtered, at: time) { frames.append($0) }
         let slotEmit = slotSink
         let frameEmit = frameSink
         lock.unlock()
@@ -407,6 +403,10 @@ final class FT8EngineService: ObservableObject {
     @Published private(set) var status = "FT8 engine is ready"
     @Published private(set) var decodedRows: [FT8DecodedRow] = []
     @Published private(set) var waterfallRows: [[Float]] = []
+    @Published private(set) var previousCycleCount = min(3, max(1, UserDefaults.standard.object(forKey: "ft8PreviousCycleCount") as? Int ?? 1))
+    private(set) var latestCompletedSlotStart: Date?
+    private(set) var waterfallCycleBoundaries: [Int] = []
+    private(set) var waterfallRevision = 0
     @Published private(set) var secondsToNextTX = 0.0
     @Published private(set) var slotProgress: Double = 0.0
     @Published private(set) var slotRemainingSeconds: Double = 15.0
@@ -421,7 +421,26 @@ final class FT8EngineService: ObservableObject {
     @Published var audioPath: FT8AudioPath = .icomLAN
     @Published var dialFrequencyHz: UInt64 = 14_074_000
     @Published var txAudioFrequencyHz: Float = 1_500
-    @Published var txGain: Float = 0.80
+    @Published var txGain: Float = min(1, max(0.02, UserDefaults.standard.object(forKey: "ft8TxAudioGain") as? Float ?? 0.80)) {
+        didSet { UserDefaults.standard.set(txGain, forKey: "ft8TxAudioGain") }
+    }
+    @Published var stopTxOnHighSWR = UserDefaults.standard.object(forKey: "ft8StopTxOnHighSWR") as? Bool ?? false {
+        didSet { UserDefaults.standard.set(stopTxOnHighSWR, forKey: "ft8StopTxOnHighSWR") }
+    }
+    private var swrTripGuard = FT8SWRTripGuard()
+    private var transmitStartedAt: Date?
+    private var workedEntitiesThisSession: Set<String> = []
+    private var workedCallsThisSession: Set<String> = []
+    private var workedGridsThisSession: Set<String> = []
+    @Published private(set) var cycleDecodeCounts: [(slot: Date, count: Int)] = []
+    @Published var expandedDecodeEnabled = UserDefaults.standard.bool(forKey: "ft8ExpandedDecode") {
+        didSet { UserDefaults.standard.set(expandedDecodeEnabled, forKey: "ft8ExpandedDecode") }
+    }
+    @Published private(set) var suggestedTxAudioHz: Int?
+    private var quietSpectrumRows: [[Float]] = []
+    private var quietSpectrumDial: UInt64 = 0
+    private var quietSpectrumUpdatedAt = Date.distantPast
+    var loggedSubdivisionForCall: ((String) -> String?)?
     @Published var txParity: SlotParity = .even
     @Published var txText = ""
     @Published var myCall = ""
@@ -518,6 +537,8 @@ final class FT8EngineService: ObservableObject {
     private var txPlayer: WaveformPlayer?
     private var sequencer: QSOSequencer?
     private var waterfallFrameCounter = 0
+    private var lastWaterfallSlotIndex: Int?
+    private var waterfallSlotIndices: [Int] = []
     private var smoothedNoiseFloor: Float = 0.0
     private var smoothedRange: Float = 25.0
 
@@ -537,6 +558,12 @@ final class FT8EngineService: ObservableObject {
     }
 
     func configureStation(callsign: String, grid: String) {
+        if myCall != callsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() {
+            workedCallsThisSession.removeAll()
+            workedEntitiesThisSession.removeAll()
+            workedGridsThisSession.removeAll()
+            latestOpportunityAlert = nil
+        }
         myCall = callsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         myGrid = String(grid.trimmingCharacters(in: .whitespacesAndNewlines).uppercased().prefix(4))
         contestEngine.configureContest(type: contestEngine.contestType, myCall: myCall, myGrid: myGrid)
@@ -653,7 +680,7 @@ final class FT8EngineService: ObservableObject {
         launchDecode(source: source)
         launchWaterfall(frames: source.frames())
         state = .monitoring
-        status = "Listening to 48 kHz audio from \(radio.radioName.isEmpty ? "Icom LAN" : radio.radioName) (\(operatingProtocol == .ft4 ? "FT4" : "FT8"))"
+        status = "Listening to \(radio.radioName.isEmpty ? "Icom LAN" : radio.radioName) (48 kHz input, filtered to 12 kHz · \(operatingProtocol == .ft4 ? "FT4" : "FT8"))"
     }
 
     func startCoreAudioMonitoring(
@@ -785,6 +812,8 @@ final class FT8EngineService: ObservableObject {
     }
 
     func stopMonitoring() {
+        suggestedTxAudioHz = nil
+        quietSpectrumRows.removeAll(keepingCapacity: true)
         decodeTask?.cancel()
         decodeTask = nil
         waterfallTask?.cancel()
@@ -848,8 +877,51 @@ final class FT8EngineService: ObservableObject {
     func clearDecodes() {
         decodedRows.removeAll(keepingCapacity: true)
         waterfallRows.removeAll(keepingCapacity: true)
+        waterfallSlotIndices.removeAll(keepingCapacity: true)
+        waterfallCycleBoundaries.removeAll(keepingCapacity: true)
+        lastWaterfallSlotIndex = nil
+        waterfallRevision += 1
         activeSignalPeaks.removeAll(keepingCapacity: true)
+        cycleDecodeCounts.removeAll(keepingCapacity: true)
+        suggestedTxAudioHz = nil
+        quietSpectrumRows.removeAll(keepingCapacity: true)
         selectedDecodeID = nil
+    }
+
+    func setPreviousCycleCount(_ count: Int) {
+        let allowed = min(3, max(1, count))
+        guard previousCycleCount != allowed else { return }
+        previousCycleCount = allowed
+        UserDefaults.standard.set(allowed, forKey: "ft8PreviousCycleCount")
+        if let latestCompletedSlotStart { trimDecodedRows(through: latestCompletedSlotStart) }
+        if let lastWaterfallSlotIndex {
+            trimWaterfallRows(through: lastWaterfallSlotIndex)
+            waterfallRevision += 1
+        }
+    }
+
+    private func trimDecodedRows(through slotStart: Date) {
+        let latestIndex = Int((slotStart.timeIntervalSince1970 / slotDuration).rounded(.down))
+        let oldestIndex = latestIndex - previousCycleCount
+        decodedRows.removeAll {
+            Int(($0.slotStart.timeIntervalSince1970 / slotDuration).rounded(.down)) < oldestIndex
+        }
+        if decodedRows.count > 600 { decodedRows.removeLast(decodedRows.count - 600) }
+        if let selectedDecodeID, !decodedRows.contains(where: { $0.id == selectedDecodeID }) {
+            self.selectedDecodeID = nil
+        }
+    }
+
+    private func trimWaterfallRows(through slotIndex: Int) {
+        let oldestIndex = slotIndex - previousCycleCount
+        let expired = waterfallSlotIndices.prefix { $0 < oldestIndex }.count
+        let excess = max(0, waterfallSlotIndices.count - 400)
+        let removeCount = max(expired, excess)
+        if removeCount > 0 {
+            waterfallSlotIndices.removeFirst(removeCount)
+            waterfallRows.removeFirst(removeCount)
+        }
+        waterfallCycleBoundaries.removeAll { $0 >= waterfallRows.count }
     }
 
     func clearBandActivity() {
@@ -1149,7 +1221,6 @@ final class FT8EngineService: ObservableObject {
 
         let path = audioPath
         let audioFrequency = min(2_900, max(300, txAudioFrequencyHz))
-        let gain = min(1, max(0.02, txGain))
         let parity = txParity
         let icom = activeIcom
         let rig = activeRig
@@ -1223,6 +1294,8 @@ final class FT8EngineService: ObservableObject {
                 }
 
                 state = .transmitting
+                transmitStartedAt = Date()
+                let gain = min(1, max(0.02, txGain))
                 transmitProgress = 0
                 status = "Transmitting \(message)"
 
@@ -1245,6 +1318,7 @@ final class FT8EngineService: ObservableObject {
                     let progressTask = startProgressClock(duration: slotSecs)
                     defer { progressTask.cancel() }
                     try await icom.transmit(samples: waveform, gain: gain)
+                    try Task.checkCancellation()
                 case .coreAudio:
                     guard let rig else { throw FT8RunError.rigUnavailable }
                     let player = WaveformPlayer(samples: waveform, amplitude: gain)
@@ -1378,6 +1452,24 @@ final class FT8EngineService: ObservableObject {
         interlockDidFinishTransmit?(self)
     }
 
+    func rememberLoggedContact(_ callsign: String, grid: String, band: String) {
+        let call = callsign.uppercased()
+        workedCallsThisSession.insert(call)
+        let country = (CTYDatabaseManager.shared.lookup(callsign: call)?.entity.entityName
+                       ?? DXCCDatabase.resolve(callsign: call).entityName).lowercased()
+        workedEntitiesThisSession.insert("\(band.lowercased())|\(country)")
+        if grid.count >= 4 { workedGridsThisSession.insert(String(grid.uppercased().prefix(4))) }
+        if let alert = latestOpportunityAlert,
+           alert.callsign.uppercased() == call || alert.entityName.lowercased() == country {
+            latestOpportunityAlert = nil
+        }
+        for i in decodedRows.indices where decodedRows[i].callerCall?.uppercased() == call {
+            decodedRows[i].isNewDXCC = false
+            decodedRows[i].isNewGrid = false
+            decodedRows[i].isNewCall = false
+        }
+    }
+
     func runSelfTest() {
         selfTestStatus = "Running codec and timing checks..."
         Task { [weak self] in
@@ -1428,10 +1520,17 @@ final class FT8EngineService: ObservableObject {
     private func launchDecode<Source: AudioSource>(source: Source) {
         let proto = operatingProtocol
         decodeTask = Task.detached(priority: .userInitiated) { [weak self] in
-            let decoder = DecodeEngine(proto: proto, spectrumColumns: 120, passband: 200...3_000)
-            for await result in decoder.results(from: source) {
+            for await slot in source.slots() {
                 guard !Task.isCancelled else { break }
-                await self?.consume(result)
+                let expanded = await self?.expandedDecodeEnabled ?? false
+                let messages = (try? FT8StationDecoder.decode(
+                    samples: slot.samples,
+                    sampleRate: slot.sampleRate,
+                    protocol: proto,
+                    expanded: expanded
+                )) ?? []
+                guard !Task.isCancelled else { break }
+                await self?.consume(messages: messages, start: slot.startTime ?? Date())
             }
         }
     }
@@ -1445,14 +1544,25 @@ final class FT8EngineService: ObservableObject {
         }
     }
 
-    private func consume(_ result: SlotResult) {
-        let start = result.startTime ?? Date()
+    private func consume(messages: [FT8StationDetection], start: Date) {
+        latestCompletedSlotStart = start
+        cycleDecodeCounts.insert((slot: start, count: messages.count), at: 0)
+        if cycleDecodeCounts.count > 24 { cycleDecodeCounts.removeLast(cycleDecodeCounts.count - 24) }
         let currentBand = currentBandName
         let dialMHzStr = String(format: "%.6f", Double(dialFrequencyHz) / 1_000_000.0)
         let slotUtc = Self.utcTime(start)
         let protoStr = operatingProtocol == .ft4 ? "FT4" : "FT8"
 
-        var rows = result.messages.map { FT8DecodedRow(message: $0, slotStart: start, myCall: myCall, myGrid: myGrid) }
+        var rows = messages.map { FT8DecodedRow(message: $0.message, slotStart: start, myCall: myCall, myGrid: myGrid, timeCorrection: $0.timeCorrection) }
+        for i in rows.indices {
+            guard let call = rows[i].callerCall else { continue }
+            if let entity = CTYDatabaseManager.shared.lookup(callsign: call)?.entity {
+                rows[i].countryName = entity.entityName
+                rows[i].countryFlag = entity.flagEmoji
+                rows[i].continent = entity.continent
+            }
+            rows[i].loggedSubdivision = loggedSubdivisionForCall?(call)
+        }
 
         // Contest multiplier & dupe analysis:
         if isContestMode {
@@ -1470,17 +1580,17 @@ final class FT8EngineService: ObservableObject {
         // Determine if new DXCC, new Grid, or new Call
         for i in rows.indices {
             let country = rows[i].countryName
-            if !country.isEmpty && country != "Unknown" && country != "International" {
+            if rows[i].callerCall != nil && rows[i].continent != "??" && !country.isEmpty && country != "Unknown" && country != "International" {
                 let worked = isCountryWorkedOnBand?(country, currentBand) ?? true
-                rows[i].isNewDXCC = !worked
+                rows[i].isNewDXCC = !worked && !workedEntitiesThisSession.contains("\(currentBand.lowercased())|\(country.lowercased())")
             }
             if let grid = rows[i].callerGrid, grid.count >= 4 {
                 let gridWorked = isGridWorked?(grid) ?? true
-                rows[i].isNewGrid = !gridWorked
+                rows[i].isNewGrid = !gridWorked && !workedGridsThisSession.contains(String(grid.uppercased().prefix(4)))
             }
             if let call = rows[i].callerCall, !call.isEmpty {
                 let callWorked = isCallWorked?(call) ?? true
-                rows[i].isNewCall = !callWorked
+                rows[i].isNewCall = !callWorked && !workedCallsThisSession.contains(call.uppercased())
             }
 
             // Continuous ALL.TXT default logging
@@ -1491,7 +1601,7 @@ final class FT8EngineService: ObservableObject {
 
             // Check for high-value opportunity alert (New Multiplier, New DXCC or New Grid calling CQ)
             let isHighValue = rows[i].contestStatus.isMultiplier || rows[i].isNewDXCC || rows[i].isNewGrid
-            if rows[i].isCQ && isHighValue && rows[i].callerCall != myCall {
+            if rows[i].isCQ && isHighValue && rows[i].callerCall != myCall && !workedCallsThisSession.contains(rows[i].callerCall?.uppercased() ?? "") && !(isCallWorkedToday?(rows[i].callerCall ?? "", currentBand) ?? false) {
                 if let call = rows[i].callerCall {
                     latestOpportunityAlert = FT8OpportunityAlert(
                         callsign: call,
@@ -1521,7 +1631,6 @@ final class FT8EngineService: ObservableObject {
 
         if !rows.isEmpty {
             decodedRows.insert(contentsOf: rows, at: 0)
-            if decodedRows.count > 300 { decodedRows.removeLast(decodedRows.count - 300) }
 
             // Update active signal peaks for spectrum overlay
             let newPeaks = rows.compactMap { r -> FT8SignalPeak? in
@@ -1538,6 +1647,8 @@ final class FT8EngineService: ObservableObject {
             let cutoff = Date().addingTimeInterval(-35)
             activeSignalPeaks = (activeSignalPeaks.filter { $0.timestamp > cutoff } + newPeaks)
         }
+
+        trimDecodedRows(through: start)
 
         // Stream decodes near rxAudioFrequencyHz or directed to me or from dxCall into qsoStreamItems
         for row in rows {
@@ -1561,11 +1672,37 @@ final class FT8EngineService: ObservableObject {
 
     private func consume(_ frame: SpectrumFrame) {
         waterfallFrameCounter += 1
-        guard waterfallFrameCounter.isMultiple(of: 5) else { return }
+        guard waterfallFrameCounter.isMultiple(of: 2) else { return }
         let normalized = normalizeSpectrum(frame.magnitudesDB)
         guard !normalized.isEmpty else { return }
+        if quietSpectrumDial != dialFrequencyHz {
+            quietSpectrumDial = dialFrequencyHz
+            quietSpectrumRows.removeAll(keepingCapacity: true)
+            suggestedTxAudioHz = nil
+        }
+        if state != .transmitting {
+            if quietSpectrumRows.last?.count != normalized.count { quietSpectrumRows.removeAll(keepingCapacity: true) }
+            quietSpectrumRows.append(normalized)
+            if quietSpectrumRows.count > 180 { quietSpectrumRows.removeFirst(quietSpectrumRows.count - 180) }
+            if Date().timeIntervalSince(quietSpectrumUpdatedAt) >= 2 {
+                quietSpectrumUpdatedAt = Date()
+                suggestedTxAudioHz = FT8QuietFrequencyAdvisor.suggest(
+                    rows: quietSpectrumRows, minimumHz: frame.fMin, binHz: frame.binHz,
+                    bandwidthHz: operatingProtocol == .ft4 ? 90 : 50,
+                    occupied: activeSignalPeaks.filter { Date().timeIntervalSince($0.timestamp) < 35 }.map(\.frequencyHz)
+                )
+            }
+        }
+        let slotIndex = Int(((frame.time ?? Date()).timeIntervalSince1970 / slotDuration).rounded(.down))
+        waterfallCycleBoundaries = waterfallCycleBoundaries.map { $0 + 1 }.filter { $0 < 400 }
+        if let lastWaterfallSlotIndex, lastWaterfallSlotIndex != slotIndex {
+            waterfallCycleBoundaries.insert(0, at: 0)
+        }
+        lastWaterfallSlotIndex = slotIndex
+        waterfallRevision += 1
+        waterfallSlotIndices.append(slotIndex)
         waterfallRows.append(normalized)
-        if waterfallRows.count > 240 { waterfallRows.removeFirst(waterfallRows.count - 240) }
+        trimWaterfallRows(through: slotIndex)
         latestSpectrumMagnitudes = normalized
     }
 
@@ -1733,6 +1870,7 @@ final class FT8EngineService: ObservableObject {
                             currentBand,
                             dialMHz
                         )
+                        if logQSOHandler != nil { rememberLoggedContact(completedDX, grid: dxGrid, band: currentBand) }
                         appendAllTextLog(line: "\(Self.utcTime(Date())) \(dialMHz) Contest QSO Logged: \(completedDX) \(dxGrid) \(operatingProtocol == .ft4 ? "FT4" : "FT8") \(currentBand)")
 
                         dxCall = ""
@@ -1791,6 +1929,7 @@ final class FT8EngineService: ObservableObject {
                         currentBand,
                         dialMHz
                     )
+                    if logQSOHandler != nil { rememberLoggedContact(completedDX, grid: dxGrid, band: currentBand) }
                     appendAllTextLog(line: "\(Self.utcTime(Date())) \(dialMHz) QSO Logged: \(completedDX) \(dxGrid) \(operatingProtocol == .ft4 ? "FT4" : "FT8") \(currentBand)")
 
                     // Zero-Idle Auto-Engage next caller if queued
@@ -1878,7 +2017,29 @@ final class FT8EngineService: ObservableObject {
                     self.liveSMeter = xiegu.sMeterValue
                 }
 
-                try? await Task.sleep(for: .milliseconds(100))
+                let meterTime: Date? = switch self.audioPath {
+                case .icomLAN: self.activeIcom?.swrUpdatedAt
+                case .icomUSB: IcomUSBRadioDriver.shared.swrUpdatedAt
+                case .xiegu6100: Xiegu6100Driver.shared.swrUpdatedAt
+                default: nil
+                }
+                if self.swrTripGuard.shouldStop(
+                    enabled: self.stopTxOnHighSWR,
+                    startedAt: self.state == .transmitting ? self.transmitStartedAt : nil,
+                    power: self.livePowerWatts, swr: self.liveSWR, sampledAt: meterTime, now: Date()
+                ) {
+                    self.isCallingCQContinually = false
+                    self.autoSequenceEnabled = false
+                    self.autoHunterEnabled = false
+                    self.cancelTransmission(reason: "TX stopped: measured SWR above 2.5")
+                    self.transmitArmed = false
+                    self.qsoStreamItems.append(.status(id: UUID(), time: Date(), text: "SWR protection: TX stopped and disarmed (above 2.5).", isMilestone: true))
+                }
+
+                // UI telemetry does not drive slot scheduling. Five updates per
+                // second keep the countdown smooth without relaying out the
+                // entire station view ten times a second.
+                try? await Task.sleep(for: .milliseconds(200))
             }
         }
     }

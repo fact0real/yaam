@@ -14,6 +14,7 @@ nonisolated struct ClubLogSpotModel: Identifiable, Sendable {
     let band: String
     let mode: String
     let timeStr: String
+    let reportedAt: Date?
     let dxcc: String
     let spotter: String
     let comment: String
@@ -37,6 +38,7 @@ nonisolated struct ClubLogSpotModel: Identifiable, Sendable {
         self.band = band
         self.mode = mode
         self.timeStr = timeStr
+        self.reportedAt = Self.reportDate(timeStr, relativeTo: Date())
         self.dxcc = dxcc
         self.spotter = spotter
         self.comment = comment
@@ -47,6 +49,26 @@ nonisolated struct ClubLogSpotModel: Identifiable, Sendable {
         let m = mode.uppercased()
         let c = comment.uppercased()
         return m == "FT8" || m == "FT4" || m == "RTTY" || m == "PSK" || m == "PSK31" || m == "JS8" || m == "DATA" || m == "DIGI" || m == "Q65" || m == "MSK144" || m.contains("FT") || c.contains("FT8") || c.contains("FT4") || c.contains("RTTY") || c.contains("PSK")
+    }
+
+    static func reportDate(_ text: String, relativeTo reference: Date) -> Date? {
+        let raw = text.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "Z", with: "")
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.isLenient = false
+        for format in ["yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd HH:mm", "yyyy/MM/dd HH:mm:ss", "yyyy/MM/dd HH:mm", "HH:mm:ss", "HH:mm", "HHmm"] {
+            formatter.dateFormat = format
+            guard let parsed = formatter.date(from: raw) else { continue }
+            if format.contains("yyyy") { return parsed }
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+            let clock = calendar.dateComponents([.hour, .minute, .second], from: parsed)
+            guard var result = calendar.date(bySettingHour: clock.hour ?? 0, minute: clock.minute ?? 0, second: clock.second ?? 0, of: reference) else { return nil }
+            if result.timeIntervalSince(reference) > 60 { result = result.addingTimeInterval(-86_400) }
+            return result
+        }
+        return nil
     }
 
     var localTimeStr: String {

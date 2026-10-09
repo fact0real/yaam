@@ -148,6 +148,7 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
     @MainActor @Published private(set) var activeRemoteSettingsSummary: String = ""
     @MainActor @Published private(set) var rfPowerWatts: Double = 0.0
     @MainActor @Published private(set) var swr: Double = 1.0
+    @MainActor private(set) var swrUpdatedAt: Date?
     @MainActor @Published private(set) var alcLevel: Double = 0.0
     @MainActor @Published private(set) var sMeterUnits: Double = 0.0
     @MainActor @Published var transmitArmed = false {
@@ -463,7 +464,9 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
     func transmit(samples: [Float], gain: Float) async throws {
         guard state.isConnected else { throw IcomNetworkError.disconnected }
         guard transmitArmed else { throw IcomNetworkError.transmitNotArmed }
-        let boundedGain = max(0.95, min(1.0, gain))
+        // This is the audio drive level, not RF power. Do not force it back to
+        // nearly full scale: operators need to lower drive when ALC is high.
+        let boundedGain = max(0.02, min(1.0, gain))
         let framesPerPacket = 480 // 10 ms at 48 kHz
         let totalSamples = samples.count
         guard totalSamples > 0 else { return }
@@ -1271,6 +1274,7 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
                         swrCalc = 3.0 + Double(raw - 120) * 0.05
                     }
                     self.swr = round(swrCalc * 10) / 10.0
+                    self.swrUpdatedAt = Date()
                 case 0x13: // ALC Meter
                     let alc = min(100.0, max(0.0, (Double(raw) / 120.0) * 100.0))
                     self.alcLevel = round(alc)

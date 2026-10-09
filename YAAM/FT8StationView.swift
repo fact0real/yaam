@@ -7,6 +7,43 @@ import SwiftUI
 import FT8Codec
 import FT8808Engine
 
+private struct FT8RibbonButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+    var accent: Color = .secondary
+    var prominent = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .frame(height: 34)
+            .padding(.horizontal, 9)
+            .foregroundStyle(prominent && isEnabled ? Color.white : (isEnabled ? Color.primary : Color.secondary))
+            .background(
+                RoundedRectangle(cornerRadius: 7)
+                    .fill(prominent && isEnabled ? accent : Color(nsColor: .controlBackgroundColor))
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 7)
+                    .strokeBorder(accent.opacity(prominent && isEnabled ? 0 : 0.14), lineWidth: 1)
+            }
+            .opacity(configuration.isPressed ? 0.72 : 1)
+            .contentShape(RoundedRectangle(cornerRadius: 7))
+    }
+}
+
+private struct FT8RibbonMenuLabel: View {
+    let text: String
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(text).font(.system(size: 12, weight: .semibold))
+            Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold))
+        }
+        .padding(.horizontal, 9)
+        .frame(height: 34)
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 7))
+        .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Color.secondary.opacity(0.14)))
+    }
+}
+
 struct FT8StationView: View {
     private static let utcTimeFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -52,6 +89,8 @@ struct FT8StationView: View {
     @State private var showCabrilloExportSheet = false
     @State private var showWSJTXBridgeSheet = false
     @State private var upperContentHeight: CGFloat = 320
+    @State private var showTxDrivePopover = false
+    @StateObject private var bandClubLogSpots = ClubLogSpotsService()
 
     private var icomModel: Binding<IcomNetworkModel> {
         Binding(
@@ -119,6 +158,18 @@ struct FT8StationView: View {
             engine.refreshAudioDevices()
             if icomPassword.isEmpty {
                 icomPassword = CredentialVault.valueIfAvailableWithoutPrompt(for: .icomNetworkPassword)
+            }
+        }
+        .task {
+            // Reuse configured Club Log authentication and keep the fetch rate
+            // bounded while this screen is visible. DX Cluster is event-driven.
+            while !Task.isCancelled {
+                let configured = !(UserDefaults.standard.string(forKey: "clubLogEmail") ?? "").isEmpty
+                    || !ClubLogSessionStore.savedCookieHeader().isEmpty
+                if configured && !bandClubLogSpots.isLoading {
+                    await bandClubLogSpots.fetchPersonalSpots(credentials: appState.qslServiceCredentials(for: [.clubLog]))
+                }
+                do { try await Task.sleep(for: .seconds(300)) } catch { return }
             }
         }
         .onChange(of: appState.activeStationProfileID) { _, _ in loadIdentity() }
@@ -339,10 +390,9 @@ struct FT8StationView: View {
                         .font(.caption2)
                 }
                 .padding(.horizontal, 8)
-                .padding(.vertical, 5)
+                .frame(height: 28)
             }
-            .buttonStyle(.bordered)
-            .tint(radioPathConnected ? .green : .orange)
+            .buttonStyle(FT8RibbonButtonStyle(accent: radioPathConnected ? .green : .orange))
             .help("Open / Close Radio Connection settings")
 
             // RX Switch Button (Redesigned matching TX)
@@ -390,8 +440,7 @@ struct FT8StationView: View {
                 }
                 .frame(width: 60, height: 28)
             }
-            .buttonStyle(.borderedProminent)
-            .tint(engine.state.isMonitoring ? Color.green : Color.secondary.opacity(0.25))
+            .buttonStyle(FT8RibbonButtonStyle(accent: engine.state.isMonitoring ? .green : .gray, prominent: true))
             .disabled(!radioPathConnected && !engine.state.isMonitoring)
             .help(radioPathConnected ? "Start / Stop receiving FT8/FT4 audio" : "Connect the radio first before starting receive")
 
@@ -410,26 +459,39 @@ struct FT8StationView: View {
                         .font(.system(size: 11, weight: .heavy, design: .monospaced))
                 }
                 .padding(.horizontal, 7)
-                .padding(.vertical, 4)
+                .frame(height: 28)
             }
-            .buttonStyle(.bordered)
-            .tint(engine.operatingProtocol == .ft4 ? Color.yellow : Color.secondary)
+            .buttonStyle(FT8RibbonButtonStyle(accent: engine.operatingProtocol == .ft4 ? .yellow : .secondary))
             .help("Toggle between FT8 (15-second cycles) and high-rate FT4 (7.5-second cycles)")
 
+            Menu {
+                Button("Standard · one pass") { engine.expandedDecodeEnabled = false }
+                Button("Expanded · three timing alignments") { engine.expandedDecodeEnabled = true }
+                Text("Expanded keeps the standard results and searches two additional alignments. Uses more CPU during decoding.")
+            } label: {
+                FT8RibbonMenuLabel(text: engine.expandedDecodeEnabled ? "Decode: Expanded" : "Decode: Standard")
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+
             // Band Presets Picker
-            Picker("Band", selection: $engine.dialFrequencyHz) {
+            Menu {
                 if engine.operatingProtocol == .ft4 {
                     ForEach(FT4BandPreset.common) { preset in
-                        Text(preset.band).tag(preset.frequencyHz)
+                        Button(preset.band) { engine.dialFrequencyHz = preset.frequencyHz }
                     }
                 } else {
                     ForEach(FT8BandPreset.common) { preset in
-                        Text(preset.band).tag(preset.frequencyHz)
+                        Button(preset.band) { engine.dialFrequencyHz = preset.frequencyHz }
                     }
                 }
+            } label: {
+                FT8RibbonMenuLabel(text: engine.currentBandName)
             }
-            .frame(width: 75)
-            .labelsHidden()
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
             .onChange(of: engine.dialFrequencyHz) { _, _ in
                 engine.applyDialAndMode()
             }
@@ -438,7 +500,7 @@ struct FT8StationView: View {
                 .font(.system(.body, design: .monospaced).weight(.bold))
                 .foregroundStyle(.primary)
                 .padding(.horizontal, 6)
-                .padding(.vertical, 4)
+                .frame(height: 34)
                 .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
 
             // Contest Mode Toggle Button
@@ -454,17 +516,15 @@ struct FT8StationView: View {
                         .font(.system(size: 11, weight: .heavy))
                 }
                 .padding(.horizontal, 7)
-                .padding(.vertical, 4)
+                .frame(height: 28)
             }
-            .buttonStyle(.bordered)
-            .tint(engine.isContestMode ? Color.yellow : Color.secondary)
+            .buttonStyle(FT8RibbonButtonStyle(accent: engine.isContestMode ? .yellow : .secondary))
             .help("Toggle Digital Contest Mode (CQ WW Digi / ARRL Digi rules, multipliers, and live rate)")
 
             // Auto-Sequence Toggle
             Toggle("Auto", isOn: $engine.autoSequenceEnabled)
                 .toggleStyle(.button)
-                .buttonStyle(.bordered)
-                .tint(engine.autoSequenceEnabled ? Color.accentColor : Color.secondary)
+                .buttonStyle(FT8RibbonButtonStyle(accent: .accentColor, prominent: engine.autoSequenceEnabled))
                 .help("Automatically progress through QSO sequence")
 
             // Erase Tables Button
@@ -473,8 +533,9 @@ struct FT8StationView: View {
                 engine.clearRxStream()
             } label: {
                 Label("Erase", systemImage: "trash")
+                    .frame(height: 28)
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(FT8RibbonButtonStyle())
             .help("Clear both Band Activity and Rx Stream")
 
             // WSJT-X 2-Way Bridge Button
@@ -492,10 +553,9 @@ struct FT8StationView: View {
                     }
                 }
                 .padding(.horizontal, 6)
-                .padding(.vertical, 4)
+                .frame(height: 28)
             }
-            .buttonStyle(.bordered)
-            .tint(appState.wsjtxListener.state.isListening ? Color.green : Color.secondary)
+            .buttonStyle(FT8RibbonButtonStyle(accent: appState.wsjtxListener.state.isListening ? .green : .secondary))
             .help("Open 2-Way WSJT-X / JTDX Live Stream & 1-Click Reply Console")
 
             }
@@ -523,8 +583,7 @@ struct FT8StationView: View {
                 }
                 .frame(width: 60, height: 28)
             }
-            .buttonStyle(.borderedProminent)
-            .tint(engine.transmitArmed ? Color.red : Color.secondary.opacity(0.25))
+            .buttonStyle(FT8RibbonButtonStyle(accent: engine.transmitArmed ? .red : .gray, prominent: true))
             .help("Arm / Disarm RF Transmission")
 
             // Slot Parity Button (1st :00/:30 or 2nd :15/:45)
@@ -535,7 +594,7 @@ struct FT8StationView: View {
                     .font(.caption.monospacedDigit().weight(.semibold))
                     .frame(width: 65, height: 26)
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(FT8RibbonButtonStyle())
             .help("Toggle transmission slot between 1st (00/30s) and 2nd (15/45s)")
 
             // Audio Frequencies & Sync
@@ -577,19 +636,27 @@ struct FT8StationView: View {
                 .help("Lock RX and TX frequencies together")
             }
             .padding(.horizontal, 6)
-            .padding(.vertical, 3)
+            .frame(height: 34)
             .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 5))
 
             // DX Station & Report
             HStack(spacing: 6) {
                 TextField("DX", text: $engine.dxCall)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 76)
+                    .textFieldStyle(.plain)
+                    .padding(.horizontal, 8)
+                    .frame(width: 92)
+                    .frame(height: 34)
+                    .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 7))
+                    .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Color.secondary.opacity(0.2)))
                     .font(.system(.caption, design: .monospaced).weight(.bold))
 
                 TextField("Rep", text: $engine.dxReport)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 46)
+                    .textFieldStyle(.plain)
+                    .padding(.horizontal, 8)
+                    .frame(width: 62)
+                    .frame(height: 34)
+                    .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 7))
+                    .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Color.secondary.opacity(0.2)))
                     .font(.system(.caption, design: .monospaced))
             }
 
@@ -606,10 +673,9 @@ struct FT8StationView: View {
                     Text("CQ")
                 }
                 .font(.caption.weight(.bold))
-                .frame(width: 56, height: 26)
+                .frame(width: 60, height: 28)
             }
-            .buttonStyle(.borderedProminent)
-            .tint(engine.isCallingCQContinually ? Color.orange : Color.accentColor)
+            .buttonStyle(FT8RibbonButtonStyle(accent: engine.isCallingCQContinually ? .orange : .accentColor, prominent: true))
             .help(engine.isCallingCQContinually ? "Stop Continuous CQ Loop" : "Start Continuous CQ (calls CQ indefinitely until answered)")
 
             // Standard Message Selector (Tx 1 .. Tx 6)
@@ -621,16 +687,16 @@ struct FT8StationView: View {
                     }
                 }
             } label: {
-                Text("Tx \(selectedTxMessageIndex)")
-                    .font(.caption.weight(.semibold))
-                    .frame(width: 46)
+                FT8RibbonMenuLabel(text: "Tx \(selectedTxMessageIndex)")
             }
-            .menuStyle(.borderedButton)
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
 
             // Manual / Auto Log Button
             Button {
                 if !engine.dxCall.isEmpty {
-                    let currentBand = FT8BandPreset.common.first(where: { $0.frequencyHz == engine.dialFrequencyHz })?.band ?? "20m"
+                    let currentBand = engine.currentBandName
                     let dialMHz = Double(engine.dialFrequencyHz) / 1_000_000.0
                     appState.logFT8StationQSO(
                         call: engine.dxCall,
@@ -644,10 +710,23 @@ struct FT8StationView: View {
             } label: {
                 Label("LOG", systemImage: "square.and.pencil")
                     .font(.caption.weight(.bold))
+                    .frame(height: 28)
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(FT8RibbonButtonStyle())
             .disabled(engine.dxCall.isEmpty)
             .help("Log current QSO to YAAM Log Table")
+
+            if let quietHz = engine.suggestedTxAudioHz {
+                Button {
+                    engine.txAudioFrequencyHz = Float(quietHz)
+                } label: {
+                    Label("Quiet TX · \(quietHz) Hz", systemImage: "waveform.path")
+                        .font(.caption.weight(.semibold))
+                }
+                .buttonStyle(FT8RibbonButtonStyle(accent: .cyan))
+                .disabled(engine.transmitArmed || engine.isTransmitScheduled)
+                .help("Suggested from recent received waterfall energy and decoded signals. Disarm TX to apply. Local reception cannot guarantee a clear frequency at the other station.")
+            }
             }
         }
     }
@@ -1736,13 +1815,12 @@ struct FT8StationView: View {
             .frame(width: 200)
             .controlSize(.small)
 
-            HStack(spacing: 4) {
-                Text("Min SNR:")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                Stepper("\(engine.autoHunterMinSNR) dB", value: $engine.autoHunterMinSNR, in: -26...0, step: 1)
+            Stepper(value: $engine.autoHunterMinSNR, in: -26...0, step: 1) {
+                Text("Min SNR: \(engine.autoHunterMinSNR) dB")
                     .font(.caption2.monospacedDigit())
+                    .fixedSize(horizontal: true, vertical: false)
             }
+            .fixedSize(horizontal: true, vertical: false)
 
             Toggle("Skip Worked B4", isOn: $engine.autoHunterSkipWorked)
                 .font(.caption2)
@@ -1816,6 +1894,67 @@ struct FT8StationView: View {
                 }
                 Spacer()
 
+                Menu {
+                    let activeBand = engine.currentBandName.lowercased()
+                    let recentCluster = appState.dxClusterClient.spots
+                        .filter { $0.band.lowercased() == activeBand && (0...900).contains(Date().timeIntervalSince($0.lastSeenAt)) }
+                        .sorted { $0.lastSeenAt > $1.lastSeenAt }
+                    if recentCluster.isEmpty {
+                        Text("No DX Cluster reports in the last 15 min")
+                    } else {
+                        Section("DX Cluster · last 15 min") {
+                            ForEach(Array(recentCluster.prefix(8))) { spot in
+                                Button("\(spot.flagEmoji) \(spot.callsign) · \(spot.mode) · \(String(format: "%.3f", spot.frequencyKHz / 1000)) MHz") {
+                                    engine.dxCall = spot.callsign
+                                }
+                            }
+                        }
+                    }
+                    Divider()
+                    Button(bandClubLogSpots.isLoading ? "Refreshing Club Log…" : "Refresh Club Log personal spots") {
+                        Task { await bandClubLogSpots.fetchPersonalSpots(credentials: appState.qslServiceCredentials(for: [.clubLog])) }
+                    }
+                    .disabled(bandClubLogSpots.isLoading)
+                    let clubSpots = bandClubLogSpots.spots.filter {
+                        guard $0.band.lowercased() == activeBand, let reported = $0.reportedAt else { return false }
+                        return (0...900).contains(Date().timeIntervalSince(reported))
+                    }.sorted { ($0.reportedAt ?? .distantPast) > ($1.reportedAt ?? .distantPast) }
+                    if !clubSpots.isEmpty {
+                        Section("Club Log · last 15 min · UTC") {
+                            ForEach(Array(clubSpots.prefix(8))) { spot in
+                                Button("\(spot.callsign) · \(spot.mode) · \(spot.frequency) MHz · \(spot.timeStr)") {
+                                    engine.dxCall = spot.callsign
+                                }
+                            }
+                        }
+                    } else if bandClubLogSpots.lastRefreshed != nil {
+                        Text("No recent Club Log reports on this band")
+                    }
+                    if let error = bandClubLogSpots.errorMessage, !error.isEmpty {
+                        Text(error)
+                    }
+                } label: {
+                    Label("On band", systemImage: "antenna.radiowaves.left.and.right")
+                        .font(.system(size: 10, weight: .semibold))
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize(horizontal: true, vertical: false)
+                .help("Recent DX Cluster spots and Club Log personal spots on this band. Selecting a spot prepares its call only; it does not transmit.")
+
+                Menu {
+                    ForEach(1...3, id: \.self) { count in
+                        Button("Keep \(count) previous cycle\(count == 1 ? "" : "s")") {
+                            engine.setPreviousCycleCount(count)
+                        }
+                    }
+                } label: {
+                    Label("\(engine.previousCycleCount) prior", systemImage: "clock.arrow.circlepath")
+                        .font(.system(size: 10, weight: .semibold))
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize(horizontal: true, vertical: false)
+                .help("Keep the latest decoded cycle and 1–3 previous cycles")
+
                 Button {
                     engine.clearBandActivity()
                 } label: {
@@ -1835,6 +1974,21 @@ struct FT8StationView: View {
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
                     .background(Color.secondary.opacity(0.12), in: Capsule())
+                if let latest = engine.cycleDecodeCounts.first {
+                    Menu {
+                        Text("Last 24 received cycles · local time")
+                        ForEach(Array(engine.cycleDecodeCounts.enumerated()), id: \.offset) { _, cycle in
+                            Text("\(Self.localTimeFormatter.string(from: cycle.slot)) · \(cycle.count) decodes")
+                        }
+                    } label: {
+                        Text("Cycle \(latest.count) · Best \(engine.cycleDecodeCounts.map(\.count).max() ?? 0)")
+                    }
+                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.cyan)
+                        .menuStyle(.borderlessButton)
+                        .fixedSize(horizontal: true, vertical: false)
+                        .help("Latest cycle count and best count in the last 24 cycles")
+                }
             }
             .padding(.horizontal, 10)
             .frame(height: 28)
@@ -1849,7 +2003,7 @@ struct FT8StationView: View {
                 Text("Freq").frame(width: 38, alignment: .trailing)
                 Text("Message").frame(maxWidth: .infinity, alignment: .leading)
                 Text("Cont").frame(width: 34, alignment: .center)
-                Text("Country").frame(width: 110, alignment: .leading)
+                Text("Country / State").frame(width: 130, alignment: .leading)
             }
             .font(.system(size: 10, weight: .bold))
             .foregroundStyle(.secondary)
@@ -1884,16 +2038,19 @@ struct FT8StationView: View {
             } else {
                 ScrollView {
                     LazyVStack(spacing: 1) {
-                        ForEach(engine.decodedRows.prefix(120)) { row in
+                        let visibleRows = engine.decodedRows
+                        ForEach(Array(visibleRows.enumerated()), id: \.element.id) { index, row in
+                            let slotIndex = Int((row.slotStart.timeIntervalSince1970 / engine.slotDuration).rounded(.down))
+                            let precedingSlotIndex = index > 0
+                                ? Int((visibleRows[index - 1].slotStart.timeIntervalSince1970 / engine.slotDuration).rounded(.down))
+                                : nil
+                            if precedingSlotIndex != slotIndex {
+                                cycleDivider(for: row, slotIndex: slotIndex)
+                            }
                             bandActivityRow(row)
-                                .id(row.id)
-                                .onTapGesture(count: 2) {
-                                    engine.answerCallsign(row)
-                                }
+                                .onTapGesture(count: 2) { engine.answerCallsign(row) }
                                 .contextMenu {
-                                    Button("Reply to \(row.callerCall ?? "Station")") {
-                                        engine.answerCallsign(row)
-                                    }
+                                    Button("Reply to \(row.callerCall ?? "Station")") { engine.answerCallsign(row) }
                                     Button("Set RX Frequency to \(Int(row.audioFrequencyHz)) Hz") {
                                         engine.rxAudioFrequencyHz = row.audioFrequencyHz
                                     }
@@ -1907,6 +2064,27 @@ struct FT8StationView: View {
                 }
             }
         }
+    }
+
+    private func cycleDivider(for row: FT8DecodedRow, slotIndex: Int) -> some View {
+        let latest = engine.latestCompletedSlotStart.map {
+            Int(($0.timeIntervalSince1970 / engine.slotDuration).rounded(.down))
+        } ?? slotIndex
+        let age = max(0, latest - slotIndex)
+        let title = age == 0 ? "Latest cycle" : "\(age) cycle\(age == 1 ? "" : "s") ago"
+        return HStack(spacing: 8) {
+            Text("\(title) · \(Self.localTimeFormatter.string(from: row.slotStart))")
+                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                .foregroundStyle(.cyan)
+                .fixedSize(horizontal: true, vertical: false)
+            Rectangle()
+                .fill(LinearGradient(colors: [.cyan.opacity(0.8), .cyan.opacity(0.04)], startPoint: .leading, endPoint: .trailing))
+                .frame(height: 1)
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 20)
+        .background(Color.cyan.opacity(0.07))
+        .accessibilityLabel("\(title), \(Self.localTimeFormatter.string(from: row.slotStart))")
     }
 
     private func bandActivityRow(_ row: FT8DecodedRow) -> some View {
@@ -1987,11 +2165,12 @@ struct FT8StationView: View {
 
             HStack(spacing: 4) {
                 Text(row.countryFlag)
-                Text(row.countryName)
+                Text(row.loggedSubdivision.map { "\($0) · \(row.countryName)" } ?? row.countryName)
                     .lineLimit(1)
             }
             .font(.system(size: 10))
-            .frame(width: 110, alignment: .leading)
+            .frame(width: 130, alignment: .leading)
+            .help(row.loggedSubdivision.map { "\(row.countryName) · \($0) (state/province from your logbook)" } ?? row.countryName)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 3)
@@ -2104,7 +2283,7 @@ struct FT8StationView: View {
             } else {
                 ScrollView {
                     LazyVStack(spacing: 1) {
-                        ForEach(engine.qsoStreamItems) { item in
+                        ForEach(Array(engine.qsoStreamItems.reversed())) { item in
                             switch item {
                             case .rx(let row):
                                 HStack(spacing: 8) {
@@ -2334,6 +2513,36 @@ struct FT8StationView: View {
                     .frame(width: 34, alignment: .trailing)
             }
 
+            Button("TX audio \(Int(engine.txGain * 100))%") {
+                showTxDrivePopover.toggle()
+            }
+            .font(.system(size: 10, weight: .semibold))
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
+            .popover(isPresented: $showTxDrivePopover) {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Transmit audio drive")
+                        .font(.headline)
+                    Text("Lower this if the measured ALC is high. Changes apply to the next transmission.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Slider(value: Binding(
+                        get: { Double(engine.txGain) },
+                        set: { engine.txGain = Float($0) }
+                    ), in: 0.02...1.0)
+                    Text("\(Int(engine.txGain * 100))% drive · ALC now \(Int(engine.liveALC))%")
+                        .font(.caption.monospacedDigit())
+                    Divider()
+                    Toggle("Stop TX if SWR exceeds 2.5", isOn: $engine.stopTxOnHighSWR)
+                        .font(.caption)
+                    Text("Uses two consecutive loaded meter readings and disarms TX. Available with Icom LAN, Icom USB and Xiegu telemetry.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(16)
+                .frame(width: 320)
+            }
+
             // S-Meter / RX Signal Level
             HStack(spacing: 6) {
                 Text("SIG")
@@ -2390,6 +2599,7 @@ struct FT8StationView: View {
 
 struct FT8SpectrumWaterfallView: View {
     @ObservedObject var engine: FT8EngineService
+    @State private var cachedWaterfallImage: CGImage?
     var onSelectRxFrequency: (Float) -> Void
     var onSelectTxFrequency: (Float) -> Void
 
@@ -2425,6 +2635,10 @@ struct FT8SpectrumWaterfallView: View {
                         }
                     }
             )
+        }
+        .onAppear { cachedWaterfallImage = Self.createWaterfallImage(rows: engine.waterfallRows) }
+        .onChange(of: engine.waterfallRevision) { _, _ in
+            cachedWaterfallImage = Self.createWaterfallImage(rows: engine.waterfallRows)
         }
     }
 
@@ -2571,13 +2785,32 @@ struct FT8SpectrumWaterfallView: View {
         }
     }
 
-    // Waterfall Canvas - Ultra-low CPU bitmap rendering via CGImage (<2% CPU)
+    // Reuse the bitmap until the next spectrum row arrives. The slot clock and
+    // radio meters may refresh without rebuilding every historical pixel.
     private func waterfallCanvas(size: CGSize) -> some View {
         Canvas(opaque: true, rendersAsynchronously: true) { context, cSize in
             context.fill(Path(CGRect(origin: .zero, size: cSize)), with: .color(Color(red: 0.02, green: 0.03, blue: 0.06)))
 
-            if let cgImage = Self.createWaterfallImage(rows: engine.waterfallRows) {
+            if let cgImage = cachedWaterfallImage {
                 context.draw(Image(decorative: cgImage, scale: 1.0), in: CGRect(origin: .zero, size: cSize))
+            }
+
+            let rowCount = max(1, engine.waterfallRows.count)
+            for boundary in engine.waterfallCycleBoundaries where boundary < rowCount {
+                let y = CGFloat(boundary + 1) * cSize.height / CGFloat(rowCount)
+                var line = Path()
+                line.move(to: CGPoint(x: 0, y: y))
+                line.addLine(to: CGPoint(x: cSize.width, y: y))
+                context.stroke(line, with: .color(Color.cyan.opacity(0.24)), lineWidth: 5)
+                context.stroke(
+                    line,
+                    with: .linearGradient(
+                        Gradient(colors: [.cyan, .white, .cyan.opacity(0.65)]),
+                        startPoint: CGPoint(x: 0, y: y),
+                        endPoint: CGPoint(x: cSize.width, y: y)
+                    ),
+                    lineWidth: 1.5
+                )
             }
 
             // RX & TX vertical markers through waterfall
@@ -2607,7 +2840,8 @@ struct FT8SpectrumWaterfallView: View {
             let rowOffset = r * width
             let colCount = min(width, row.count)
             for c in 0..<colCount {
-                pixels[rowOffset + c] = waterfallRGB32(row[c])
+                let index = Int(min(255, max(0, row[c] * 255)))
+                pixels[rowOffset + c] = waterfallPalette[index]
             }
         }
 
@@ -2630,6 +2864,8 @@ struct FT8SpectrumWaterfallView: View {
             intent: .defaultIntent
         )
     }
+
+    private static let waterfallPalette = (0...255).map { waterfallRGB32(Float($0) / 255) }
 
     private static func waterfallRGB32(_ rawValue: Float) -> UInt32 {
         let v = min(1.0, max(0.0, rawValue))

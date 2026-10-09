@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.37.33 — 2026-10-09
+
+- Unify FT8 Station ribbon heights, keep SNR on one line, and show the newest RX stream entries first.
+- Add cycle separators, retention of 1–3 previous cycles, and a 24-cycle decode-count history.
+- Cache waterfall images and color lookup, filter Icom LAN audio to 12 kHz, and remove unused per-slot spectrum processing.
+- Add optional expanded decoding with three bounded timing alignments; this is not WSJT-X AP or successive signal cancellation.
+- Restore Icom TX audio gain control (remove the unintended 95% minimum), and add optional SWR protection using two distinct, fresh loaded readings above 2.5.
+- Clear worked-contact opportunities after logging; correct the overly broad SV2A/Mount Athos rule, resolve received calls through CTY, and display logged state/province where known.
+- Add current-band DX Cluster/Club Log reports with freshness filtering, and an operator-applied quiet TX offset suggestion from recent received spectrum energy.
+
 ## 1.37.32 — 2026-10-08
 
 - Reorganize FT8 Station controls into receive and transmit groups that wrap to fit the window.

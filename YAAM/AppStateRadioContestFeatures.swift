@@ -95,10 +95,21 @@ extension AppState {
 
         // Bridge FT8 Station Engine with AppState Logbook
         ft8Engine.logQSOHandler = { [weak self] call, grid, sent, rcvd, band, freq in
-            Task { @MainActor in
-                self?.logFT8StationQSO(call: call, grid: grid, sentRST: sent, rcvdRST: rcvd, band: band, freqMHz: freq)
-            }
+            self?.logFT8StationQSO(call: call, grid: grid, sentRST: sent, rcvdRST: rcvd, band: band, freqMHz: freq)
         }
+
+        $qsoRecords
+            .debounce(for: .milliseconds(300), scheduler: RunLoop.main)
+            .sink { [weak self] records in
+                var subdivisions: [String: String] = [:]
+                for record in records {
+                    let call = record["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+                    let state = record["STATE"].trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !call.isEmpty && !state.isEmpty { subdivisions[call] = state }
+                }
+                self?.ft8Engine.loggedSubdivisionForCall = { subdivisions[$0.uppercased()] }
+            }
+            .store(in: &operatorFeatureCancellables)
 
         // Bridge Digital Modem Engine (RTTY / PSK) with AppState Logbook
         digitalModemEngine.logQSOHandler = { [weak self] call, mode, sent, rcvd, freqHz, band in
@@ -110,10 +121,10 @@ extension AppState {
         ft8Engine.isCountryWorkedOnBand = { [weak self] country, band in
             guard let self else { return true }
             let targetBand = band.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-            let targetCountry = country.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            let targetCountry = canonicalCountryName(country).lowercased()
             return self.qsoRecords.contains { rec in
                 let recBand = (rec.fields["BAND"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-                let recCountry = (rec.fields["COUNTRY"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                let recCountry = canonicalCountryName(rec.fields["COUNTRY"] ?? "").lowercased()
                 return recBand == targetBand && recCountry == targetCountry
             }
         }
@@ -204,6 +215,7 @@ extension AppState {
 
         qsoRecords.append(newRecord)
         persistQuickLog(newRecord)
+        ft8Engine.rememberLoggedContact(cleanCall, grid: grid, band: band)
         ZeroClickCloudUploadDaemon.shared.dispatch(
             record: newRecord,
             stationID: activeStationProfileID?.uuidString,

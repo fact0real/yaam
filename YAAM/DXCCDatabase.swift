@@ -273,7 +273,6 @@ public enum DXCCDatabase {
         entry("SY", "Greece", "GR", "🇬🇷", "EU", 20, 28),
         entry("SV9", "Crete", "GR", "🇬🇷", "EU", 20, 28),
         entry("SV5", "Dodecanese", "GR", "🇬🇷", "EU", 20, 28),
-        entry("SV2A", "Mount Athos", "GR", "🇬🇷", "EU", 20, 28),
         entry("5B", "Cyprus", "CY", "🇨🇾", "AS", 20, 39),
         entry("C4", "Cyprus", "CY", "🇨🇾", "AS", 20, 39),
         entry("ZC4", "UK Sov. Bases Cyprus", "GB", "🇬🇧", "AS", 20, 39),
@@ -485,6 +484,12 @@ public enum DXCCDatabase {
                 return DXCCEntityInfo(entityName: cleanCountry, countryCode: "--", flagEmoji: countryToFlag(cleanCountry), continent: "??", cqZone: 0, ituZone: 0)
             }
             return DXCCEntityInfo(entityName: "Unknown", countryCode: "--", flagEmoji: "🌐", continent: "??", cqZone: 0, ituZone: 0)
+        }
+
+        // Mount Athos is an exact operating-call exception, not the SV2A
+        // prefix (SV2AOB and other SV2 calls are Greece).
+        if ["SV2RSG/A", "SV2ASP/A", "SV2ASP", "SV2ASP/P", "SV/A"].contains(clean) {
+            return DXCCEntityInfo(entityName: "Mount Athos", countryCode: "GR", flagEmoji: "🇬🇷", continent: "EU", cqZone: 20, ituZone: 28)
         }
 
         // Handle slash callsigns: e.g. Z6/OE1EMS, OE1EMS/Z6, W1AW/P, EA8/G4XYZ

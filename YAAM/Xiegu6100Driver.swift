@@ -79,6 +79,7 @@ public final class Xiegu6100Driver: ObservableObject {
     @Published public var sMeterValue: Double = 0.0 // 0 to 15 S-units (S9 = 9, >9 is +dB)
     @Published public var powerWatts: Int = 5        // 1W to 10W (QRP scale)
     @Published public var swr: Double = 1.0
+    private(set) var swrUpdatedAt: Date?
     @Published public var alcLevel: Double = 0.0
     @Published public var isTransmitting: Bool = false
     @Published public var lastMessage: String = "Ready to connect to Xiegu X6100"
@@ -564,6 +565,7 @@ public final class Xiegu6100Driver: ObservableObject {
                 } else if meterSub == 0x12 {
                     // SWR
                     self.swr = max(1.0, 1.0 + (rawVal / 255.0) * 4.0)
+                    self.swrUpdatedAt = Date()
                 } else if meterSub == 0x13 {
                     // ALC
                     self.alcLevel = (rawVal / 255.0) * 100.0

@@ -123,6 +123,7 @@ public final class IcomUSBRadioDriver: ObservableObject {
     @Published public var sMeterValue: Double = 0.0      // 0 to 15 S-units (S9 = 9, >9 is +dB)
     @Published public var rfPowerWatts: Double = 0.0     // 0 to 100 Watts
     @Published public var swr: Double = 1.0              // 1.0 to 3.0+
+    private(set) var swrUpdatedAt: Date?
     @Published public var alcLevel: Double = 0.0         // 0 to 100%
     @Published public var isTransmitting: Bool = false
     @Published public var lastMessage: String = "Ready to connect to Icom radio via USB"
@@ -650,6 +651,7 @@ public final class IcomUSBRadioDriver: ObservableObject {
                     swrCalc = 3.0 + Double(rawVal - 120) * 0.05
                 }
                 self.swr = round(swrCalc * 10) / 10.0
+                self.swrUpdatedAt = Date()
             case 0x13: // ALC
                 let alc = min(100.0, max(0.0, (Double(rawVal) / 120.0) * 100.0))
                 self.alcLevel = round(alc)
