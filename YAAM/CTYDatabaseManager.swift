@@ -358,16 +358,24 @@ public final class CTYDatabaseManager: ObservableObject {
             return exact
         }
 
+        // Maritime mobile (/MM) and aeronautical mobile (/AM) are in no DXCC entity.
+        if CallsignEntityRule.isOutsideAnyEntity(clean) {
+            return nil
+        }
+        // "F/EA3JIC/P" is read as "F/EA3JIC": a trailing indicator does not hide the visited prefix.
+        let operatingCall = CallsignEntityRule.withoutTrailingIndicators(clean)
+
         // 2. Handle guest operating prefix: e.g. VP8/G4XYZ or G4XYZ/VP8
         let targetPrefix: String
-        if clean.contains("/") {
-            let parts = clean.components(separatedBy: "/")
+        if operatingCall.contains("/") {
+            let parts = operatingCall.components(separatedBy: "/")
             if parts.count == 2 {
                 let firstPart = parts[0]
                 let lastPart = parts[1]
-                let portableSuffixes: Set<String> = ["P", "M", "MM", "AM", "QRP", "R", "B", "LGT", "LH", "J", "A", "FF", "POTA", "SOTA"]
+                let portableSuffixes = CallsignEntityRule.operatingIndicators
 
-                if !portableSuffixes.contains(firstPart) && firstPart.count <= lastPart.count {
+                // Operating indicators are written after the callsign, so a first part is always read as a prefix.
+                if firstPart.count <= lastPart.count {
                     targetPrefix = firstPart
                 } else if !portableSuffixes.contains(lastPart) && lastPart.count < firstPart.count {
                     targetPrefix = lastPart
@@ -375,10 +383,10 @@ public final class CTYDatabaseManager: ObservableObject {
                     targetPrefix = firstPart
                 }
             } else {
-                targetPrefix = clean
+                targetPrefix = operatingCall
             }
         } else {
-            targetPrefix = clean
+            targetPrefix = operatingCall
         }
 
         // 3. Longest prefix match: check from maxPrefixLength down to 1

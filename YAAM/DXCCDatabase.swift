@@ -492,16 +492,24 @@ public enum DXCCDatabase {
             return DXCCEntityInfo(entityName: "Mount Athos", countryCode: "GR", flagEmoji: "🇬🇷", continent: "EU", cqZone: 20, ituZone: 28)
         }
 
+        // Maritime mobile (/MM) and aeronautical mobile (/AM) are in no DXCC entity.
+        if CallsignEntityRule.isOutsideAnyEntity(clean) {
+            return DXCCEntityInfo(entityName: "Unknown", countryCode: "--", flagEmoji: "🌐", continent: "??", cqZone: 0, ituZone: 0)
+        }
+        // "F/EA3JIC/P" is read as "F/EA3JIC": a trailing indicator does not hide the visited prefix.
+        let operatingCall = CallsignEntityRule.withoutTrailingIndicators(clean)
+
         // Handle slash callsigns: e.g. Z6/OE1EMS, OE1EMS/Z6, W1AW/P, EA8/G4XYZ
-        if clean.contains("/") {
-            let parts = clean.components(separatedBy: "/")
+        if operatingCall.contains("/") {
+            let parts = operatingCall.components(separatedBy: "/")
             if parts.count == 2 {
                 let firstPart = parts[0]
                 let lastPart = parts[1]
-                let portableIndicators: Set<String> = ["P", "M", "MM", "AM", "QRP", "R", "B", "LGT", "LH", "J", "A", "FF", "POTA", "SOTA"]
+                let portableIndicators = CallsignEntityRule.operatingIndicators
 
-                // If first part is a guest operating DXCC prefix (e.g. Z6/OE1EMS, SV9/G4IRN, VP8/K1TTT):
-                if !portableIndicators.contains(firstPart) && firstPart.count <= lastPart.count {
+                // If first part is a guest operating DXCC prefix (e.g. Z6/OE1EMS, SV9/G4IRN, VP8/K1TTT, MM/EA3JIC).
+                // Operating indicators are written after the callsign, so a first part is always read as a prefix.
+                if firstPart.count <= lastPart.count {
                     for entry in entries {
                         if firstPart == entry.prefix || (firstPart.hasPrefix(entry.prefix) && firstPart.count <= entry.prefix.count + 2) {
                             return entry.entity
@@ -521,7 +529,7 @@ public enum DXCCDatabase {
         }
 
         // Strip portable indicators like /P, /M, /MM
-        let basePart = clean.components(separatedBy: "/").first { $0.count >= 3 } ?? clean
+        let basePart = operatingCall.components(separatedBy: "/").first { $0.count >= 3 } ?? operatingCall
 
         for entry in entries {
             if basePart.hasPrefix(entry.prefix) {
@@ -548,5 +556,38 @@ public enum DXCCDatabase {
         }
 
         return DXCCEntityInfo(entityName: "International", countryCode: "--", flagEmoji: "🌐", continent: "??", cqZone: 0, ituZone: 0)
+    }
+}
+
+// MARK: - How a callsign written with "/" is read before its entity is looked up
+// One rule for both resolvers (DXCCDatabase.resolve and CTYDatabaseManager.lookup), so they give the same answer.
+
+nonisolated enum CallsignEntityRule {
+    /// Indicators written after the callsign that say how or where the station operates. They are not part of the
+    /// callsign and they do not name a DXCC entity; a part written before the callsign is always a prefix.
+    static let operatingIndicators: Set<String> = ["P", "M", "MM", "AM", "QRP", "R", "B", "LGT", "LH", "J", "A", "FF", "POTA", "SOTA"]
+
+    /// Maritime mobile (/MM) and aeronautical mobile (/AM): the station is on a ship or an aircraft, not in the
+    /// country of its callsign, so it counts for no DXCC entity (ARRL DXCC rules; ADIF DXCC code 0, None).
+    static func isOutsideAnyEntity(_ callsign: String) -> Bool {
+        let parts = parts(of: callsign)
+        guard parts.count >= 2, let last = parts.last else { return false }
+        return last == "MM" || last == "AM"
+    }
+
+    /// With three or more parts, the trailing operating indicators are dropped, so the visited country's prefix
+    /// (written first, CEPT T/R 61-01, 2.3) still decides the entity: "F/EA3JIC/P" is read as "F/EA3JIC" and
+    /// "EA3JIC/EA6/P" as "EA3JIC/EA6". With one or two parts the callsign is returned unchanged.
+    static func withoutTrailingIndicators(_ callsign: String) -> String {
+        var parts = parts(of: callsign)
+        while parts.count >= 3, let last = parts.last, operatingIndicators.contains(last) {
+            parts.removeLast()
+        }
+        return parts.joined(separator: "/")
+    }
+
+    private static func parts(of callsign: String) -> [String] {
+        callsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            .components(separatedBy: "/")
     }
 }
