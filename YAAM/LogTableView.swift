@@ -447,6 +447,14 @@ struct LogTableView: View {
                             Label("Export Selected (\(appState.selectedRecordIDs.count)) to ADIF...", systemImage: "square.and.arrow.down")
                         }
 
+                        // Upload the selected QSOs not yet at each service switched on with credentials; no download.
+                        Button {
+                            Task { await appState.syncSelectedQSOs() }
+                        } label: {
+                            Label("Sync Selected (\(appState.selectedRecordIDs.count))", systemImage: "arrow.up.circle")
+                        }
+                        .disabled(appState.isProcessingQSLQueue || QSLSyncEngine.shared.isSyncing)
+
                         Divider()
 
                         Button(role: .destructive) {

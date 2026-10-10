@@ -114,6 +114,8 @@ nonisolated struct QSLUploadResult: Sendable {
     var accepted: Bool
     var authenticationFailure: Bool
     var message: String
+    /// True when the service already had every QSO of the batch (a QRZ duplicate).
+    var alreadyAtService = false
 }
 
 nonisolated enum QSLHubError: LocalizedError, Sendable {
@@ -152,9 +154,13 @@ actor QSLHubClient {
 
     func upload(provider: QSLProvider, adifRecords: [String], credentials: QSLServiceCredentials) async -> QSLUploadResult {
         do {
+            var alreadyAtService = false
+            var message = "Accepted by \(provider.title)"
             switch provider {
             case .qrz:
-                try await uploadQRZ(adifRecords, apiKey: credentials.qrzAPIKey)
+                let duplicates = try await uploadQRZ(adifRecords, apiKey: credentials.qrzAPIKey)
+                alreadyAtService = !adifRecords.isEmpty && duplicates == adifRecords.count
+                if alreadyAtService { message = "Already in \(provider.title)" }
             case .eqsl:
                 try await uploadEQSL(adifRecords, credentials: credentials)
             case .clubLog:
@@ -162,7 +168,13 @@ actor QSLHubClient {
             case .lotw:
                 try await uploadLoTW(adifRecords, credentials: credentials)
             }
-            return QSLUploadResult(provider: provider, accepted: true, authenticationFailure: false, message: "Accepted by \(provider.title)")
+            return QSLUploadResult(
+                provider: provider,
+                accepted: true,
+                authenticationFailure: false,
+                message: message,
+                alreadyAtService: alreadyAtService
+            )
         } catch let error as QSLHubError {
             return QSLUploadResult(
                 provider: provider,
@@ -286,13 +298,15 @@ actor QSLHubClient {
         }
     }
 
-    private func uploadQRZ(_ records: [String], apiKey: String) async throws {
+    /// Returns how many of the records QRZ already had (a duplicate reply counts as accepted).
+    private func uploadQRZ(_ records: [String], apiKey: String) async throws -> Int {
         guard !apiKey.isEmpty else { throw QSLHubError.missingCredential("QRZ Logbook API key") }
         guard let url = URL(string: "https://logbook.qrz.com/api") else {
             throw QSLHubError.invalidResponse("Invalid QRZ Logbook API endpoint.")
         }
 
         // QRZ's INSERT action accepts one ADIF record per request.
+        var duplicates = 0
         for adif in records {
             var request = URLRequest(url: url)
             request.httpMethod = "POST"
@@ -305,12 +319,13 @@ actor QSLHubClient {
             let (data, response) = try await session.data(for: request)
             let text = Self.responseText(data)
             try Self.requireHTTP(response, body: text)
-            let upper = text.uppercased()
-            guard upper.contains("RESULT=OK") else {
-                let auth = upper.contains("INVALID") || upper.contains("KEY") || upper.contains("AUTH")
-                throw QSLHubError.serviceRejected("QRZ rejected the upload: \(Self.concise(text))", authenticationFailure: auth)
+            let reply = QSLUploadStatus.qrzReply(text)
+            guard reply.accepted else {
+                throw QSLHubError.serviceRejected("QRZ rejected the upload: \(Self.concise(text))", authenticationFailure: reply.authenticationFailure)
             }
+            if reply.duplicate { duplicates += 1 }
         }
+        return duplicates
     }
 
     private func uploadEQSL(_ records: [String], credentials: QSLServiceCredentials) async throws {

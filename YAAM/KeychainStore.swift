@@ -643,16 +643,32 @@ nonisolated enum CredentialVault {
         return value
     }
 
+    /// When a credential was last saved: only the time, never the value. Sync queues again the uploads that a
+    /// service's rejected credentials blocked once they are saved again (AppState.qslCredentialsChangedAt).
+    static func changedAt(_ credential: SecureCredential) -> Date? {
+        UserDefaults.standard.object(forKey: changedAtKey(account: credential.rawValue)) as? Date
+    }
+
+    static func stationQRZAPIKeyChangedAt(profileID: UUID) -> Date? {
+        UserDefaults.standard.object(forKey: changedAtKey(account: stationQRZAccount(profileID: profileID))) as? Date
+    }
+
+    private static func changedAtKey(account: String) -> String { "credentialVault.changedAt." + account }
+
+    private static func markChanged(account: String) {
+        UserDefaults.standard.set(Date(), forKey: changedAtKey(account: account))
+    }
+
     @discardableResult
     static func set(_ value: String, for credential: SecureCredential) -> Bool {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
             let result = KeychainStore.delete(credential.rawValue)
-            if result { setPresence(false, account: credential.rawValue) }
+            if result { setPresence(false, account: credential.rawValue); markChanged(account: credential.rawValue) }
             return result
         }
         let result = KeychainStore.set(trimmed, for: credential.rawValue)
-        if result { setPresence(true, account: credential.rawValue) }
+        if result { setPresence(true, account: credential.rawValue); markChanged(account: credential.rawValue) }
         return result
     }
 
@@ -660,11 +676,11 @@ nonisolated enum CredentialVault {
     static func set(_ data: Data, for credential: SecureCredential) -> Bool {
         guard !data.isEmpty else {
             let result = KeychainStore.delete(credential.rawValue)
-            if result { setPresence(false, account: credential.rawValue) }
+            if result { setPresence(false, account: credential.rawValue); markChanged(account: credential.rawValue) }
             return result
         }
         let result = KeychainStore.set(data, for: credential.rawValue)
-        if result { setPresence(true, account: credential.rawValue) }
+        if result { setPresence(true, account: credential.rawValue); markChanged(account: credential.rawValue) }
         return result
     }
 
@@ -688,11 +704,11 @@ nonisolated enum CredentialVault {
         let account = stationQRZAccount(profileID: profileID)
         if trimmed.isEmpty {
             let result = KeychainStore.delete(account)
-            if result { setPresence(false, account: account) }
+            if result { setPresence(false, account: account); markChanged(account: account) }
             return result
         }
         let result = KeychainStore.set(trimmed, for: account)
-        if result { setPresence(true, account: account) }
+        if result { setPresence(true, account: account); markChanged(account: account) }
         return result
     }
 

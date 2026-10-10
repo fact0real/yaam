@@ -510,6 +510,8 @@ nonisolated struct ConfirmationMergeResult: Sendable {
     let lotwUnmatchedRecords: [[String: String]]
     let qrzUnmatchedRecords: [[String: String]]
     let changedRecordIDs: Set<UUID>
+    /// QSOs that only got QRZCOM_QSO_DOWNLOAD_STATUS=Y: saved, but not counted as changed or newly confirmed.
+    let fieldOnlyRecordIDs: Set<UUID>
 }
 
 nonisolated enum ConfirmationMergeEngine {
@@ -524,6 +526,7 @@ nonisolated enum ConfirmationMergeEngine {
         var output = localRecords
         let index = Dictionary(grouping: output.indices, by: { baseKey(output[$0].fields) })
         var changedIDs = Set<UUID>()
+        var fieldOnlyIDs = Set<UUID>()
         var lotwChanged = 0
         var qrzChanged = 0
         var lotwMatched = 0
@@ -563,12 +566,17 @@ nonisolated enum ConfirmationMergeEngine {
             changed = set("QRZLOG_QSL_RCVD", to: "Y", in: &output[target]) || changed
             changed = set("QSL_RCVD", to: "Y", in: &output[target]) || changed
             changed = set("APP_QRZLOG_STATUS", to: "C", in: &output[target]) || changed
+            // The ADIF field for "downloaded from QRZ", so other programs know the QSO is in the QRZ logbook. It is
+            // not a confirmation, so writing it alone does not count the QSO as changed or newly confirmed.
+            let markedDownloaded = set("QRZCOM_QSO_DOWNLOAD_STATUS", to: "Y", in: &output[target])
             if let date = confirmationDate(incoming, provider: .qrz) {
                 changed = set("APP_QRZLOG_QSLDATE", to: date, in: &output[target]) || changed
             }
             if changed {
                 qrzChanged += 1
                 changedIDs.insert(output[target].id)
+            } else if markedDownloaded {
+                fieldOnlyIDs.insert(output[target].id)
             }
         }
 
@@ -582,7 +590,8 @@ nonisolated enum ConfirmationMergeEngine {
             qrzUnmatched: qrzUnmatchedRecords.count,
             lotwUnmatchedRecords: lotwUnmatchedRecords,
             qrzUnmatchedRecords: qrzUnmatchedRecords,
-            changedRecordIDs: changedIDs
+            changedRecordIDs: changedIDs,
+            fieldOnlyRecordIDs: fieldOnlyIDs
         )
     }
 
@@ -908,6 +917,7 @@ extension AppState {
 
             var importedConfirmedRecords = 0
             let hasMergeChanges = !mergeResult.changedRecordIDs.isEmpty
+                || !mergeResult.fieldOnlyRecordIDs.isEmpty
                 || !mergeResult.lotwUnmatchedRecords.isEmpty
                 || !mergeResult.qrzUnmatchedRecords.isEmpty
             if hasMergeChanges {
@@ -1117,6 +1127,7 @@ extension AppState {
                 case .qrz:
                     fields["QRZLOG_QSL_RCVD"] = "Y"
                     fields["APP_QRZLOG_STATUS"] = "C"
+                    fields["QRZCOM_QSO_DOWNLOAD_STATUS"] = "Y"
                 default:
                     break
                 }
@@ -1133,7 +1144,8 @@ extension AppState {
 
         if added > 0 {
             qsoRecords = excludingSelfContacts(workingRecords)
-            let remoteHeaders = ["LOTW_QSL_RCVD", "QRZLOG_QSL_RCVD", "QSL_RCVD", "APP_YAAM_REMOTE_CONFIRMATION_IMPORTED"]
+            let remoteHeaders = ["LOTW_QSL_RCVD", "QRZLOG_QSL_RCVD", "QSL_RCVD", "APP_YAAM_REMOTE_CONFIRMATION_IMPORTED",
+                                 "QRZCOM_QSO_DOWNLOAD_STATUS"]
             let missingHeaders = remoteHeaders.filter { !tableHeaders.contains($0) }
             if !missingHeaders.isEmpty {
                 tableHeaders.append(contentsOf: missingHeaders)

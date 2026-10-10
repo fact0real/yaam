@@ -99,11 +99,22 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
     @AppStorage("lotwStationLocation") public var lotwStationLocation: String = ""
     @AppStorage("autoCommitWSJTX") public var autoCommitWSJTX: Bool = true
 
+    /// Called with the services that accepted a QSO (QRZ, Club Log, eQSL, LoTW; Wavelog has no QSL Hub service),
+    /// so that AppState marks the QSO as sent there, as the QSL Hub does. Without it, Sync All would upload again
+    /// every QSO this daemon already uploaded.
+    var onServiceAccepted: (@MainActor (QSORecordModel, [String]) -> Void)?
+
+    /// Asked before the outbox sends a QSO again to a service: true when the QSO is already there (for example, a Sync
+    /// sent it meanwhile), and then that service is dropped from the item instead of being sent twice.
+    var isAlreadyAtService: (@MainActor (QSORecordModel, String) -> Bool)?
+
     // Real-Time Live Status
     @Published public var lastUploadStatus: String = ""
     @Published public var lastUploadLatencyMs: Int = 0
     @Published public var showToast: Bool = false
-    @Published public var isUploading: Bool = false
+    /// Uploads in flight: dispatch starts one task per QSO, and they overlap, so this is a count, not a flag.
+    @Published public private(set) var activeUploads = 0
+    public var isUploading: Bool { activeUploads > 0 }
     @Published public var isFlushingQueue: Bool = false
     @Published public var isNetworkConnected: Bool = true
     @Published public var pendingQueueCount: Int = 0
@@ -515,8 +526,8 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
         }
         guard !eligibleServices.isEmpty else { return }
         let startTime = Date()
-        isUploading = true
-        defer { isUploading = false }
+        activeUploads += 1
+        defer { activeUploads -= 1 }
 
         var successfulServices: [String] = []
         var networkFailedServices: [String] = []
@@ -595,6 +606,9 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
                 configErrors.append("LoTW: \(lotwOutcome.message)")
             }
         }
+
+        // Mark the QSO as sent to each service that accepted it.
+        if !successfulServices.isEmpty { onServiceAccepted?(record, successfulServices) }
 
         let latency = Int(Date().timeIntervalSince(startTime) * 1000)
         self.lastUploadLatencyMs = latency
@@ -730,6 +744,7 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
             if !manualRetry && Date().timeIntervalSince(item.enqueuedAt) > maxAutomaticRetryAge { continue }
             let record = QSORecordModel(fields: item.recordFields)
             var servicesToRemove: [String] = []
+            var acceptedServices: [String] = []
             var pausedServices = Set(item.pausedServices ?? [])
             var attempted = false
 
@@ -737,6 +752,11 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
                 if !CredentialVault.isVaultSessionUnlocked { break }
                 if !enabledServices().contains(service) { continue }
                 if unavailableServices.contains(service) || (!manualRetry && pausedServices.contains(service)) { continue }
+                if isAlreadyAtService?(record, service) == true {
+                    servicesToRemove.append(service)
+                    pausedServices.remove(service)
+                    continue
+                }
                 var success = false
                 var networkFailure = false
                 attempted = true
@@ -777,6 +797,7 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
                 }
 
                 if success {
+                    acceptedServices.append(service)
                     servicesToRemove.append(service)
                     pausedServices.remove(service)
                     uploadedItemIDs.insert(item.id)
@@ -792,6 +813,8 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
                 }
             }
 
+            // The outbox record has a new id; AppState finds the QSO by its key.
+            if !acceptedServices.isEmpty { onServiceAccepted?(record, acceptedServices) }
             item.pendingServices.removeAll { servicesToRemove.contains($0) }
             item.pausedServices = Array(pausedServices)
             if attempted {
@@ -889,10 +912,9 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
                 return (false, Self.httpFailureMessage(response))
             }
             let responseText = String(data: data, encoding: .utf8) ?? ""
-            if responseText.contains("RESULT=OK") {
-                return (true, "OK")
-            } else if responseText.contains("DUPLICATE") {
-                return (true, "Already in log")
+            let reply = QSLUploadStatus.qrzReply(responseText)
+            if reply.accepted {
+                return (true, reply.duplicate ? "Already in log" : "OK")
             } else {
                 let reason = extractQRZReason(from: responseText)
                 return (false, reason)
@@ -995,8 +1017,8 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
         for (key, val) in normalizedFields {
             let cleanVal = val.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !cleanVal.isEmpty else { continue }
-            // Filter non-standard internal fields
-            if key.starts(with: "APP_YAAM_") { continue }
+            // Filter non-standard internal fields and local paths
+            if QSLUploadStatus.isLocalOnly(key) { continue }
             if key == "COMMENT" {
                 let sanitized = QSOMetadataFormatter.cleanComment(cleanVal)
                 guard !sanitized.isEmpty else { continue }

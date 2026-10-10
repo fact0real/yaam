@@ -185,7 +185,7 @@ public struct QSLHubStudioView: View {
             Button {
                 Task {
                     await syncEngine.syncAllServices(appState: appState)
-                    showToast("One-Click Sync Complete!")
+                    showToast(syncEngine.lastRunSummary)
                 }
             } label: {
                 HStack(spacing: 6) {
@@ -194,7 +194,7 @@ public struct QSLHubStudioView: View {
                     } else {
                         Image(systemName: "bolt.horizontal.fill")
                     }
-                    Text(syncEngine.isSyncing ? "Syncing..." : "Sync Confirmations")
+                    Text(syncEngine.isSyncing ? "Syncing..." : "Sync All")
                         .fontWeight(.bold)
                 }
                 .padding(.horizontal, 12)
@@ -204,13 +204,18 @@ public struct QSLHubStudioView: View {
             }
             .buttonStyle(.plain)
             .disabled(syncEngine.isSyncing || appState.isUnifiedSyncRunning || appState.isSyncingAPI)
-            .help("Synchronize LoTW, eQSL.cc, QRZ, and Club Log in parallel")
+            .help("Upload the QSOs not yet at each service switched on in the Station Workspace with its upload credentials set, then download LoTW, QRZ and eQSL.cc confirmations and Club Log's LoTW state")
 
             Menu {
                 Button("Sync LoTW Only") { appState.runSync(.lotw) }
                     .disabled(syncEngine.isSyncing || appState.isUnifiedSyncRunning || appState.isSyncingAPI)
                 Button("Sync QRZ Only") { appState.runSync(.qrz) }
                     .disabled(syncEngine.isSyncing || appState.isUnifiedSyncRunning || appState.isSyncingAPI)
+                Button("Retry Failed Uploads") {
+                    appState.retryQSLFailures()
+                    Task { await appState.processQSLQueue() }
+                }
+                .disabled(syncEngine.isSyncing || appState.isProcessingQSLQueue)
                 Divider()
                 Button("Automatic Schedule & Log Sources…") { appState.openOperatorDesk(.logSources) }
                 Button("Labels & Printing…") { appState.openOperatorDesk(.qslLabels) }

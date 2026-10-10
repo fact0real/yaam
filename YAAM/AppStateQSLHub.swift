@@ -9,6 +9,14 @@ import UniformTypeIdentifiers
 
 extension AppState {
     func loadQSLHubState() {
+        let daemon = ZeroClickCloudUploadDaemon.shared
+        daemon.onServiceAccepted = { [weak self] record, services in
+            self?.markZeroClickUploads(record, services: services)
+        }
+        daemon.isAlreadyAtService = { [weak self] record, service in
+            self?.isZeroClickQSOAlreadyAtService(record, service: service) ?? false
+        }
+        addStandardClubLogStatus()
         guard let profileID = activeStationProfileID, let database = logbookDatabase else {
             qslQueueJobs = []
             awardClaims = []
@@ -26,6 +34,7 @@ extension AppState {
                 recovered.append(qslQueueJobs[index])
             }
             try database.saveQSLJobs(recovered)
+            restoreLostQSLMarks()
             awardClaims = try database.loadAwardClaims(profileID: profileID)
             refreshAwardProgress()
             qslHubStatus = qslQueueJobs.contains(where: { $0.state.isPending })
@@ -78,7 +87,15 @@ extension AppState {
         }
     }
 
-    func enqueueQSL(records: [QSORecordModel], providers: Set<QSLProvider>) {
+    /// Queues the QSOs that are not at each service yet (QSLSyncAll.plannedUploads). `retryStopped` lets a click on a
+    /// QSO's own Upload button queue again a stopped job (blocked, or failed five times); Sync All and Sync Selected
+    /// do not, except for the blocked jobs in `unblockedKeys`, whose service's credentials changed since.
+    func enqueueQSL(
+        records: [QSORecordModel],
+        providers: Set<QSLProvider>,
+        retryStopped: Bool = true,
+        unblockedKeys: Set<String> = []
+    ) {
         guard let profileID = activeStationProfileID, let database = logbookDatabase else {
             qslHubStatus = "Choose an active station first"
             return
@@ -91,21 +108,28 @@ extension AppState {
         var added = 0
         var changedJobs: [QSLQueueJob] = []
         var existingByKey: [String: QSLQueueJob] = [:]
-        for job in qslQueueJobs { existingByKey["\(job.qsoID.uuidString)|\(job.provider.rawValue)"] = job }
-        for record in records {
-            for provider in providers {
-                let alreadySent = ["Y", "V", "C", "CONFIRMED"].contains(record[provider.sentField].uppercased())
-                let key = "\(record.id.uuidString)|\(provider.rawValue)"
-                let existing = existingByKey[key]
-                if alreadySent || existing?.state == .succeeded { continue }
-
-                var job = existing ?? QSLQueueJob(
+        for job in qslQueueJobs { existingByKey[QSLSyncAll.jobKey(job.qsoID, job.provider)] = job }
+        var jobStates = existingByKey.mapValues(\.state)
+        for key in unblockedKeys where jobStates[key] == .blocked { jobStates[key] = .retry }
+        let plan = QSLSyncAll.plannedUploads(
+            records: records.map { (id: $0.id, fields: $0.fields) },
+            providers: providers,
+            jobStates: jobStates,
+            retryStopped: retryStopped
+        )
+        let fieldsByID = Dictionary(records.map { ($0.id, $0.fields) }, uniquingKeysWith: { first, _ in first })
+        for provider in QSLProvider.allCases {
+            for qsoID in plan[provider] ?? [] {
+                guard let fields = fieldsByID[qsoID] else { continue }
+                let key = QSLSyncAll.jobKey(qsoID, provider)
+                let adif = QSLUploadStatus.uploadADIF(fields)
+                var job = existingByKey[key] ?? QSLQueueJob(
                     stationProfileID: profileID,
-                    qsoID: record.id,
+                    qsoID: qsoID,
                     provider: provider,
-                    adif: qslADIFRecord(record.fields)
+                    adif: adif
                 )
-                job.adif = qslADIFRecord(record.fields)
+                job.adif = adif
                 job.state = .queued
                 job.nextAttemptAt = nil
                 job.message = "Waiting"
@@ -137,51 +161,193 @@ extension AppState {
         Task { @MainActor in await self.processQSLQueue() }
     }
 
-    @MainActor
-    func processQSLQueue() async {
-        guard !isProcessingQSLQueue, let database = logbookDatabase else { return }
-        let due = qslQueueJobs.filter {
-            ($0.state == .queued || $0.state == .retry) && ($0.nextAttemptAt == nil || $0.nextAttemptAt! <= Date())
+    /// R16: why the upload part of a Sync cannot work on the open log, or nil when the station's own log is open.
+    var qslOwnLogProblem: String? {
+        if QSLSyncAll.isOwnLog(isMasterMode: isMasterMode, loadedProfileID: loadedWorkspaceProfileID, activeProfileID: activeStationProfileID) {
+            return nil
         }
+        return isMasterMode ? "the station's log is not loaded from its database" : "a Guest Log is open; open the master log"
+    }
+
+    var isOwnStationLogOpen: Bool { qslOwnLogProblem == nil }
+
+    /// The services whose upload credentials are set, with TQSL looked up for LoTW (QSLSyncAll.configuredProviders).
+    func qslConfiguredProvidersForSync() -> Set<QSLProvider> {
+        let credentials = qslServiceCredentials(for: Set(QSLProvider.allCases))
+        var tqslFound = false
+        if let resolved = TQSLCoordinator.resolveBinaryPath(
+            customPath: credentials.tqslExecutablePath,
+            securityBookmark: credentials.tqslBookmarkData
+        ) {
+            resolved.scopedURL?.stopAccessingSecurityScopedResource()
+            tqslFound = true
+        }
+        return QSLSyncAll.configuredProviders(credentials, tqslFound: tqslFound)
+    }
+
+    /// When each service's secret credentials were last saved (CredentialVault.changedAt), so that Sync queues again
+    /// the jobs they blocked. LoTW jobs are never blocked: a TQSL failure is not a credential rejection.
+    func qslCredentialsChangedAt() -> [QSLProvider: Date] {
+        var dates: [QSLProvider: Date] = [:]
+        let qrz = [CredentialVault.changedAt(.qrzAPIKey),
+                   activeStationProfileID.flatMap { CredentialVault.stationQRZAPIKeyChangedAt(profileID: $0) }]
+        if let latest = qrz.compactMap({ $0 }).max() { dates[.qrz] = latest }
+        if let date = CredentialVault.changedAt(.eqslPassword) { dates[.eqsl] = date }
+        let clubLog = [CredentialVault.changedAt(.clubLogPassword), CredentialVault.changedAt(.clubLogAPIKey)]
+        if let latest = clubLog.compactMap({ $0 }).max() { dates[.clubLog] = latest }
+        return dates
+    }
+
+    /// The upload part of Sync All (every QSO) and of Sync Selected (`selectedIDs`), on the station's own log only.
+    /// The services are those switched on in the Station Workspace with their upload credentials set; for each, the
+    /// QSOs not at the service yet go to the queue, and the queue sends them, those services and QSOs only. The
+    /// summaries also count the QSOs already there and the jobs left stopped by an earlier run. One upload at a time:
+    /// when the queue is already busy, nothing is done and the result says so.
+    @MainActor
+    func uploadNeverSentQSOs(selectedIDs: Set<UUID>? = nil) async -> QSLSyncUploadRun {
+        guard !isProcessingQSLQueue else { return QSLSyncUploadRun(busy: true) }
+        var run = QSLSyncUploadRun()
+        if let problem = qslOwnLogProblem {
+            for provider in QSLProvider.allCases { run.notChecked[provider] = problem }
+            return run
+        }
+        if addStandardClubLogStatus() > 0 { autoSaveActiveWorkspace() }
+        let vaultLocked = !CredentialVault.isVaultSessionUnlocked
+        let configured = qslConfiguredProvidersForSync()
+        let switchedOn = QSLSyncAll.switchedOn(stored: UserDefaults.standard.string(forKey: "stationWorkspace.enabledProviders"))
+        for provider in QSLProvider.allCases {
+            if let reason = QSLSyncAll.notChecked(provider, configured: configured, switchedOn: switchedOn, vaultLocked: vaultLocked) {
+                run.notChecked[provider] = reason
+            }
+        }
+        let providers = vaultLocked ? Set<QSLProvider>() : configured.intersection(switchedOn)
+        let chosenFields = QSLSyncAll.recordsToSync(all: qsoRecords.map { (id: $0.id, fields: $0.fields) }, selectedIDs: selectedIDs)
+        guard !providers.isEmpty, !chosenFields.isEmpty else { return run }
+        let chosenIDs = Set(chosenFields.map(\.id))
+        let fieldsByID = Dictionary(chosenFields.map { ($0.id, $0.fields) }, uniquingKeysWith: { first, _ in first })
+        let alreadyThere = QSLSyncAll.alreadyThereCounts(records: chosenFields, providers: providers)
+        let unblocked = QSLSyncAll.unblockedJobKeys(qslQueueJobs, credentialsChangedAt: qslCredentialsChangedAt())
+        let leftover = QSLSyncAll.leftoverStopped(jobs: qslQueueJobs, fieldsByID: fieldsByID, providers: providers, unblocked: unblocked)
+        enqueueQSL(records: qsoRecords.filter { chosenIDs.contains($0.id) }, providers: providers, retryStopped: false, unblockedKeys: unblocked)
+        let summaries = await processQSLQueue(providers: providers, qsoIDs: selectedIDs == nil ? nil : chosenIDs, countAlreadyThere: false)
+        run.summaries = QSLSyncReport.withPriorState(summaries, providers: providers, alreadyThere: alreadyThere, leftover: leftover)
+        return run
+    }
+
+    /// Sync Selected, from the log table's selection menu: the upload part of Sync All for the selected QSOs only,
+    /// with the same rule and services. Nothing is downloaded. When another sync or upload is running (the Zero-Click
+    /// daemon's included), or a log is loading, nothing is done and the QSL Hub status says so.
+    @MainActor
+    func syncSelectedQSOs() async {
+        let engine = QSLSyncEngine.shared
+        let daemon = ZeroClickCloudUploadDaemon.shared
+        guard !engine.isSyncing, !isUnifiedSyncRunning, !isSyncingAPI, !isProcessingQSLQueue, !isLoading,
+              !daemon.isUploading, !daemon.isFlushingQueue else {
+            qslHubStatus = "Another sync or upload is running; Sync Selected did nothing"
+            engine.appendLog(level: .warning, service: "Sync Selected", message: "⚠️ \(qslHubStatus)")
+            playActivitySound(.notice)
+            return
+        }
+        if let problem = qslOwnLogProblem {
+            qslHubStatus = "Sync Selected did nothing: \(problem)"
+            engine.appendLog(level: .warning, service: "Sync Selected", message: "⚠️ \(qslHubStatus)")
+            playActivitySound(.notice)
+            return
+        }
+        let selectedIDs = selectedRecordIDs
+        guard !selectedIDs.isEmpty else { return }
+        let run = await uploadNeverSentQSOs(selectedIDs: selectedIDs)
+        for line in QSLSyncReport.lines(run) {
+            engine.appendLog(level: line.problem ? .warning : .info, service: "Sync Selected", message: line.text)
+        }
+        qslHubStatus = "Sync Selected (\(selectedIDs.count)): " + QSLSyncReport.status(run)
+        appendLog(qslHubStatus)
+    }
+
+    /// Sends the due jobs, all of them or only those of some services and QSOs. At the start of the run each job is
+    /// looked at again with its QSO as it is then (QSLSyncAll.review); each service runs as one QSLProviderPass, with
+    /// the jobs that never failed first (QSLSyncAll.passOrder), and stops after two failures in a row or one clear
+    /// credential rejection. Returns one summary per service, for the report.
+    @MainActor
+    @discardableResult
+    func processQSLQueue(
+        providers: Set<QSLProvider>? = nil,
+        qsoIDs: Set<UUID>? = nil,
+        countAlreadyThere: Bool = true
+    ) async -> [QSLPassSummary] {
+        guard !isProcessingQSLQueue, let database = logbookDatabase else { return [] }
+        // R16: with a Guest Log open, the station's jobs are not for these QSOs: nothing is sent and nothing dropped.
+        if let problem = qslOwnLogProblem {
+            qslHubStatus = "Nothing uploaded: \(problem)"
+            return []
+        }
+        let due = QSLSyncAll.dueJobs(qslQueueJobs, now: Date(), providers: providers, qsoIDs: qsoIDs)
         guard !due.isEmpty else {
             qslHubStatus = "No uploads are due"
-            return
+            return []
         }
 
         isProcessingQSLQueue = true
-        qslHubStatus = "Uploading \(due.count) item(s)..."
-        let credentials = qslServiceCredentials(for: Set(due.map(\.provider)))
-        var didUpdateRecords = false
-
-        for provider in QSLProvider.allCases {
-            let providerJobs = due.filter { $0.provider == provider }
-            guard !providerJobs.isEmpty else { continue }
-            updateQSLJobs(providerJobs, state: .uploading, message: "Contacting \(provider.title)", database: database)
-
-            let batchSize = provider == .qrz ? 1 : 200
-            for batchStart in stride(from: 0, to: providerJobs.count, by: batchSize) {
-                let end = min(providerJobs.count, batchStart + batchSize)
-                let batch = Array(providerJobs[batchStart..<end])
-                let result = await qslHubClient.upload(provider: provider, adifRecords: batch.map(\.adif), credentials: credentials)
-                if result.accepted {
-                    for original in batch {
-                        completeQSLJob(original, result: result, database: database)
-                        markQSO(original.qsoID, sentTo: provider)
-                    }
-                    didUpdateRecords = true
-                } else {
-                    for original in batch { failQSLJob(original, result: result, database: database) }
-                }
+        let now = Date()
+        let fieldsByID = Dictionary(qsoRecords.map { ($0.id, $0.fields) }, uniquingKeysWith: { first, _ in first })
+        var gone: [QSLQueueJob] = []
+        var alreadyThere: [QSLQueueJob] = []
+        var toSend: [QSLQueueJob] = []
+        for original in due {
+            var job = original
+            job.updatedAt = now
+            switch QSLSyncAll.review(job, currentFields: fieldsByID[job.qsoID]) {
+            case .qsoGone:
+                gone.append(job)
+            case .alreadyThere:
+                job.state = .succeeded
+                job.nextAttemptAt = nil
+                job.message = "Already at the service"
+                alreadyThere.append(job)
+            case .send(let adif):
+                job.adif = adif
+                job.state = .uploading
+                job.message = "Contacting \(job.provider.title)"
+                toSend.append(job)
             }
         }
+        if !gone.isEmpty {
+            try? database.deleteQSLJobs(gone)
+            let goneIDs = Set(gone.map(\.id))
+            qslQueueJobs.removeAll { goneIDs.contains($0.id) }
+        }
+        var positions = QSLRunPositions(jobs: qslQueueJobs, records: qsoRecords)
+        _ = applyQSLJobUpdates((alreadyThere + toSend).map { QSLJobUpdate(job: $0, markSent: false) }, positions: &positions, database: database)
 
-        if didUpdateRecords { autoSaveActiveWorkspace() }
+        qslHubStatus = "Uploading \(toSend.count) item(s)..."
+        let credentials = qslServiceCredentials(for: Set(toSend.map(\.provider)))
+        var summaries: [QSLPassSummary] = []
+        var markedSinceSave = 0
+        for provider in QSLProvider.allCases {
+            let jobs = QSLSyncAll.passOrder(toSend.filter { $0.provider == provider })
+            let already = countAlreadyThere ? alreadyThere.filter { $0.provider == provider }.count : 0
+            guard !jobs.isEmpty || already > 0 else { continue }
+            var pass = QSLProviderPass(provider: provider, jobs: jobs, alreadyThere: already)
+            while let batch = pass.nextBatch() {
+                let result = await qslHubClient.upload(provider: provider, adifRecords: batch.map(\.adif), credentials: credentials)
+                let updates = pass.record(QSLBatchOutcome(result), for: batch, now: Date())
+                markedSinceSave += applyQSLJobUpdates(updates, positions: &positions, database: database)
+                // Long runs (QRZ takes one QSO per request) save the marks as they go, into the station's own log only.
+                if markedSinceSave >= 200 {
+                    if isOwnStationLogOpen { autoSaveActiveWorkspace() }
+                    markedSinceSave = 0
+                }
+            }
+            _ = applyQSLJobUpdates(pass.finish(now: Date()), positions: &positions, database: database)
+            summaries.append(pass.summary)
+        }
+
+        if markedSinceSave > 0, isOwnStationLogOpen { autoSaveActiveWorkspace() }
         isProcessingQSLQueue = false
-        let pending = qslQueueJobs.filter { $0.state.isPending }.count
-        let blocked = qslQueueJobs.filter { $0.state == .blocked }.count
-        qslHubStatus = pending > 0 ? "\(pending) waiting · \(blocked) blocked" : "QSL uploads complete"
+        qslHubStatus = QSLSyncReport.status(QSLSyncUploadRun(summaries: summaries))
         refreshAwardProgress()
-        playActivitySound(blocked > 0 ? .notice : .success)
+        playActivitySound(summaries.contains(where: \.hasProblems) ? .notice : .success)
+        return summaries
     }
 
     func retryQSLFailures() {
@@ -340,60 +506,120 @@ extension AppState {
         )
     }
 
-    private func updateQSLJobs(_ jobs: [QSLQueueJob], state: QSLQueueState, message: String, database: LogbookDatabase) {
-        for job in jobs {
-            guard let index = qslQueueJobs.firstIndex(where: { $0.qsoID == job.qsoID && $0.provider == job.provider }) else { continue }
-            qslQueueJobs[index].state = state
-            qslQueueJobs[index].message = message
-            qslQueueJobs[index].updatedAt = Date()
-            try? database.saveQSLJob(qslQueueJobs[index])
+    /// Writes a batch of job updates (one database transaction) and marks the accepted QSOs, changing qsoRecords
+    /// once per batch. Returns how many QSOs were marked.
+    @MainActor
+    private func applyQSLJobUpdates(_ updates: [QSLJobUpdate], positions: inout QSLRunPositions, database: LogbookDatabase) -> Int {
+        guard !updates.isEmpty else { return 0 }
+        var jobs = qslQueueJobs
+        for update in updates {
+            if let index = positions.job(update.job.id, in: jobs) { jobs[index] = update.job }
         }
+        qslQueueJobs = jobs
+        try? database.saveQSLJobs(updates.map(\.job))
+
+        let marked = updates.filter(\.markSent)
+        guard !marked.isEmpty else { return 0 }
+        let date = Self.qslDateString(Date())
+        var records = qsoRecords
+        var count = 0
+        var lost: [UUID: [QSLLostMark]] = [:]
+        for update in marked {
+            // The QSO is not in the open log (it changed during the upload): the mark is saved for later.
+            guard let index = positions.record(update.job.qsoID, in: records) else {
+                lost[update.job.stationProfileID, default: []].append(
+                    QSLLostMark(qsoID: update.job.qsoID, provider: update.job.provider, date: Self.qslDateString(update.job.updatedAt))
+                )
+                continue
+            }
+            for (field, value) in QSLUploadStatus.acceptedFields(for: update.job.provider, date: date) {
+                records[index].fields[field] = value
+                if !tableHeaders.contains(field) { tableHeaders.append(field) }
+            }
+            count += 1
+        }
+        if count > 0 { qsoRecords = records }
+        for (profileID, marks) in lost { QSLLostMarkStore.standard.append(marks, profileID: profileID) }
+        return count
     }
 
-    private func completeQSLJob(_ job: QSLQueueJob, result: QSLUploadResult, database: LogbookDatabase) {
-        guard let index = qslQueueJobs.firstIndex(where: { $0.qsoID == job.qsoID && $0.provider == job.provider }) else { return }
-        qslQueueJobs[index].state = .succeeded
-        qslQueueJobs[index].attempts += 1
-        qslQueueJobs[index].nextAttemptAt = nil
-        qslQueueJobs[index].message = result.message
-        qslQueueJobs[index].updatedAt = Date()
-        try? database.saveQSLJob(qslQueueJobs[index])
-    }
-
-    private func failQSLJob(_ job: QSLQueueJob, result: QSLUploadResult, database: LogbookDatabase) {
-        guard let index = qslQueueJobs.firstIndex(where: { $0.qsoID == job.qsoID && $0.provider == job.provider }) else { return }
-        qslQueueJobs[index].attempts += 1
-        if result.authenticationFailure {
-            qslQueueJobs[index].state = .blocked
-            qslQueueJobs[index].nextAttemptAt = nil
-        } else if qslQueueJobs[index].attempts >= 5 {
-            qslQueueJobs[index].state = .failed
-            qslQueueJobs[index].nextAttemptAt = nil
-        } else {
-            qslQueueJobs[index].state = .retry
-            let delay = min(3_600.0, pow(2.0, Double(qslQueueJobs[index].attempts)) * 30.0)
-            qslQueueJobs[index].nextAttemptAt = Date().addingTimeInterval(delay)
-        }
-        qslQueueJobs[index].message = result.message
-        qslQueueJobs[index].updatedAt = Date()
-        try? database.saveQSLJob(qslQueueJobs[index])
-    }
-
-    private func markQSO(_ id: UUID, sentTo provider: QSLProvider) {
-        guard let index = qsoRecords.firstIndex(where: { $0.id == id }) else { return }
-        qsoRecords[index].fields[provider.sentField] = "Y"
-        let dateField = switch provider {
-        case .lotw: "LOTW_QSLSDATE"
-        case .qrz: "QRZCOM_QSO_UPLOAD_DATE"
-        case .eqsl: "EQSL_QSLSDATE"
-        case .clubLog: "APP_YAAM_CLUBLOG_SENT_DATE"
-        }
+    static func qslDateString(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
         formatter.dateFormat = "yyyyMMdd"
-        qsoRecords[index].fields[dateField] = formatter.string(from: Date())
-        for header in [provider.sentField, dateField] where !tableHeaders.contains(header) { tableHeaders.append(header) }
+        return formatter.string(from: date)
+    }
+
+    /// The Zero-Click daemon uploads each new QSO by itself and reports the services that accepted it; the QSO is
+    /// then marked as the QSL Hub marks it, so Sync All does not upload it again. The daemon's outbox rebuilds the
+    /// record with a new id, so the QSO is looked up by id and then by its QSO key.
+    func markZeroClickUploads(_ record: QSORecordModel, services: [String]) {
+        let providers = services.compactMap { QSLUploadStatus.provider(zeroClickService: $0) }
+        guard !providers.isEmpty, isOwnStationLogOpen, let index = zeroClickRecordIndex(record) else { return }
+        let id = qsoRecords[index].id
+        for provider in providers { markQSO(id, sentTo: provider) }
+        autoSaveActiveWorkspace()
+    }
+
+    /// For the Zero-Click daemon's outbox (R8): whether a QSO it is about to send again is already at that service,
+    /// for example because a Sync sent it meanwhile. Only the station's own log is looked at.
+    func isZeroClickQSOAlreadyAtService(_ record: QSORecordModel, service: String) -> Bool {
+        guard isOwnStationLogOpen, let provider = QSLUploadStatus.provider(zeroClickService: service),
+              let index = zeroClickRecordIndex(record) else { return false }
+        return QSLUploadStatus.isSent(qsoRecords[index].fields, to: provider)
+    }
+
+    /// The daemon's QSO in the open log: by id, or, because the outbox rebuilds the record with a new id, by its QSO
+    /// key, never an empty one. The search goes from the end, where new QSOs are, and compares the callsign first.
+    private func zeroClickRecordIndex(_ record: QSORecordModel) -> Int? {
+        if let index = qsoRecords.lastIndex(where: { $0.id == record.id }) { return index }
+        let key = record.uniqueKey
+        guard !key.isEmpty else { return nil }
+        let call = record["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        return qsoRecords.lastIndex(where: {
+            $0["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == call && $0.uniqueKey == key
+        })
+    }
+
+    /// Marks saved because the QSO was not in the open log when its service accepted it (QSLLostMark) are written
+    /// with their upload date when the station's own log is open, unless the QSO's fields for that service have a
+    /// value by then (QSLSyncAll.sortLostMarks). Called when the QSL Hub state loads and when the master log loads.
+    func restoreLostQSLMarks() {
+        guard isOwnStationLogOpen, let profileID = activeStationProfileID else { return }
+        let store = QSLLostMarkStore.standard
+        guard !store.load(profileID: profileID).isEmpty else { return }
+        let fieldsByID = Dictionary(qsoRecords.map { ($0.id, $0.fields) }, uniquingKeysWith: { first, _ in first })
+        let write = store.restore(profileID: profileID, fieldsByID: fieldsByID)
+        for mark in write { markQSO(mark.qsoID, sentTo: mark.provider, date: mark.date) }
+        if !write.isEmpty { autoSaveActiveWorkspace() }
+    }
+
+    /// QSOs that 1.37.34 marked as sent to Club Log only in YAAM's own field also get the ADIF field
+    /// (QSLUploadStatus.withStandardClubLogStatus), so the next save and every export carry it. Returns the count.
+    @discardableResult
+    func addStandardClubLogStatus() -> Int {
+        var records = qsoRecords
+        var count = 0
+        for index in records.indices {
+            guard let updated = QSLUploadStatus.withStandardClubLogStatus(records[index].fields) else { continue }
+            records[index].fields = updated
+            count += 1
+        }
+        guard count > 0 else { return 0 }
+        qsoRecords = records
+        for field in ["CLUBLOG_QSO_UPLOAD_STATUS", "CLUBLOG_QSO_UPLOAD_DATE"] where !tableHeaders.contains(field) {
+            tableHeaders.append(field)
+        }
+        return count
+    }
+
+    private func markQSO(_ id: UUID, sentTo provider: QSLProvider, date: String? = nil) {
+        guard let index = qsoRecords.firstIndex(where: { $0.id == id }) else { return }
+        for (field, value) in QSLUploadStatus.acceptedFields(for: provider, date: date ?? Self.qslDateString(Date())) {
+            qsoRecords[index].fields[field] = value
+            if !tableHeaders.contains(field) { tableHeaders.append(field) }
+        }
     }
 
     /// eQSL confirmation -> local QSO, with eQSL's own one-hour window. `candidates` is a snapshot of
@@ -427,32 +653,30 @@ extension AppState {
             return $0["CALL"].uppercased() == call && $0["QSO_DATE"].filter(\.isNumber) == date && timeMatches && bandMatches && modeMatches
         }
     }
+}
 
-    private func qslADIFRecord(_ fields: [String: String]) -> String {
-        var normalizedFields = fields
-        let currentMode = normalizedFields["MODE"] ?? ""
-        let currentSubmode = normalizedFields["SUBMODE"] ?? ""
-        let freq = Double(normalizedFields["FREQ"] ?? "")
-        let effective = AmateurBandPlan.effectiveADIFMode(mode: currentMode, submode: currentSubmode, frequencyMHz: freq)
-        if !effective.isEmpty {
-            normalizedFields["MODE"] = effective
-            if effective == "FT8" || effective == "FT4" || effective == "JS8" {
-                normalizedFields["SUBMODE"] = effective
-            }
-        }
+/// Where the jobs and QSOs of one queue run were found, so that each lookup is not a search of the whole list. A
+/// position is used only after checking the id at it, because the lists can change while the run waits for a service.
+struct QSLRunPositions {
+    private var jobIndex: [UUID: Int]
+    private var recordIndex: [UUID: Int]
 
-        var result = ""
-        for key in normalizedFields.keys.sorted() {
-            guard let value = normalizedFields[key], !value.isEmpty else { continue }
-            if key.starts(with: "APP_YAAM_") { continue }
-            if key == "COMMENT" {
-                let sanitized = QSOMetadataFormatter.cleanComment(value)
-                guard !sanitized.isEmpty else { continue }
-                result += "<\(key):\(sanitized.utf8.count)>\(sanitized)"
-                continue
-            }
-            result += "<\(key):\(value.utf8.count)>\(value)"
-        }
-        return result + "<EOR>"
+    init(jobs: [QSLQueueJob], records: [QSORecordModel]) {
+        jobIndex = Dictionary(jobs.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { first, _ in first })
+        recordIndex = Dictionary(records.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { first, _ in first })
+    }
+
+    mutating func job(_ id: UUID, in jobs: [QSLQueueJob]) -> Int? {
+        if let index = jobIndex[id], index < jobs.count, jobs[index].id == id { return index }
+        guard let index = jobs.firstIndex(where: { $0.id == id }) else { return nil }
+        jobIndex[id] = index
+        return index
+    }
+
+    mutating func record(_ id: UUID, in records: [QSORecordModel]) -> Int? {
+        if let index = recordIndex[id], index < records.count, records[index].id == id { return index }
+        guard let index = records.firstIndex(where: { $0.id == id }) else { return nil }
+        recordIndex[id] = index
+        return index
     }
 }

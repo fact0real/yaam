@@ -87,6 +87,7 @@ struct QRZAwardsFetchResult {
 
 struct QRZAwardsView: View {
     @EnvironmentObject var appState: AppState
+    @ObservedObject private var syncEngine = QSLSyncEngine.shared
     @State private var selectedSource: AwardSource = .qrz
     @State private var animateIcon: Bool = false
 
@@ -98,9 +99,7 @@ struct QRZAwardsView: View {
         }
     }
     private var clublogRecords: [QSORecordModel] {
-        appState.qsoRecords.filter {
-            $0["CLUBLOG_QSO_UPLOAD_STATUS"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == "Y"
-        }
+        appState.qsoRecords.filter { QSLUploadStatus.isSent($0.fields, to: .clubLog) }
     }
     private var allConfirmedRecords: [QSORecordModel] {
         appState.qsoRecords.filter(\.isConfirmed)
@@ -456,9 +455,12 @@ struct QRZAwardsView: View {
             }
 
         case .combined:
-            actionPill(label: "Sync All", icon: "arrow.triangle.2.circlepath", disabled: appState.isProcessingQSLQueue) {
-                appState.downloadLoTWAndQRZConfirmations()
-                Task { await appState.downloadEQSLConfirmations() }
+            actionPill(
+                label: syncEngine.isSyncing ? "Syncing…" : "Sync All",
+                icon: "arrow.triangle.2.circlepath",
+                disabled: syncEngine.isSyncing || appState.isUnifiedSyncRunning || appState.isSyncingAPI || appState.isProcessingQSLQueue
+            ) {
+                Task { await QSLSyncEngine.shared.syncAllServices(appState: appState) }
             }
         }
     }

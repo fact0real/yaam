@@ -993,9 +993,11 @@ nonisolated struct QSORecordModel: Identifiable, Sendable, Equatable {
         }
     }
 
+    /// The ADIF record HRDLog and HamQTH upload. Local paths and app-only fields stay on this Mac
+    /// (QSLUploadStatus.localOnlyFields).
     public func toADIFRecordString() -> String {
         var adif = ""
-        var exportFields = fields
+        var exportFields = QSLUploadStatus.serviceFields(fields)
         let currentMode = exportFields["MODE"] ?? ""
         let currentSubmode = exportFields["SUBMODE"] ?? ""
         let freq = Double(exportFields["FREQ"] ?? "")
@@ -3854,6 +3856,8 @@ class AppState: NSObject, ObservableObject {
                 loadedWorkspaceProfileID = profileID
                 refreshEmailHistoryColumns()
                 appendLog("Loaded \(qsoRecords.count) QSOs for station profile \(currentStationCallsign) from the protected database.")
+                // Sent marks saved while another log was open (QSLLostMark) are written now.
+                restoreLostQSLMarks()
                 return
             } catch {
                 loadedWorkspaceProfileID = nil
@@ -4430,6 +4434,9 @@ class AppState: NSObject, ObservableObject {
                 var qsoModels = parsed.records.enumerated().map { QSORecordModel(index: $0 + 1, fields: $1) }
                 let offlineMatched = applyPersistentConfirmationCache(to: &qsoModels)
 
+                // The station's log is saved before the Guest Log replaces it, so the sent marks an upload wrote since
+                // the last save stay (a mark that comes after this is kept as a QSLLostMark).
+                if isOwnStationLogOpen { autoSaveActiveWorkspace() }
                 isMasterMode = false
                 loadedFileURL = parsed.format == .adif ? url : nil
                 loadedFileOriginalContent = parsed.originalADIFContent

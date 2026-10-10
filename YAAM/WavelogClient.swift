@@ -310,7 +310,8 @@ public final class WavelogClient: Sendable {
 
     private func formatSingleADIF(_ record: QSORecordModel) -> String {
         var adif = ""
-        var normalizedFields = record.fields
+        // Local paths and app-only fields stay on this Mac (QSLUploadStatus.localOnlyFields).
+        var normalizedFields = QSLUploadStatus.serviceFields(record.fields)
         let currentMode = normalizedFields["MODE"] ?? ""
         let currentSubmode = normalizedFields["SUBMODE"] ?? ""
         let freq = Double(normalizedFields["FREQ"] ?? "")

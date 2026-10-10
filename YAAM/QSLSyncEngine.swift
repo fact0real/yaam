@@ -83,12 +83,18 @@ public final class QSLSyncEngine: ObservableObject {
     @Published public var totalFetchedCount: Int = 0
     @Published public var totalUpdatedCount: Int = 0
     @Published public var downloadedCardCount: Int = 0
+    /// The last line of the last Sync All: complete only when nothing failed, was blocked or was left out.
+    @Published public var lastRunSummary: String = ""
+    private var errorsLogged = 0
+    /// The LoTW and QRZ download's own summary from the last Sync All, so the report can say if it failed or did not run.
+    private var lastLoTWQRZSummary: ConfirmationSyncSummary?
 
     public init() {
         appendLog(level: .info, service: "System", message: "QSL Sync Engine initialized. Multi-service parallel runner ready.")
     }
 
     public func appendLog(level: QSLDiagnosticLevel, service: String, message: String) {
+        if level == .error { errorsLogged += 1 }
         let entry = QSLDiagnosticEntry(level: level, service: service, message: message)
         diagnosticLogs.insert(entry, at: 0)
         // Keep maximum 200 logs
@@ -104,42 +110,105 @@ public final class QSLSyncEngine: ObservableObject {
     // MARK: - One-Click Sync All Services
 
     func syncAllServices(appState: AppState) async {
-        guard !isSyncing, !appState.isUnifiedSyncRunning, !appState.isSyncingAPI else { return }
+        // One sync at a time (R8): if another sync or upload is running (the Zero-Click daemon's included) or a log is
+        // loading, nothing is uploaded or downloaded, and it says so. R16: only on the station's own log.
+        let daemon = ZeroClickCloudUploadDaemon.shared
+        guard !isSyncing, !appState.isUnifiedSyncRunning, !appState.isSyncingAPI, !appState.isProcessingQSLQueue,
+              !appState.isLoading, !daemon.isUploading, !daemon.isFlushingQueue else {
+            lastRunSummary = "Another sync or upload is running; Sync All did nothing."
+            appendLog(level: .warning, service: "Sync Manager", message: "⚠️ \(lastRunSummary)")
+            return
+        }
+        if let problem = appState.qslOwnLogProblem {
+            lastRunSummary = "Sync All did nothing: \(problem)."
+            appendLog(level: .warning, service: "Sync Manager", message: "⚠️ \(lastRunSummary)")
+            return
+        }
+        // The station this Sync is for (R16 is checked again after the uploads).
+        let startProfileID = appState.activeStationProfileID
 
         isSyncing = true
         progress = 0.05
         currentStepText = "Starting One-Click Multi-Service Synchronization..."
         totalFetchedCount = 0
         totalUpdatedCount = 0
+        lastLoTWQRZSummary = nil
 
         appendLog(level: .info, service: "Sync Manager", message: "🚀 Initiating parallel sync across LoTW, eQSL.cc, QRZ, and Club Log...")
 
-        // Parallel tasks using TaskGroup
-        await withTaskGroup(of: Void.self) { group in
-            // Task 1: eQSL.cc Inbox & Card Download
-            group.addTask { @MainActor in
-                await self.syncEQSL(appState: appState)
-            }
+        // Upload first: the QSOs not at each service yet, for the services switched on with upload credentials. The
+        // downloads below write confirmation fields, never a sent field, so a service that now has every QSO can
+        // return confirmations for them in this same run. The QSOs that the LoTW and QRZ downloads add from
+        // unmatched confirmations count as sent to that service (QSLUploadStatus.cameFrom) and go to the others
+        // next time.
+        currentStepText = "Uploading QSOs never sent..."
+        let upload = await appState.uploadNeverSentQSOs()
+        for line in QSLSyncReport.lines(upload) {
+            appendLog(level: line.problem ? .warning : .info, service: "Upload", message: line.text)
+        }
+        if upload.busy {
+            appendLog(level: .warning, service: "Upload", message: "⚠️ Another upload was running; nothing was uploaded.")
+        }
 
-            // Task 2: LoTW & QRZ Logbook
-            group.addTask { @MainActor in
-                await self.syncLoTWAndQRZ(appState: appState)
-            }
+        // Which downloads can run, with the same tests as each download (QSLSyncReport.downloadReadiness).
+        let readiness = QSLSyncReport.downloadReadiness(
+            lotwUsername: UserDefaults.standard.string(forKey: "lotwUsername") ?? "",
+            lotwPassword: CredentialVault.value(for: .lotwPassword),
+            qrzAPIKey: appState.activeQRZAPIKey,
+            eqsl: appState.qslServiceCredentials(for: [.eqsl]),
+            clubLog: appState.qslServiceCredentials(for: [.clubLog])
+        )
+        // R16 again: if the open log stopped being this station's own during the uploads (a Guest Log was opened, or
+        // another station was made active), nothing is downloaded or saved into it.
+        let downloadsSkipped = appState.qslOwnLogProblem ??
+            (appState.activeStationProfileID == startProfileID ? nil : "the active station changed")
+        let errorsBeforeDownloads = errorsLogged
+        progress = 0.3
 
-            // Task 3: Club Log LoTW State
-            group.addTask { @MainActor in
-                await self.syncClubLog(appState: appState)
+        if downloadsSkipped == nil {
+            // Parallel tasks using TaskGroup
+            await withTaskGroup(of: Void.self) { group in
+                // Task 1: eQSL.cc Inbox & Card Download
+                group.addTask { @MainActor in
+                    await self.syncEQSL(appState: appState)
+                }
+
+                // Task 2: LoTW & QRZ Logbook
+                group.addTask { @MainActor in
+                    await self.syncLoTWAndQRZ(appState: appState)
+                }
+
+                // Task 3: Club Log LoTW State
+                group.addTask { @MainActor in
+                    await self.syncClubLog(appState: appState)
+                }
             }
         }
 
         progress = 1.0
         isSyncing = false
         lastSyncCompletedAt = Date()
-        currentStepText = "Sync Complete: \(totalUpdatedCount) confirmed QSO(s) updated."
-        appendLog(level: .success, service: "Sync Manager", message: "🎉 All services synchronized successfully! \(totalUpdatedCount) QSOs updated.")
+        if totalUpdatedCount > 0, appState.isOwnStationLogOpen { appState.autoSaveActiveWorkspace() }
+
+        // The report (R10): a failed download, or one that did not run or was not checked, is said, and the last line
+        // says "successfully" only when nothing failed, was blocked, was left waiting or was left out.
+        let end = QSLSyncReport.endOfSync(
+            upload: upload,
+            readiness: readiness,
+            lotwQRZ: lastLoTWQRZSummary,
+            otherErrors: errorsLogged - errorsBeforeDownloads,
+            updated: totalUpdatedCount,
+            downloadsSkipped: downloadsSkipped
+        )
+        for problem in end.downloadProblems { appendLog(level: .error, service: "Download", message: "❌ \(problem)") }
+        for name in end.downloadsNotChecked { appendLog(level: .warning, service: "Download", message: "Not checked: \(name)") }
+        lastRunSummary = end.text
+        appendLog(level: end.problems ? .warning : (end.complete ? .success : .info), service: "Sync Manager",
+                  message: end.complete ? "🎉 \(lastRunSummary)" : (end.problems ? "⚠️ \(lastRunSummary)" : lastRunSummary))
+        currentStepText = lastRunSummary
 
         appState.refreshAwardProgress()
-        appState.playActivitySound(.success)
+        appState.playActivitySound(end.complete ? .success : .notice)
     }
 
     // MARK: - Service 1: eQSL.cc Sync & Graphic Card Ingestion
@@ -227,6 +296,7 @@ public final class QSLSyncEngine: ObservableObject {
                     continuation.resume()
                     return
                 }
+                self.lastLoTWQRZSummary = summary // R10 report
 
                 self.totalFetchedCount += summary.fetched
                 self.totalUpdatedCount += summary.changed

@@ -139,7 +139,8 @@ public final class WavelogSyncEngine: ObservableObject {
         do {
             // 1. Export local records as batch ADIF and push to Wavelog
             self.lastStatusMessage = "Uploading local QSOs to Wavelog..."
-            let dicts = appState.qsoRecords.map { $0.fields }
+            // Local paths and app-only fields stay on this Mac (QSLUploadStatus.localOnlyFields); a local export keeps them.
+            let dicts = appState.qsoRecords.map { QSLUploadStatus.serviceFields($0.fields) }
             let localADIF = generateADIF(originalContent: "", records: dicts)
             if !localADIF.isEmpty {
                 let uploadResult = try await WavelogClient.shared.uploadBatchADIF(

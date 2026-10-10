@@ -27,7 +27,8 @@ nonisolated enum TableColumnPolicy {
             field.hasPrefix("LOTW_") ||
             field.hasPrefix("QRZLOG_") ||
             field.hasPrefix("QRZCOM_") ||
-            field.hasPrefix("EQSL_")
+            field.hasPrefix("EQSL_") ||
+            field.hasPrefix("CLUBLOG_")
     }
 
     static func isHiddenByDefault(_ header: String, isMostlyEmpty: Bool) -> Bool {

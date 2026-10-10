@@ -498,13 +498,9 @@ struct StationWorkspaceView: View {
             if let saved = UserDefaults.standard.string(forKey: "stationWorkspace.enabledProviders") {
                 enabledProviders = Set(saved.split(separator: ",").compactMap { QSLProvider(rawValue: String($0)) })
             } else {
-                let credentials = appState.qslServiceCredentials(for: Set(QSLProvider.allCases))
-                var configured = Set<QSLProvider>()
-                if !credentials.lotwPassword.isEmpty { configured.insert(.lotw) }
-                if !credentials.qrzAPIKey.isEmpty { configured.insert(.qrz) }
-                if !credentials.eqslPassword.isEmpty { configured.insert(.eqsl) }
-                if !credentials.clubLogEmail.isEmpty &&
-                    (!credentials.clubLogPassword.isEmpty || !credentials.clubLogAPIKey.isEmpty) { configured.insert(.clubLog) }
+                // Nothing saved yet: show what Sync uses, the services with their upload credentials set. Nothing is
+                // saved until a switch is touched, so a service configured later is on for Sync too.
+                let configured = appState.qslConfiguredProvidersForSync()
                 enabledProviders = configured
                 if let first = QSLProvider.allCases.first(where: { configured.contains($0) }) { defaultProvider = first }
             }
@@ -523,9 +519,6 @@ struct StationWorkspaceView: View {
         .onChange(of: bandFilter) { _, _ in refreshLogRows() }
         .onChange(of: modeFilter) { _, _ in refreshLogRows() }
         .onChange(of: search) { _, _ in refreshLogRows(debounce: true) }
-        .onChange(of: enabledProviders) { _, selection in
-            UserDefaults.standard.set(selection.map(\.rawValue).sorted().joined(separator: ","), forKey: "stationWorkspace.enabledProviders")
-        }
         .onReceive(clock) { date in
             let hourChanged = WorkspaceData.calendar.component(.hour, from: date) != WorkspaceData.calendar.component(.hour, from: now)
             guard hourChanged || (page == .log && timeFilter != "All") else { return }
@@ -1258,6 +1251,11 @@ struct StationWorkspaceView: View {
                         set: { enabled in
                             if enabled { enabledProviders.insert(provider) }
                             else { enabledProviders.remove(provider) }
+                            // Saved only when a switch is touched; Sync reads the same key (QSLSyncAll.switchedOn).
+                            UserDefaults.standard.set(
+                                enabledProviders.map(\.rawValue).sorted().joined(separator: ","),
+                                forKey: "stationWorkspace.enabledProviders"
+                            )
                         }
                     )) {
                         VStack(alignment: .leading) {
@@ -1317,7 +1315,7 @@ struct StationWorkspaceView: View {
 
     private func uploadedNames(_ record: QSORecordModel) -> String {
         let names = QSLProvider.allCases.filter { provider in
-            ["Y", "V", "C", "CONFIRMED"].contains(record[provider.sentField].uppercased()) ||
+            QSLUploadStatus.isSent(record.fields, to: provider) ||
             appState.qslQueueJobs.contains { $0.qsoID == record.id && $0.provider == provider && $0.state == .succeeded }
         }.map(\.title)
         return names.isEmpty ? "Not uploaded" : "Uploaded to " + names.joined(separator: ", ")
@@ -1325,7 +1323,7 @@ struct StationWorkspaceView: View {
 
     private func confirmationAction(_ record: QSORecordModel) -> some View {
         let missing = enabledProviders.filter { provider in
-            let sent = ["Y", "V", "C", "CONFIRMED"].contains(record[provider.sentField].uppercased())
+            let sent = QSLUploadStatus.isSent(record.fields, to: provider)
             let queued = appState.qslQueueJobs.contains { $0.qsoID == record.id && $0.provider == provider && ($0.state.isPending || $0.state == .succeeded) }
             return !sent && !queued
         }.sorted { $0.title < $1.title }

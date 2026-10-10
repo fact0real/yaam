@@ -2006,8 +2006,8 @@ struct HelpView: View {
             ])
             helpSection("Downloading Confirmations from QRZ & LoTW") {
                 HelpInstruction(number: 1, title: "Open QSL Hub", text: "Choose Operator Desk > QSL & Data > QSL Hub for all manual confirmation downloads.")
-                HelpInstruction(number: 2, title: "Sync Confirmations", text: "Sync Confirmations checks configured LoTW, QRZ, eQSL, and Club Log services. It does not import local logger files.")
-                HelpInstruction(number: 3, title: "Individual Provider Sync", text: "The ellipsis menu beside Sync Confirmations includes Sync LoTW Only and Sync QRZ Only, plus links to automation and label printing.")
+                HelpInstruction(number: 2, title: "Sync All", text: "Sync All uploads the QSOs not yet at each service switched on in the Station Workspace with its upload credentials set, then downloads LoTW, QRZ and eQSL confirmations and Club Log's LoTW state. Sync Selected, in the log table's selection menu, uploads the selected QSOs the same way and downloads nothing. It does not import local logger files.")
+                HelpInstruction(number: 3, title: "Individual Provider Sync", text: "The ellipsis menu beside Sync All includes Sync LoTW Only, Sync QRZ Only and Retry Failed Uploads, plus links to automation and label printing.")
                 HelpInstruction(number: 4, title: "Hands-Free Auto Sync", text: "Open QSL & Data > Log Sources & Automation (⌘⌥⇧S), enable Scheduled log & confirmation sync, and choose an interval. The previous schedule is preserved. ⌘⇧S remains File > Save As.")
             }
             helpSection("Local Sources & Scheduled Confirmations") {

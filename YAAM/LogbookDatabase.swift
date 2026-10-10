@@ -970,6 +970,32 @@ nonisolated final class LogbookDatabase: @unchecked Sendable {
         }
     }
 
+    /// Removes these jobs (one transaction), for example the jobs of QSOs that are no longer in the log.
+    func deleteQSLJobs(_ jobs: [QSLQueueJob]) throws {
+        guard !jobs.isEmpty else { return }
+        try queue.sync {
+            try execute("BEGIN IMMEDIATE TRANSACTION;")
+            do {
+                let statement = try prepare(
+                    "DELETE FROM qsl_jobs WHERE station_profile_id = ? AND qso_id = ? AND provider = ?;"
+                )
+                defer { sqlite3_finalize(statement) }
+                for job in jobs {
+                    sqlite3_reset(statement)
+                    sqlite3_clear_bindings(statement)
+                    bind(job.stationProfileID.uuidString, to: 1, in: statement)
+                    bind(job.qsoID.uuidString, to: 2, in: statement)
+                    bind(job.provider.rawValue, to: 3, in: statement)
+                    try stepDone(statement)
+                }
+                try execute("COMMIT;")
+            } catch {
+                try? execute("ROLLBACK;")
+                throw error
+            }
+        }
+    }
+
     func deleteQSLJobs(profileID: UUID, states: Set<QSLQueueState>) throws {
         guard !states.isEmpty else { return }
         try queue.sync {
