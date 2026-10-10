@@ -70,6 +70,19 @@ nonisolated enum ImportReviewAnalyzer {
         "APP_YAAM_CLUBLOG_LOTW_STATE", "APP_YAAM_CONFIRMATION_STATUS", "APP_YAAM_NEW_CONFIRMED"
     ])
 
+    /// The upload-status fields, each with its date field: the four of ADIF 3.1.7, YAAM's own Club Log field, and
+    /// QRZCOM_QSO_DOWNLOAD_STATUS (the QSO is in the QRZ logbook). When a QSO already in the log comes in again, they
+    /// only go up: an incoming Y replaces an empty or pending value (N, R, Q, I or M) and brings its date; a Y already
+    /// there is never replaced. So whichever record wins a merge, a Y from either of them is kept.
+    static let uploadStatusFields: [String: String] = [
+        "LOTW_QSL_SENT": "LOTW_QSLSDATE",
+        "EQSL_QSL_SENT": "EQSL_QSLSDATE",
+        "QRZCOM_QSO_UPLOAD_STATUS": "QRZCOM_QSO_UPLOAD_DATE",
+        "CLUBLOG_QSO_UPLOAD_STATUS": "CLUBLOG_QSO_UPLOAD_DATE",
+        "APP_YAAM_CLUBLOG_SENT": "APP_YAAM_CLUBLOG_SENT_DATE",
+        "QRZCOM_QSO_DOWNLOAD_STATUS": "QRZCOM_QSO_DOWNLOAD_DATE",
+    ]
+
     private static let protectedEnrichmentFields = Set([
         "RANK_DXCC", "RANK_QSO", "RANK_BAND", "APP_YAAM_RANK_STATUS",
         "APP_YAAM_ENRICHED", "APP_YAAM_EMAIL_CHECKED", "APP_YAAM_RANK_CHECKED",
@@ -175,6 +188,7 @@ nonisolated enum ImportReviewAnalyzer {
 
     static func mergeUpdate(incoming: [String: String], into existing: [String: String]) -> [String: String] {
         var merged = existing
+        let incomingByKey = Dictionary(incoming.map { ($0.key.uppercased(), $0.value) }, uniquingKeysWith: { first, _ in first })
         for (key, value) in incoming {
             let cleanKey = key.uppercased()
             let cleanValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -183,6 +197,10 @@ nonisolated enum ImportReviewAnalyzer {
             let existingValue = (merged[cleanKey] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             if existingValue.isEmpty {
                 merged[cleanKey] = cleanValue
+            } else if cleanKey == "APP_QRZLOG_STATUS" {
+                if qrzStatusRank(cleanValue) > qrzStatusRank(existingValue) {
+                    merged[cleanKey] = cleanValue
+                }
             } else if confirmationFields.contains(cleanKey) {
                 // If existing is not affirmative and incoming is affirmative, update it.
                 // If existing is already affirmative, never downgrade to non-affirmative.
@@ -192,6 +210,13 @@ nonisolated enum ImportReviewAnalyzer {
             } else if protectedEnrichmentFields.contains(cleanKey) {
                 if existingValue.isEmpty {
                     merged[cleanKey] = cleanValue
+                }
+            } else if let dateField = uploadStatusFields[cleanKey] {
+                // Upload status only goes up: from empty or pending to uploaded, never back.
+                if isUploaded(cleanValue) && !isUploaded(existingValue) {
+                    merged[cleanKey] = cleanValue
+                    let date = (incomingByKey[dateField] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !date.isEmpty { merged[dateField] = date }
                 }
             }
         }
@@ -217,9 +242,27 @@ nonisolated enum ImportReviewAnalyzer {
             guard !value.isEmpty else { return nil }
             let oldValue = existing[key]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             if oldValue.isEmpty { return key }
+            if key == "APP_QRZLOG_STATUS" { return qrzStatusRank(value) > qrzStatusRank(oldValue) ? key : nil }
             if confirmationFields.contains(key), isAffirmative(value), !isAffirmative(oldValue) { return key }
+            if uploadStatusFields[key] != nil, isUploaded(value), !isUploaded(oldValue) { return key }
             return nil
         }
+    }
+
+    /// QRZ's own status, APP_QRZLOG_STATUS: pending (NONE, N, QUEUED, ERROR or any other value) < UPLOADED < confirmed
+    /// (C, CONFIRMED, and Y, V and VERIFIED, which AppState.isConfirmedValue also reads as a confirmation). When a QSO
+    /// comes in again it only goes up.
+    static func qrzStatusRank(_ value: String) -> Int {
+        switch value.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() {
+        case "C", "CONFIRMED", "Y", "V", "VERIFIED": return 2
+        case "UPLOADED": return 1
+        default: return 0
+        }
+    }
+
+    /// Uploaded and accepted: Y, and the values the QSL Hub also reads as sent (V, C, CONFIRMED).
+    static func isUploaded(_ value: String) -> Bool {
+        ["Y", "V", "C", "CONFIRMED"].contains(value.trimmingCharacters(in: .whitespacesAndNewlines).uppercased())
     }
 
     private static func isAffirmative(_ value: String) -> Bool {
