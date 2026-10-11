@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.37.35 — 2026-10-11
+
+- Add bidirectional Sync All and Sync Selected for online QSL services (LoTW, QRZ, eQSL, Club Log) on active station logs.
+- Protect privacy and security by stripping local file paths, usernames, and internal metadata from online ADIF uploads.
+- Prevent duplicate uploads by marking QSOs accepted by Zero-Click daemon and treating QRZ duplicate responses as accepted.
+- Preserve QSL upload status during ADIF imports and merges (upload status only upgrades, never downgrades).
+- Log Digital Suite QSOs with connected radio frequency and band, with operator confirmation safeguards.
+- Require explicit confirmation (Record QSO / Discard QSO) with valid RSV reports before logging SSTV contacts.
+- Isolate Olivia and SSTV practice/simulation text from CALL auto-population; decode complete callsigns on word boundaries.
+- Correct DXCC entity mapping for maritime (/MM) and aeronautical (/AM) mobile stations and preserve visited DXCC prefixes.
+- Restore Quick Log grid support for both GRIDSQUARE and GRID fields, and default CW/RTTY contest signal reports to 599.
+
 ## 1.37.34 — 2026-10-09
 
 - Require the operator's own callsign before CW and digital transmissions, including JS8 and SSTV audio; require a valid locator for FT8/FT4 standard messages.
