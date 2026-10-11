@@ -1246,7 +1246,7 @@ private struct QuickLogPanel: View {
         appState.quickLogDraft.rstReceived = record["RST_RCVD"]
         appState.quickLogDraft.name = record["NAME"]
         appState.quickLogDraft.qth = record["QTH"]
-        appState.quickLogDraft.grid = record["GRID"]
+        appState.quickLogDraft.grid = record["GRIDSQUARE"].isEmpty ? record["GRID"] : record["GRIDSQUARE"]
         appState.quickLogDraft.country = record["COUNTRY"]
         appState.quickLogDraft.comment = record["COMMENT"]
         appState.refreshQuickLogAssessment()
@@ -1338,6 +1338,7 @@ private struct QuickLogPanel: View {
                            rec["BAND"].uppercased().contains(q) ||
                            rec["MODE"].uppercased().contains(q) ||
                            rec["GRID"].uppercased().contains(q) ||
+                           rec["GRIDSQUARE"].uppercased().contains(q) ||
                            rec["COMMENT"].uppercased().contains(q)
                 }
                 let recents = Array(filtered.suffix(recentLimit).reversed())

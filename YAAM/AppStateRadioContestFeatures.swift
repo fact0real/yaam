@@ -512,15 +512,18 @@ extension AppState {
         else if b == "10M" { defaultFreq = "28.500" }
         else if b == "6M" { defaultFreq = "50.150" }
 
+        let cleanMode = mode.uppercased()
+        let defaultRST = (cleanMode == "CW" || cleanMode == "RTTY") ? "599" : "59"
+
         var fields: [String: String] = [
             "QSO_DATE": qsoDateStr,
             "TIME_ON": qsoTimeStr,
             "CALL": cleanCall,
             "FREQ": frequencyMHz.isEmpty ? defaultFreq : frequencyMHz,
             "BAND": band.uppercased(),
-            "MODE": mode.uppercased(),
-            "RST_SENT": rstSent.isEmpty ? "59" : rstSent,
-            "RST_RCVD": rstReceived.isEmpty ? "59" : rstReceived,
+            "MODE": cleanMode,
+            "RST_SENT": rstSent.isEmpty ? defaultRST : rstSent,
+            "RST_RCVD": rstReceived.isEmpty ? defaultRST : rstReceived,
             "CONTEST_ID": session.contestID,
             "STX": String(format: "%03d", session.nextSerial),
             "STX_STRING": sentExchange.isEmpty ? session.sentExchange : sentExchange,
