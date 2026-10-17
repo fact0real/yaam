@@ -1,0 +1,18 @@
+Release 1.37.36 with CW safety and band-advisor fixes
+
+Integrate reviewed EA3JIC proposals 45-60 with additional transport
+validation and lifecycle safeguards.
+
+- Reject command-bearing, unsupported and oversized CW text.
+- Cancel and pace CAT chunks; keep STOP bound to the active transmit path.
+- Correct WinKeyer commands, handshake, status parsing and buffer flow.
+- Stop Auto-CQ after manual sends or refusals and protect replacement sends.
+- Give asynchronous CW stops a bounded opportunity to finish on normal exit.
+- Deduplicate and expire band activity; withdraw stale QSY suggestions.
+- Coalesce statistics work and batch email-history updates.
+- Add CW protocol, cancellation, input-validation and scheduling regressions.
+
+Validation: Debug and Release builds, 20 simulated CW/advisor suites and
+five snapshot concurrency scenarios. No on-air hardware testing.
+
+Co-authored-by: EA3JIC <338018746+EA3JIC@users.noreply.github.com>

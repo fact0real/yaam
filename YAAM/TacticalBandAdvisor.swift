@@ -109,8 +109,8 @@ public final class TacticalBandAdvisor: ObservableObject {
         "6M": 50_313_000
     ]
 
-    // Internal tracking: (Timestamp, SNR)
-    private var decodesHistory: [String: [(Date, Double)]] = [:]
+    // Internal tracking: each decode once (its id, when it was received, SNR)
+    private var decodesHistory: [String: [(id: UUID, at: Date, snr: Double)]] = [:]
     private var clusterSpotsHistory: [String: [Date]] = [:]
     private var previousSlotRates: [String: Double] = [:]
     private var timer: AnyCancellable?
@@ -128,39 +128,42 @@ public final class TacticalBandAdvisor: ObservableObject {
         evaluateBandsNow()
     }
 
-    /// Records incoming decodes from SDR-Control (WSJTXListener)
+    /// Records incoming decodes from SDR-Control (WSJTXListener). The app hands over the whole list of recent decodes,
+    /// twice per new decode and by two paths (directly and through the call roster), so only the decodes not seen
+    /// before, on any band, are added, with the time they were received.
     public func recordDecodes(_ decodes: [WSJTXLiveDecode], onBand band: String) {
         guard !decodes.isEmpty else { return }
         let targetBand = band.uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
         let resolvedBand = targetBand.isEmpty ? activeBand : targetBand
-
-        let now = Date()
-        var list = decodesHistory[resolvedBand] ?? []
-        for d in decodes {
-            list.append((now, Double(d.snr)))
-        }
+        guard Self.digitalFrequenciesHz[resolvedBand] != nil else { return }
 
         // Keep last 10 minutes
-        let cutoff = now.addingTimeInterval(-600)
-        list = list.filter { $0.0 > cutoff }
+        let cutoff = Date().addingTimeInterval(-600)
+        decodesHistory = decodesHistory.mapValues { $0.filter { $0.at > cutoff } }
+        var list = decodesHistory[resolvedBand] ?? []
+        var seen = Set(decodesHistory.values.joined().map(\.id))
+        for d in decodes where d.receivedAt > cutoff && d.receivedAt <= Date() && seen.insert(d.id).inserted {
+            guard list.count < 4000 else { break }
+            list.append((id: d.id, at: d.receivedAt, snr: Double(d.snr)))
+        }
         decodesHistory[resolvedBand] = list
 
         evaluateBand(resolvedBand)
     }
 
-    /// Records incoming DX Cluster spots for cross-band awareness
+    /// Records DX Cluster spots for cross-band awareness. The app hands over the cluster's whole current list on every
+    /// change (DXClusterClient.spots, old spots included), so the counts are taken afresh from that list: each spot
+    /// once, at the last time the cluster reported it.
     func recordClusterSpots(_ spots: [DXSpot]) {
-        guard !spots.isEmpty else { return }
-        let now = Date()
-        let cutoff = now.addingTimeInterval(-900) // 15 minutes
-
-        for spot in spots {
+        let cutoff = Date().addingTimeInterval(-900) // 15 minutes
+        var byBand: [String: [Date]] = [:]
+        var seen = Set<String>()
+        for spot in spots where spot.lastSeenAt > cutoff && spot.lastSeenAt <= Date() && seen.insert(spot.id).inserted {
             let band = spot.band.uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !band.isEmpty else { continue }
-            var list = clusterSpotsHistory[band] ?? []
-            list.append(now)
-            clusterSpotsHistory[band] = list.filter { $0 > cutoff }
+            guard Self.digitalFrequenciesHz[band] != nil, byBand[band, default: []].count < 2000 else { continue }
+            byBand[band, default: []].append(spot.lastSeenAt)
         }
+        clusterSpotsHistory = byBand
 
         evaluateBandsNow()
     }
@@ -176,6 +179,8 @@ public final class TacticalBandAdvisor: ObservableObject {
     }
 
     public func evaluateBandsNow() {
+        let cutoff = Date().addingTimeInterval(-600)
+        decodesHistory = decodesHistory.mapValues { $0.filter { $0.at > cutoff } }
         let allBands = Array(Set(Array(Self.digitalFrequenciesHz.keys) + Array(decodesHistory.keys)))
         for b in allBands {
             evaluateBand(b)
@@ -189,10 +194,10 @@ public final class TacticalBandAdvisor: ObservableObject {
         let twoMinutesAgo = now.addingTimeInterval(-120)
 
         let decodes = decodesHistory[band] ?? []
-        let recentDecodes = decodes.filter { $0.0 > twoMinutesAgo }
+        let recentDecodes = decodes.filter { $0.at > twoMinutesAgo }
 
         let decodesPerMin: Double = Double(recentDecodes.count) / 2.0
-        let avgSNR: Double = recentDecodes.isEmpty ? -20.0 : (recentDecodes.map(\.1).reduce(0, +) / Double(recentDecodes.count))
+        let avgSNR: Double = recentDecodes.isEmpty ? -20.0 : (recentDecodes.map(\.snr).reduce(0, +) / Double(recentDecodes.count))
 
         let spots = clusterSpotsHistory[band] ?? []
         let recentSpots = spots.filter { $0 > now.addingTimeInterval(-600) }
@@ -215,6 +220,15 @@ public final class TacticalBandAdvisor: ObservableObject {
         if recentSpots.count >= 20 { health += 30 }
         else if recentSpots.count >= 8 { health += 20 }
         else if recentSpots.count >= 2 { health += 10 }
+
+        // A band this station is not listening to has no decodes of its own, so it is judged by the cluster alone, on
+        // a scale of its own: with one receiver it could otherwise never reach the 60 % a QSY needs. 20 spots in
+        // 10 minutes (the cluster's top mark above) give 70 %, just over that line and below a band heard well here.
+        if band != activeBand && recentDecodes.isEmpty {
+            if recentSpots.count >= 20 { health = 70 }
+            else if recentSpots.count >= 8 { health = 45 }
+            else if recentSpots.count >= 2 { health = 20 }
+        }
 
         if recentDecodes.isEmpty && recentSpots.isEmpty {
             health = 0
@@ -290,8 +304,8 @@ public final class TacticalBandAdvisor: ObservableObject {
                 recommendationHistory.insert(rec, at: 0)
                 if recommendationHistory.count > 20 { recommendationHistory.removeLast() }
             }
-        } else if currentSnap.healthPercentage >= 70 {
-            // Current band recovered
+        } else {
+            // Withdraw a suggestion when either its source activity or its justification disappears.
             if activeRecommendation != nil {
                 activeRecommendation = nil
             }
@@ -304,6 +318,12 @@ public final class TacticalBandAdvisor: ObservableObject {
         to recommendation: BandSwitchRecommendation,
         rigClient: RigControlClient?
     ) {
+        guard activeRecommendation?.id == recommendation.id,
+              let target = bandSnapshots[recommendation.targetBand], target.healthPercentage >= 60,
+              Date().timeIntervalSince(target.lastUpdated) <= 30 else {
+            activeRecommendation = nil
+            return
+        }
         let targetHz = recommendation.targetFrequencyHz
         let targetBand = recommendation.targetBand
 

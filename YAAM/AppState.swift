@@ -1932,7 +1932,9 @@ class AppState: NSObject, ObservableObject {
     @Published var selectedEmailUnconfirmedQSOs: [QSORecordModel] = []
     @Published var selectedEmailIncomingRequest: QRZIncomingConfirmation? = nil
     @Published var incomingEmailDraftNotice: String = ""
-    @Published var emailHistory: [EmailHistoryEntry] = []
+    @Published var emailHistory: [EmailHistoryEntry] = [] {
+        didSet { invalidateStatisticsCache() }
+    }
     @Published var emailHistoryByCallsign: [String: EmailHistoryEntry] = [:]
     @Published var newlyConfirmedRecordIDs: Set<UUID> = []
     @Published var showQSLCardComposer: Bool = false
@@ -1977,7 +1979,9 @@ class AppState: NSObject, ObservableObject {
     @Published var qrzRankData: QRZRankResponse? = nil
     @Published var qrzComparisonRankData: [QRZRankResponse] = []
     @Published var leaderboardSearchCallsign: String = ""
-    @Published var ownerRankData: QRZRankResponse? = nil
+    @Published var ownerRankData: QRZRankResponse? = nil {
+        didSet { invalidateStatisticsCache() }
+    }
     @Published var trackedRankCallsigns: [String] = []
     @Published var rankHistorySnapshots: [QRZRankHistorySnapshot] = []
     @Published var isRefreshingRankHistory: Bool = false
@@ -2161,8 +2165,15 @@ class AppState: NSObject, ObservableObject {
     private var cachedNewlyConfirmedRevision = -1
     @Published public private(set) var cachedStatisticsSnapshot: StatisticsSnapshot?
     public private(set) var cachedStatisticsRevision = -1
-    private var cachedStatisticsRankFingerprint = ""
-    private var inFlightStatisticsTask: Task<StatisticsSnapshot, Never>?
+    private var statisticsGeneration: UInt64 = 0
+    private var cachedStatisticsGeneration: UInt64?
+    private var statisticsWarmupTask: Task<Void, Never>?
+    private struct StatisticsInput: Sendable {
+        let records: [QSORecordModel]
+        let rank: QRZRankResponse?
+        let emailHistory: [EmailHistoryEntry]
+    }
+    private let statisticsWorker = LatestSnapshotWorker<UInt64, StatisticsInput, StatisticsSnapshot>()
 
     @Published var tableHeaders: [String] = []
     @Published var qsoRecords: [QSORecordModel] = [] {
@@ -2175,12 +2186,7 @@ class AppState: NSObject, ObservableObject {
             cachedTodayConfirmedRecords = nil
             cachedTodayConfirmedIDs = nil
             cachedAllNewlyConfirmedIDs = nil
-            cachedStatisticsSnapshot = nil
-            cachedStatisticsRevision = -1
-            cachedStatisticsRankFingerprint = ""
-            inFlightStatisticsTask?.cancel()
-            inFlightStatisticsTask = nil
-            warmStatisticsCacheIfNeeded()
+            invalidateStatisticsCache()
         }
     }
     @Published var recentLogFiles: [URL] = []
@@ -2273,53 +2279,46 @@ class AppState: NSObject, ObservableObject {
         }
     }
 
+    private func invalidateStatisticsCache() {
+        statisticsGeneration &+= 1
+        cachedStatisticsSnapshot = nil
+        cachedStatisticsRevision = -1
+        cachedStatisticsGeneration = nil
+        statisticsWorker.invalidate()
+        warmStatisticsCacheIfNeeded()
+    }
+
     func warmStatisticsCacheIfNeeded() {
+        statisticsWarmupTask?.cancel()
         guard !qsoRecords.isEmpty else { return }
-        Task(priority: .utility) { [weak self] in
+        statisticsWarmupTask = Task(priority: .utility) { [weak self] in
+            try? await Task.sleep(for: .milliseconds(300))
+            guard !Task.isCancelled else { return }
             _ = await self?.getOrComputeStatisticsSnapshot(force: false)
         }
     }
 
     public func getOrComputeStatisticsSnapshot(force: Bool = false) async -> StatisticsSnapshot {
-        let currentRevision = qsoRecordsRevision
-        let rank = ownerRankData
-        let rankFingerprint = "\(rank?.callsign ?? "")-\(rank?.rank_qso ?? "")-\(rank?.rank_countries ?? "")"
+        if force { invalidateStatisticsCache() }
 
-        if !force,
-           let cached = cachedStatisticsSnapshot,
-           cachedStatisticsRevision == currentRevision,
-           cachedStatisticsRankFingerprint == rankFingerprint {
-            return cached
-        }
-
-        if !force, let inFlight = inFlightStatisticsTask {
-            return await inFlight.value
-        }
-
-        let records = qsoRecords
-        let emailHist = emailHistory
-        let task = Task.detached(priority: .userInitiated) {
-            StatisticsSnapshot.make(
-                records: records,
-                ownerRankData: rank,
-                emailHistory: emailHist
-            )
-        }
-        inFlightStatisticsTask = task
-
-        let snapshot = await task.value
-
-        await MainActor.run {
-            if !Task.isCancelled {
-                self.cachedStatisticsSnapshot = snapshot
-                self.cachedStatisticsRevision = currentRevision
-                self.cachedStatisticsRankFingerprint = rankFingerprint
+        while !Task.isCancelled {
+            if let cached = cachedStatisticsSnapshot,
+               cachedStatisticsGeneration == statisticsGeneration {
+                return cached
             }
-            if self.inFlightStatisticsTask == task {
-                self.inFlightStatisticsTask = nil
+
+            let input = StatisticsInput(records: qsoRecords, rank: ownerRankData, emailHistory: emailHistory)
+            let result = await statisticsWorker.value(for: statisticsGeneration, input: input) { input in
+                StatisticsSnapshot.make(records: input.records, ownerRankData: input.rank, emailHistory: input.emailHistory)
             }
+            guard !Task.isCancelled else { return .empty }
+            guard let result, result.key == statisticsGeneration else { continue }
+            cachedStatisticsSnapshot = result.value
+            cachedStatisticsRevision = qsoRecordsRevision
+            cachedStatisticsGeneration = result.key
+            return result.value
         }
-        return snapshot
+        return .empty
     }
 
     var availableCountries: [String] {
@@ -7660,11 +7659,17 @@ class AppState: NSObject, ObservableObject {
         }
         emailHistoryByCallsign = map
 
-        for index in qsoRecords.indices {
-            let callsign = qsoRecords[index]["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        var updatedRecords = qsoRecords
+        var changed = false
+        for index in updatedRecords.indices {
+            let callsign = updatedRecords[index]["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
             guard let entry = map[callsign] else { continue }
-            qsoRecords[index].fields["APP_YAAM_LAST_EMAIL"] = emailHistorySummary(for: entry)
+            let summary = emailHistorySummary(for: entry)
+            guard updatedRecords[index].fields["APP_YAAM_LAST_EMAIL"] != summary else { continue }
+            updatedRecords[index].fields["APP_YAAM_LAST_EMAIL"] = summary
+            changed = true
         }
+        if changed { qsoRecords = updatedRecords }
     }
 
     private func updateEmailHistoryColumn(with entry: EmailHistoryEntry, autoSave: Bool = true) {
@@ -7677,13 +7682,16 @@ class AppState: NSObject, ObservableObject {
 
         let summary = emailHistorySummary(for: entry)
         var updatedRows = 0
-        for index in qsoRecords.indices {
-            let rowCallsign = qsoRecords[index]["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        var updatedRecords = qsoRecords
+        for index in updatedRecords.indices {
+            let rowCallsign = updatedRecords[index]["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
             guard rowCallsign == normalizedCallsign else { continue }
-            qsoRecords[index].fields["APP_YAAM_LAST_EMAIL"] = summary
+            guard updatedRecords[index].fields["APP_YAAM_LAST_EMAIL"] != summary else { continue }
+            updatedRecords[index].fields["APP_YAAM_LAST_EMAIL"] = summary
             updatedRows += 1
         }
 
+        if updatedRows > 0 { qsoRecords = updatedRecords }
         if updatedRows > 0 && autoSave {
             objectWillChange.send()
             autoSaveActiveWorkspace()

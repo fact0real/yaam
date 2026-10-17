@@ -152,6 +152,13 @@ struct StatisticsView: View {
         .onReceive(NotificationCenter.default.publisher(for: .amateurBandsConfigurationDidChange)) { _ in
             refreshSnapshot(force: true)
         }
+        .onReceive(appState.$cachedStatisticsSnapshot) { cached in
+            guard let cached else { return }
+            applySnapshot(cached)
+        }
+        .onChange(of: appState.qsoRecordsRevision) { _, _ in
+            if appState.qsoRecords.isEmpty { snapshot = .empty }
+        }
     }
 
     private func statisticsContent(stats: StatisticsSnapshot) -> some View {
@@ -756,15 +763,18 @@ struct StatisticsView: View {
         Task {
             let refreshed = await appState.getOrComputeStatisticsSnapshot(force: force)
             guard generation == snapshotGeneration else { return }
-            snapshot = refreshed
+            applySnapshot(refreshed)
             isRefreshingSnapshot = false
+        }
+    }
 
-            let selectedStillExists = selectedCoverageCountry.map { selected in
-                refreshed.countryBandCoverage.contains { $0.country == selected }
-            } ?? false
-            if !selectedStillExists {
-                selectedCoverageCountry = refreshed.countryBandCoverage.first?.country
-            }
+    private func applySnapshot(_ refreshed: StatisticsSnapshot) {
+        snapshot = refreshed
+        let selectedStillExists = selectedCoverageCountry.map { selected in
+            refreshed.countryBandCoverage.contains { $0.country == selected }
+        } ?? false
+        if !selectedStillExists {
+            selectedCoverageCountry = refreshed.countryBandCoverage.first?.country
         }
     }
 
@@ -1990,12 +2000,14 @@ nonisolated struct StatisticsSnapshot: Sendable {
         ownerRankData: QRZRankResponse?,
         emailHistory: [EmailHistoryEntry] = []
     ) -> StatisticsSnapshot {
+        guard !Task.isCancelled else { return .empty }
         let availableCountries = Set(
             records.compactMap { record -> String? in
                 let country = ConfirmationOpportunityIndex.normalizedCountry(for: record)
                 return country.isEmpty ? nil : country
             }
         )
+        guard !Task.isCancelled else { return .empty }
         let confirmedDxccCountries = Set(
             records.compactMap { record -> String? in
                 let country = ConfirmationOpportunityIndex.normalizedCountry(for: record)
@@ -2003,6 +2015,7 @@ nonisolated struct StatisticsSnapshot: Sendable {
             }
         )
 
+        guard !Task.isCancelled else { return .empty }
         let workedGrids = Set(records.compactMap { fourCharacterGrid(for: $0) })
         let confirmedGrids = Set(
             records.compactMap { record -> String? in
@@ -2020,8 +2033,11 @@ nonisolated struct StatisticsSnapshot: Sendable {
         let confirmationPercentage = totalCount == 0
             ? 0
             : Double(confirmedCount) / Double(totalCount) * 100
+        guard !Task.isCancelled else { return .empty }
         let providerStatistics = makeProviderStatistics(records: records)
+        guard !Task.isCancelled else { return .empty }
         let opportunityIndex = ConfirmationOpportunityIndex(records: records)
+        guard !Task.isCancelled else { return .empty }
         let followUpCandidates = records.compactMap { record -> StatisticsFollowUpCandidate? in
             guard !record.isConfirmed,
                   let opportunity = opportunityIndex.opportunity(for: record.id) else { return nil }
@@ -2052,6 +2068,15 @@ nonisolated struct StatisticsSnapshot: Sendable {
             .prefix(20)
             .map(\.record)
 
+        guard !Task.isCancelled else { return .empty }
+        let bandStatistics = makeBandStatistics(records: records)
+        guard !Task.isCancelled else { return .empty }
+        let countryStatistics = makeCountryStatistics(records: records)
+        guard !Task.isCancelled else { return .empty }
+        let unconfirmedStatistics = makeUnconfirmedBandCountryStatistics(records: records, emailHistory: emailHistory)
+        guard !Task.isCancelled else { return .empty }
+        let progressSummary = ConfirmedProgressAnalyzer.makeSummary(records: records, ownerRankData: ownerRankData)
+        guard !Task.isCancelled else { return .empty }
         return StatisticsSnapshot(
             totalQSOCount: totalCount,
             confirmedCount: confirmedCount,
@@ -2073,11 +2098,11 @@ nonisolated struct StatisticsSnapshot: Sendable {
             providerStatistics: providerStatistics,
             followUpCandidates: sortedFollowUps,
             recentConfirmedRecords: Array(recentConfirmedRecords),
-            bandStatistics: makeBandStatistics(records: records),
-            countryStatistics: makeCountryStatistics(records: records),
-            unconfirmedBandCountryStatistics: makeUnconfirmedBandCountryStatistics(records: records, emailHistory: emailHistory),
+            bandStatistics: bandStatistics,
+            countryStatistics: countryStatistics,
+            unconfirmedBandCountryStatistics: unconfirmedStatistics,
             countryBandCoverage: opportunityIndex.countryBandCoverage,
-            progressSummary: ConfirmedProgressAnalyzer.makeSummary(records: records, ownerRankData: ownerRankData)
+            progressSummary: progressSummary
         )
     }
 
@@ -2086,6 +2111,7 @@ nonisolated struct StatisticsSnapshot: Sendable {
         var values: [String: (total: Int, confirmed: Int, countries: Set<String>, confirmedCountries: Set<String>)] = [:]
 
         for record in records {
+            guard !Task.isCancelled else { return [] }
             let normalizedBand = ConfirmationOpportunityIndex.normalizedBand(for: record)
             let band = normalizedBand.isEmpty ? "UNKNOWN" : normalizedBand.uppercased()
             let country = ConfirmationOpportunityIndex.normalizedCountry(for: record)
@@ -2123,6 +2149,7 @@ nonisolated struct StatisticsSnapshot: Sendable {
     private static func makeCountryStatistics(records: [QSORecordModel]) -> [CountryStatModel] {
         var values: [String: (total: Int, confirmed: Int)] = [:]
         for record in records {
+            guard !Task.isCancelled else { return [] }
             let canonical = ConfirmationOpportunityIndex.normalizedCountry(for: record)
             let country = canonical.isEmpty ? "Unknown" : canonical
             var value = values[country] ?? (0, 0)
@@ -2163,6 +2190,7 @@ nonisolated struct StatisticsSnapshot: Sendable {
         }
 
         for record in records {
+            guard !Task.isCancelled else { return [] }
             let normalizedBand = ConfirmationOpportunityIndex.normalizedBand(for: record)
             let band = normalizedBand.isEmpty ? "UNKNOWN" : normalizedBand.uppercased()
             let canonical = ConfirmationOpportunityIndex.normalizedCountry(for: record)

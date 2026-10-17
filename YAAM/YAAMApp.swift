@@ -21,6 +21,7 @@ enum YAAMWindowID {
 // MARK: - Main Application Entry Point & Global Menu Commands
 @main
 struct YAAMApp: App {
+    @NSApplicationDelegateAdaptor(YAAMAppDelegate.self) private var appDelegate
     @StateObject private var appState = AppState()
     @Environment(\.openWindow) private var openWindow
 

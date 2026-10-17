@@ -244,7 +244,7 @@ public struct CWHardwareSetupSheet: View {
                         sliderRow(
                             label: "Dit/Dah Weighting",
                             value: Binding(get: { Double(wk.ditDahRatio) }, set: { wk.ditDahRatio = Int($0) }),
-                            range: 20...80,
+                            range: 33...66,
                             unit: "%",
                             help: "50 = standard 1:3 ratio. Higher values lengthen marks relative to spaces."
                         ) { wk.setDitDahRatio(wk.ditDahRatio) }

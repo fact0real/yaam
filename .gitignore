@@ -64,3 +64,6 @@ fastlane/test_output
 .DS_Store
 .derivedData/
 /build/
+
+# Local YAAM development skills (kept off GitHub)
+/.codex/skills/

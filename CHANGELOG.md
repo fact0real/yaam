@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.37.36 - 2026-10-17
+
+- Integrate reviewed EA3JIC CW and band-advisor fixes, with additional validation at radio transport boundaries.
+- Reject CW command delimiters, unsupported characters and oversized messages; fold supported accents and normalize pasted whitespace.
+- Cancel pending TX-500/FX-4CR CW chunks on STOP, replacement and disconnect; pace chunks using Morse timing and preserve the active transmit destination.
+- Correct WinKeyer commands and status bits; require the Host Open response, use two serial stop bits, and bound transmission with echoed-character flow control.
+- Prevent stale callbacks from ending replacement messages, stop Auto-CQ after manual sends or rejected CQs, and refuse sends without connected keying hardware.
+- Send the correct Hamlib stop_morse command and give asynchronous CW stop operations a bounded opportunity to complete during normal application exit.
+- Count FT8 decodes and cluster spots once at their original timestamps; bound activity history and allow cluster-based suggestions for bands not currently monitored.
+- Coalesce log statistics work, discard stale snapshots, batch email-history row updates and avoid repeated date parsing during log sorting.
+- Add simulated CW, protocol, text-validation and snapshot-scheduling regressions. Physical radio/keyer behavior remains subject to hardware verification.
+
 ## 1.37.35 — 2026-10-11
 
 - Add bidirectional Sync All and Sync Selected for online QSL services (LoTW, QRZ, eQSL, Club Log) on active station logs.

@@ -97,6 +97,9 @@ public final class Lab599TX500Driver: ObservableObject {
     private var receiveBuffer = ""
     private var pollingTimer: DispatchSourceTimer?
     private var pttWatchdog: DispatchWorkItem?
+    // The KY pieces of a CW message still to be sent; cancelled by a new message, STOP and disconnect
+    private var pendingMorseChunks: [DispatchWorkItem] = []
+    private var morseGeneration: UInt64 = 0
     private let serialQueue = DispatchQueue(label: "com.yaam.tx500.driver", qos: .userInitiated)
 
     private init() {
@@ -199,6 +202,8 @@ public final class Lab599TX500Driver: ObservableObject {
     }
 
     public func disconnect() {
+        cancelPendingMorseChunks()
+        if isConnected { stopMorse() }
         if isTransmitting {
             setPTT(false)
         }
@@ -309,32 +314,37 @@ public final class Lab599TX500Driver: ObservableObject {
     /// Transmits text directly via Kenwood CAT Morse `KY <text>;` to TX-500's internal keyer
     public func sendMorse(_ text: String, wpm: Int = 24) {
         guard isConnected else { return }
-        let clean = text.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        guard !clean.isEmpty else { return }
+        guard let clean = MorseTiming.safeText(text) else {
+            lastMessage = "Nothing sent: unsupported CW text or message too long."
+            return
+        }
+        if pendingMorseChunks.isEmpty { cancelPendingMorseChunks() } else { stopMorse() }
 
         // Set keyer speed first: KS<wpm>;
         let clampedWPM = max(5, min(60, wpm))
         sendRaw(String(format: "KS%03d;", clampedWPM))
 
-        // Kenwood KY command: buffers up to 24 characters at a time
-        // We chunk long strings into safe 24-character pieces
-        let chunks = stride(from: 0, to: clean.count, by: 24).map { idx -> String in
-            let start = clean.index(clean.startIndex, offsetBy: idx)
-            let end = clean.index(start, offsetBy: min(24, clean.count - idx))
-            return String(clean[start..<end])
-        }
+        // Kenwood KY command: buffers up to 24 characters at a time. The text is cut at spaces into pieces of
+        // at most 24 characters. Each later piece is sent when, by the Morse timing, the radio has keyed the one
+        // before, plus a word gap: right whether the radio queues KY texts or refuses one while it is keying.
+        let chunks = MorseTiming.chunks(of: clean, limit: 24)
+        let start = DispatchTime.now()
+        let generation = morseGeneration
+        var delay: TimeInterval = 0
 
         for (i, chunk) in chunks.enumerated() {
             let cmd = "KY \(chunk);"
             if i == 0 {
                 sendRaw(cmd)
             } else {
-                // Micro-delay between successive 24-char chunks
-                DispatchQueue.main.asyncAfter(deadline: .now() + Double(i) * 1.5) { [weak self] in
-                    guard self?.isConnected == true else { return }
+                let piece = DispatchWorkItem { [weak self] in
+                    guard self?.isConnected == true, self?.morseGeneration == generation else { return }
                     self?.sendRaw(cmd)
                 }
+                pendingMorseChunks.append(piece)
+                DispatchQueue.main.asyncAfter(deadline: start + delay, execute: piece)
             }
+            delay += MorseTiming.duration(of: chunk, wpm: clampedWPM) + MorseTiming.handover(wpm: clampedWPM)
         }
 
         self.lastMessage = "Transmitting CW: \(clean)"
@@ -342,9 +352,17 @@ public final class Lab599TX500Driver: ObservableObject {
 
     /// Aborts active CW transmission
     public func stopMorse() {
+        cancelPendingMorseChunks()
         guard isConnected else { return }
         sendRaw("KY ;RX;")
         self.lastMessage = "CW Transmission Aborted"
+    }
+
+    /// Cancels the KY pieces of the last message that have not been sent yet
+    private func cancelPendingMorseChunks() {
+        morseGeneration &+= 1
+        pendingMorseChunks.forEach { $0.cancel() }
+        pendingMorseChunks.removeAll()
     }
 
     /// Pulse hardware DTR/RTS lines for Morse keying (if keying via serial pin)

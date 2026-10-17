@@ -167,20 +167,23 @@ final class RigControlClient: ObservableObject {
     /// Sends Morse text directly to transceiver's internal keyer via Hamlib \\send_morse
     func sendMorse(_ text: String) {
         guard state.isConnected else { return }
-        let clean = text.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        guard !clean.isEmpty else { return }
+        guard let clean = MorseTiming.safeText(text) else {
+            lastMessage = "Nothing sent: unsupported CW text or message too long."
+            return
+        }
         send("b \(clean)\n")
         DispatchQueue.main.async {
             self.lastMessage = "Transmitting CW: \(clean)"
         }
     }
 
-    /// Aborts current Morse transmission on transceiver
+    /// Aborts current Morse transmission on transceiver via Hamlib \\stop_morse
+    /// ("b" alone is a send_morse with no text: it stops nothing).
     func stopMorse() {
         guard state.isConnected else { return }
-        send("b\n")
+        send("\\stop_morse\n")
         DispatchQueue.main.async {
-            self.lastMessage = "CW Transmission Aborted"
+            self.lastMessage = "CW stop requested; radio acknowledgement not verified"
         }
     }
 

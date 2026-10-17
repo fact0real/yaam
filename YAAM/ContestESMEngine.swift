@@ -225,11 +225,15 @@ public final class ContestESMEngine: ObservableObject {
             .replacingOccurrences(of: "{RCVD_EXCH}", with: rcvdExch)
             .replacingOccurrences(of: "{SERIAL}", with: serialStr)
 
-        self.activeOutgoingText = text
-        self.isTransmitting = true
-
         // Transmit via CW Keyer Service
         CWKeyerService.shared.send(text: text, myCall: myCall)
+        guard CWKeyerService.shared.transmitRefusal.isEmpty else {
+            transmitRefusal = CWKeyerService.shared.transmitRefusal
+            statusMessage = transmitRefusal
+            return false
+        }
+        self.activeOutgoingText = text
+        self.isTransmitting = true
         return true
     }
 

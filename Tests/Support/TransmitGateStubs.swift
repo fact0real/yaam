@@ -21,12 +21,25 @@ final class WinKeyerDriver {
     var isConnected = false
     var wkVersion = "stub"
     var selectedPort = ""
+    var isTransmitting = false
     var onCharacterEchoed: ((String) -> Void)?
     var onTransmissionComplete: (() -> Void)?
     var onPaddleBreakIn: (() -> Void)?
     func setSpeed(_ wpm: Int) {}
-    func sendMorseText(_ text: String) { KeyLog.add("KEYED via WinKeyer: \(text)") }
-    func abort() {}
+    // As YAAM/WinKeyerDriver.swift: sendMorseText marks the WinKeyer busy; abort() clears it, marks it idle and,
+    // unless reportEnd is false, reports the end at once (Tests/WinKeyerAutoCQRegression.swift checks the real
+    // driver does the same).
+    func sendMorseText(_ text: String) {
+        guard isConnected else { return }
+        isTransmitting = true
+        KeyLog.add("KEYED via WinKeyer: \(text)")
+    }
+    func abort(reportEnd: Bool = true) {
+        guard isConnected else { return }
+        KeyLog.add("WinKeyer buffer cleared")
+        isTransmitting = false
+        if reportEnd { onTransmissionComplete?() }
+    }
 }
 
 final class SerialKeyerDriver {
@@ -78,6 +91,8 @@ final class Lab599TX500Driver {
     static let shared = Lab599TX500Driver()
     var isConnected = false
     var selectedPort = ""
+    var formattedFrequency = ""
+    var mode = ""
     func sendMorse(_ text: String, wpm: Int) { KeyLog.add("KEYED via Lab599 TX-500: \(text)") }
     func stopMorse() {}
     func setPTT(_ on: Bool, maximumDuration: TimeInterval = 14) { KeyLog.add("PTT \(on) via Lab599 TX-500") }
@@ -91,6 +106,8 @@ final class Xiegu6100Driver {
     static let shared = Xiegu6100Driver()
     var isConnected = false
     var selectedPort = ""
+    var formattedFrequency = ""
+    var mode = ""
     func setKeyerSpeed(_ wpm: Int) {}
     func sendMorse(_ text: String) { KeyLog.add("KEYED via Xiegu X6100: \(text)") }
     func stopMorse() {}
@@ -127,8 +144,19 @@ final class FLRigClient {
     var isConnected = false
     var frequencyHz: Double = 0
     // The keyer calls sendMorse(text) at f83e099 and sendMorse(text, wpm:) once the flrig client of patch 32 is applied.
-    func sendMorse(_ text: String, wpm: Int? = nil) async throws { KeyLog.add("KEYED via flrig: \(text)") }
-    func stopMorse() async throws {}
+    // Tests/FlrigCWErrorRegression.swift sets sendMorseError to make it throw, as the real client does when flrig
+    // refuses the text or does not answer (FLRigError), and sendMorseDelay for the time flrig takes to answer.
+    var sendMorseError: Error?
+    var sendMorseDelay: TimeInterval = 0
+    func sendMorse(_ text: String, wpm: Int? = nil) async throws {
+        let answer = sendMorseError          // flrig's answer to this text, whatever the test sets meanwhile
+        if sendMorseDelay > 0 { try? await Task.sleep(nanoseconds: UInt64(sendMorseDelay * 1_000_000_000)) }
+        if let answer { throw answer }
+        KeyLog.add("KEYED via flrig: \(text)")
+    }
+    // Tests/CATStopDestinationRegression.swift checks where a CAT Morse STOP goes (the real stopMorse sends the stop
+    // sequence to flrig whatever its last poll said).
+    func stopMorse() async throws { KeyLog.add("CW STOP via flrig") }
 }
 
 struct StubRigState { var isConnected = false }
@@ -137,7 +165,8 @@ final class RigControlClient {
     var state = StubRigState()
     var snapshot: StubRigSnapshot? = nil
     func sendMorse(_ text: String) { KeyLog.add("KEYED via rigctl: \(text)") }
-    func stopMorse() {}
+    // Records every stop the keyer asks for (the real one sends nothing while rigctld is not connected).
+    func stopMorse() { KeyLog.add("CW STOP via rigctl") }
     func setKeyerSpeed(_ wpm: Int) {}
     func setFrequencyHz(_ hz: UInt64) {}
     func setMode(_ m: String, passbandHz: Int) {}

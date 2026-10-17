@@ -168,11 +168,16 @@ private struct WorkspaceRecordSummary: Sendable {
 
     nonisolated init?(records: [QSORecordModel], now: Date) {
         guard !Task.isCancelled else { return nil }
-        let chronological = records.map { ($0, WorkspaceData.date($0) ?? .distantPast) }
-            .sorted { lhs, rhs in
-                if lhs.1 == rhs.1 { return lhs.0.id.uuidString < rhs.0.id.uuidString }
-                return lhs.1 < rhs.1
-            }
+        var datedRecords: [(QSORecordModel, Date)] = []
+        datedRecords.reserveCapacity(records.count)
+        for record in records {
+            guard !Task.isCancelled else { return nil }
+            datedRecords.append((record, WorkspaceData.date(record) ?? .distantPast))
+        }
+        let chronological = datedRecords.sorted { lhs, rhs in
+            if lhs.1 == rhs.1 { return lhs.0.id.uuidString < rhs.0.id.uuidString }
+            return lhs.1 < rhs.1
+        }
         var seenCalls = Set<String>()
         var previous = Set<UUID>()
         var bins = Array(repeating: 0, count: 24)
@@ -196,11 +201,14 @@ private struct WorkspaceRecordSummary: Sendable {
         progressWorked = groups.count
         guard !Task.isCancelled else { return nil }
         progressCoverage = ConfirmationOpportunityIndex(records: records).countryBandCoverage
+        guard !Task.isCancelled else { return nil }
         progressBands = Self.progressRows(records, key: { $0["BAND"] })
+        guard !Task.isCancelled else { return nil }
         progressModes = Self.progressRows(records, key: WorkspaceData.modeGroup)
+        guard !Task.isCancelled else { return nil }
         progressContinents = Self.progressRows(records, key: { DXCCDatabase.resolve(callsign: $0["CALL"]).continent })
-        awaitingRecords = records.filter { !$0.isConfirmed }
-            .sorted { (WorkspaceData.date($0) ?? .distantPast) < (WorkspaceData.date($1) ?? .distantPast) }
+        guard !Task.isCancelled else { return nil }
+        awaitingRecords = chronological.compactMap { $0.0.isConfirmed ? nil : $0.0 }
         toVerifyRecords = records.filter { $0.isConfirmed && !$0["CREDIT_GRANTED"].uppercased().contains("DXCC") }
         newConfirmationRecords = records.filter {
             $0.isConfirmed && ($0.latestConfirmationDate ?? .distantPast) >= now.addingTimeInterval(-7 * 86400)
@@ -242,7 +250,9 @@ private struct WorkspaceLogResult: Sendable {
             return true
         }
         guard !Task.isCancelled else { return nil }
-        let filteredRows = candidates.sorted { $0["QSO_DATE"] + $0["TIME_ON"] > $1["QSO_DATE"] + $1["TIME_ON"] }
+        let filteredRows = candidates.map { (key: $0["QSO_DATE"] + $0["TIME_ON"], record: $0) }
+            .sorted { $0.key > $1.key }.map(\.record)
+        guard !Task.isCancelled else { return nil }
         var markers: [Globe3DMarker] = []
         var ids: [UUID: UUID] = [:]
         for record in filteredRows {
@@ -267,6 +277,20 @@ private struct WorkspaceLogResult: Sendable {
         self.markers = markers
         markerRecordIDs = ids
     }
+}
+
+private struct WorkspaceSummaryInput: Sendable {
+    let records: [QSORecordModel]
+    let now: Date
+}
+
+private struct WorkspaceLogInput: Sendable {
+    let records: [QSORecordModel]
+    let cutoff: Date?
+    let band: String
+    let mode: String
+    let search: String
+    let now: Date
 }
 
 private struct WorkspaceNeededEntity: Identifiable {
@@ -357,12 +381,14 @@ struct StationWorkspaceView: View {
     @State private var confirmationTab = "Awaiting QSL"
     @State private var now = Date()
     @State private var reloadTask: Task<Void, Never>?
+    @State private var summaryWorker = LatestSnapshotWorker<UUID, WorkspaceSummaryInput, WorkspaceRecordSummary>()
+    @State private var logWorker = LatestSnapshotWorker<UUID, WorkspaceLogInput, WorkspaceLogResult>()
     private let clock = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
 
     private var pageBackground: Color { pureBlack ? .black : Color(nsColor: .windowBackgroundColor) }
     private var panelBackground: Color { pureBlack ? .black : Color(nsColor: .controlBackgroundColor) }
     private var edge: Color { pureBlack ? Color(white: 0.23) : Color.primary.opacity(0.11) }
-    private func refreshLogRows(debounce: Bool = false) {
+    private func refreshLogRows() {
         let cutoff: Date? = {
             switch timeFilter {
             case "15 m": return now.addingTimeInterval(-900)
@@ -375,27 +401,19 @@ struct StationWorkspaceView: View {
             }
         }()
         filterTask?.cancel()
-        let source = records
-        let band = bandFilter
-        let mode = modeFilter
-        let term = search
-        let currentNow = now
+        logWorker.invalidate()
+        let requestID = UUID()
+        let input = WorkspaceLogInput(records: records, cutoff: cutoff, band: bandFilter,
+                                      mode: modeFilter, search: search, now: now)
         isPreparingLog = true
         filterTask = Task {
-            if debounce {
-                try? await Task.sleep(for: .milliseconds(180))
-                guard !Task.isCancelled else { return }
+            guard !Task.isCancelled else { return }
+            let completed = await logWorker.value(for: requestID, input: input) { input in
+                WorkspaceLogResult(records: input.records, cutoff: input.cutoff, band: input.band,
+                                   mode: input.mode, search: input.search, now: input.now)
             }
-            let worker = Task.detached(priority: .userInitiated) {
-                WorkspaceLogResult(records: source, cutoff: cutoff, band: band,
-                                   mode: mode, search: term, now: currentNow)
-            }
-            let result = await withTaskCancellationHandler {
-                await worker.value
-            } onCancel: {
-                worker.cancel()
-            }
-            guard let result, !Task.isCancelled else { return }
+            guard let completed, completed.key == requestID, !Task.isCancelled else { return }
+            let result = completed.value
             logRows = result.rows
             mapMarkers = result.markers
             markerRecordIDs = result.markerRecordIDs
@@ -411,18 +429,17 @@ struct StationWorkspaceView: View {
         let source = appState.qsoRecords
         records = source
         reloadTask?.cancel()
+        summaryWorker.invalidate()
         isPreparingSummary = true
-        let currentNow = now
+        let requestID = UUID()
+        let input = WorkspaceSummaryInput(records: source, now: now)
         reloadTask = Task {
-            let worker = Task.detached(priority: .userInitiated) {
-                WorkspaceRecordSummary(records: source, now: currentNow)
+            guard !Task.isCancelled else { return }
+            let completed = await summaryWorker.value(for: requestID, input: input) { input in
+                WorkspaceRecordSummary(records: input.records, now: input.now)
             }
-            let summary = await withTaskCancellationHandler {
-                await worker.value
-            } onCancel: {
-                worker.cancel()
-            }
-            guard let summary, !Task.isCancelled else { return }
+            guard let completed, completed.key == requestID, !Task.isCancelled else { return }
+            let summary = completed.value
             priorWorkedIDs = summary.priorWorkedIDs
             entityGroups = summary.entityGroups
             availableBands = summary.availableBands
@@ -518,7 +535,7 @@ struct StationWorkspaceView: View {
         .onChange(of: customMinutes) { _, _ in refreshLogRows() }
         .onChange(of: bandFilter) { _, _ in refreshLogRows() }
         .onChange(of: modeFilter) { _, _ in refreshLogRows() }
-        .onChange(of: search) { _, _ in refreshLogRows(debounce: true) }
+        .onChange(of: search) { _, _ in refreshLogRows() }
         .onReceive(clock) { date in
             let hourChanged = WorkspaceData.calendar.component(.hour, from: date) != WorkspaceData.calendar.component(.hour, from: now)
             guard hourChanged || (page == .log && timeFilter != "All") else { return }
@@ -535,6 +552,8 @@ struct StationWorkspaceView: View {
         .onDisappear {
             reloadTask?.cancel()
             filterTask?.cancel()
+            summaryWorker.invalidate()
+            logWorker.invalidate()
         }
     }
 

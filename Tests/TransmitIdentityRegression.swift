@@ -360,9 +360,10 @@ struct TransmitIdentityRegression {
 
     static func sidetoneAndKeyer() {
         let keyer = "YAAM/CWKeyerService.swift"
-        check("every way into the keyer asks one function, which exempts only Audio Sidetone Only",
+        check("every way into the keyer asks one function, which exempts only Audio Sidetone Only and asks the callsign first",
               statements(functionBody("public func refusalReason(", in: keyer)) == [
-                "if transmissionMode == .audioOnly { return nil }", "return TransmitIdentity.callsignRefusal(myCall)"])
+                "if transmissionMode == .audioOnly { return nil }",
+                "if let issue = TransmitIdentity.callsignRefusal(myCall) { return issue }", "return keyerOfflineRefusal"])
         let issue = "if let issue = refusalReason(myCall: myCall) {"
         check("CWKeyerService.send: refuses with the reason and returns, before it stops or starts anything",
               refusalBlock(issue, equals: ["transmitRefusal = issue", "return"], before: "stopTransmitOnly()",

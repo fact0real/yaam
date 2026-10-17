@@ -182,11 +182,14 @@ public final class SerialKeyerDriver: ObservableObject {
                     if symbol == "." {
                         self.applyControlLines(cwActive: true, pttActive: self.pttPin != .none)
                         try? await Task.sleep(nanoseconds: ditNs)
+                        // After abort() the lines are released: writing them again would key PTT once more.
+                        guard !Task.isCancelled else { break }
                         self.applyControlLines(cwActive: false, pttActive: self.pttPin != .none)
                         try? await Task.sleep(nanoseconds: elementSpaceNs)
                     } else if symbol == "-" {
                         self.applyControlLines(cwActive: true, pttActive: self.pttPin != .none)
                         try? await Task.sleep(nanoseconds: dahNs)
+                        guard !Task.isCancelled else { break }
                         self.applyControlLines(cwActive: false, pttActive: self.pttPin != .none)
                         try? await Task.sleep(nanoseconds: elementSpaceNs)
                     }
@@ -204,6 +207,8 @@ public final class SerialKeyerDriver: ObservableObject {
                 }
             }
 
+            // Cancelled by abort(): the lines are already released, and a newer message may be keying on them now.
+            guard !Task.isCancelled else { return }
             self.applyControlLines(cwActive: false, pttActive: false)
             self.isTransmitting = false
             onComplete?()
