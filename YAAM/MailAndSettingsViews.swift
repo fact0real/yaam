@@ -535,14 +535,8 @@ Warm 73,
         
         let myCall = resolvedMyCallsign
         let profile = appState.activeStationProfile
-        let resolvedStation = QSLCardStationInfo(
-            callsign: myCall,
-            grid: profile?.normalizedGrid ?? "",
-            radio: profile?.radioModel ?? "",
-            antenna: profile?.antennaDescription ?? "",
-            powerWatts: profile?.powerWatts ?? 100,
-            antennaHeightMeters: profile?.antennaHeightMeters ?? 10
-        )
+        let resolvedStation = QSLCardStationInfo(callsign: myCall, profile: profile)
+
         
         var attachmentData: Data? = nil
         var attachmentName: String? = nil

@@ -338,6 +338,10 @@ public final class OliviaMFSKEngine: ObservableObject {
             txRefusal = issue
             return
         }
+        guard audioEngine?.isRunning == true, playerNode?.isPlaying == true else {
+            txRefusal = "Audio transmitter is unavailable. No message was sent; the queued text is kept."
+            return
+        }
         isTransmitting = true
 
         txTask = Task.detached(priority: .userInitiated) { [weak self] in

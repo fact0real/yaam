@@ -877,8 +877,8 @@ public struct GlobeAndGridTrackerWorkspaceView: View {
                 return GeoCoordinate(latitude: lat, longitude: lon)
             }
         }
-        // Default: Tehran, Iran (35.6892° N, 51.3890° E)
-        return GeoCoordinate(latitude: 35.6892, longitude: 51.3890)
+        // Neutral world-map origin when no station position is known.
+        return GeoCoordinate(latitude: 0, longitude: 0)
     }
 
     private var activeMapMarkers: [Globe3DMarker] {

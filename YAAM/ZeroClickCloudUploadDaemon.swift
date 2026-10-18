@@ -893,7 +893,7 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
             return (false, "No QRZ API Key configured")
         }
 
-        let adif = buildSingleQSOADIF(record)
+        let adif = buildSingleQSOADIF(record, for: .qrz)
         guard let endpoint = URL(string: "https://logbook.qrz.com/api") else {
             return (false, "Invalid endpoint")
         }
@@ -939,7 +939,7 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
             return (false, "Invalid endpoint")
         }
 
-        let adif = buildSingleQSOADIF(record)
+        let adif = buildSingleQSOADIF(record, for: .clubLog)
         var request = URLRequest(url: endpoint, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: 10)
         request.httpMethod = "POST"
         request.setValue("YAAM-macOS/ZeroClickCloudUpload", forHTTPHeaderField: "User-Agent")
@@ -976,7 +976,7 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
             return (false, "Invalid endpoint")
         }
 
-        let adif = buildSingleQSOADIF(record)
+        let adif = buildSingleQSOADIF(record, for: .eqsl)
         var request = URLRequest(url: endpoint, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: 10)
         request.httpMethod = "POST"
         request.setValue("YAAM-macOS/ZeroClickCloudUpload", forHTTPHeaderField: "User-Agent")
@@ -1001,9 +1001,10 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
     }
 
     // MARK: - Single QSO ADIF Generator
-    private func buildSingleQSOADIF(_ record: QSORecordModel) -> String {
+    /// Only the fields `destination` may get, with the comment cleaned (QSLUploadStatus.uploadFields).
+    private func buildSingleQSOADIF(_ record: QSORecordModel, for destination: QSLUploadDestination) -> String {
         var out = "<ADIF_VER:5>3.1.4 <PROGRAMID:4>YAAM <EOH>\n"
-        var normalizedFields = record.fields
+        var normalizedFields = QSLUploadStatus.uploadFields(record.fields, for: destination)
         let currentMode = normalizedFields["MODE"] ?? ""
         let currentSubmode = normalizedFields["SUBMODE"] ?? ""
         let freq = Double(normalizedFields["FREQ"] ?? "")
@@ -1017,14 +1018,6 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
         for (key, val) in normalizedFields {
             let cleanVal = val.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !cleanVal.isEmpty else { continue }
-            // Filter non-standard internal fields and local paths
-            if QSLUploadStatus.isLocalOnly(key) { continue }
-            if key == "COMMENT" {
-                let sanitized = QSOMetadataFormatter.cleanComment(cleanVal)
-                guard !sanitized.isEmpty else { continue }
-                out += "<\(key):\(sanitized.utf8.count)>\(sanitized) "
-                continue
-            }
             out += "<\(key):\(cleanVal.utf8.count)>\(cleanVal) "
         }
         out += "<EOR>\n"
@@ -1042,7 +1035,7 @@ public final class ZeroClickCloudUploadDaemon: ObservableObject {
             return (false, "Choose a LoTW station location before automatic upload.")
         }
 
-        let adifContent = buildSingleQSOADIF(record)
+        let adifContent = buildSingleQSOADIF(record, for: .lotw)
         return await TQSLCoordinator.shared.execute(
             adifContent: adifContent,
             stationLocation: resolvedLocation

@@ -52,10 +52,10 @@ extension AppState {
             } else if let lat = Double(prof.latitude), let lon = Double(prof.longitude) {
                 homeCoord = GeoCoordinate(latitude: lat, longitude: lon)
             } else {
-                homeCoord = GeoCoordinate(latitude: 35.6892, longitude: 51.3890)
+                homeCoord = GeoCoordinate(latitude: 0, longitude: 0)
             }
         } else {
-            homeCoord = GeoCoordinate(latitude: 35.6892, longitude: 51.3890)
+            homeCoord = GeoCoordinate(latitude: 0, longitude: 0)
         }
         return RoverModeEngine.shared.effectiveCoordinate(homeCoordinate: homeCoord)
     }

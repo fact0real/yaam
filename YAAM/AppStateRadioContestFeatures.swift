@@ -502,15 +502,11 @@ extension AppState {
         let qsoDateStr = String(format: "%04d%02d%02d", components.year ?? 0, components.month ?? 0, components.day ?? 0)
         let qsoTimeStr = String(format: "%02d%02d%02d", components.hour ?? 0, components.minute ?? 0, components.second ?? 0)
 
-        var defaultFreq = "14.200"
-        let b = band.uppercased()
-        if b == "160M" { defaultFreq = "1.850" }
-        else if b == "80M" { defaultFreq = "3.700" }
-        else if b == "40M" { defaultFreq = "7.150" }
-        else if b == "20M" { defaultFreq = "14.200" }
-        else if b == "15M" { defaultFreq = "21.250" }
-        else if b == "10M" { defaultFreq = "28.500" }
-        else if b == "6M" { defaultFreq = "50.150" }
+        guard let frequency = AmateurBandPlan.normalizedMHz(frequencyMHz), frequency.isFinite,
+              let actualBand = AmateurBandPlan.band(forMHz: frequency),
+              actualBand.caseInsensitiveCompare(band) == .orderedSame else {
+            throw QuickLogValidationError.invalidFrequency
+        }
 
         let cleanMode = mode.uppercased()
         let defaultRST = (cleanMode == "CW" || cleanMode == "RTTY") ? "599" : "59"
@@ -519,7 +515,7 @@ extension AppState {
             "QSO_DATE": qsoDateStr,
             "TIME_ON": qsoTimeStr,
             "CALL": cleanCall,
-            "FREQ": frequencyMHz.isEmpty ? defaultFreq : frequencyMHz,
+            "FREQ": AmateurBandPlan.formattedMHz(frequency),
             "BAND": band.uppercased(),
             "MODE": cleanMode,
             "RST_SENT": rstSent.isEmpty ? defaultRST : rstSent,

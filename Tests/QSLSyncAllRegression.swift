@@ -227,7 +227,7 @@ struct QSLSyncAllRegression {
         if case .send(let adif) = QSLSyncAll.review(stale, currentFields: current) { sentADIF = adif }
         check("a job is sent with the QSO's current fields, not the ones it was queued with",
               sentADIF.contains("<BAND:3>20m") && !sentADIF.contains("40m"), sentADIF)
-        let builtADIF = QSLUploadStatus.uploadADIF(current)
+        let builtADIF = QSLUploadStatus.uploadADIF(current, for: .qrz)
         check("the ADIF sent to a service has no local path, QRZ page link or APP_YAAM_ field",
               [sentADIF, builtADIF].allSatisfy { adif in
                   !adif.contains("QSL_MEDIA_PATH") && !adif.contains("/local/") && !adif.contains("QRZ_URL") &&
@@ -629,7 +629,7 @@ struct QSLSyncAllRegression {
         let applyUpdates = slice(hub, from: "private func applyQSLJobUpdates(", to: "static func qslDateString(")
         let restoreMarks = slice(hub, from: "func restoreLostQSLMarks() {", to: "func addStandardClubLogStatus()")
         check("the queue plans with QSLSyncAll.plannedUploads, builds the ADIF with uploadADIF, and lets new credentials unblock",
-              hub.contains("let plan = QSLSyncAll.plannedUploads(") && hub.contains("let adif = QSLUploadStatus.uploadADIF(fields)") &&
+              hub.contains("let plan = QSLSyncAll.plannedUploads(") && hub.contains("let adif = QSLUploadStatus.uploadADIF(fields, for: provider)") &&
               hub.contains("for key in unblockedKeys where jobStates[key] == .blocked { jobStates[key] = .retry }") &&
               !hub.contains("func qslADIFRecord"))
         check("Sync reads the Station Workspace switches under the key the page saves, and only a touched switch saves it",
@@ -644,7 +644,7 @@ struct QSLSyncAllRegression {
               upload.contains("let vaultLocked = !CredentialVault.isVaultSessionUnlocked") &&
               upload.contains("let providers = vaultLocked ? Set<QSLProvider>() : configured.intersection(switchedOn)"))
         check("Sync takes the QSOs with recordsToSync, queues them without stopped jobs, and reports what was there before",
-              upload.contains("let chosenFields = QSLSyncAll.recordsToSync(all: qsoRecords.map { (id: $0.id, fields: $0.fields) }, selectedIDs: selectedIDs)") &&
+              upload.contains("let chosenFields = QSLSyncAll.recordsToSync(all: selectedFields, selectedIDs: nil, stationCallsign: currentStationCallsign)") &&
               upload.contains("enqueueQSL(records: qsoRecords.filter { chosenIDs.contains($0.id) }, providers: providers, retryStopped: false, unblockedKeys: unblocked)") &&
               upload.contains("let unblocked = QSLSyncAll.unblockedJobKeys(qslQueueJobs, credentialsChangedAt: qslCredentialsChangedAt())") &&
               upload.contains("let summaries = await processQSLQueue(providers: providers, qsoIDs: selectedIDs == nil ? nil : chosenIDs, countAlreadyThere: false)") &&
@@ -734,10 +734,10 @@ struct QSLSyncAllRegression {
               daemon.contains("let reply = QSLUploadStatus.qrzReply(responseText)") && client.contains("let reply = QSLUploadStatus.qrzReply(text)") &&
               client.contains("if reply.duplicate { duplicates += 1 }"))
         check("R11: the daemon, Wavelog (one QSO and the full sync), HRDLog and HamQTH leave the local fields out",
-              daemon.contains("if QSLUploadStatus.isLocalOnly(key) { continue }") &&
-              wavelog.contains("var normalizedFields = QSLUploadStatus.serviceFields(record.fields)") &&
-              wavelogSync.contains("let dicts = appState.qsoRecords.map { QSLUploadStatus.serviceFields($0.fields) }") &&
-              appState.contains("var exportFields = QSLUploadStatus.serviceFields(fields)"))
+              daemon.contains("var normalizedFields = QSLUploadStatus.uploadFields(record.fields, for: destination)") &&
+              wavelog.contains("var normalizedFields = QSLUploadStatus.uploadFields(record.fields, for: .wavelog)") &&
+              wavelogSync.contains("let dicts = uploadRecords.map { QSLUploadStatus.uploadFields($0.fields, for: .wavelog) }") &&
+              appState.contains("var exportFields = QSLUploadStatus.uploadFields(fields, for: destination)"))
         check("new credentials: every save records its time, and Sync reads it per service",
               vault.components(separatedBy: "markChanged(account:").count == 8 &&
               hub.contains("CredentialVault.changedAt(.qrzAPIKey)") && hub.contains("CredentialVault.changedAt(.clubLogAPIKey)"))

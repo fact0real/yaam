@@ -7,6 +7,11 @@ nonisolated struct FT8StationDetection: Sendable {
 }
 
 nonisolated enum FT8StationDecoder {
+    /// Calibration for the pinned ft8-808 efe779c decoder: its sample-origin epoch includes about one
+    /// FT8 symbol (0.16 s) plus the protocol's nominal 0.5 s start. Verified with known-start waveforms.
+    /// FT4 has a different timing convention and must be calibrated independently.
+    static let ft8EpochCorrection: Float = 0.66
+
     /// Optional extra timing alignments retain every standard-pass result.
     /// This is bounded timing diversity, not WSJT-X AP or signal subtraction.
     static func decode(samples: [Float], sampleRate: Int, protocol proto: FT8Protocol,
@@ -24,7 +29,7 @@ nonisolated enum FT8StationDecoder {
                 guard !results.contains(where: {
                     $0.message.text == message.text && abs($0.message.frequencyHz - message.frequencyHz) < 6
                 }) else { continue }
-                results.append(.init(message: message, timeCorrection: Float(offset)))
+                results.append(.init(message: message, timeCorrection: Float(offset) - (proto == .ft8 ? ft8EpochCorrection : 0)))
             }
         }
         return results

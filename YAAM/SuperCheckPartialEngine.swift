@@ -91,44 +91,6 @@ public final class SuperCheckPartialEngine: ObservableObject {
     private var callsignSet: Set<String> = []
     private var callsignList: [String] = []
 
-    // Built-in comprehensive starter database of prominent world contest / DX callsigns
-    private let defaultMasterSeed: [String] = [
-        // North America (W/K, VE, XE, KL7, KH6)
-        "W1AW", "W2GD", "W3LPL", "W4KW", "K1LZ", "K1DG", "K3LR", "K5ZD", "K9CT", "N2IC",
-        "N3QE", "AA3B", "AA1K", "K1AR", "K1TTT", "W2FU", "W2VJN", "N4WW", "K4BA", "W5WMU",
-        "K5TR", "N6RO", "N6TV", "W6YX", "K7RI", "W7RN", "N8OO", "K8GL", "VE2CSE", "VE3EJ",
-        "VE3AT", "VE3NEA", "VE3RAC", "VE6SV", "VE7CC", "VE7GL", "XE1R", "XE2S", "KL7RA", "KH6J", "KH6LC",
-
-        // Europe (DL, G, F, I, EA, CT, PA, ON, SM, LA, OH, OZ, SP, OK, OM, HA, S5, 9A, YU, LZ, SV)
-        "DL1ABC", "DL6FBL", "DL0CS", "DA0HQ", "DK3WW", "DF3CB", "G3TXF", "G4BJM", "M6T", "M0DXR",
-        "GM3ZWW", "GW4BLE", "F6KOP", "F6KNB", "TM6M", "I2WIJ", "IR4M", "IO4T", "IB4M", "EA4TX",
-        "EA8RM", "EF8R", "ED1R", "CT1BOH", "CR3A", "CR6K", "PA0MIR", "PI4CC", "ON4UN", "ON4KST",
-        "SM5AJV", "SK3W", "LA8HGA", "LN8W", "OH2B", "OH2BH", "OG2X", "OF100FI", "OZ1ADL", "OZ5E",
-        "SP9QMP", "SN3A", "SP5GR", "OK2C", "OL7M", "OK1CF", "OM7M", "OM3RM", "HG6N", "HA8IH",
-        "S50A", "S51A", "9A1A", "9A5W", "YU1LA", "YU1ZZ", "YT5A", "LZ2K", "LZ2JA", "SV2DCD", "SV1DPI",
-        "ER4DX", "E77DX", "EI7M", "Z60A",
-
-        // Eastern Europe & Central Asia (UA, UR, UN, EY, EX)
-        "RA3W", "R9DX", "UA9BA", "RT6A", "RK3AWL", "RW2F", "UR5LAM", "UX0FF", "UP2L", "UN9L",
-        "EY8MM", "EX8M", "ES5TV",
-
-        // Middle East & Africa (EP, 4X, A6, A7, HZ, 9K, CN, ZS, 7Q, 5Z)
-        "EP2AES", "EP2LSH", "EP2C", "EP4HR", "4X4DK", "4X1IM", "4Z5LA", "A45XR", "A65BR", "A61Q",
-        "A71BX", "HZ1SK", "7Z1SJ", "9K2HN", "9K2GS", "OD5ZZ", "JY5MM", "TA1D", "CN8KD", "CN2AA",
-        "ZS6CCY", "ZS6CC", "5Z4/EA4ATI", "7Q7RU", "3B8BAP", "5R8UI", "6W/AA7JV", "EA9LZ",
-
-        // Asia & Oceania (JA, HL, BY, BV, VR2, 9M, 9V, YB, DU, VK, ZL)
-        "JA1ABC", "JA1BJK", "JA7NVF", "JH1AJT", "JH1EAQ", "JR2PAU", "HL5IVL", "B1Z", "BY1RX",
-        "BY4AA", "BV2B", "VR2XMT", "9M2TO", "9V1YC", "YB0AR", "YB0ECT", "YF1AR", "DU1/JJ5GMJ",
-        "VK3XYZ", "VK4KW", "VK2GR", "ZL1BQD", "ZL1BY", "ZL3X", "VU2PTT", "VU2NKS", "JT1CO", "HS0ZDY",
-
-        // South & Central America, Caribbean (PY, LU, CE, CX, ZP, ZF, PJ2, P4, TI, KP4, V3)
-        "PY2XB", "PY2ZX", "PT5T", "PR7AB", "LU8DPM", "LR2F", "CE3CT", "CX7CO", "ZP5AA", "CP6CW",
-        "OA4SS", "HK3C", "YV5E", "ZF1A", "ZF2MJ", "PJ2T", "PJ4G", "P40W", "P49X", "TI7W", "TI9A",
-        "KP4AA", "KP2M", "V31MA", "V47T", "J68HZ", "VP2V/K6TOP", "VP9/W6PH", "C31CT", "T77C", "TF3W",
-        "4U1UN", "4U1ITU", "5B4AMM", "3D2RR", "3D2AG"
-    ]
-
     private init() {
         self.isEnabled = UserDefaults.standard.object(forKey: "scpEnabled") as? Bool ?? true
         self.autoUpdate = UserDefaults.standard.object(forKey: "scpAutoUpdate") as? Bool ?? true
@@ -154,19 +116,15 @@ public final class SuperCheckPartialEngine: ObservableObject {
                 statusMessage = "Loaded \(totalCallsigns) callsigns from Master.scp"
                 return
             } catch {
-                // Fallback to starter set
+                // Leave the index empty if the cached roster cannot be read.
             }
         }
 
-        // Seed with default callsigns
-        var set = Set<String>()
-        for call in defaultMasterSeed {
-            set.insert(call.uppercased())
-        }
-        self.callsignSet = set
-        self.callsignList = Array(set).sorted()
-        self.totalCallsigns = set.count
-        self.statusMessage = "\(totalCallsigns) starter callsigns loaded"
+        // Demonstration identities must not become operational matches.
+        self.callsignSet = []
+        self.callsignList = []
+        self.totalCallsigns = 0
+        self.statusMessage = "No roster loaded. Import MASTER.SCP or download an update."
     }
 
     private func parseMasterSCP(_ content: String) {

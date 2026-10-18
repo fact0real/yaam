@@ -290,7 +290,7 @@ nonisolated func flagFromCallsignPrefix(_ callsign: String) -> String? {
     return nil
 }
 
-nonisolated func countryToFlag(_ country: String) -> String {
+nonisolated func countryToFlag(_ country: String, allowCallsignFallback: Bool = true) -> String {
     let clean = canonicalCountryName(country).lowercased()
     if clean.isEmpty || clean == "n/a" || clean == "none" || clean == "-" { return "🌐" }
     
@@ -713,7 +713,7 @@ nonisolated func countryToFlag(_ country: String) -> String {
     }
 
     // Callsign prefix fallback
-    if let prefixFlag = flagFromCallsignPrefix(country) {
+    if allowCallsignFallback, let prefixFlag = flagFromCallsignPrefix(country) {
         return prefixFlag
     }
     

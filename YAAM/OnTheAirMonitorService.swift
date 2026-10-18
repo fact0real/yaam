@@ -92,8 +92,8 @@ public final class OnTheAirMonitorService: ObservableObject {
     @Published public var sessionMaxDXCall: String = ""
     @Published public var currentCallsign: String = ""
     @Published public var homeGrid: String = ""
-    @Published public var homeLatitude: Double = 35.6892
-    @Published public var homeLongitude: Double = 51.3890
+    @Published public var homeLatitude: Double = 0
+    @Published public var homeLongitude: Double = 0
 
     private var pollerTask: Task<Void, Never>?
     private var lastNotifiedSpotID: String?

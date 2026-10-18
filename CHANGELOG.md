@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.37.37 - 2026-10-18
+
+- Integrate reviewed EA3JIC upload privacy and open items with positive allowlists and enhanced transport safeguards.
+- Enforce positive ADIF allowlist per upload service, stripping other stations' personal data (email, address, biography, exact coordinates) and local station street address/exact coordinates by default.
+- Add three separate opt-in privacy controls in Data Safety for other stations' name/QTH, contact details plus precise positions, and comments/QSL messages.
+- Restrict online uploads to the active station callsign, skipping historical or imported contacts made under other callsigns.
+- Add non-mutating Wavelog connection and rights test (`check_auth`), distinguish read-only from read/write API keys, and update endpoints (`api/qso`, `get_contacts_adif`, `station_info`).
+- Tighten TQSL verification to require exit code 0 for full batch acceptance; handle codes 8, 9, and 14 as non-success with diagnostic details.
+- Prevent silent failures on automatic ADIF file save by surfacing I/O errors and serializing background writes.
+- Guard digital audio transmissions against unconfigured audio output, preventing invalid RF keying.
+- Require valid, finite, in-band frequencies in contest quick-logging instead of falling back to synthetic band defaults.
+- Default CAT Morse rigctld client reference to shared instance before Operator Desk is presented.
+- Fix PSK31 Varicode table to standard 128-character G3PLX mapping, correct Hellschreiber pixel clock rate, and buffer streamed digital callsigns.
+- Detect serial/rig disconnects during CW keying and cancel active transmission within 200 ms.
+- Remove debugger entitlement from Release builds, disable base entitlement injection, and document all application entitlements.
+- Apply calibrated 0.66 s timing correction to FT8 decodes and normalize station weather coordinates to coarse 4-character grid squares.
+
 ## 1.37.36 - 2026-10-17
 
 - Integrate reviewed EA3JIC CW and band-advisor fixes, with additional validation at radio transport boundaries.

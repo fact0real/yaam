@@ -350,6 +350,10 @@ public final class SSTVEngine: ObservableObject {
             transmitRefusal = issue
             return
         }
+        guard audioEngine?.isRunning == true, playerNode?.isPlaying == true else {
+            transmitRefusal = "SSTV test-card audio transmission is unavailable. Nothing was sent."
+            return
+        }
         transmitRefusal = ""
         isTransmitting = true
 

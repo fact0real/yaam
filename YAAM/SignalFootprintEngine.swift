@@ -191,7 +191,7 @@ public final class SignalFootprintEngine: ObservableObject {
     @Published public var sessionMaxDXBearing: Double = 0.0
     @Published public var stationCallsign: String = ""
     @Published public var homeGrid: String = ""
-    @Published public var homeCoordinate: GeoCoordinate = GeoCoordinate(latitude: 35.6892, longitude: 51.3890)
+    @Published public var homeCoordinate: GeoCoordinate = GeoCoordinate(latitude: 0, longitude: 0)
     @Published public var audioAlertsEnabled: Bool = true
     @Published public var voiceAlertsEnabled: Bool = false
     @Published public var filterBand: String = "ALL"

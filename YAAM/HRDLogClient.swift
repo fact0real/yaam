@@ -36,7 +36,7 @@ public final class HRDLogClient: ObservableObject {
     // MARK: - Upload Single QSO
 
     func uploadSingleQSO(record: QSORecordModel, callsign: String? = nil) async -> Bool {
-        let adif = record.toADIFRecordString()
+        let adif = record.toADIFRecordString(for: .hrdlog)
         return await uploadADIFString(adif, callsign: callsign)
     }
 
@@ -47,7 +47,7 @@ public final class HRDLogClient: ObservableObject {
 
         var adifBatch = "<ADIF_VER:5>3.1.4\n<PROGRAMID:4>YAAM\n<EOH>\n"
         for rec in records {
-            adifBatch += rec.toADIFRecordString() + "\n"
+            adifBatch += rec.toADIFRecordString(for: .hrdlog) + "\n"
         }
 
         self.isUploading = true

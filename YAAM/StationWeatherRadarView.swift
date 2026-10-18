@@ -70,7 +70,7 @@ public struct StationWeatherPillView: View {
                     Image(systemName: "cloud.sun")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
-                    Text(engine.resolvedGrid.isEmpty ? "Radar" : engine.resolvedGrid)
+                    Text(!engine.isEnabled ? "Weather Off" : (engine.resolvedGrid.isEmpty ? "Weather" : engine.resolvedGrid))
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(.secondary)
                 }
@@ -163,6 +163,24 @@ public struct StationWeatherRadarPopoverView: View {
 
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(alignment: .leading, spacing: 14) {
+                    Toggle("Enable weather forecasts", isOn: $engine.isEnabled)
+                    Text("When enabled, Open-Meteo receives the selected locator centre every 20 minutes and on location changes. Default: approximate 4-character square. Change precision in Settings → Antenna Weather Radar.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    if !engine.isEnabled {
+                        Text("Weather is disabled. No weather requests are sent.")
+                    } else if engine.currentTelemetry == nil {
+                        if engine.isFetching {
+                            ProgressView("Loading forecast…")
+                        } else {
+                            Text(engine.fetchError ?? "No weather forecast is available.")
+                                .foregroundStyle(.secondary)
+                        }
+                    } else {
+                    Text("Forecast for the shared locator centre. Conditions at your antennas may differ; this is not lightning detection or a safety guarantee.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     tacticalHeroBanner
 
                     if engine.threatLevel != .safe {
@@ -174,6 +192,7 @@ public struct StationWeatherRadarPopoverView: View {
                     windRotatorCompassCard
 
                     twentyFourHourHorizonCard
+                    }
                 }
                 .padding(16)
             }
@@ -201,7 +220,7 @@ public struct StationWeatherRadarPopoverView: View {
                 }
 
                 HStack(spacing: 6) {
-                    Text("QTH Locator:")
+                    Text("Shared locator:")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
 

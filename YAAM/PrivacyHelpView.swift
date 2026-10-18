@@ -1,0 +1,75 @@
+import SwiftUI
+
+struct PrivacyHelpView: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Label("Privacy & Network Connections", systemImage: "hand.raised.fill")
+                .font(.title2.bold())
+            Text("Reviewed 18 October 2026. Public data engines can connect without an account, including when created during startup or when restoring a screen. Every peer can see your IP address, connection timing and ordinary request metadata. This page works offline.")
+            GroupBox("Your controls") {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Weather: Settings → Antenna Weather Radar. Off on new installations; existing enable preference is preserved. The shared position defaults to a 4-character square, with optional 6-character precision. Coarse forecasts may differ from local conditions and are not lightning detection.")
+                    Text("Uploads: Settings → ADIF Live Sync → Zero-Click Cloud Outbox. Use the master and individual service switches. Configured new-QSO uploads default on. Scheduled sync, manual uploads, Wavelog, HRDLog and HamQTH have separate controls. Already dispatched requests cannot be recalled.")
+                    Text("Upload fields: Settings → Data Safety → Logbook upload privacy. Name/QTH, contact details with precise locations, and comments/QSL messages each require an opt-in (all default off). Callsigns, QSO/award fields and grids up to six characters still leave. LoTW uses signing fields plus TrustedQSL’s station location. Local exports retain all fields.")
+                    Text("Rank batches disclose the destination before starting. Local servers, cloud folders, monitoring and alert webhooks have their own controls. Read each destination below for the data it receives.")
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            ForEach(Array(Self.services.enumerated()), id: \.offset) { _, service in
+                GroupBox {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(service.name).font(.headline)
+                        Text(service.host).font(.caption.monospaced()).textSelection(.enabled)
+                        Text(service.purpose)
+                        Text("When: " + service.when).foregroundStyle(.secondary)
+                        Text("Sent: " + service.sent)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(4)
+                }
+            }
+            Text("This inventory describes YAAM source behavior, not provider retention policies or a packet-capture audit. DNS, macOS services and embedded web subresources may make additional connections. The repository’s PRIVACY.md includes source boundaries and maintenance notes.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .textSelection(.enabled)
+    }
+
+    private struct Service {
+        let name: String
+        let host: String
+        let purpose: String
+        let when: String
+        let sent: String
+    }
+    private static let services: [Service] = [
+        Service(name: "QRZ.com", host: "www.qrz.com · xmldata.qrz.com · logbook.qrz.com", purpose: "Callsign/contact lookup, signed-in pages, awards and QSO uploads.", when: "On lookup/enrichment or opening online account tools; configured automatic uploads and scheduled sync can run in the background.", sent: "Requested callsigns, authentication/session credentials, and uploaded QSO ADIF fields including station identity. Web pages may load third-party assets."),
+        Service(name: "LoTW / TrustedQSL", host: "lotw.arrl.org", purpose: "Signed QSO uploads, confirmation downloads and public activity roster.", when: "Manual actions; configured automatic uploads and scheduled confirmation sync. The public roster is fetched when its update is requested.", sent: "Uploads: signed QSO data and station identity through TQSL. Confirmation downloads: login credentials and date filters. Public roster requests contain no station payload."),
+        Service(name: "eQSL", host: "www.eqsl.cc", purpose: "QSO upload, inbox confirmations and QSL card downloads.", when: "Manual actions or configured upload/sync schedules.", sent: "Account credentials, QTH nickname where set, uploaded QSO ADIF data; card/download queries include contact/date filters."),
+        Service(name: "Club Log", host: "clublog.org", purpose: "QSO upload, DXCC matrix, leagues and personal live spots.", when: "Manual tools, signed-in live spots polling, configured automatic uploads or scheduled sync.", sent: "Account credentials/session, station callsign and uploaded QSO data; league/matrix/spot filters."),
+        Service(name: "HRDLog", host: "hrdlog.net", purpose: "Online logbook upload.", when: "Manual upload, or on QSO save if HRDLog auto-upload is enabled (default off).", sent: "Account callsign, upload code and QSO data."),
+        Service(name: "HamQTH", host: "www.hamqth.com", purpose: "Callsign/contact lookup and online logbook upload.", when: "Configured lookup/contact enrichment; manual upload or auto-upload if enabled (default off).", sent: "Login credentials/session, requested callsign; uploaded QSO data and station identity."),
+        Service(name: "Wavelog", host: "Operator-selected server", purpose: "Logbook upload/download and station synchronization.", when: "Manual sync; configured automatic push/pull and the Zero-Click outbox.", sent: "API key, station identifier and allowed QSO data. Wavelog requires the key in the URL path for authentication tests and profile discovery; uploads/downloads carry it in JSON. YAAM uses an ephemeral session, refuses redirects and omits keyed URLs from errors. Transport depends on the configured server URL."),
+        Service(name: "QRZ Rank", host: "qrz-rank.asis.sh", purpose: "Rank lookup, log enrichment, country tables, account allowance and statistics.", when: "On rank/leaderboard actions, owner rank refresh, or operator-started enrichment/backfill. Public overview and country endpoints may be read without a token.", sent: "Each requested callsign is sent separately. Personal token goes in the Authorization: Bearer header, never the URL. Rank requests do not send QSO dates, reports or an ADIF log. Country/category/limit filters and YAAM User-Agent are sent where applicable."),
+        Service(name: "Log Assistant", host: "api.openai.com by default; configurable endpoint", purpose: "Answer the operator’s questions about the log.", when: "When a prompt is submitted with an API key configured.", sent: "Prompt text, active station callsign, model and aggregate counts: QSOs, confirmations, incoming requests, contests and DXpeditions. Individual QSO rows are not automatically included; anything typed or pasted into the prompt is sent. The configured provider receives the key."),
+        Service(name: "Open-Meteo", host: "api.open-meteo.com", purpose: "Station forecast and derived weather guidance.", when: "Off on new installations; existing enable preference is preserved. When enabled: engine startup, every 20 minutes, manual refresh and station/rover or precision changes. Invalid or missing locators produce no request.", sent: "Selected locator centre as latitude/longitude; forecast variables and timezone=auto. Default is the 4-character square centre (2° longitude × 1° latitude); optional precision uses up to 6 characters. No callsign, key or log is sent."),
+        Service(name: "NOAA SWPC", host: "services.swpc.noaa.gov · www.swpc.noaa.gov", purpose: "Solar indices, auroral oval, absorption and propagation.", when: "Automatically when the relevant engines are created (which can occur at startup), then their refresh timers; also on refresh or opening propagation tools. Aurora refreshes every 10 minutes, absorption every 5 minutes.", sent: "Public feed paths; no station fields in these requests."),
+        Service(name: "KC2G / GIRO", host: "prop.kc2g.com · giro.uml.edu", purpose: "Ionosonde/MUF data and source/reference links.", when: "Propagation refresh; the 6m engine refreshes automatically every 3 minutes while enabled. GIRO reference links open on click.", sent: "Public data/filter requests; no station coordinates in the public ionosonde request."),
+        Service(name: "NASA SDO", host: "sdo.gsfc.nasa.gov", purpose: "Solar imagery.", when: "Automatically when the solar image engine is created, then every 20 minutes, or on channel/refresh selection.", sent: "Selected public image/channel path; no station payload."),
+        Service(name: "CelesTrak", host: "celestrak.org", purpose: "Amateur satellite orbit elements.", when: "Automatically when the satellite tracking engine is created, or when refresh is requested.", sent: "Amateur satellite group and TLE format; no observer coordinates in the download."),
+        Service(name: "PSKReporter", host: "retrieve.pskreporter.info · mqtt.pskreporter.info:1883", purpose: "Reception reports, station footprints, 6m spots and live tracker.", when: "On monitoring/tool use and their polling intervals; 6m public activity also participates in automatic propagation refresh.", sent: "Station/target callsign for personalized queries or MQTT subscriptions, time/frequency/limit filters. Public 6m queries omit the callsign. MQTT on port 1883 is unencrypted."),
+        Service(name: "Reverse Beacon Network / WSPR.live", host: "www.reversebeacon.net · db1.wspr.live", purpose: "CW and WSPR propagation/activity.", when: "When the associated live propagation tool refreshes.", sent: "Callsign and/or time/band filters for RBN; public SQL activity query for WSPR."),
+        Service(name: "hamqsl solar feed", host: "www.hamqsl.com", purpose: "DX Advisor solar and band conditions.", when: "When propagation conditions are fetched; NOAA outlook is fetched alongside it.", sent: "Public feed request; no station payload."),
+        Service(name: "DX clusters", host: "Operator-selected TCP host; fallback dxc.nc7j.com; tracker can use dxc.w3lpl.net:7373", purpose: "DX spots and cluster commands.", when: "On connect/monitoring, including reconnect while monitoring is enabled.", sent: "Login callsign and entered cluster commands/spot content. Telnet/TCP connections are unencrypted."),
+        Service(name: "ON4KST", host: "chat.on4kst.com (configured host/room)", purpose: "VHF/UHF chat.", when: "When the operator connects and sends messages.", sent: "Login callsign, password if supplied, selected room and message text over TCP."),
+        Service(name: "POTA / SOTA", host: "api.pota.app · api2.sota.org.uk", purpose: "Activation spot lists.", when: "When the activation spot feature refreshes.", sent: "Public spot queries; no station payload."),
+        Service(name: "Calendars and DX news", host: "contestcalendar.com · ng3k.com · 425dxn.org · dx-world.net · dxping.com · arrl.org · arnewsline.org", purpose: "Contest calendars, DXpedition lists, bulletins and news.", when: "When those views request a refresh, subject to cache freshness.", sent: "Public page/feed requests; YAAM version in the User-Agent for DX news. Linked images/pages may contact their own hosts."),
+        Service(name: "Callsign / country / club rosters", host: "supercheckpartial.com · country-files.com · lotw.arrl.org · skccgroup.com · cwops.org · fists.co.uk · longislandcwclub.org", purpose: "SCP, CTY, public LoTW activity and membership databases.", when: "On roster update/download actions and any enabled update check. Cached/imported data is used locally.", sent: "Public file requests; no logbook/callsign lookup payload. User-imported rosters remain local."),
+        Service(name: "WebSDR / KiwiSDR", host: "Selected public receiver or custom receiver URL", purpose: "Remote audio and receiver control for FT8 monitoring.", when: "When the operator starts a web receiver.", sent: "Requested frequency/mode, stream/control messages and normal browser/connection metadata. Some receivers use HTTP or unencrypted WebSockets."),
+        Service(name: "Email", host: "Operator-selected SMTP server / system mail application", purpose: "Send QSL cards, logs or feedback.", when: "On explicit send; configured batch mail sends selected messages. Feedback opens a prepared message in the system mail application.", sent: "Recipients, subject, message body, attachments and SMTP credentials to the selected mail server. Feedback includes the information the operator chooses to include."),
+        Service(name: "Alert webhooks", host: "Operator-selected Discord / Telegram / other webhook URL", purpose: "6m opening notifications.", when: "When configured alerts trigger.", sent: "Alert message and fields included by the alert formatter; destination credentials/token embedded in the configured URL where required."),
+        Service(name: "Radio / station and local servers", host: "Configured flrig, rigctld, TCI, cwdaemon, rotator, WSJT-X, local cluster, HamClock or mobile endpoints", purpose: "Radio control, decoded/logged QSOs and companion dashboards.", when: "When enabled/connected, with reconnect or listeners as configured.", sent: "Frequency/mode/PTT/keyer commands, decoded callsigns and QSO/station state according to the feature. Servers can expose station/log state to connected clients. These stay on the Mac/LAN only if endpoints and binding/network exposure are local."),
+        Service(name: "Cloud folder sync", host: "Operator-selected iCloud Drive or other synchronized folder", purpose: "Versioned logbook package exchange.", when: "Manual push/pull or enabled cloud sync timer.", sent: "Station profile, headers, QSOs, app version, generated timestamp and device identifier in a package. The folder provider may upload it using its own sync service; it is not a direct YAAM HTTP upload."),
+        Service(name: "Apple Maps / embedded web content", host: "Apple Maps and hosts referenced by viewed pages/images", purpose: "Maps, online login pages, callsign biographies and images.", when: "When a native map or online page/image is loaded.", sent: "Map view/tile requests or page/image URLs and normal web metadata/cookies. A map’s viewport can reveal the area being viewed, including the station area. Third-party page subresources are controlled by that page."),
+        Service(name: "GitHub / browser links", host: "api.github.com · github.com · linked propagation sites (VOACAP, NCDXF, DXmaps and others)", purpose: "Release checks, downloads and operator-opened reference links.", when: "Release check when Check for Updates is selected; links and downloads on use.", sent: "Public repository/release request; normal browser metadata and any parameters in the chosen link. A download may use GitHub asset/CDN hosts.")
+    ]
+}

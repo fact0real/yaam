@@ -21,7 +21,8 @@ struct ParsedQSOMetadata: Sendable {
     }
 }
 
-enum QSOMetadataFormatter {
+/// Pure text helpers, nonisolated so the upload builders (QSLUploadStatus.uploadFields) can call them anywhere.
+nonisolated enum QSOMetadataFormatter {
     /// Parses raw comments and record fields into clean, human-readable structured metadata.
     static func parse(record: QSORecordModel) -> ParsedQSOMetadata {
         var iota: String? = record["IOTA"].isEmpty ? nil : record["IOTA"]

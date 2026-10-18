@@ -87,7 +87,7 @@ struct BustedCallsignDatabaseManagerView: View {
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     } else {
-                        Text("Using bundled verified starter database. Update from web recommended.")
+                        Text("Import or download SCP / LoTW lists to enable roster-based suggestions.")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }

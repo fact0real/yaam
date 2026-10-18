@@ -236,18 +236,61 @@ public struct HourlyThreatForecast: Identifiable, Equatable {
 public final class StationWeatherSafetyEngine: ObservableObject {
     public static let shared = StationWeatherSafetyEngine()
 
+    private let defaults: UserDefaults
+    private let session: URLSession
+
     // MARK: - User Defaults / Configuration
     @Published public var isEnabled: Bool {
-        didSet { UserDefaults.standard.set(isEnabled, forKey: "weatherRadarEnabled") }
+        didSet {
+            defaults.set(isEnabled, forKey: "weatherRadarEnabled")
+            configurationChanged()
+        }
     }
     @Published public var audioAlertsEnabled: Bool {
-        didSet { UserDefaults.standard.set(audioAlertsEnabled, forKey: "weatherAudioAlertsEnabled") }
+        didSet { defaults.set(audioAlertsEnabled, forKey: "weatherAudioAlertsEnabled") }
     }
     @Published public var highWindThreshold: Double {
-        didSet { UserDefaults.standard.set(highWindThreshold, forKey: "weatherHighWindThreshold") }
+        didSet { defaults.set(highWindThreshold, forKey: "weatherHighWindThreshold") }
     }
+    @Published var locationPrecision: WeatherLocationPrecision {
+        didSet {
+            defaults.set(locationPrecision.rawValue, forKey: "weatherLocationPrecision")
+            configurationChanged()
+        }
+    }
+    private var requestTask: Task<(Data, URLResponse), Error>?
+    private var requestID = UUID()
+
+    private func configurationChanged() {
+        requestID = UUID()
+        requestTask?.cancel()
+        requestTask = nil
+        refreshTimer?.invalidate()
+        isFetching = false
+        speechSynthesizer.stopSpeaking(at: .immediate)
+        clearForecast()
+        fetchError = nil
+        guard isEnabled else { return }
+        startTimer()
+        Task { await refresh() }
+    }
+
+    private func clearForecast() {
+        currentTelemetry = nil
+        hourlyForecast = []
+        lastUpdated = nil
+        resolvedGrid = ""
+        resolvedCoordinates = nil
+        threatLevel = .safe
+        pStaticRisk = .low
+        windThreat = .low
+        tropoIndex = .nominal
+        recommendedRotatorHeading = 0
+        lastSpokenThreatLevel = nil
+    }
+
     private var stationGrid: String {
-        UserDefaults.standard.string(forKey: "stationGrid") ?? ""
+        defaults.string(forKey: "stationGrid") ?? ""
     }
 
     // MARK: - Published State
@@ -274,20 +317,24 @@ public final class StationWeatherSafetyEngine: ObservableObject {
     private var lastSpokenThreatLevel: AntennaThreatLevel?
     private let speechSynthesizer = AVSpeechSynthesizer()
 
-    private init() {
-        self.isEnabled = UserDefaults.standard.object(forKey: "weatherRadarEnabled") as? Bool ?? true
-        self.audioAlertsEnabled = UserDefaults.standard.object(forKey: "weatherAudioAlertsEnabled") as? Bool ?? true
-        let savedWind = UserDefaults.standard.double(forKey: "weatherHighWindThreshold")
+    init(defaults: UserDefaults = .standard, session: URLSession = .shared, startsAutomatically: Bool = true) {
+        self.defaults = defaults
+        self.session = session
+        self.isEnabled = defaults.object(forKey: "weatherRadarEnabled") as? Bool ?? false
+        self.locationPrecision = WeatherLocationPrecision(rawValue: defaults.string(forKey: "weatherLocationPrecision") ?? "") ?? .square
+        self.audioAlertsEnabled = defaults.object(forKey: "weatherAudioAlertsEnabled") as? Bool ?? true
+        let savedWind = defaults.double(forKey: "weatherHighWindThreshold")
         self.highWindThreshold = savedWind > 0 ? savedWind : 50.0
 
-        startTimer()
-        Task { @MainActor in
-            await refresh()
+        if startsAutomatically && isEnabled {
+            startTimer()
+            Task { @MainActor in await refresh() }
         }
     }
 
     deinit {
         refreshTimer?.invalidate()
+        requestTask?.cancel()
     }
 
     private func startTimer() {
@@ -305,20 +352,27 @@ public final class StationWeatherSafetyEngine: ObservableObject {
     public func refresh(forcedGrid: String? = nil) async {
         guard isEnabled else { return }
 
-        let targetGrid = (forcedGrid ?? stationGrid).trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        requestTask?.cancel()
+        let id = UUID()
+        requestID = id
+        isFetching = false
+        let targetGrid = (forcedGrid ?? RoverModeEngine.shared.effectiveGrid(homeGrid: stationGrid))
+            .trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         guard !targetGrid.isEmpty else {
-            resolvedGrid = ""
+            clearForecast()
             fetchError = "Set your locator in Settings > Stations to see the weather at your station."
             return
         }
-        let effectiveGrid = targetGrid
-        resolvedGrid = effectiveGrid
-
-        guard let coords = coordinate(fromMaidenhead: effectiveGrid) else {
-            fetchError = "Invalid Maidenhead Locator: \(effectiveGrid)"
+        guard let location = locationPrecision.location(for: targetGrid) else {
+            clearForecast()
+            fetchError = "Invalid Maidenhead Locator. Use a valid 4, 6, 8 or 10-character locator."
             return
         }
-
+        let coords = (lat: location.latitude, lon: location.longitude)
+        if resolvedGrid != location.grid {
+            clearForecast()
+        }
+        resolvedGrid = location.grid
         resolvedCoordinates = coords
         isFetching = true
         fetchError = nil
@@ -332,7 +386,12 @@ public final class StationWeatherSafetyEngine: ObservableObject {
         }
 
         do {
-            let (data, response) = try await URLSession.shared.data(from: url)
+            let session = self.session
+            let task = Task { try await session.data(from: url) }
+            requestTask = task
+            let (data, response) = try await task.value
+            guard requestID == id, isEnabled else { return }
+            requestTask = nil
             guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
                 throw URLError(.badServerResponse)
             }
@@ -344,6 +403,8 @@ public final class StationWeatherSafetyEngine: ObservableObject {
             lastUpdated = Date()
             isFetching = false
         } catch {
+            guard requestID == id, isEnabled else { return }
+            requestTask = nil
             isFetching = false
             fetchError = "Failed to update weather: \(error.localizedDescription)"
         }
@@ -492,30 +553,8 @@ public final class StationWeatherSafetyEngine: ObservableObject {
     // MARK: - Maidenhead Grid Resolver
 
     public func coordinate(fromMaidenhead locator: String) -> (lat: Double, lon: Double)? {
-        let value = locator.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        guard value.count >= 4 else { return nil }
-
-        let chars = Array(value)
-        guard
-            let lonField = chars[0].asciiValue,
-            let latField = chars[1].asciiValue,
-            let lonSquare = chars[2].wholeNumberValue,
-            let latSquare = chars[3].wholeNumberValue
-        else {
-            return nil
-        }
-
-        var longitude = Double(lonField - Character("A").asciiValue!) * 20 - 180 + Double(lonSquare) * 2 + 1
-        var latitude = Double(latField - Character("A").asciiValue!) * 10 - 90 + Double(latSquare) + 0.5
-
-        if value.count >= 6,
-           let lonSub = chars[4].asciiValue,
-           let latSub = chars[5].asciiValue {
-            longitude += Double(lonSub - Character("A").asciiValue!) * (5.0 / 60.0) + (2.5 / 60.0) - 1
-            latitude += Double(latSub - Character("A").asciiValue!) * (2.5 / 60.0) + (1.25 / 60.0) - 0.5
-        }
-
-        return (latitude, longitude)
+        guard let location = WeatherLocationPrecision.subsquare.location(for: locator) else { return nil }
+        return (location.latitude, location.longitude)
     }
 }
 

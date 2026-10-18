@@ -219,7 +219,7 @@ struct VisualAnalyticsView: View {
            let box = MaidenheadGridEngine.boundingBox(for: prof.grid) {
             return box.center
         }
-        return GeoCoordinate(latitude: 35.6892, longitude: 51.3890) // Default Station QTH
+        return GeoCoordinate(latitude: 0, longitude: 0) // Neutral map origin; configure a station profile for station calculations.
     }
 
     private var currentData: VisualAnalyticsData {

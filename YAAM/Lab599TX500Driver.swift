@@ -58,7 +58,7 @@ public final class Lab599TX500Driver: ObservableObject {
     @Published public var isConnecting: Bool = false
     @Published public var selectedPort: String = ""
     @Published public var baudRate: Int = 9600
-    @Published public var stopBits: Int = 2 // 8N2 recommended by TX-500 documentation
+    @Published public var stopBits: Int = 2 // Existing compatibility default; user manual specifies 8N1. Both remain selectable.
     @Published public var preserveDIGMode: Bool = true // MANDATORY for Firmware Bug #1 fix
     @Published public var autoConnect: Bool = false
 

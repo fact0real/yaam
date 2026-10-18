@@ -47,6 +47,11 @@ struct BulkQRZEnrichmentView: View {
 
             ScrollView {
                 VStack(spacing: 18) {
+                    Label("Starting enrichment sends each candidate callsign to QRZ.com and, if enabled and configured, HamQTH using your saved credentials or signed-in session.", systemImage: "hand.raised.fill")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
                     // Metrics Grid
                     HStack(spacing: 12) {
                         metricCard(

@@ -341,3 +341,27 @@ Decoded message streams from all active slots are continuously fed into an aggre
   - `quadGrid`: 2x2 grid for 4-transceiver monitoring.
   - `focusedSingle`: Single active slot focus with hot-switch tab bar.
 - **Standalone Window Topology:** Available in main window Operator Desk workspace and as a dedicated secondary window scene (`YAAMWindowID.multiRigFT8`) via shortcut `Cmd + Option + 8`.
+
+## 13. Release entitlements and upload privacy
+
+The shared `YAAM/YAAM.entitlements` file must not contain `com.apple.security.get-task-allow`. Xcode may add debugger access to a Debug build; it must be absent from a signed Release. Release explicitly sets `CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO`, because Xcode otherwise reinjects debugger access into an ad-hoc Release even after it is removed from the plist. Never re-sign a distribution with debugger entitlements copied from Debug.
+
+| Entitlement | Current purpose / boundary |
+| --- | --- |
+| `com.apple.security.app-sandbox` | Keep application sandboxing enabled. |
+| `com.apple.security.device.audio-input` | Operator-started radio/microphone audio capture through AVFoundation/Core Audio. |
+| `com.apple.security.device.bluetooth` | Retained for the supported FX-4CR paired Bluetooth serial/audio workflow pending a sandboxed hardware test without this grant; there is no direct CoreBluetooth/IOBluetooth implementation. |
+| `com.apple.security.device.serial` | POSIX serial CAT, WinKeyer and serial keying devices. |
+| `com.apple.security.files.downloads.read-write` | Existing log/report/download file workflows in Downloads. |
+| `com.apple.security.files.user-selected.read-write` | Files/folders explicitly selected by the operator and their security-scoped bookmarks. |
+| `com.apple.security.network.client` | Configured radio connections, public data feeds and online logbook clients. |
+| `com.apple.security.network.server` | Operator-enabled rigctld emulator, companion and other local listener workflows. |
+| `com.apple.security.temporary-exception.files.home-relative-path.read-write` | Existing `.tqsl` storage reconciliation and iCloud `Library/Mobile Documents` workflows; only the four explicit paths in the plist, with no wildcard expansion. |
+
+`Tests/ReleaseEntitlementsRegression.swift` checks this inventory against the plist and optionally checks the effective entitlements of a signed Release `.app`. Bluetooth removal remains a hardware validation item, rather than being inferred solely from the absence of an import.
+
+Every provider ADIF builder starts from `QSLUploadStatus.uploadFields(_:for:options:)`. Local file/CSV/database exports must never use this privacy filter. Three global Data Safety opt-ins default off: name/QTH, contact details plus precise positions, and comments/QSL messages. Imported `APP_*`, `*_INTL` and unknown fields never pass; `QSL_VIA` is a contact detail. Default grid payloads are limited to six characters, including grid lists. LoTW has a separate signing-field set and ignores the opt-ins; TQSL's station location can still supply its configured signing location. Do not describe this as anonymous uploading.
+
+The QSL Hub filters again at the request boundary, and TQSL always receives a private filtered copy even when handed a file URL. A queued preview does not grant permission to send a field later. Keep the active-station checks before each Hub batch and before Wavelog full sync/import; a changed workspace must leave unsubmitted jobs retryable without increasing attempts or marking sent. Only TQSL exit zero confirms the whole submitted batch. Codes 8, 9 and 14 require reconciliation, not blanket success.
+
+Focused runners for this review: `Tests/run-upload-privacy-regressions.sh`, `Tests/run-review-regressions.sh`, `Tests/run-workspace-review-regressions.sh`, and the existing `Tests/run-cw-safety-regressions.sh`. The workspace runner compiles the actual two AppState method bodies into isolated side-effect stand-ins, so tests do not initialize the live application. See `Reports/EA3JIC-20261017-review.md` for the evidence, deferred protocol work and exact scope.

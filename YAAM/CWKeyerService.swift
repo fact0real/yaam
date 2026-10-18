@@ -136,13 +136,15 @@ public final class CWKeyerService: ObservableObject {
     private var audioEngine: AVAudioEngine?
     private var playerNode: AVAudioPlayerNode?
     private var transmitTask: Task<Void, Never>?
+    private var connectionWatchTask: Task<Void, Never>?
     private var autoCQTask: Task<Void, Never>?
     /// True only while the Auto-CQ loop hands its own CQ to send(): every other message is sent by hand and ends it.
     private var autoCQIsSending = false
     private var activeTransmissionMode: CWTransmissionMode?
     private var catStopTask: Task<Void, Never>?
     private var isShuttingDown = false
-    weak var rigControlClientRef: RigControlClient?
+    // Use the shared connection before any Operator Desk view has appeared. Tests may still inject a client.
+    weak var rigControlClientRef: RigControlClient? = RigControlClient.shared
 
     /// In CAT Morse mode, the destination that took the last text (set by sendViaCAT), so that STOP reaches it even
     /// if the connection states have changed since. Nil until a text has gone to one.
@@ -505,6 +507,7 @@ public final class CWKeyerService: ObservableObject {
         transmitTask = Task { [weak self] in
             guard let self, !Task.isCancelled else { return }
 
+            self.watchActiveConnection()
             // 1. Hardware / Network backend execution
             switch selectedMode {
             case .winkeyer:
@@ -611,9 +614,52 @@ public final class CWKeyerService: ObservableObject {
         }
     }
 
+    /// Watch the destination that accepted this message, even if another radio becomes connected later.
+    /// A transport loss ends local progress and Auto-CQ; STOP is still attempted on the original destination.
+    private func watchActiveConnection() {
+        connectionWatchTask?.cancel()
+        connectionWatchTask = Task { [weak self] in
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .milliseconds(200)) } catch { return }
+                guard let self, self.isTransmitting, !Task.isCancelled else { return }
+                if let lost = self.disconnectedTransmissionDevice {
+                    self.transmitRefusal = "\(lost) disconnected during CW. Transmission stopped; check the radio before sending again."
+                    self.stop()
+                    return
+                }
+            }
+        }
+    }
+
+    private var disconnectedTransmissionDevice: String? {
+        func lost(_ connected: Bool, _ name: String) -> String? { connected ? nil : name }
+        switch activeTransmissionMode {
+        case .icomUSB?: return lost(IcomUSBRadioDriver.shared.isConnected, "Icom USB")
+        case .lab599TX500?: return lost(Lab599TX500Driver.shared.isConnected, "TX-500")
+        case .fx4cr?: return lost(FX4CRDriver.shared.isConnected, "FX-4CR")
+        case .xiegu6100?: return lost(Xiegu6100Driver.shared.isConnected, "Xiegu X6100")
+        case .winkeyer?: return lost(WinKeyerDriver.shared.isConnected, "WinKeyer")
+        case .serialDTR_RTS?: return lost(SerialKeyerDriver.shared.isConnected, "Serial keyer")
+        case .tci?: return lost(TCIClient.shared.isConnected, "TCI")
+        case .catMorse?:
+            switch catMorsePath {
+            case .fx4cr?: return lost(FX4CRDriver.shared.isConnected, "FX-4CR")
+            case .tx500?: return lost(Lab599TX500Driver.shared.isConnected, "TX-500")
+            case .icomUSB?: return lost(IcomUSBRadioDriver.shared.isConnected, "Icom USB")
+            case .xiegu6100?: return lost(Xiegu6100Driver.shared.isConnected, "Xiegu X6100")
+            case .rigctl?: return lost(rigControlClientRef?.state.isConnected == true, "rigctld")
+            case .flrig?: return lost(FLRigClient.shared.isConnected, "FLRig")
+            case nil: return nil
+            }
+        case .audioOnly?, .cwdaemon?, nil: return nil
+        }
+    }
+
     private func stopTransmitOnly() {
         transmitTask?.cancel()
         transmitTask = nil
+        connectionWatchTask?.cancel()
+        connectionWatchTask = nil
         isTransmitting = false
         activeBufferText = ""
         currentlyTransmittingChar = ""

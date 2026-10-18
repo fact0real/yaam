@@ -1,0 +1,24 @@
+Release 1.37.37 with upload privacy safeguards and platform fixes
+
+Integrate reviewed EA3JIC patch 61 and open items with positive allowlists,
+transport boundary filtering, and radio/DSP stability safeguards.
+
+- Build uploads from positive ADIF allowlists, stripping other stations'
+  personal data and local station street address/exact coordinates.
+- Add three Data Safety switches for name/QTH, contact details, and comments.
+- Require active station callsign for uploads and Wavelog two-way sync.
+- Add non-mutating Wavelog connection and rights test (`check_auth`).
+- Require TQSL exit 0 for batch acceptance; report diagnostic exit codes 8/9/14.
+- Surface automatic ADIF file save failures and serialize disk writes.
+- Inhibit unconfigured digital audio transmit before radio PTT keying.
+- Validate and require explicit in-band frequencies in contest quick-log.
+- Default CAT Morse rigctld client reference to shared instance.
+- Standardize PSK31 Varicode (G3PLX), fix Hell pixel clock, and buffer callsigns.
+- Cancel CW transmission within 200 ms upon serial or rig disconnect.
+- Remove debugger entitlement from Release and document entitlement inventory.
+- Apply calibrated 0.66 s FT8 DT timing offset and coarse weather locators.
+
+Validation: Debug and Release builds, full upload privacy suite (19+52+100 checks),
+CW safety regressions, digital receive, workspace review and entitlements tests.
+
+Co-authored-by: EA3JIC <338018746+EA3JIC@users.noreply.github.com>

@@ -49,9 +49,28 @@ public final class WavelogSyncEngine: ObservableObject {
         return !serverURL.isEmpty && !key.isEmpty
     }
 
+    /// Read-only check. The key is saved separately by Settings only when the operator chooses Save.
+    public func testConnection(apiKey: String) async {
+        guard !isSyncing else { return }
+        reloadSettings()
+        isSyncing = true
+        lastError = nil
+        defer { isSyncing = false }
+        do {
+            let rights = try await WavelogClient.shared.checkAuth(baseURL: serverURL, apiKey: apiKey)
+            lastStatusMessage = rights == .readOnly
+                ? "Connected with read-only access: uploads and radio updates will be refused. Use a read/write key to upload."
+                : "Connected with read/write access. No log data was changed."
+        } catch {
+            lastError = error.localizedDescription
+            lastStatusMessage = "Connection test failed."
+        }
+    }
+
     // MARK: - Station Profiles Discovery
 
     public func discoverStationProfiles() async {
+        guard !isSyncing else { return }
         reloadSettings()
         let key = CredentialVault.value(for: .wavelogAPIKey)
         guard !serverURL.isEmpty, !key.isEmpty else {
@@ -117,7 +136,12 @@ public final class WavelogSyncEngine: ObservableObject {
     // MARK: - Two-Way Batch Synchronization
 
     func performFullSync(appState: AppState) async {
+        guard !isSyncing else { return }
         reloadSettings()
+        guard appState.isOwnStationLogOpen else {
+            lastError = "Open the active station’s master log before synchronizing Wavelog."
+            return
+        }
         guard isConfigured else {
             self.lastError = "Wavelog is not configured in Settings."
             return
@@ -126,23 +150,38 @@ public final class WavelogSyncEngine: ObservableObject {
         let key = CredentialVault.value(for: .wavelogAPIKey)
         let url = serverURL
         let stationID = selectedStationProfileID
-
+        let localProfileID = appState.activeStationProfileID
+        let stationCallsign = appState.currentStationCallsign
         self.isSyncing = true
         self.lastError = nil
         self.lastStatusMessage = "Starting two-way synchronization with Wavelog..."
 
         defer {
             self.isSyncing = false
-            self.lastSyncDate = Date()
         }
 
         do {
+            let rights = try await WavelogClient.shared.checkAuth(baseURL: url, apiKey: key)
+            guard rights == .readWrite else {
+                throw WavelogError.serverRejected(reason: "Read-only key: two-way sync requires read/write access. No QSOs were uploaded.")
+            }
+            let profiles = try await WavelogClient.shared.fetchStationProfiles(baseURL: url, apiKey: key)
+            guard let remote = profiles.first(where: { $0.stationID == stationID }),
+                  remote.stationCallsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == stationCallsign else {
+                throw WavelogError.serverRejected(reason: "The selected Wavelog station callsign does not match the active station.")
+            }
+            guard appState.isOwnStationLogOpen, appState.activeStationProfileID == localProfileID,
+                  appState.currentStationCallsign == stationCallsign else {
+                throw WavelogError.serverRejected(reason: "The active log changed; synchronization stopped.")
+            }
+            let uploadRecords = appState.qsoRecords.filter { UploadStationPolicy.matches($0.fields, stationCallsign: stationCallsign) }
+            let skipped = appState.qsoRecords.count - uploadRecords.count
             // 1. Export local records as batch ADIF and push to Wavelog
             self.lastStatusMessage = "Uploading local QSOs to Wavelog..."
-            // Local paths and app-only fields stay on this Mac (QSLUploadStatus.localOnlyFields); a local export keeps them.
-            let dicts = appState.qsoRecords.map { QSLUploadStatus.serviceFields($0.fields) }
+            // Only the fields Wavelog may get (QSLUploadStatus.uploadFields); a local export keeps them all.
+            let dicts = uploadRecords.map { QSLUploadStatus.uploadFields($0.fields, for: .wavelog) }
             let localADIF = generateADIF(originalContent: "", records: dicts)
-            if !localADIF.isEmpty {
+            if !dicts.isEmpty {
                 let uploadResult = try await WavelogClient.shared.uploadBatchADIF(
                     adifContent: localADIF,
                     baseURL: url,
@@ -160,6 +199,10 @@ public final class WavelogSyncEngine: ObservableObject {
                 stationProfileID: stationID
             )
 
+            guard appState.isOwnStationLogOpen, appState.activeStationProfileID == localProfileID,
+                  appState.currentStationCallsign == stationCallsign else {
+                throw WavelogError.serverRejected(reason: "The active log changed; downloaded QSOs were not imported.")
+            }
             if !remoteADIF.isEmpty {
                 let (_, parsedRecords) = parseADIF(content: remoteADIF)
                 var newImportedCount = 0
@@ -185,6 +228,8 @@ public final class WavelogSyncEngine: ObservableObject {
             } else {
                 self.lastStatusMessage = "Sync complete. All logs up to date."
             }
+            if skipped > 0 { lastStatusMessage += " \(skipped) other-station QSO(s) skipped." }
+            self.lastSyncDate = Date()
         } catch {
             self.lastError = error.localizedDescription
             self.lastStatusMessage = "Sync failed: \(error.localizedDescription)"

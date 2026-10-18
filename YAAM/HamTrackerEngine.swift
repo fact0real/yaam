@@ -379,7 +379,7 @@ public final class HamTrackerEngine: ObservableObject {
         didSet { UserDefaults.standard.set(partnerDetectionEnabled, forKey: "hamTracker.partnerDetection") }
     }
 
-    @Published public var homeCoordinate: GeoCoordinate = GeoCoordinate(latitude: 35.6892, longitude: 51.3890)
+    @Published public var homeCoordinate: GeoCoordinate = GeoCoordinate(latitude: 0, longitude: 0)
 
     // Real-Time Published States
     @Published public private(set) var status: HamTrackerConnectionStatus = .idle

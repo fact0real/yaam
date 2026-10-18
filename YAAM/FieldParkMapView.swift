@@ -19,8 +19,8 @@ public struct FieldParkMapView: View {
     @State private var searchQuery: String = ""
     @State private var selectedPark: ParkDirectoryEntry?
     @State private var mapRegion = MKCoordinateRegion(
-        center: CLLocationCoordinate2D(latitude: 35.6892, longitude: 51.3890), // Default center
-        span: MKCoordinateSpan(latitudeDelta: 10.0, longitudeDelta: 10.0)
+        center: CLLocationCoordinate2D(latitude: 0, longitude: 0), // Neutral world view
+        span: MKCoordinateSpan(latitudeDelta: 120.0, longitudeDelta: 300.0)
     )
 
     public init() {}
@@ -282,6 +282,9 @@ public struct FieldParkMapView: View {
 
     // MARK: - Navigation / Zoom
     private func setupInitialRegion() {
+        guard appState.isRoverActive || appState.activeStationProfile.map({
+            MaidenheadGridEngine.boundingBox(for: $0.grid) != nil || (Double($0.latitude) != nil && Double($0.longitude) != nil)
+        }) == true else { return }
         let center = currentStationCoord
         mapRegion = MKCoordinateRegion(
             center: center,

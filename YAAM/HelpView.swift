@@ -6,11 +6,12 @@
 import SwiftUI
 
 private enum HelpTopic: String, CaseIterable, Identifiable {
-    case start, stations, logTable, quickLog, callIntelligence, roverMode, convertExport, globeGrids, greylineOverlay, bandmap, pileupSniper, cwWinKeyer, cwAcademy, competitors, tciSdr, dxCluster, clubLogSpots, on4kst, radioBridge, nteEmulator, multiRigFT8, contest, digitalContest, digitalRoster, contestCalendar, dxpeditions, magicBand, tacticalPilot, hamClockShack, weatherRadar, satellites, clubMembership, syncCenter, lotwTqsl, qslHub, qslLabels, todayQSL, confirmations, statistics, qrzIncoming, logAssistant, awards, portable, connectivity, importReview, dataSafety, credentials, workflows, faq
+    case privacy, start, stations, logTable, quickLog, callIntelligence, roverMode, convertExport, globeGrids, greylineOverlay, bandmap, pileupSniper, cwWinKeyer, cwAcademy, competitors, tciSdr, dxCluster, clubLogSpots, on4kst, radioBridge, nteEmulator, multiRigFT8, contest, digitalContest, digitalRoster, contestCalendar, dxpeditions, magicBand, tacticalPilot, hamClockShack, weatherRadar, satellites, clubMembership, syncCenter, lotwTqsl, qslHub, qslLabels, todayQSL, confirmations, statistics, qrzIncoming, logAssistant, awards, portable, connectivity, importReview, dataSafety, credentials, workflows, faq
     var id: String { rawValue }
 
     var title: String {
         switch self {
+        case .privacy: return "Privacy & Network Connections"
         case .start: return "Getting Started"
         case .stations: return "Station Profiles"
         case .logTable: return "Log Table & Filters"
@@ -65,6 +66,7 @@ private enum HelpTopic: String, CaseIterable, Identifiable {
 
     var icon: String {
         switch self {
+        case .privacy: return "hand.raised.fill"
         case .start: return "sparkles"
         case .stations: return "antenna.radiowaves.left.and.right"
         case .logTable: return "tablecells"
@@ -259,6 +261,7 @@ struct HelpView: View {
     @ViewBuilder
     private func detail(for topic: HelpTopic) -> some View {
         switch topic {
+        case .privacy: PrivacyHelpView()
         case .start: gettingStarted
         case .stations: stationProfiles
         case .logTable: logTable
@@ -1767,26 +1770,15 @@ struct HelpView: View {
 
     private var weatherRadarView: some View {
         Group {
-            helpHeader(
-                title: "Station Weather & Lightning Safety",
-                subtitle: "Real-time NEXRAD weather radar overlay, severe wind gust alerts, and thunderstorm cell tracking to protect towers, beams, and shack transceivers.",
-                icon: "cloud.bolt.rain.fill",
-                color: .blue
-            )
-
-            HelpWeatherRadarMockup()
-
+            helpHeader(title: "Station Weather & Antenna Guidance", subtitle: "Open-Meteo forecasts and derived wind, precipitation and thunderstorm guidance.", icon: "cloud.bolt.rain.fill", color: .blue)
             HelpFlow(steps: [
-                HelpFlowStep(icon: "location.fill", title: "Station Location", detail: "Automatically centers weather radar around your active station profile's coordinates."),
-                HelpFlowStep(icon: "cloud.rain.fill", title: "Precipitation & Wind", detail: "Live doppler precipitation reflectivity and real-time wind gust monitoring."),
-                HelpFlowStep(icon: "bolt.fill", title: "Lightning Proximity", detail: "Monitors atmospheric electrical discharges within a 100 km radius of your station antennas."),
-                HelpFlowStep(icon: "exclamationmark.shield.fill", title: "Protection Alerts", detail: "Audible and visual alerts trigger when lightning is detected within 30 km or winds exceed 65 km/h.")
+                HelpFlowStep(icon: "hand.raised.fill", title: "Choose what to share", detail: "Enable weather in Settings → Antenna Weather Radar. New installations start disabled. The default sends only the centre of your 4-character square; optional precise mode uses up to 6 characters."),
+                HelpFlowStep(icon: "location.fill", title: "Home or rover locator", detail: "The selected precision applies to every request, including rover changes and automatic refreshes. No callsign or QSO log is sent to Open-Meteo."),
+                HelpFlowStep(icon: "arrow.clockwise", title: "Forecast refresh", detail: "While enabled, YAAM refreshes every 20 minutes and on manual refresh or location/precision changes. Disabling cancels pending work; already sent positions cannot be recalled.")
             ])
-
-            helpSection("Equipment Safety Protocols") {
-                HelpDefinition(icon: "shield.lefthalf.filled", title: "Safe Zone (> 30 km)", text: "Normal operation. Rotators and amplifiers safe to use.", color: .green)
-                HelpDefinition(icon: "exclamationmark.triangle.fill", title: "Caution Zone (15–30 km)", text: "Thunderstorm cell approaching. Prepare to park rotators, lower crank-up towers, and power down linear amplifiers.", color: .orange)
-                HelpDefinition(icon: "xmark.octagon.fill", title: "Danger Zone (< 15 km)", text: "IMMEDIATE ACTION: Disconnect coaxial feedlines, ground antenna switches, and disconnect station power to prevent lightning-induced EMP damage.", color: .red)
+            helpSection("Understanding the forecast") {
+                HelpDefinition(icon: "exclamationmark.triangle.fill", title: "Forecast guidance only", text: "YAAM uses weather codes, precipitation and wind forecasts. It does not measure lightning proximity or display live Doppler radar. A coarse square can represent conditions far from your antennas. A Safe label is a forecast classification, not a guarantee that operating is safe.", color: .orange)
+                HelpDefinition(icon: "slider.horizontal.3", title: "Wind threshold and voice alerts", text: "Set the gust threshold and optional spoken warnings in weather settings. Follow local weather warnings and your station’s safety procedures.", color: .blue)
             }
         }
     }

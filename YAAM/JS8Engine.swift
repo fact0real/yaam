@@ -223,6 +223,10 @@ public final class JS8Engine: ObservableObject {
             transmitRefusal = issue
             return false
         }
+        guard audioEngine?.isRunning == true, playerNode?.isPlaying == true else {
+            transmitRefusal = "Native JS8 audio transmission is unavailable. No message was sent."
+            return false
+        }
         transmitRefusal = ""
 
         let dest = target.isEmpty ? "@ALLCALL" : target.uppercased()

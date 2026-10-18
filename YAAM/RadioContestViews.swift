@@ -524,6 +524,7 @@ struct ContestPanel: View {
     // Fast Logging HUD State
     @State private var inputCall = ""
     @State private var inputBand = "20M"
+    @State private var inputFrequencyMHz = ""
     @State private var inputMode = "SSB"
     @State private var inputRstSent = "59"
     @State private var inputRstRcvd = "59"
@@ -820,6 +821,15 @@ struct ContestPanel: View {
                 }
             }
 
+            HStack {
+                TextField("Frequency (MHz)", text: $inputFrequencyMHz)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(maxWidth: 180)
+                Text("Enter the actual QSO frequency. It must match the selected band.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             // ESM Live Ribbon & Mode Controller
             ContestESMControlView(
                 inputCall: $inputCall,
@@ -1032,7 +1042,7 @@ struct ContestPanel: View {
                 callsign: cleanCall,
                 band: inputBand,
                 mode: inputMode,
-                frequencyMHz: "",
+                frequencyMHz: inputFrequencyMHz,
                 rstSent: inputRstSent,
                 rstReceived: inputRstRcvd,
                 sentExchange: sent,

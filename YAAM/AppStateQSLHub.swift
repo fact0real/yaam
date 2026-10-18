@@ -105,6 +105,12 @@ extension AppState {
             return
         }
 
+        guard isOwnStationLogOpen else {
+            qslHubStatus = "Nothing queued: " + (qslOwnLogProblem ?? "open the station’s own log")
+            return
+        }
+        let eligible = records.filter { UploadStationPolicy.matches($0.fields, stationCallsign: currentStationCallsign) }
+        let skipped = records.count - eligible.count
         var added = 0
         var changedJobs: [QSLQueueJob] = []
         var existingByKey: [String: QSLQueueJob] = [:]
@@ -112,7 +118,7 @@ extension AppState {
         var jobStates = existingByKey.mapValues(\.state)
         for key in unblockedKeys where jobStates[key] == .blocked { jobStates[key] = .retry }
         let plan = QSLSyncAll.plannedUploads(
-            records: records.map { (id: $0.id, fields: $0.fields) },
+            records: eligible.map { (id: $0.id, fields: $0.fields) },
             providers: providers,
             jobStates: jobStates,
             retryStopped: retryStopped
@@ -122,7 +128,7 @@ extension AppState {
             for qsoID in plan[provider] ?? [] {
                 guard let fields = fieldsByID[qsoID] else { continue }
                 let key = QSLSyncAll.jobKey(qsoID, provider)
-                let adif = QSLUploadStatus.uploadADIF(fields)
+                let adif = QSLUploadStatus.uploadADIF(fields, for: provider)
                 var job = existingByKey[key] ?? QSLQueueJob(
                     stationProfileID: profileID,
                     qsoID: qsoID,
@@ -149,6 +155,7 @@ extension AppState {
             return
         }
         qslHubStatus = added == 0 ? "All selected QSOs were already sent or queued" : "Queued \(added) upload(s)"
+        if skipped > 0 { qslHubStatus += "; \(skipped) other-station QSO(s) skipped" }
         if added > 0 { playActivitySound(.notice) }
     }
 
@@ -221,7 +228,9 @@ extension AppState {
             }
         }
         let providers = vaultLocked ? Set<QSLProvider>() : configured.intersection(switchedOn)
-        let chosenFields = QSLSyncAll.recordsToSync(all: qsoRecords.map { (id: $0.id, fields: $0.fields) }, selectedIDs: selectedIDs)
+        let selectedFields = QSLSyncAll.recordsToSync(all: qsoRecords.map { (id: $0.id, fields: $0.fields) }, selectedIDs: selectedIDs)
+        let chosenFields = QSLSyncAll.recordsToSync(all: selectedFields, selectedIDs: nil, stationCallsign: currentStationCallsign)
+        run.skippedStationCount = selectedFields.count - chosenFields.count
         guard !providers.isEmpty, !chosenFields.isEmpty else { return run }
         let chosenIDs = Set(chosenFields.map(\.id))
         let fieldsByID = Dictionary(chosenFields.map { ($0.id, $0.fields) }, uniquingKeysWith: { first, _ in first })
@@ -281,7 +290,15 @@ extension AppState {
             qslHubStatus = "Nothing uploaded: \(problem)"
             return []
         }
-        let due = QSLSyncAll.dueJobs(qslQueueJobs, now: Date(), providers: providers, qsoIDs: qsoIDs)
+        let uploadProfileID = activeStationProfileID
+        let uploadStationCallsign = currentStationCallsign
+        let eligibleIDs = Set(qsoRecords.filter {
+            UploadStationPolicy.matches($0.fields, stationCallsign: uploadStationCallsign)
+        }.map(\.id))
+        let existingIDs = Set(qsoRecords.map(\.id))
+        let due = QSLSyncAll.dueJobs(qslQueueJobs, now: Date(), providers: providers, qsoIDs: qsoIDs).filter {
+            $0.stationProfileID == uploadProfileID && (!existingIDs.contains($0.qsoID) || eligibleIDs.contains($0.qsoID))
+        }
         guard !due.isEmpty else {
             qslHubStatus = "No uploads are due"
             return []
@@ -329,7 +346,21 @@ extension AppState {
             guard !jobs.isEmpty || already > 0 else { continue }
             var pass = QSLProviderPass(provider: provider, jobs: jobs, alreadyThere: already)
             while let batch = pass.nextBatch() {
-                let result = await qslHubClient.upload(provider: provider, adifRecords: batch.map(\.adif), credentials: credentials)
+                // Recheck after each network suspension. A profile, workspace, QSO or privacy switch can change.
+                guard isOwnStationLogOpen, activeStationProfileID == uploadProfileID,
+                      currentStationCallsign == uploadStationCallsign else {
+                    pass.stopBeforeSending(reason: "the active station or log changed")
+                    break
+                }
+                let currentByID = Dictionary(qsoRecords.map { ($0.id, $0.fields) }, uniquingKeysWith: { first, _ in first })
+                guard batch.allSatisfy({ job in
+                    currentByID[job.qsoID].map { UploadStationPolicy.matches($0, stationCallsign: uploadStationCallsign) } ?? false
+                }) else {
+                    pass.stopBeforeSending(reason: "a QSO was removed or its station callsign changed")
+                    break
+                }
+                let adif = batch.compactMap { job in currentByID[job.qsoID].map { QSLUploadStatus.uploadADIF($0, for: provider) } }
+                let result = await qslHubClient.upload(provider: provider, adifRecords: adif, credentials: credentials)
                 let updates = pass.record(QSLBatchOutcome(result), for: batch, now: Date())
                 markedSinceSave += applyQSLJobUpdates(updates, positions: &positions, database: database)
                 // Long runs (QRZ takes one QSO per request) save the marks as they go, into the station's own log only.

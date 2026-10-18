@@ -127,7 +127,7 @@ public final class HellschreiberEngine: ObservableObject {
     // Pixel rate = 122.5 * (14 / 7) = 245 pixels/sec. Pixel duration = 1.0 / 245 = 4.0816 ms.
     private var samplesPerPixel: Double = 48000.0 / 245.0
     private var pixelAccumulator: Float = 0.0
-    private var pixelSampleCount: Int = 0
+    private var pixelSampleCount: Double = 0
     private var currentColumnPixels: [Float] = []
 
     private var txTask: Task<Void, Never>?
@@ -207,10 +207,16 @@ public final class HellschreiberEngine: ObservableObject {
 
     // MARK: - DSP Audio Demodulator
 
-    private func processAudioBuffer(_ buffer: AVAudioPCMBuffer) {
+    func processAudioBuffer(_ buffer: AVAudioPCMBuffer) {
         guard let channelData = buffer.floatChannelData?[0] else { return }
         let totalFrames = Int(buffer.frameLength)
-        guard totalFrames > 0 else { return }
+        guard totalFrames > 0, buffer.format.sampleRate > 0 else { return }
+        if sampleRate != buffer.format.sampleRate {
+            sampleRate = buffer.format.sampleRate
+            updatePixelTiming()
+            pixelSampleCount = 0
+            pixelAccumulator = 0
+        }
 
         // Peak Level
         var peak: Float = 0.0
@@ -225,11 +231,8 @@ public final class HellschreiberEngine: ObservableObject {
         var newCols: [HellColumn] = []
 
         // Slicing into small 32-sample chunks for envelope detection
-        let sub = 32
-        let subCount = totalFrames / sub
-
-        for s in 0..<subCount {
-            let offset = s * sub
+        for offset in stride(from: 0, to: totalFrames, by: 32) {
+            let sub = min(32, totalFrames - offset)
             var sumReal: Float = 0.0
             var sumImag: Float = 0.0
 
@@ -243,21 +246,22 @@ public final class HellschreiberEngine: ObservableObject {
             let env = sqrt(sumReal * sumReal + sumImag * sumImag) / Float(sub)
             let normalized = min(1.0, env * tapeContrast * 6.0)
 
-            pixelAccumulator += normalized * Float(sub)
-            pixelSampleCount += sub
-
-            if Double(pixelSampleCount) >= samplesPerPixel {
-                let pixelVal = pixelAccumulator / Float(pixelSampleCount)
-                pixelAccumulator = 0.0
-                pixelSampleCount = 0
-
-                let finalPixel = pixelVal > squelchLevel ? pixelVal : 0.0
-                currentColumnPixels.append(finalPixel)
-
-                if currentColumnPixels.count >= 14 {
-                    // One full column of 14 pixels completed!
-                    newCols.append(HellColumn(pixels: currentColumnPixels))
-                    currentColumnPixels.removeAll()
+            // Split this detector interval at exact pixel boundaries. Carry fractional samples across buffers.
+            var remaining = Double(sub)
+            while remaining > 1e-9 {
+                let taken = min(remaining, samplesPerPixel - pixelSampleCount)
+                pixelAccumulator += normalized * Float(taken)
+                pixelSampleCount += taken
+                remaining -= taken
+                if pixelSampleCount >= samplesPerPixel - 1e-9 {
+                    let pixelVal = pixelAccumulator / Float(samplesPerPixel)
+                    pixelAccumulator = 0
+                    pixelSampleCount = 0
+                    currentColumnPixels.append(pixelVal > squelchLevel ? pixelVal : 0)
+                    if currentColumnPixels.count == 14 {
+                        newCols.append(HellColumn(pixels: currentColumnPixels))
+                        currentColumnPixels.removeAll(keepingCapacity: true)
+                    }
                 }
             }
         }
@@ -297,6 +301,10 @@ public final class HellschreiberEngine: ObservableObject {
         guard !txBufferText.isEmpty, !isTransmitting else { return }
         if let issue = TransmitIdentity.callsignRefusal(myCallsign) {
             txRefusal = issue
+            return
+        }
+        guard audioEngine?.isRunning == true, playerNode?.isPlaying == true else {
+            txRefusal = "Audio transmitter is unavailable. No message was sent; the queued text is kept."
             return
         }
         isTransmitting = true

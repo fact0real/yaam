@@ -74,15 +74,18 @@ final class CallHistoryLookupEngine: ObservableObject {
     @Published var lastImportedFileName: String = ""
     @Published var lastLearnedLogbookCount: Int = 0
     @Published var isEnabled: Bool = true {
-        didSet { UserDefaults.standard.set(isEnabled, forKey: "callHistoryEnabled") }
+        didSet { defaults.set(isEnabled, forKey: "callHistoryEnabled") }
     }
 
     // Fast in-memory hash store
     private var records: [String: CallHistoryRecord] = [:]
+    private let storageOverride: URL?
+    private let defaults: UserDefaults
 
-    private init() {
-        self.isEnabled = UserDefaults.standard.object(forKey: "callHistoryEnabled") as? Bool ?? true
-        loadSeedDatabase()
+    init(defaults: UserDefaults = .standard, storageURL: URL? = nil) {
+        self.defaults = defaults
+        self.storageOverride = storageURL
+        self.isEnabled = defaults.object(forKey: "callHistoryEnabled") as? Bool ?? true
         loadPersistedRecords()
     }
 
@@ -281,61 +284,10 @@ final class CallHistoryLookupEngine: ObservableObject {
         persistLearnedRecords()
     }
 
-    // MARK: - Built-in Seed Database
-
-    private func loadSeedDatabase() {
-        let seeds: [CallHistoryRecord] = [
-            // Prominent World Contest Stations with verified CQ Zones, States, and Operators
-            CallHistoryRecord(callsign: "W1AW", name: "HQ", state: "CT", arrlSection: "CT", cqZone: 5, ituZone: 8, gridSquare: "FN31pr", userExchange: "KW"),
-            CallHistoryRecord(callsign: "K3LR", name: "Tim", state: "PA", arrlSection: "WPA", cqZone: 5, ituZone: 8, gridSquare: "EN91re", userExchange: "KW"),
-            CallHistoryRecord(callsign: "W3LPL", name: "Frank", state: "MD", arrlSection: "MDC", cqZone: 5, ituZone: 8, gridSquare: "FM19lf", userExchange: "KW"),
-            CallHistoryRecord(callsign: "K1LZ", name: "Krasi", state: "ME", arrlSection: "EMA", cqZone: 5, ituZone: 8, gridSquare: "FN54", userExchange: "KW"),
-            CallHistoryRecord(callsign: "K5ZD", name: "Randy", state: "MA", arrlSection: "WMA", cqZone: 5, ituZone: 8, gridSquare: "FN32", userExchange: "KW"),
-            CallHistoryRecord(callsign: "AA3B", name: "Bud", state: "PA", arrlSection: "EPA", cqZone: 5, ituZone: 8, gridSquare: "FN20", userExchange: "KW"),
-            CallHistoryRecord(callsign: "N2IC", name: "Steve", state: "NM", arrlSection: "NM", cqZone: 4, ituZone: 7, gridSquare: "DM65", userExchange: "KW"),
-            CallHistoryRecord(callsign: "W6YX", name: "Stanford", state: "CA", arrlSection: "SCV", cqZone: 3, ituZone: 6, gridSquare: "CM87", userExchange: "KW"),
-            CallHistoryRecord(callsign: "K7RI", name: "Rich", state: "WA", arrlSection: "WWA", cqZone: 3, ituZone: 6, gridSquare: "CN87", userExchange: "KW"),
-            CallHistoryRecord(callsign: "VE3EJ", name: "John", state: "ON", arrlSection: "GTA", cqZone: 4, ituZone: 8, gridSquare: "FN04", userExchange: "KW"),
-            CallHistoryRecord(callsign: "VE2CSE", name: "Gilles", state: "QC", arrlSection: "QC", cqZone: 5, ituZone: 9, gridSquare: "FN46", userExchange: "100"),
-            CallHistoryRecord(callsign: "DL1ABC", name: "Klaus", state: "", arrlSection: "", cqZone: 14, ituZone: 28, gridSquare: "JO40", userExchange: "14"),
-            CallHistoryRecord(callsign: "DL0CS", name: "Club", state: "", arrlSection: "", cqZone: 14, ituZone: 28, gridSquare: "JO50", userExchange: "14"),
-            CallHistoryRecord(callsign: "DA0HQ", name: "DARC", state: "", arrlSection: "", cqZone: 14, ituZone: 28, gridSquare: "JO52", userExchange: "DARC"),
-            CallHistoryRecord(callsign: "DF3CB", name: "Bernd", state: "", arrlSection: "", cqZone: 14, ituZone: 28, gridSquare: "JN58", userExchange: "14"),
-            CallHistoryRecord(callsign: "G3TXF", name: "Nigel", state: "", arrlSection: "", cqZone: 14, ituZone: 27, gridSquare: "IO91", userExchange: "14"),
-            CallHistoryRecord(callsign: "M6T", name: "Contest", state: "", arrlSection: "", cqZone: 14, ituZone: 27, gridSquare: "IO92", userExchange: "14"),
-            CallHistoryRecord(callsign: "F6KOP", name: "Club", state: "", arrlSection: "", cqZone: 14, ituZone: 27, gridSquare: "JN18", userExchange: "14"),
-            CallHistoryRecord(callsign: "TM6M", name: "Team", state: "", arrlSection: "", cqZone: 14, ituZone: 27, gridSquare: "IN98", userExchange: "14"),
-            CallHistoryRecord(callsign: "I2WIJ", name: "Bob", state: "", arrlSection: "", cqZone: 15, ituZone: 28, gridSquare: "JN45", userExchange: "15"),
-            CallHistoryRecord(callsign: "IR4M", name: "Team", state: "", arrlSection: "", cqZone: 15, ituZone: 28, gridSquare: "JN54", userExchange: "15"),
-            CallHistoryRecord(callsign: "EA4TX", name: "Pablo", state: "", arrlSection: "", cqZone: 14, ituZone: 37, gridSquare: "IN80", userExchange: "14"),
-            CallHistoryRecord(callsign: "EF8R", name: "Team", state: "", arrlSection: "", cqZone: 33, ituZone: 36, gridSquare: "IL28", userExchange: "33"),
-            CallHistoryRecord(callsign: "CR3A", name: "Team", state: "", arrlSection: "", cqZone: 33, ituZone: 36, gridSquare: "IL12", userExchange: "33"),
-            CallHistoryRecord(callsign: "OH2BH", name: "Martti", state: "", arrlSection: "", cqZone: 15, ituZone: 18, gridSquare: "KP20", userExchange: "15"),
-            CallHistoryRecord(callsign: "OG2X", name: "Jari", state: "", arrlSection: "", cqZone: 15, ituZone: 18, gridSquare: "KP20", userExchange: "15"),
-            CallHistoryRecord(callsign: "EP2AES", name: "Amir", state: "THR", arrlSection: "", cqZone: 21, ituZone: 40, gridSquare: "LL45", userExchange: "21"),
-            CallHistoryRecord(callsign: "EP2LSH", name: "Hossein", state: "AZB", arrlSection: "", cqZone: 21, ituZone: 40, gridSquare: "LN48", userExchange: "21"),
-            CallHistoryRecord(callsign: "EP2C", name: "CRA", state: "THR", arrlSection: "", cqZone: 21, ituZone: 40, gridSquare: "LL45", userExchange: "21"),
-            CallHistoryRecord(callsign: "4X4DK", name: "Avi", state: "", arrlSection: "", cqZone: 20, ituZone: 39, gridSquare: "KM72", userExchange: "20"),
-            CallHistoryRecord(callsign: "A61Q", name: "Hazza", state: "", arrlSection: "", cqZone: 21, ituZone: 39, gridSquare: "LL75", userExchange: "21"),
-            CallHistoryRecord(callsign: "JA1ABC", name: "Ken", state: "", arrlSection: "", cqZone: 25, ituZone: 45, gridSquare: "PM95", userExchange: "25"),
-            CallHistoryRecord(callsign: "JA1BJK", name: "Tak", state: "", arrlSection: "", cqZone: 25, ituZone: 45, gridSquare: "QM05", userExchange: "25"),
-            CallHistoryRecord(callsign: "JH1AJT", name: "Zorro", state: "", arrlSection: "", cqZone: 25, ituZone: 45, gridSquare: "PM95", userExchange: "25"),
-            CallHistoryRecord(callsign: "BY1RX", name: "Team", state: "", arrlSection: "", cqZone: 24, ituZone: 44, gridSquare: "OM89", userExchange: "24"),
-            CallHistoryRecord(callsign: "VK3XYZ", name: "Ross", state: "VIC", arrlSection: "", cqZone: 30, ituZone: 59, gridSquare: "QF22", userExchange: "30"),
-            CallHistoryRecord(callsign: "ZL1BQD", name: "Roly", state: "", arrlSection: "", cqZone: 32, ituZone: 60, gridSquare: "RF73", userExchange: "32"),
-            CallHistoryRecord(callsign: "P40W", name: "John", state: "", arrlSection: "", cqZone: 9, ituZone: 11, gridSquare: "FK42", userExchange: "09"),
-            CallHistoryRecord(callsign: "PJ2T", name: "CCC", state: "", arrlSection: "", cqZone: 9, ituZone: 11, gridSquare: "FK52", userExchange: "09")
-        ]
-
-        for s in seeds {
-            records[s.callsign] = s
-        }
-        self.totalRecordsCount = records.count
-    }
-
     // MARK: - Persistence
 
     private var storageURL: URL {
+        if let storageOverride { return storageOverride }
         if let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
             let dir = appSupport.appendingPathComponent("YAAM", isDirectory: true)
             try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -346,7 +298,7 @@ final class CallHistoryLookupEngine: ObservableObject {
 
     private func persistLearnedRecords() {
         Task.detached(priority: .background) { [records = self.records, url = self.storageURL] in
-            // Only persist learned and imported records (built-ins are initialized in code)
+            // Only persist learned and imported records; legacy demonstration entries are discarded.
             let nonSeed = records.values.filter { $0.source != .builtInSeed }
             if let data = try? JSONEncoder().encode(Array(nonSeed)) {
                 try? data.write(to: url, options: .atomic)
@@ -359,7 +311,7 @@ final class CallHistoryLookupEngine: ObservableObject {
               let list = try? JSONDecoder().decode([CallHistoryRecord].self, from: data) else {
             return
         }
-        for item in list {
+        for item in list where item.source != .builtInSeed {
             records[item.callsign] = item
         }
         self.totalRecordsCount = records.count

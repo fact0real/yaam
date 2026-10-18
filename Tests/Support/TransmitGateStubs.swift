@@ -162,6 +162,7 @@ final class FLRigClient {
 struct StubRigState { var isConnected = false }
 struct StubRigSnapshot { var frequencyMHz = ""; var mode = "" }
 final class RigControlClient {
+    static let shared = RigControlClient()
     var state = StubRigState()
     var snapshot: StubRigSnapshot? = nil
     func sendMorse(_ text: String) { KeyLog.add("KEYED via rigctl: \(text)") }

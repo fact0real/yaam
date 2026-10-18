@@ -993,11 +993,11 @@ nonisolated struct QSORecordModel: Identifiable, Sendable, Equatable {
         }
     }
 
-    /// The ADIF record HRDLog and HamQTH upload. Local paths and app-only fields stay on this Mac
-    /// (QSLUploadStatus.localOnlyFields).
-    public func toADIFRecordString() -> String {
+    /// The ADIF record HRDLog and HamQTH upload: only the fields `destination` may get, with the comment cleaned
+    /// (QSLUploadStatus.uploadFields).
+    func toADIFRecordString(for destination: QSLUploadDestination) -> String {
         var adif = ""
-        var exportFields = QSLUploadStatus.serviceFields(fields)
+        var exportFields = QSLUploadStatus.uploadFields(fields, for: destination)
         let currentMode = exportFields["MODE"] ?? ""
         let currentSubmode = exportFields["SUBMODE"] ?? ""
         let freq = Double(exportFields["FREQ"] ?? "")
@@ -3920,12 +3920,19 @@ class AppState: NSObject, ObservableObject {
         }
 
         guard let url = loadedFileURL, !qsoRecords.isEmpty else { return }
-        DispatchQueue.global(qos: .background).async { [weak self] in
-            guard let self = self else { return }
-            let recordsDicts = self.qsoRecords.map { $0.fields }
-            let original = self.loadedFileOriginalContent ?? ""
+        // Capture the workspace on the main actor and serialize file saves so an older save cannot win a race.
+        let recordsDicts = qsoRecords.map { $0.fields }
+        let original = loadedFileOriginalContent ?? ""
+        workspaceSaveQueue.async { [weak self] in
             let adifOutput = generateADIF(originalContent: original, records: recordsDicts)
-            try? adifOutput.write(to: url, atomically: true, encoding: .utf8)
+            do {
+                try adifOutput.write(to: url, atomically: true, encoding: .utf8)
+            } catch {
+                DispatchQueue.main.async {
+                    self?.databaseStatus = "Automatic file save failed: \(error.localizedDescription)"
+                    self?.appendLog("Automatic file save failed: \(error.localizedDescription)")
+                }
+            }
         }
     }
 
@@ -5155,6 +5162,22 @@ class AppState: NSObject, ObservableObject {
         appendLog("🛑 Enrichment process stopped by user. Saved completed results.")
     }
 
+    private func confirmEnrichmentDisclosure(includeRank: Bool, includeContacts: Bool) -> Bool {
+        let alert = NSAlert()
+        alert.messageText = "Look up logbook callsigns online?"
+        var details: [String] = []
+        if includeRank {
+            details.append("QRZ Rank enrichment sends each selected callsign separately to qrz-rank.asis.sh using your personal API token in the Authorization header. QSO dates, reports and the full log are not sent to QRZ Rank.")
+        }
+        if includeContacts {
+            details.append("Contact enrichment also looks up callsigns on QRZ.com and, when configured, HamQTH using those services' saved credentials or signed-in session.")
+        }
+        alert.informativeText = details.joined(separator: "\n\n")
+        alert.addButton(withTitle: "Continue")
+        alert.addButton(withTitle: "Cancel")
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+
     func enrichLogData(targetCallsigns: Set<String>? = nil) {
         guard !qsoRecords.isEmpty, !isEnriching else { return }
 
@@ -5194,6 +5217,7 @@ class AppState: NSObject, ObservableObject {
         }
         
         let rankCredentials = rankServiceCredentials()
+        guard confirmEnrichmentDisclosure(includeRank: rankCredentials.isConfigured, includeContacts: true) else { return }
         var recordIndicesByCallsign: [String: [Int]] = [:]
         for index in qsoRecords.indices {
             let callsign = qsoRecords[index]["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
@@ -5348,6 +5372,8 @@ class AppState: NSObject, ObservableObject {
             }
             return
         }
+
+        guard confirmEnrichmentDisclosure(includeRank: true, includeContacts: false) else { return }
 
         for header in [
             "RANK_QSO", "RANK_BAND", "RANK_DXCC", "APP_YAAM_ENRICHED",
@@ -7283,19 +7309,7 @@ class AppState: NSObject, ObservableObject {
     func qslCardStationInfoFromDefaults() -> QSLCardStationInfo {
         let profile = activeStationProfile
         let stationCallsign = currentStationCallsign == "DEFAULT" ? "NOCALL" : currentStationCallsign
-        let grid = profile?.normalizedGrid ?? ""
-        let radio = profile?.radioModel ?? ""
-        let antenna = profile?.antennaDescription ?? ""
-        let power = profile?.powerWatts ?? 100
-        let antennaHeight = profile?.antennaHeightMeters ?? 10
-        return QSLCardStationInfo(
-            callsign: stationCallsign,
-            grid: grid,
-            radio: radio,
-            antenna: antenna,
-            powerWatts: power,
-            antennaHeightMeters: antennaHeight > 0 ? antennaHeight : 10
-        )
+        return QSLCardStationInfo(callsign: stationCallsign, profile: profile)
     }
 
     // MARK: - Email Recipient Name & Title-Case Formatting

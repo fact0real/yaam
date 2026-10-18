@@ -11,6 +11,9 @@ struct DataSafetySettingsView: View {
     @State private var backupToRestore: BackupSnapshot?
     @State private var isBiometricsEnabled: Bool = CredentialVault.isBiometricLockEnabled
     @State private var biometricTestStatus: String = ""
+    @AppStorage("uploadShareNameAndQTH") private var uploadShareNameAndQTH = false
+    @AppStorage("uploadShareContactDetails") private var uploadShareContactDetails = false
+    @AppStorage("uploadShareFreeText") private var uploadShareFreeText = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -20,6 +23,7 @@ struct DataSafetySettingsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
                     credentialSecuritySection
+                    personalDataSection
                     restorePoints
                     auditTrail
                 }
@@ -247,6 +251,63 @@ struct DataSafetySettingsView: View {
                         .foregroundStyle(biometricTestStatus.contains("successfully") ? .green : .orange)
                         .transition(.opacity)
                 }
+            }
+            .padding(14)
+            .background(Color(NSColor.controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.secondary.opacity(0.15), lineWidth: 1))
+        }
+    }
+
+    /// What QRZ, eQSL, Club Log, HRDLog, HamQTH and Wavelog may receive of the other station's personal data
+    /// (QSLUploadStatus.uploadFields). LoTW never receives it.
+    private var personalDataSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Logbook upload privacy", systemImage: "person.crop.circle.badge.questionmark")
+                .font(.headline)
+
+            VStack(alignment: .leading, spacing: 10) {
+                Toggle(isOn: $uploadShareNameAndQTH) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Upload the other station's name and QTH")
+                            .font(.callout.weight(.medium))
+                        Text("Shares NAME and QTH with QRZ, eQSL, Club Log, HRDLog, HamQTH and Wavelog.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .toggleStyle(.switch)
+
+                Divider()
+
+                Toggle(isOn: $uploadShareContactDetails) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Upload contact details and precise locations")
+                            .font(.callout.weight(.medium))
+                        Text("Shares the other station’s e-mail, postal address, web page, notes, QSL route and precise location, plus your own street address, postal code and precise location.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .toggleStyle(.switch)
+
+                Divider()
+
+                Toggle(isOn: $uploadShareFreeText) {
+                    Text("Upload comments and QSL messages")
+                        .font(.callout.weight(.medium))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .toggleStyle(.switch)
+                Text("Free text can contain personal information. YAAM’s internal comment tags are always removed.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Text("All sharing switches are off by default. Callsigns, QSO details, award locations and grids up to 6 characters are still uploaded. LoTW receives only signing fields; its station location is also controlled by TrustedQSL. Local exports keep the full record.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .padding(14)
             .background(Color(NSColor.controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10))

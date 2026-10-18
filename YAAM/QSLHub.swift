@@ -144,29 +144,42 @@ nonisolated enum QSLHubError: LocalizedError, Sendable {
 actor QSLHubClient {
     private let session: URLSession
 
-    init() {
+    init(session: URLSession? = nil) {
+        if let session {
+            self.session = session
+            return
+        }
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 45
         configuration.timeoutIntervalForResource = 120
         configuration.httpAdditionalHeaders = ["User-Agent": "YAAM-QSL-Hub"]
-        session = URLSession(configuration: configuration)
+        self.session = URLSession(configuration: configuration)
     }
 
     func upload(provider: QSLProvider, adifRecords: [String], credentials: QSLServiceCredentials) async -> QSLUploadResult {
         do {
+            // Final transport boundary: prebuilt/stored previews must never bypass the current privacy policy.
+            let records = try await MainActor.run {
+                try adifRecords.map { raw -> String in
+                    let (_, fields) = parseADIF(content: raw)
+                    guard fields.count == 1 else { throw QSLHubError.invalidResponse("Expected one QSO per upload record.") }
+                    return QSLUploadStatus.uploadADIF(fields[0], for: provider)
+                }
+            }
+            guard !records.isEmpty else { throw QSLHubError.invalidResponse("No QSOs to upload.") }
             var alreadyAtService = false
             var message = "Accepted by \(provider.title)"
             switch provider {
             case .qrz:
-                let duplicates = try await uploadQRZ(adifRecords, apiKey: credentials.qrzAPIKey)
-                alreadyAtService = !adifRecords.isEmpty && duplicates == adifRecords.count
+                let duplicates = try await uploadQRZ(records, apiKey: credentials.qrzAPIKey)
+                alreadyAtService = duplicates == records.count
                 if alreadyAtService { message = "Already in \(provider.title)" }
             case .eqsl:
-                try await uploadEQSL(adifRecords, credentials: credentials)
+                try await uploadEQSL(records, credentials: credentials)
             case .clubLog:
-                try await uploadClubLog(adifRecords, credentials: credentials)
+                try await uploadClubLog(records, credentials: credentials)
             case .lotw:
-                try await uploadLoTW(adifRecords, credentials: credentials)
+                try await uploadLoTW(records, credentials: credentials)
             }
             return QSLUploadResult(
                 provider: provider,

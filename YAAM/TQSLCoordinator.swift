@@ -14,13 +14,30 @@
 //
 
 import AppKit
+import Darwin
 import Foundation
 
 public actor TQSLCoordinator {
     public static let shared = TQSLCoordinator()
 
-    private init() {
-        Self.cleanStaleTemporaryFiles()
+    private var isExecuting = false
+    private var executionWaiters: [CheckedContinuation<Void, Never>] = []
+
+    init(cleanStaleFiles: Bool = true) {
+        if cleanStaleFiles { Self.cleanStaleTemporaryFiles() }
+    }
+
+    private func acquireExecution() async {
+        if isExecuting {
+            await withCheckedContinuation { executionWaiters.append($0) }
+        } else {
+            isExecuting = true
+        }
+    }
+
+    private func releaseExecution() {
+        if executionWaiters.isEmpty { isExecuting = false }
+        else { executionWaiters.removeFirst().resume() }
     }
 
     // MARK: - Binary Resolution
@@ -69,26 +86,21 @@ public actor TQSLCoordinator {
 
     // MARK: - Stale File Cleanup
 
-    public static func cleanStaleTemporaryFiles() {
+    public static func cleanStaleTemporaryFiles(in directory: URL = FileManager.default.temporaryDirectory) {
         let fileManager = FileManager.default
-        let directories = [
-            TQSLService.realTQSLDirectory(),
-            TQSLService.containerTQSLDirectory(),
-            fileManager.temporaryDirectory.path
-        ]
-
-        for dir in directories {
-            guard fileManager.fileExists(atPath: dir),
-                  let items = try? fileManager.contentsOfDirectory(atPath: dir) else { continue }
-            for item in items {
-                let lower = item.lowercased()
-                if (lower.hasPrefix("yaam_lotw") || lower.hasPrefix("yaam-lotw")) &&
-                   (lower.hasSuffix(".tq8") || lower.hasSuffix(".adi")) {
-                    let path = (dir as NSString).appendingPathComponent(item)
-                    try? fileManager.removeItem(atPath: path)
-                }
-            }
+        let keys: Set<URLResourceKey> = [.isDirectoryKey, .isSymbolicLinkKey, .contentModificationDateKey]
+        guard let items = try? fileManager.contentsOfDirectory(at: directory, includingPropertiesForKeys: Array(keys)) else { return }
+        let cutoff = Date().addingTimeInterval(-24 * 60 * 60)
+        for item in items {
+            let name = item.lastPathComponent
+            guard name.hasPrefix("yaam-lotw-"), UUID(uuidString: String(name.dropFirst("yaam-lotw-".count))) != nil,
+                  let values = try? item.resourceValues(forKeys: keys), values.isDirectory == true,
+                  values.isSymbolicLink != true, let modified = values.contentModificationDate, modified < cutoff,
+                  let attributes = try? fileManager.attributesOfItem(atPath: item.path),
+                  (attributes[.ownerAccountID] as? NSNumber)?.uint32Value == getuid() else { continue }
+            try? fileManager.removeItem(at: item)
         }
+        // Never sweep .tqsl storage or arbitrary ADIF/TQ8 filenames: they can be user files or a live process's input.
     }
 
     // MARK: - Execute TQSL (Serialized & Protected)
@@ -102,6 +114,10 @@ public actor TQSLCoordinator {
         securityBookmark: Data? = nil,
         timeoutSeconds: TimeInterval = 45.0
     ) async -> (success: Bool, message: String) {
+        // Actor methods reenter at await: an explicit gate keeps actual TQSL processes mutually exclusive.
+        await acquireExecution()
+        defer { releaseExecution() }
+        guard !Task.isCancelled else { return (false, "LoTW upload cancelled before signing.") }
         let fileManager = FileManager.default
 
         guard let resolved = Self.resolveBinaryPath(
@@ -117,35 +133,39 @@ public actor TQSLCoordinator {
             scopedURL?.stopAccessingSecurityScopedResource()
         }
 
-        // Determine working ADIF file URL
-        let workingAdifURL: URL
-        let shouldDeleteAdif: Bool
-
-        if let adifContent = adifContent {
-            let tempURL = fileManager.temporaryDirectory.appendingPathComponent("yaam_lotw_\(UUID().uuidString).adi")
-            do {
-                try adifContent.write(to: tempURL, atomically: true, encoding: .utf8)
-                workingAdifURL = tempURL
-                shouldDeleteAdif = true
-            } catch {
-                return (false, "Failed to write temporary ADIF log: \(error.localizedDescription)")
+        // Always sign a private, filtered copy, including when a caller supplies a local ADIF file.
+        // Do not let TQSL create/delete a .tq8 beside the operator's original file.
+        let input: String
+        do {
+            if let adifContent {
+                input = adifContent
+            } else if let adifFileURL {
+                let data = try Data(contentsOf: adifFileURL)
+                guard let decoded = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) else {
+                    return (false, "Could not decode the ADIF file for LoTW signing.")
+                }
+                input = decoded
+            } else {
+                return (false, "No ADIF log was provided for LoTW signing.")
             }
-        } else if let adifFileURL = adifFileURL, fileManager.fileExists(atPath: adifFileURL.path) {
-            workingAdifURL = adifFileURL
-            shouldDeleteAdif = false
-        } else {
-            return (false, "No valid ADIF log content or file path provided for LoTW signing.")
+        } catch {
+            return (false, "Could not read the ADIF file for LoTW signing.")
         }
-
-        // Potential companion .tq8 package generated by TQSL
-        let companionTq8URL = workingAdifURL.deletingPathExtension().appendingPathExtension("tq8")
-
-        defer {
-            if shouldDeleteAdif {
-                try? fileManager.removeItem(at: workingAdifURL)
-            }
-            try? fileManager.removeItem(at: companionTq8URL)
+        let (_, records) = parseADIF(content: input)
+        guard !records.isEmpty else { return (false, "No QSOs found for LoTW signing.") }
+        let safeRecords = records.map { QSLUploadStatus.uploadFields($0, for: .lotw) }
+        let safeADIF = generateADIF(originalContent: "", records: safeRecords)
+        let workingDirectory = fileManager.temporaryDirectory.appendingPathComponent("yaam-lotw-" + UUID().uuidString, isDirectory: true)
+        let workingAdifURL = workingDirectory.appendingPathComponent("upload.adi")
+        do {
+            try fileManager.createDirectory(at: workingDirectory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+            try safeADIF.write(to: workingAdifURL, atomically: true, encoding: .utf8)
+            try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: workingAdifURL.path)
+        } catch {
+            try? fileManager.removeItem(at: workingDirectory)
+            return (false, "Failed to prepare a private ADIF file for LoTW signing.")
         }
+        defer { try? fileManager.removeItem(at: workingDirectory) }
 
         // Resolve Station Location
         var resolvedLocation = (stationLocation ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -201,6 +221,7 @@ public actor TQSLCoordinator {
         var lastOutput = ""
 
         for attempt in 1...maxAttempts {
+            guard !Task.isCancelled else { return (false, "LoTW upload cancelled before signing.") }
             // Synchronize configuration safely before process run
             TQSLService.synchronizeTQSLStorage()
 
@@ -213,18 +234,14 @@ public actor TQSLCoordinator {
             lastExitCode = result.exitCode
             lastOutput = result.output
 
-            // Success condition:
-            // Code 0: All submitted QSOs were signed and uploaded
-            // Code 8: No QSOs processed because already uploaded / out of range
-            // Code 9: Some QSOs processed, already-uploaded ones skipped
-            // Code 14: Some QSOs were already uploaded previously
+            // Only zero proves that every submitted QSO was signed and uploaded. Codes 8/9 also cover
+            // certificate date exclusions; even 14 cannot prove which records were previously accepted.
             if result.exitCode == 0 {
                 return (true, "Signed & Uploaded to LoTW")
             }
-
-            if result.exitCode == 8 || result.exitCode == 9 || result.exitCode == 14 {
-                let note = result.exitCode == 0 ? "Accepted" : "Already uploaded / compliant"
-                return (true, "LoTW: \(note) (TQSL code \(result.exitCode))")
+            if [8, 9, 14].contains(result.exitCode) {
+                let detail = Self.cleanErrorOutput(result.output, exitCode: result.exitCode)
+                return (false, "LoTW upload is not fully confirmed (TQSL code \(result.exitCode)). No QSOs were marked uploaded. Review the TQSL result and LoTW log before retrying. \(detail)")
             }
 
             // Detect database lock contention:
@@ -278,6 +295,7 @@ public actor TQSLCoordinator {
                 process.standardError = pipe
 
                 var isCompleted = false
+                var timedOut = false
                 let lock = NSLock()
 
                 // Watchdog timer to kill process if it hangs
@@ -287,23 +305,35 @@ public actor TQSLCoordinator {
                     lock.lock()
                     defer { lock.unlock() }
                     if !isCompleted && process.isRunning {
+                        timedOut = true
                         process.terminate()
+                        DispatchQueue.global(qos: .background).asyncAfter(deadline: .now() + 2) {
+                            lock.lock()
+                            defer { lock.unlock() }
+                            if !isCompleted && process.isRunning { kill(process.processIdentifier, SIGKILL) }
+                        }
                     }
                 }
                 timer.resume()
 
                 do {
                     try process.run()
+                    // Drain while the child runs so verbose TQSL output cannot fill the pipe and deadlock it.
+                    let data = pipe.fileHandleForReading.readDataToEndOfFile()
                     process.waitUntilExit()
 
                     lock.lock()
                     isCompleted = true
+                    let didTimeOut = timedOut
                     timer.cancel()
                     lock.unlock()
 
-                    let data = pipe.fileHandleForReading.readDataToEndOfFile()
                     let output = String(data: data, encoding: .utf8) ?? ""
-                    continuation.resume(returning: (process.terminationStatus, output))
+                    if didTimeOut {
+                        continuation.resume(returning: (-1, "TQSL timed out before upload acceptance was confirmed."))
+                    } else {
+                        continuation.resume(returning: (process.terminationReason == .exit ? process.terminationStatus : -1, output))
+                    }
                 } catch {
                     lock.lock()
                     isCompleted = true

@@ -161,6 +161,7 @@ codesign --verify --deep --strict /Applications/YAAM.app
 | :--- | :--- |
 | [English user manual](USER_MANUAL.md) | Station setup, logging, QSL services, radio tools, and day-to-day operation |
 | [راهنمای کاربری فارسی](USER_MANUAL_FA.md) | راه‌اندازی ایستگاه، ثبت تماس‌ها، سرویس‌های QSL و ابزارهای رادیویی |
+| [Privacy & network connections](PRIVACY.md) | Destinations, background connections, transmitted data and privacy controls |
 | [Developer documentation](DEVELOPER_DOCUMENTATION.md) | Application architecture, modules, storage, networking, and implementation details |
 | [App icon assets](Design/AppIcon/README.md) | Production artwork, icon sizes, and asset-catalog maintenance |
 

@@ -217,7 +217,7 @@ public struct Lab599TX500SetupView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Stop Bits").font(.caption.bold())
                     Picker("Stop", selection: $tx500.stopBits) {
-                        Text("2 Stop Bits (8N2 - Verified)").tag(2)
+                        Text("2 Stop Bits (8N2)").tag(2)
                         Text("1 Stop Bit (8N1)").tag(1)
                     }
                     .frame(width: 160)

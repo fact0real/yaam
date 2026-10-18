@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import Combine
 import AppKit
 import UniformTypeIdentifiers
 
@@ -1090,6 +1091,10 @@ struct SettingsView: View {
                 SecureField("API Key (saved securely in Keychain):", text: $wavelogAPIKey)
                     .textFieldStyle(.roundedBorder)
 
+                Text("Use a read/write API key for QSO uploads and radio updates. A read-only key can discover profiles and read the log. Test Connection checks rights without changing the log.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
                 Label("Stored in macOS Hardware Keychain", systemImage: "lock.fill")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -1104,14 +1109,22 @@ struct SettingsView: View {
                         Label("Save Key & Discover Profiles", systemImage: "checkmark.circle")
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(wavelogAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || wavelogServerURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(wavelogAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || wavelogServerURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || wavelogEngine.isSyncing)
 
                     Button("Remove Key", role: .destructive) {
                         removeCredential(.wavelogAPIKey, value: $wavelogAPIKey, status: $wavelogCredentialStatus)
                     }
 
-                    credentialStatus(wavelogCredentialStatus)
                 }
+
+                HStack {
+                    Button("Test Connection") {
+                        Task { await wavelogEngine.testConnection(apiKey: wavelogAPIKey) }
+                    }
+                    .disabled(wavelogEngine.isSyncing || wavelogAPIKey.isEmpty || wavelogServerURL.isEmpty)
+                    if wavelogEngine.isSyncing { ProgressView().controlSize(.small) }
+                }
+                credentialStatus(wavelogCredentialStatus)
 
                 Divider()
 
@@ -1644,6 +1657,18 @@ struct SettingsView: View {
                         }
                     }
 
+                    Toggle("Automatically upload new QSOs", isOn: cloudUploadPreference(\.isEnabled))
+                    if cloudDaemon.isEnabled {
+                        Toggle("Upload to QRZ", isOn: cloudUploadPreference(\.uploadToQRZ))
+                        Toggle("Upload to Club Log", isOn: cloudUploadPreference(\.uploadToClubLog))
+                        Toggle("Upload to eQSL", isOn: cloudUploadPreference(\.uploadToEQSL))
+                        Toggle("Upload to Wavelog", isOn: cloudUploadPreference(\.uploadToWavelog))
+                        Toggle("Sign and upload to LoTW", isOn: cloudUploadPreference(\.uploadToLoTW))
+                    }
+                    Text("Each enabled, configured service receives the QSO's ADIF data and station identity. These switches control the Zero-Click outbox; scheduled sync and manual uploads have separate controls in Sync Center and QSL Hub.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
                     Text("New contacts upload to enabled services that are configured. Network failures wait in the outbox; uploads logged while Touch ID is locked are checked after unlock. Older requests and rejected uploads remain available for manual retry.")
                         .font(.caption2)
                         .foregroundColor(.secondary)
@@ -1651,6 +1676,16 @@ struct SettingsView: View {
             }
             .padding()
         }
+    }
+
+    private func cloudUploadPreference(_ keyPath: ReferenceWritableKeyPath<ZeroClickCloudUploadDaemon, Bool>) -> Binding<Bool> {
+        Binding(
+            get: { cloudDaemon[keyPath: keyPath] },
+            set: { value in
+                cloudDaemon.objectWillChange.send()
+                cloudDaemon[keyPath: keyPath] = value
+            }
+        )
     }
 
     // MARK: - Credential & Path Helpers
@@ -1771,119 +1806,6 @@ private struct SettingsWindowConfigurator: NSViewRepresentable {
             newFrame.size.width = max(newFrame.size.width, targetWidth)
             newFrame.size.height = max(newFrame.size.height, targetHeight)
             window.setFrame(newFrame, display: true, animate: false)
-        }
-    }
-}
-
-// MARK: - Antenna & Station Weather Safety Settings
-struct AntennaWeatherSafetySettingsView: View {
-    @ObservedObject private var engine = StationWeatherSafetyEngine.shared
-    @AppStorage("weatherRadarEnabled") private var weatherRadarEnabled = true
-    @AppStorage("weatherAudioAlertsEnabled") private var weatherAudioAlertsEnabled = true
-    @AppStorage("weatherHighWindThreshold") private var weatherHighWindThreshold: Double = 50.0
-
-    var body: some View {
-        Form {
-            VStack(alignment: .leading, spacing: 18) {
-                // Header
-                HStack(spacing: 12) {
-                    Image(systemName: "bolt.trianglebadge.exclamationmark.fill")
-                        .font(.system(size: 28))
-                        .foregroundStyle(Color.red)
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Station Weather & Antenna Safety Radar")
-                            .font(.headline)
-                        Text("Monitors live atmospheric telemetry to prevent lightning strikes, coaxial cable ESD arcing, and wind load damage to Yagi antennas and masts.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                Divider()
-
-                // Master Toggle
-                Toggle("Enable Live Atmospheric Radar", isOn: $weatherRadarEnabled)
-                    .font(.body.weight(.medium))
-
-                if weatherRadarEnabled {
-                    // Audio warning toggle
-                    Toggle("Voice Alert on Severe Weather / Lightning Threats", isOn: $weatherAudioAlertsEnabled)
-                        .font(.body)
-
-                    // Wind threshold slider
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack {
-                            Text("High Wind Alert Threshold:")
-                            Spacer()
-                            Text("\(Int(weatherHighWindThreshold)) km/h")
-                                .font(.body.monospacedDigit().bold())
-                        }
-                        Slider(value: $weatherHighWindThreshold, in: 25...120, step: 5)
-                        Text("Triggers warning when wind gusts threaten directional HF Yagi beams or vertical antennas.")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    Divider()
-
-                    // Live Status Card
-                    HStack(spacing: 16) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Active Station QTH:")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Text(engine.resolvedGrid.isEmpty ? "No Grid Set" : engine.resolvedGrid)
-                                .font(.system(size: 14, weight: .semibold, design: .monospaced))
-                        }
-
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Current Threat Level:")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            HStack(spacing: 4) {
-                                Circle()
-                                    .fill(engine.threatLevel.color)
-                                    .frame(width: 8, height: 8)
-                                Text(engine.threatLevel.rawValue)
-                                    .font(.system(size: 12, weight: .bold))
-                                    .foregroundStyle(engine.threatLevel.color)
-                            }
-                        }
-
-                        Spacer()
-
-                        Button {
-                            Task {
-                                await engine.refresh()
-                            }
-                        } label: {
-                            Label("Refresh", systemImage: "arrow.clockwise")
-                        }
-                        .controlSize(.small)
-                        .disabled(engine.isFetching)
-                    }
-                    .padding(10)
-                    .background(Color(NSColor.controlBackgroundColor).opacity(0.6), in: RoundedRectangle(cornerRadius: 8))
-                }
-
-                // Audio Test Button
-                HStack {
-                    Button {
-                        engine.speak(message: "Warning. Severe lightning or thunderstorm hazard detected at your station locator. Disconnect antenna coaxial cables immediately.")
-                    } label: {
-                        Label("Test Voice Warning Announcement", systemImage: "speaker.wave.2.fill")
-                    }
-                    .controlSize(.small)
-
-                    Spacer()
-
-                    Text("Weather telemetry powered by Open-Meteo REST API (No API key needed)")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .padding()
         }
     }
 }

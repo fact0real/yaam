@@ -221,20 +221,27 @@ Evaluates all 11 amateur HF/VHF bands (160m through 6m), categorizing each into 
 
 ---
 
-## 6. Station Weather Radar & Lightning Safety Protocols
+## 6. Station Weather & Location Privacy
 
-Tall antenna towers and rotators are prime targets for lightning strikes and wind damage.
+### 6.1 Enable forecasts and choose precision
+Open **Settings → Antenna Weather Radar**. Weather starts disabled on new installations; existing enable preferences are preserved. **Approximate** mode, the default, sends the centre of the station’s 4-character Maidenhead square (2° longitude × 1° latitude) to Open-Meteo. Optional **Precise** mode uses up to 6 characters and can place the station within a few kilometres. No callsign or logbook is sent.
 
-### 6.1 NEXRAD Doppler Precipitation Radar
-Overlay live high-resolution Doppler precipitation radar reflecting storms over your station's Maidenhead grid locator.
+### 6.2 Refresh and rover behavior
+While enabled, YAAM requests a forecast on startup of the weather engine, every 20 minutes, on manual refresh and on station/rover or precision changes. All paths use the selected precision. Disabling cancels pending work and clears the displayed forecast; data already received by the provider cannot be recalled.
 
-### 6.2 Real-Time Cloud-to-Ground Lightning Discharge Tracking
-Monitors cloud-to-ground electrostatic discharges within a 100-kilometer radius, calculating distance and bearing to the nearest active strike.
+### 6.3 Forecast guidance and limits
+The weather display derives classifications from Open-Meteo weather codes, precipitation and wind forecasts. It does **not** measure lightning distance or provide live NEXRAD/Doppler imagery. Conditions at a coarse square centre may differ substantially from conditions at your antennas. A “Safe” classification is not a guarantee of safe operation. Set the gust threshold and optional voice alerts in weather settings, and follow local weather warnings and station safety procedures.
 
-### 6.3 Mast, Rotator & Equipment Safety Distance Rings
-* **Green Zone (> 30 km):** Normal operation; antennas and linear amplifiers safe to operate.
-* **Amber Warning (15 to 30 km):** Storm system approaching; prepare to stow rotators to prevailing wind direction and power down high-voltage amplifiers.
-* **Red Hazard (< 15 km):** **Immediate Equipment Disconnect Alert!** Unplug coaxial feedlines, ground antenna switches, and disconnect station power to protect sensitive receiver front-ends from induced voltage spikes.
+### 6.4 Network transparency
+Open **Help → Privacy & Network Connections** for an offline inventory of destinations, purposes, triggers and transmitted data, or read [PRIVACY.md](PRIVACY.md). Automatic new-QSO upload controls are under **Settings → ADIF Live Sync → Zero-Click Cloud Outbox**; scheduled sync and manual uploads are separate.
+
+
+### 6.5 Logbook upload privacy
+In **Settings → Data Safety → Logbook upload privacy**, three sharing switches start off: the other station’s name/QTH; contact details and precise locations (including your own street address and coordinates); and comments/QSL messages. Unknown fields, other programs’ app fields and international-only ADIF fields stay local. Default uploaded grids are limited to six characters. Callsigns, QSO details and award locations still go to the selected service. These choices apply to uploads, including queued jobs when they are sent; local exports and your saved log retain the full record.
+
+LoTW receives only signing fields. Its certificate/station location remains controlled by TrustedQSL. Only TQSL exit zero confirms the entire batch: codes 8, 9 and 14 leave the records unmarked and show a reconciliation message. Check the TQSL result and LoTW log before retrying a partial batch.
+
+For Wavelog, **Test Connection** checks the API key’s rights without changing the log. Use a read/write key for uploads/two-way sync and radio updates. Full sync requires the active station’s master log and a matching remote station callsign; other-station contacts are skipped. QSL Hub sync also skips contacts whose station callsign differs from the active profile. Historical contacts remain in the local log.
 
 ---
 
@@ -324,7 +331,7 @@ The Digital Call Roster inspects every incoming FT8/FT4 decode against your logb
 ## 12. Today's QSL Card Image Batch Dispatcher
 
 For contacts confirmed today:
-* Automatically generates two-page, high-resolution vector PDF QSL cards (Page 1: station artwork; Page 2: cryptographic QSO confirmation endorsement).
+* Generates a two-page PDF with a generic station front and contact details on the back; PNG export contains the back. The active station profile supplies QTH, country, CQ/ITU zones and flag. Unknown fields are omitted. The card is not a cryptographic signature.
 * Direct email dispatch via your personal SMTP credentials.
 * **Anti-Duplication Guard:** QSOs previously mailed are flagged `Already Sent` to prevent duplicate emails.
 * Embeds official national emoji flags corresponding to recipient DXCC entities.
@@ -518,7 +525,7 @@ The TX-500 requires two separate hardware channels connected to your Mac:
 ### 23.2 Transceiver Menu Configuration (Pre-Flight Checklist)
 Ensure your TX-500 has the following settings configured in its hardware menu:
 1. **`Menu 34 (CAT MODEL): TS2000`** — Sets Kenwood TS-2000 emulation mode.
-2. **`Menu 35 (CAT SPEED): 9600`** — Sets communication baud rate to 9600 bps (8 data bits, no parity, 2 stop bits — **8N2**).
+2. **`Menu 35 (CAT SPEED): 9600`** — Sets communication baud rate to 9600 bps. The official user manual documents **8N1**; YAAM retains its existing **8N2** compatibility default and offers both choices in hardware settings. Verify the framing with your radio/firmware; no saved port setting is changed automatically.
 3. **`Menu 09 (CAT PTT-TO): 30`** — Sets hardware PTT safety timeout to 30 seconds.
 4. **Operating Mode:** Select **`DIG`** directly on the radio front panel.
 

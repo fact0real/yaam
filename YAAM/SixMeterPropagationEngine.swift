@@ -300,9 +300,9 @@ public final class SixMeterPropagationEngine: ObservableObject {
     @Published public var autoRefreshEnabled: Bool = true
     @Published public var refreshCountdownSeconds: Int = 180
 
-    // Reference home station coordinates (defaults to Tehran / EP if profile not loaded)
-    public var homeLatitude: Double = 35.6892
-    public var homeLongitude: Double = 51.3890
+    // Reference home station coordinates (neutral origin until the profile is loaded)
+    public var homeLatitude: Double = 0
+    public var homeLongitude: Double = 0
     public var homeGrid: String = ""
 
     private var autoRefreshTask: Task<Void, Never>?

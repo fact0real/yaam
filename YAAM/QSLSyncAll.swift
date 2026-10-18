@@ -110,12 +110,117 @@ nonisolated enum QSLUploadStatus {
         fields.filter { !isLocalOnly($0.key) }
     }
 
-    /// The ADIF record the QSL Hub uploads, built from the QSO's fields as they are now: the effective mode, the
-    /// cleaned comment, and no local-only field. (It was AppState.qslADIFRecord; the comment cleaner runs on the
-    /// main actor, as before.)
+    /// ADIF 3.1.5 QSO fields that may go to every upload destination. Not here, so never sent: the other station's
+    /// personal data (below, only on request), every *_INTL field (the ADIF specification keeps them out of ADI
+    /// files), any program's APP_ field, and any name that is not an ADIF QSO field.
+    static let uploadCoreFields: Set<String> = [
+        // the contact
+        "CALL", "QSO_DATE", "TIME_ON", "QSO_DATE_OFF", "TIME_OFF", "BAND", "BAND_RX", "FREQ", "FREQ_RX", "MODE",
+        "SUBMODE", "RST_SENT", "RST_RCVD", "TX_PWR", "RX_PWR", "PROP_MODE", "SAT_MODE", "SAT_NAME", "QSO_COMPLETE",
+        "QSO_RANDOM", "SWL", "FORCE_INIT", "MAX_BURSTS", "NR_BURSTS", "NR_PINGS", "MS_SHOWER", "ANT_AZ", "ANT_EL",
+        "ANT_PATH", "A_INDEX", "K_INDEX", "SFI", "DISTANCE",
+        "MORSE_KEY_INFO", "MORSE_KEY_TYPE",
+        // the other station: callsign, location to grid and county level, zones, awards
+        "CONTACTED_OP", "EQ_CALL", "GUEST_OP", "PFX", "COUNTRY", "DXCC", "CONT", "CQZ", "ITUZ", "STATE", "CNTY",
+        "CNTY_ALT", "REGION", "ARRL_SECT", "GRIDSQUARE", "VUCC_GRIDS", "USACA_COUNTIES", "ALTITUDE",
+        "IOTA", "IOTA_ISLAND_ID", "SOTA_REF", "POTA_REF", "WWFF_REF", "SIG", "SIG_INFO", "DARC_DOK", "FISTS", "FISTS_CC",
+        "SKCC", "TEN_TEN", "UKSMG", "RIG",
+        // contests
+        "CONTEST_ID", "SRX", "SRX_STRING", "STX", "STX_STRING", "CHECK", "CLASS", "PRECEDENCE",
+        // this station, without its precise address
+        "STATION_CALLSIGN", "OPERATOR", "OWNER_CALLSIGN", "MY_NAME", "MY_CITY", "MY_COUNTRY", "MY_DXCC", "MY_STATE",
+        "MY_CNTY", "MY_CNTY_ALT", "MY_CQ_ZONE", "MY_ITU_ZONE", "MY_GRIDSQUARE", "MY_VUCC_GRIDS",
+        "MY_USACA_COUNTIES", "MY_ARRL_SECT", "MY_ALTITUDE", "MY_IOTA", "MY_IOTA_ISLAND_ID", "MY_SOTA_REF",
+        "MY_POTA_REF", "MY_WWFF_REF", "MY_SIG", "MY_SIG_INFO", "MY_DARC_DOK", "MY_FISTS", "MY_RIG", "MY_ANTENNA",
+        "MY_MORSE_KEY_INFO", "MY_MORSE_KEY_TYPE",
+        // QSL and upload status
+        "QSL_SENT", "QSL_RCVD", "QSLSDATE", "QSLRDATE", "QSL_SENT_VIA", "QSL_RCVD_VIA",
+        "LOTW_QSL_SENT", "LOTW_QSL_RCVD", "LOTW_QSLSDATE", "LOTW_QSLRDATE",
+        "EQSL_QSL_SENT", "EQSL_QSL_RCVD", "EQSL_QSLSDATE", "EQSL_QSLRDATE",
+        "DCL_QSL_SENT", "DCL_QSL_RCVD", "DCL_QSLSDATE", "DCL_QSLRDATE",
+        "CLUBLOG_QSO_UPLOAD_DATE", "CLUBLOG_QSO_UPLOAD_STATUS", "HAMLOGEU_QSO_UPLOAD_DATE", "HAMLOGEU_QSO_UPLOAD_STATUS",
+        "HAMQTH_QSO_UPLOAD_DATE", "HAMQTH_QSO_UPLOAD_STATUS", "HRDLOG_QSO_UPLOAD_DATE", "HRDLOG_QSO_UPLOAD_STATUS",
+        "QRZCOM_QSO_UPLOAD_DATE", "QRZCOM_QSO_UPLOAD_STATUS", "QRZCOM_QSO_DOWNLOAD_DATE", "QRZCOM_QSO_DOWNLOAD_STATUS",
+        "AWARD_SUBMITTED", "AWARD_GRANTED", "CREDIT_SUBMITTED", "CREDIT_GRANTED",
+    ]
+
+    /// The other station's name and QTH: sent only when the operator switches on uploadShareNameAndQTH.
+    static let nameAndQTHFields: Set<String> = ["NAME", "QTH"]
+
+    /// The other station's contact details, and this station's own precise address: sent only when the operator
+    /// switches on uploadShareContactDetails.
+    static let contactDetailFields: Set<String> = [
+        "EMAIL", "ADDRESS", "WEB", "AGE", "BIOGRAPHY", "PUBLIC_KEY", "SILENT_KEY", "LAT", "LON", "NOTES",
+        "MY_STREET", "MY_POSTAL_CODE", "MY_LAT", "MY_LON",
+        // A 10-character grid locates a station as closely as LAT/LON; QSLMSG_RCVD is the other station's own text.
+        "GRIDSQUARE_EXT", "MY_GRIDSQUARE_EXT", "QSLMSG_RCVD", "QSL_VIA",
+    ]
+
+    /// Operator-authored text may itself contain personal information. Share only by explicit choice.
+    static let freeTextFields: Set<String> = ["COMMENT", "QSLMSG"]
+
+    /// The file handed to TQSL for LoTW: what TQSL signs, or compares with the station location. The switches do
+    /// not apply.
+    static let lotwFields: Set<String> = [
+        "CALL", "QSO_DATE", "TIME_ON", "BAND", "BAND_RX", "MODE", "SUBMODE", "FREQ", "FREQ_RX", "PROP_MODE", "SAT_NAME",
+        "STATION_CALLSIGN", "OPERATOR", "MY_GRIDSQUARE", "MY_VUCC_GRIDS", "MY_DXCC", "MY_STATE", "MY_CNTY",
+        "MY_CQ_ZONE", "MY_ITU_ZONE", "MY_IOTA",
+    ]
+
+    /// The fields of a QSO that go to `destination`: its allowlist (the core list, plus what the switches add; LoTW
+    /// its own list), never a local-only field, an APP_ field or an *_INTL field, and COMMENT without YAAM's
+    /// [KEY=value] tags. Every upload builder starts from this; a local export does not.
+    static func uploadFields(
+        _ fields: [String: String],
+        for destination: QSLUploadDestination,
+        options: UploadFieldOptions = .standard
+    ) -> [String: String] {
+        var allowed = destination == .lotw ? lotwFields : uploadCoreFields
+        if destination != .lotw {
+            if options.shareNameAndQTH { allowed.formUnion(nameAndQTHFields) }
+            if options.shareContactDetails { allowed.formUnion(contactDetailFields) }
+            if options.shareFreeText { allowed.formUnion(freeTextFields) }
+        }
+        var result: [String: String] = [:]
+        // Conflicting case variants are ambiguous input, so omit the field rather than choose at random.
+        let groups = Dictionary(grouping: fields.keys, by: { $0.uppercased() })
+        for (key, value) in fields {
+            let name = key.uppercased()
+            guard groups[name]?.count == 1, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+            if isLocalOnly(key) || name.hasPrefix("APP_") || name.hasSuffix("_INTL") || !allowed.contains(name) { continue }
+            if name == "COMMENT" {
+                let cleaned = QSOMetadataFormatter.cleanComment(value)
+                if !cleaned.isEmpty { result[name] = cleaned }
+                continue
+            }
+            // Even without *_EXT, an 8-character locator reveals roughly a street-sized area.
+            // Keep award-usable 6-character locators by default, for both individual grids and grid lists.
+            if ["GRIDSQUARE", "MY_GRIDSQUARE", "VUCC_GRIDS", "MY_VUCC_GRIDS"].contains(name),
+               destination == .lotw || !options.shareContactDetails {
+                let grids = value.split(separator: ",", omittingEmptySubsequences: false).compactMap { raw -> String? in
+                    let grid = raw.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+                    guard [2, 4, 6, 8].contains(grid.count),
+                          grid.range(of: "^[A-R]{2}([0-9]{2}([A-X]{2}([0-9]{2})?)?)?$", options: .regularExpression) != nil else { return nil }
+                    return String(grid.prefix(6))
+                }
+                if !grids.isEmpty { result[name] = grids.joined(separator: ",") }
+                continue
+            }
+            result[name] = value
+        }
+        return result
+    }
+
+    /// The ADIF record the QSL Hub uploads to `provider`, built from the QSO's fields as they are now: the effective
+    /// mode, and only the fields of uploadFields (cleaned comment, no local-only field). (It was
+    /// AppState.qslADIFRecord.)
     @MainActor
-    static func uploadADIF(_ fields: [String: String]) -> String {
-        var normalizedFields = fields
+    static func uploadADIF(
+        _ fields: [String: String],
+        for provider: QSLProvider,
+        options: UploadFieldOptions = .standard
+    ) -> String {
+        var normalizedFields = uploadFields(fields, for: QSLUploadDestination(provider), options: options)
         let currentMode = normalizedFields["MODE"] ?? ""
         let currentSubmode = normalizedFields["SUBMODE"] ?? ""
         let freq = Double(normalizedFields["FREQ"] ?? "")
@@ -130,13 +235,6 @@ nonisolated enum QSLUploadStatus {
         var result = ""
         for key in normalizedFields.keys.sorted() {
             guard let value = normalizedFields[key], !value.isEmpty else { continue }
-            if isLocalOnly(key) { continue }
-            if key == "COMMENT" {
-                let sanitized = QSOMetadataFormatter.cleanComment(value)
-                guard !sanitized.isEmpty else { continue }
-                result += "<\(key):\(sanitized.utf8.count)>\(sanitized)"
-                continue
-            }
             result += "<\(key):\(value.utf8.count)>\(value)"
         }
         return result + "<EOR>"
@@ -169,6 +267,55 @@ nonisolated enum QSLUploadStatus {
             updated["CLUBLOG_QSO_UPLOAD_DATE"] = date
         }
         return updated
+    }
+}
+
+/// Where a QSO is uploaded: the four QSL Hub services (also used by the Zero-Click daemon), HRDLog, HamQTH and
+/// Wavelog. Each one gets the fields of QSLUploadStatus.uploadFields.
+nonisolated enum QSLUploadDestination: String, CaseIterable, Sendable {
+    case lotw, qrz, eqsl, clubLog, hrdlog, hamqth, wavelog
+
+    init(_ provider: QSLProvider) {
+        switch provider {
+        case .lotw: self = .lotw
+        case .qrz: self = .qrz
+        case .eqsl: self = .eqsl
+        case .clubLog: self = .clubLog
+        }
+    }
+}
+
+/// What the operator lets go to the logbook services besides the core fields, switched on in Data Safety. Both are
+/// off until the operator switches them on; they are read when an upload is built.
+nonisolated struct UploadFieldOptions: Equatable, Sendable {
+    /// The other station's NAME and QTH.
+    var shareNameAndQTH: Bool
+    /// The other station's contact details (EMAIL, ADDRESS, WEB, AGE, LAT, LON, NOTES…) and this station's own
+    /// MY_STREET, MY_POSTAL_CODE, MY_LAT and MY_LON.
+    var shareContactDetails: Bool
+    var shareFreeText: Bool = false
+
+    static var standard: UploadFieldOptions { read(from: .standard) }
+
+    static func read(from defaults: UserDefaults) -> UploadFieldOptions {
+        UploadFieldOptions(
+            shareNameAndQTH: defaults.bool(forKey: "uploadShareNameAndQTH"),
+            shareContactDetails: defaults.bool(forKey: "uploadShareContactDetails"),
+            shareFreeText: defaults.bool(forKey: "uploadShareFreeText")
+        )
+    }
+}
+
+/// Historical callsigns remain in the local log. A service upload may use only the active station identity.
+nonisolated enum UploadStationPolicy {
+    static func matches(_ fields: [String: String], stationCallsign: String) -> Bool {
+        let station = stationCallsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard !station.isEmpty, station != "DEFAULT" else { return false }
+        // Legacy QSOs without STATION_CALLSIGN belong to the owning profile. OPERATOR can legitimately differ.
+        return fields.filter { $0.key.uppercased() == "STATION_CALLSIGN" }.values.allSatisfy {
+            let call = $0.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            return call.isEmpty || call == station
+        }
     }
 }
 
@@ -261,10 +408,13 @@ nonisolated enum QSLSyncAll {
     /// R7: the QSOs a Sync takes: all of them for Sync All, only the selected ones for Sync Selected.
     static func recordsToSync(
         all: [(id: UUID, fields: [String: String])],
-        selectedIDs: Set<UUID>?
+        selectedIDs: Set<UUID>?,
+        stationCallsign: String? = nil
     ) -> [(id: UUID, fields: [String: String])] {
-        guard let selectedIDs else { return all }
-        return all.filter { selectedIDs.contains($0.id) }
+        all.filter { record in
+            (selectedIDs?.contains(record.id) ?? true) &&
+                (stationCallsign.map { UploadStationPolicy.matches(record.fields, stationCallsign: $0) } ?? true)
+        }
     }
 
     /// The keys of jobs blocked by rejected credentials whose service's credentials were saved again after the block,
@@ -357,7 +507,7 @@ nonisolated enum QSLSyncAll {
     static func review(_ job: QSLQueueJob, currentFields: [String: String]?) -> QSLJobReview {
         guard let fields = currentFields else { return .qsoGone }
         if QSLUploadStatus.isSent(fields, to: job.provider) { return .alreadyThere }
-        return .send(adif: QSLUploadStatus.uploadADIF(fields))
+        return .send(adif: QSLUploadStatus.uploadADIF(fields, for: job.provider))
     }
 }
 
@@ -514,6 +664,15 @@ nonisolated struct QSLProviderPass {
         return chunks[next]
     }
 
+    /// A workspace/identity change can invalidate a batch after nextBatch returned it but before any request.
+    /// Put that batch back with the remaining jobs; no attempt or sent mark is earned.
+    mutating func stopBeforeSending(reason: String) {
+        guard stopReason == nil, next > 0 else { return }
+        next -= 1
+        stopReason = reason
+        summary.firstProblem = reason
+    }
+
     /// The jobs of `batch` after the service answered `outcome`.
     mutating func record(_ outcome: QSLBatchOutcome, for batch: [QSLQueueJob], now: Date) -> [QSLJobUpdate] {
         var updates: [QSLJobUpdate] = []
@@ -599,6 +758,7 @@ nonisolated struct QSLProviderPass {
 nonisolated struct QSLSyncUploadRun: Sendable {
     /// Another upload was running, so nothing was done.
     var busy = false
+    var skippedStationCount = 0
     var summaries: [QSLPassSummary] = []
     /// The services left out, with the reason.
     var notChecked: [QSLProvider: String] = [:]
@@ -631,7 +791,9 @@ nonisolated enum QSLSyncReport {
     }
 
     static func lines(_ run: QSLSyncUploadRun) -> [(text: String, problem: Bool)] {
-        QSLProvider.allCases.map { provider in
+        let skipped: [(text: String, problem: Bool)] = run.skippedStationCount > 0
+            ? [("Skipped \(run.skippedStationCount) QSO(s) from another station callsign.", false)] : []
+        return skipped + QSLProvider.allCases.map { provider in
             if let reason = run.notChecked[provider] { return ("\(provider.title): not checked (\(reason))", false) }
             guard let summary = run.summaries.first(where: { $0.provider == provider }) else {
                 return ("\(provider.title): nothing to upload", false)
@@ -652,6 +814,11 @@ nonisolated enum QSLSyncReport {
 
     /// One short line for the QSL Hub status.
     static func status(_ run: QSLSyncUploadRun) -> String {
+        if run.skippedStationCount > 0 {
+            var summary = run
+            summary.skippedStationCount = 0
+            return status(summary) + "; \(run.skippedStationCount) other-station QSO(s) skipped"
+        }
         if run.busy { return "Another upload is running; nothing was done" }
         if run.summaries.isEmpty, !run.notChecked.isEmpty {
             let reasons = Set(run.notChecked.values)

@@ -156,107 +156,25 @@ public struct VaricodeCodec: Sendable {
     // Standard Peter Martinez G3PLX Varicode table (ASCII 0 - 127)
     // Characters are encoded as binary strings where zeros are always single (never '00')
     // and terminated by '00' (inter-character delimiter).
+    // G3PLX, QEX July/August 1999, Table 1:
+    // https://www.arrl.org/files/file/Technology/tis/info/pdf/x9907003.pdf
     public static let asciiToVaricode: [String] = [
-        /* 00-07 */ "1010101011", "1011011011", "1011101101", "1101110111", "1011101011", "1101011111", "1011101111", "1011111101",
-        /* 08-15 */ "1011111111", "11101111", "1111111", "1101101111", "1011011101", "11111", "1101110101", "1110101011",
-        /* 16-23 */ "1011111011", "1011110111", "1011101101", "1010110111", "1011010111", "1011011111", "1101011011", "1101101011",
-        /* 24-31 */ "1101101101", "1101111011", "1101111101", "1101111111", "1110101101", "1110101111", "1110110101", "1110110111",
-        /* 32 SP */ "1",
-        /* 33 !  */ "111111111",
-        /* 34 "  */ "101011111",
-        /* 35 #  */ "111110101",
-        /* 36 $  */ "111011011",
-        /* 37 %  */ "1011010101",
-        /* 38 &  */ "1010111011",
-        /* 39 '  */ "101111111",
-        /* 40 (  */ "11111011",
-        /* 41 )  */ "11110111",
-        /* 42 *  */ "101101111",
-        /* 43 +  */ "11101111",
-        /* 44 ,  */ "1110101",
-        /* 45 -  */ "11010101",
-        /* 46 .  */ "10101011",
-        /* 47 /  */ "110101111",
-        /* 48 0  */ "1011011101",
-        /* 49 1  */ "1011110101",
-        /* 50 2  */ "1110110101",
-        /* 51 3  */ "1111111101",
-        /* 52 4  */ "1011101111",
-        /* 53 5  */ "1010110111",
-        /* 54 6  */ "1011010111",
-        /* 55 7  */ "1101011011",
-        /* 56 8  */ "1101010111",
-        /* 57 9  */ "1101101011",
-        /* 58 :  */ "111101011",
-        /* 59 ;  */ "1101111011",
-        /* 60 <  */ "1110110111",
-        /* 61 =  */ "1111101101",
-        /* 62 >  */ "1110101111",
-        /* 63 ?  */ "1010101111",
-        /* 64 @  */ "1010111101",
-        /* 65 A  */ "111111101",
-        /* 66 B  */ "1110101101",
-        /* 67 C  */ "1010110101",
-        /* 68 D  */ "1011011011",
-        /* 69 E  */ "111011101",
-        /* 70 F  */ "1101101101",
-        /* 71 G  */ "1110111101",
-        /* 72 H  */ "1101010101",
-        /* 73 I  */ "11111101",
-        /* 74 J  */ "1111111011",
-        /* 75 K  */ "1011111101",
-        /* 76 L  */ "1101011101",
-        /* 77 M  */ "1011101101",
-        /* 78 N  */ "110111011",
-        /* 79 O  */ "101101011",
-        /* 80 P  */ "110101101",
-        /* 81 Q  */ "1111111111",
-        /* 82 R  */ "1010111111",
-        /* 83 S  */ "110111101",
-        /* 84 T  */ "101101101",
-        /* 85 U  */ "1010101101",
-        /* 86 V  */ "1111010101",
-        /* 87 W  */ "1101111101",
-        /* 88 X  */ "1111011011",
-        /* 89 Y  */ "1011110111",
-        /* 90 Z  */ "1110101011",
-        /* 91 [  */ "111110111",
-        /* 92 \  */ "1111111101",
-        /* 93 ]  */ "111111011",
-        /* 94 ^  */ "1101011111",
-        /* 95 _  */ "1011011001",
-        /* 96 `  */ "1011011111",
-        /* 97 a  */ "1011",
-        /* 98 b  */ "1011111",
-        /* 99 c  */ "101011",
-        /* 100 d */ "101101",
-        /* 101 e */ "11",
-        /* 102 f */ "111101",
-        /* 103 g */ "1011011",
-        /* 104 h */ "11011",
-        /* 105 i */ "1101",
-        /* 106 j */ "1111011",
-        /* 107 k */ "1011101",
-        /* 108 l */ "110111",
-        /* 109 m */ "11101",
-        /* 110 n */ "1111",
-        /* 111 o */ "111",
-        /* 112 p */ "111111",
-        /* 113 q */ "11011101",
-        /* 114 r */ "1010",
-        /* 115 s */ "10101",
-        /* 116 t */ "101",
-        /* 117 u */ "110101",
-        /* 118 v */ "1101101",
-        /* 119 w */ "1101011",
-        /* 120 x */ "1101111",
-        /* 121 y */ "101111",
-        /* 122 z */ "1110101",
-        /* 123 { */ "1010110111",
-        /* 124 | */ "1101110111",
-        /* 125 } */ "1010111011",
-        /* 126 ~ */ "1010101111",
-        /* 127 DEL */ "1110110101"
+        /* 000-007 */ "1010101011", "1011011011", "1011101101", "1101110111", "1011101011", "1101011111", "1011101111", "1011111101",
+        /* 008-015 */ "1011111111", "11101111", "11101", "1101101111", "1011011101", "11111", "1101110101", "1110101011",
+        /* 016-023 */ "1011110111", "1011110101", "1110101101", "1110101111", "1101011011", "1101101011", "1101101101", "1101010111",
+        /* 024-031 */ "1101111011", "1101111101", "1110110111", "1101010101", "1101011101", "1110111011", "1011111011", "1101111111",
+        /* 032-039 */ "1", "111111111", "101011111", "111110101", "111011011", "1011010101", "1010111011", "101111111",
+        /* 040-047 */ "11111011", "11110111", "101101111", "111011111", "1110101", "110101", "1010111", "110101111",
+        /* 048-055 */ "10110111", "10111101", "11101101", "11111111", "101110111", "101011011", "101101011", "110101101",
+        /* 056-063 */ "110101011", "110110111", "11110101", "110111101", "111101101", "1010101", "111010111", "1010101111",
+        /* 064-071 */ "1010111101", "1111101", "11101011", "10101101", "10110101", "1110111", "11011011", "11111101",
+        /* 072-079 */ "101010101", "1111111", "111111101", "101111101", "11010111", "10111011", "11011101", "10101011",
+        /* 080-087 */ "11010101", "111011101", "10101111", "1101111", "1101101", "101010111", "110110101", "101011101",
+        /* 088-095 */ "101110101", "101111011", "1010101101", "111110111", "111101111", "111111011", "1010111111", "101101101",
+        /* 096-103 */ "1011011111", "1011", "1011111", "101111", "101101", "11", "111101", "1011011",
+        /* 104-111 */ "101011", "1101", "111101011", "10111111", "11011", "111011", "1111", "111",
+        /* 112-119 */ "111111", "110111111", "10101", "10111", "101", "110111", "1111011", "1101011",
+        /* 120-127 */ "11011111", "1011101", "111010101", "1010110111", "110111011", "1010110101", "1011010111", "1110110101"
     ]
 
     public static let varicodeToAscii: [String: Character] = {
@@ -408,6 +326,8 @@ public final class DigitalModemEngine: ObservableObject {
     private var rttyRxState: RTTYRxFSM = .idle
     private var bitSampleAccumulator: Float = 0.0
     private var bitSampleCount: Int = 0
+    private var pendingDecodedWord = ""
+    private var decodedWordOverflow = false
     private var recentScopeBuffer: [DigitalScopeSample] = []
 
     // PSK31 State
@@ -522,6 +442,8 @@ public final class DigitalModemEngine: ObservableObject {
     public func clearTerminals() {
         rxText = ""
         decodedTokens.removeAll()
+        pendingDecodedWord = ""
+        decodedWordOverflow = false
         txBufferText = ""
         txTransmittedText = ""
         txRemainingText = ""
@@ -801,7 +723,19 @@ public final class DigitalModemEngine: ObservableObject {
         }
 
         // Tokenize and highlight callsigns & signal reports
-        let rawTokens = text.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
+        var rawTokens: [String] = []
+        for character in text {
+            if character.isWhitespace {
+                if !decodedWordOverflow, !pendingDecodedWord.isEmpty { rawTokens.append(pendingDecodedWord) }
+                pendingDecodedWord = ""
+                decodedWordOverflow = false
+            } else if pendingDecodedWord.count < 64, !decodedWordOverflow {
+                pendingDecodedWord.append(character)
+            } else {
+                pendingDecodedWord = ""
+                decodedWordOverflow = true
+            }
+        }
         for tok in rawTokens {
             let clean = tok.trimmingCharacters(in: .punctuationCharacters).uppercased()
             guard !clean.isEmpty else { continue }
@@ -848,10 +782,7 @@ public final class DigitalModemEngine: ObservableObject {
     }
 
     private func isHamCallsign(_ s: String) -> Bool {
-        guard s.count >= 3 && s.count <= 7 else { return false }
-        let hasLetter = s.contains { $0.isLetter }
-        let hasDigit = s.contains { $0.isNumber }
-        return hasLetter && hasDigit && !s.contains("/")
+        TransmitIdentity.isValidCallsign(s)
     }
 
     // MARK: - Macro Tag Expansion
@@ -892,6 +823,10 @@ public final class DigitalModemEngine: ObservableObject {
         guard !txRemainingText.isEmpty, !isTransmitting else { return }
         if let issue = TransmitIdentity.callsignRefusal(myCallsign) {
             txRefusal = issue
+            return
+        }
+        guard audioEngine?.isRunning == true, playerNode?.isPlaying == true else {
+            txRefusal = "Audio transmitter is unavailable. No message was sent; the queued text is kept."
             return
         }
         isTransmitting = true

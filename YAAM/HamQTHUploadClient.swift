@@ -36,7 +36,7 @@ public final class HamQTHUploadClient: ObservableObject {
     // MARK: - Upload Single QSO
 
     func uploadSingleQSO(record: QSORecordModel) async -> Bool {
-        let adif = "<ADIF_VER:5>3.1.4\n<PROGRAMID:4>YAAM\n<EOH>\n" + record.toADIFRecordString() + "\n"
+        let adif = "<ADIF_VER:5>3.1.4\n<PROGRAMID:4>YAAM\n<EOH>\n" + record.toADIFRecordString(for: .hamqth) + "\n"
         return await uploadADIFString(adif)
     }
 
@@ -47,7 +47,7 @@ public final class HamQTHUploadClient: ObservableObject {
 
         var adifBatch = "<ADIF_VER:5>3.1.4\n<PROGRAMID:4>YAAM\n<EOH>\n"
         for rec in records {
-            adifBatch += rec.toADIFRecordString() + "\n"
+            adifBatch += rec.toADIFRecordString(for: .hamqth) + "\n"
         }
 
         self.isUploading = true

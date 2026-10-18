@@ -31,28 +31,14 @@ public struct CallHistoryLookupRegressionTests {
 
         print("--- Starting Call History & Pre-fill Regression Tests ---")
 
-        let engine = CallHistoryLookupEngine.shared
-
-        // Test 1: Seed Database Integrity
-        assertTest(engine.totalRecordsCount >= 30, "Seed database loaded at least 30 verified contest callsigns (count: \(engine.totalRecordsCount))")
-
-        // Test 2: Known Station Lookups
-        let w1aw = engine.lookup(callsign: "W1AW")
-        assertTest(w1aw != nil, "W1AW found in database")
-        assertTest(w1aw?.state == "CT", "W1AW state is CT")
-        assertTest(w1aw?.cqZone == 5, "W1AW CQ Zone is 5")
-        assertTest(w1aw?.name == "HQ", "W1AW name is HQ")
-
-        let k3lr = engine.lookup(callsign: "k3lr") // Test case insensitivity
-        assertTest(k3lr != nil, "k3lr found (case insensitive)")
-        assertTest(k3lr?.name == "Tim", "K3LR operator name is Tim")
-        assertTest(k3lr?.state == "PA", "K3LR state is PA")
-        assertTest(k3lr?.cqZone == 5, "K3LR zone is 5")
-
-        let ep2aes = engine.lookup(callsign: "EP2AES")
-        assertTest(ep2aes != nil, "EP2AES found")
-        assertTest(ep2aes?.name == "Amir", "EP2AES operator name is Amir")
-        assertTest(ep2aes?.cqZone == 21, "EP2AES zone is 21")
+        let storage = FileManager.default.temporaryDirectory.appendingPathComponent("YAAM-History-\(UUID().uuidString).json")
+        let suite = "YAAM-History-Regression-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let engine = CallHistoryLookupEngine(defaults: defaults, storageURL: storage)
+        engine.isEnabled = true
+        assertTest(engine.totalRecordsCount == 0, "Fresh history starts without demonstration identities")
+        assertTest(engine.lookup(callsign: "EP2AES") == nil, "No built-in personal station entry")
 
         // Test 3: Logbook Self-Learning
         let learnedQSO = QSORecordModel(fields: [
@@ -93,13 +79,9 @@ public struct CallHistoryLookupRegressionTests {
 
         // Test 5: Macro Token Expansion in CWKeyerService
         let keyer = CWKeyerService.shared
-        let expandedW1AW = keyer.expandMacro("TU {HISNAME} {HISSTATE} {HISZONE} 5NN", myCall: "AA1AA", call: "W1AW")
-        assertTest(expandedW1AW.contains("HQ"), "Macro expanded {HISNAME} to HQ")
-        assertTest(expandedW1AW.contains("CT"), "Macro expanded {HISSTATE} to CT")
-        assertTest(expandedW1AW.contains("05"), "Macro expanded {HISZONE} to 05")
-
-        let expandedK3LR = keyer.expandMacro("TNX {HISNAME} 73", myCall: "AA1AA", call: "K3LR")
-        assertTest(expandedK3LR.contains("TIM"), "Macro expanded {HISNAME} to TIM")
+        let expandedUnknown = keyer.expandMacro("TU {HISNAME} {HISSTATE} {HISZONE} 5NN", myCall: "DEMO-A", call: "YAAM-DEMO-UNKNOWN")
+        assertTest(!expandedUnknown.contains("{HISNAME}"), "Unknown station name token is resolved without invented identity")
+        assertTest(!expandedUnknown.contains("{HISSTATE}"), "Unknown station state token is resolved")
 
         // Test 6: Paddle Break-In Handling
         keyer.isTransmitting = true

@@ -10,39 +10,15 @@ import AppKit
 import PDFKit
 import UniformTypeIdentifiers
 
-struct QSLCardStationInfo {
-    let callsign: String
-    let grid: String
-    let radio: String
-    let antenna: String
-    let powerWatts: Int
-    var antennaHeightMeters: Int = 10
-}
-
 enum QSLCardRenderer {
-    private static let templateResourceName = "EP2AES_QSL_Card_HQ"
-    private static let fallbackTemplateURL = URL(fileURLWithPath: NSHomeDirectory())
-        .appendingPathComponent("EP2AES_QSL_Card_HQ.pdf")
-
     static func render(record: QSORecordModel, station: QSLCardStationInfo) -> NSImage {
-        let page = templatePage()
-        let size = page?.bounds(for: .mediaBox).size ?? CGSize(width: 1600, height: 1000)
+        let size = CGSize(width: 1600, height: 1000)
         let image = NSImage(size: size)
-
         image.lockFocus()
-        NSColor.white.setFill()
-        NSRect(origin: .zero, size: size).fill()
-
-        if let page, let context = NSGraphicsContext.current?.cgContext {
-            context.saveGState()
-            page.draw(with: .mediaBox, to: context)
-            context.restoreGState()
-        } else {
-            drawFallbackTemplate(in: CGRect(origin: .zero, size: size), station: station)
-        }
-
-        drawStationFlag(in: CGRect(origin: .zero, size: size))
-        drawQSOFields(record: record, station: station, in: CGRect(origin: .zero, size: size))
+        let rect = CGRect(origin: .zero, size: size)
+        drawFallbackTemplate(in: rect, station: station)
+        drawStationFlag(in: rect, station: station)
+        drawQSOFields(record: record, station: station, in: rect)
         image.unlockFocus()
 
         return image
@@ -60,22 +36,13 @@ enum QSLCardRenderer {
     }
 
     static func exportPDF(record: QSORecordModel, station: QSLCardStationInfo, to url: URL) throws {
-        let bundledURL = Bundle.main.url(forResource: templateResourceName, withExtension: "pdf")
-        let templateUrl = bundledURL ?? (FileManager.default.fileExists(atPath: fallbackTemplateURL.path) ? fallbackTemplateURL : nil)
-        
-        guard let templateUrl, let templateDoc = PDFDocument(url: templateUrl) else {
-            throw CocoaError(.fileReadNoSuchFile)
+        let pageSize = CGSize(width: 780, height: 488)
+        let frontImage = renderPDFPage(page: nil, size: pageSize) { rect in
+            drawFront(in: rect, station: station)
         }
-
-        let frontPage = templateDoc.page(at: 0)
-        let backPage = templateDoc.pageCount > 1 ? templateDoc.page(at: 1) : nil
-        let pageSize = (backPage ?? frontPage)?.bounds(for: .mediaBox).size ?? CGSize(width: 780, height: 482)
-        let frontImage = renderPDFPage(page: frontPage, size: pageSize)
-        let backImage = renderPDFPage(page: backPage, size: pageSize) { rect in
-            if backPage == nil {
-                drawFallbackTemplate(in: rect, station: station)
-            }
-            drawStationFlag(in: rect)
+        let backImage = renderPDFPage(page: nil, size: pageSize) { rect in
+            drawFallbackTemplate(in: rect, station: station)
+            drawStationFlag(in: rect, station: station)
             drawQSOFields(record: record, station: station, in: rect)
         }
 
@@ -91,24 +58,16 @@ enum QSLCardRenderer {
         return "\(myCall)_QSL_\(theirCall)_\(date).png"
     }
 
-    private static func templatePage() -> PDFPage? {
-        let bundledURL = Bundle.main.url(forResource: templateResourceName, withExtension: "pdf")
-        let url = bundledURL ?? (FileManager.default.fileExists(atPath: fallbackTemplateURL.path) ? fallbackTemplateURL : nil)
-        guard let url, let document = PDFDocument(url: url) else { return nil }
-        let templatePageIndex = document.pageCount > 1 ? 1 : 0
-        return document.page(at: templatePageIndex)
-    }
-
     fileprivate static func drawQSOFields(record: QSORecordModel, station: QSLCardStationInfo, in rect: CGRect) {
         let qso = QSLCardQSO(record: record)
         let height = rect.height
         let rowY: CGFloat = 0.500
 
         // Callsign (Higher position)
-        draw(qso.callDisplay, x: 0.030, y: 0.535, width: 0.175, height: 0.050, in: rect, size: (height * 0.038) + 4, weight: .bold)
+        draw(qso.callDisplay, x: 0.030, y: rowY, width: 0.175, height: 0.050, in: rect, size: (height * 0.038) + 4, weight: .bold)
         
         // Name (Below callsign)
-        draw(qso.name, x: 0.030, y: 0.495, width: 0.175, height: 0.030, in: rect, size: (height * 0.020) + 2, weight: .medium, color: .darkGray)
+        draw(qso.name, x: 0.030, y: 0.455, width: 0.175, height: 0.030, in: rect, size: (height * 0.020) + 2, weight: .medium, color: .darkGray)
 
         // Date
         draw(qso.date, x: 0.210, y: rowY, width: 0.150, height: 0.052, in: rect, size: (height * 0.030) + 2, weight: .bold)
@@ -128,37 +87,54 @@ enum QSLCardRenderer {
         // Station Details (Dynamically populated from Station Profile)
         let infoFontSize = (height * 0.020) + 6
         let radioClean = station.radio.trimmingCharacters(in: .whitespacesAndNewlines)
-        let radioText = radioClean.isEmpty ? "ICOM-7300" : radioClean
+        let radioText = radioClean.isEmpty ? "" : "RADIO: \(radioClean)"
 
         let antennaClean = station.antenna.trimmingCharacters(in: .whitespacesAndNewlines)
-        let antennaBase = antennaClean.isEmpty ? "Fan Dipole" : antennaClean
-        let antennaText = station.antennaHeightMeters > 0 ? "\(antennaBase) @\(station.antennaHeightMeters)m" : antennaBase
+        let antennaBase = antennaClean
+        let antennaText = !antennaBase.isEmpty && station.antennaHeightMeters > 0 ? "ANT: \(antennaBase) @\(station.antennaHeightMeters)m" : antennaBase
 
-        let powerText = "\(station.powerWatts > 0 ? station.powerWatts : 25)W"
+        let powerText = station.powerWatts > 0 ? "POWER: \(station.powerWatts) W" : ""
 
         draw(radioText, x: 0.170, y: 0.345, width: 0.250, height: 0.040, in: rect, size: infoFontSize, weight: .bold, alignment: .left)
         draw(antennaText, x: 0.100, y: 0.305, width: 0.300, height: 0.040, in: rect, size: infoFontSize, weight: .bold, alignment: .left)
         draw(powerText, x: 0.480, y: 0.305, width: 0.150, height: 0.040, in: rect, size: infoFontSize, weight: .bold, alignment: .left)
     }
 
-    fileprivate static func drawStationFlag(in rect: CGRect) {
-        draw("🇮🇷", x: 0.215, y: 0.870, width: 0.070, height: 0.080, in: rect, size: rect.height * 0.066, weight: .regular)
+    fileprivate static func drawStationFlag(in rect: CGRect, station: QSLCardStationInfo) {
+        draw(station.flag, x: 0.80, y: 0.78, width: 0.10, height: 0.10, in: rect, size: rect.height * 0.066)
     }
 
-    fileprivate static func drawFallbackTemplate(in rect: CGRect, station: QSLCardStationInfo) {
+    private static func drawBackground(in rect: CGRect) {
         NSColor(calibratedRed: 0.96, green: 0.97, blue: 0.95, alpha: 1).setFill()
         NSBezierPath(rect: rect).fill()
         NSColor.black.setStroke()
         let border = NSBezierPath(roundedRect: rect.insetBy(dx: rect.width * 0.035, dy: rect.height * 0.045), xRadius: 10, yRadius: 10)
         border.lineWidth = 3
         border.stroke()
+    }
 
-        draw("AMATEUR RADIO STATION", x: 0.08, y: 0.09, width: 0.40, height: 0.06, in: rect, size: rect.height * 0.028, weight: .bold, alignment: .left)
-        draw(station.callsign.uppercased(), x: 0.08, y: 0.15, width: 0.40, height: 0.10, in: rect, size: rect.height * 0.07, weight: .heavy, alignment: .left)
-        draw("CONFIRMING OUR QSO", x: 0.18, y: 0.45, width: 0.64, height: 0.06, in: rect, size: rect.height * 0.032, weight: .bold)
-        draw("TO RADIO        DATE        UTC TIME        FREQUENCY        MODE        SIGNAL RST", x: 0.12, y: 0.535, width: 0.78, height: 0.035, in: rect, size: rect.height * 0.018)
-        draw("QTH: Tehran, Iran     GRID: \(station.grid.uppercased())     CQ ZONE: 21     ITU ZONE: 40", x: 0.16, y: 0.675, width: 0.68, height: 0.04, in: rect, size: rect.height * 0.02)
-        draw("THANK YOU FOR THE QSO!     73 PSE QSL TNX", x: 0.20, y: 0.88, width: 0.60, height: 0.05, in: rect, size: rect.height * 0.026, weight: .bold)
+    private static func drawFront(in rect: CGRect, station: QSLCardStationInfo) {
+        drawBackground(in: rect)
+        draw("AMATEUR RADIO STATION", x: 0.08, y: 0.72, width: 0.84, height: 0.06, in: rect, size: rect.height * 0.035, weight: .bold)
+        draw(station.callsign.uppercased(), x: 0.08, y: 0.50, width: 0.84, height: 0.16, in: rect, size: rect.height * 0.12, weight: .heavy)
+        draw(station.locationLine, x: 0.08, y: 0.34, width: 0.84, height: 0.06, in: rect, size: rect.height * 0.025)
+        draw("73 · THANK YOU FOR THE QSO", x: 0.08, y: 0.16, width: 0.84, height: 0.06, in: rect, size: rect.height * 0.03, weight: .bold)
+        drawStationFlag(in: rect, station: station)
+    }
+
+    fileprivate static func drawFallbackTemplate(in rect: CGRect, station: QSLCardStationInfo) {
+        drawBackground(in: rect)
+        draw("AMATEUR RADIO STATION", x: 0.08, y: 0.86, width: 0.64, height: 0.05, in: rect, size: rect.height * 0.028, weight: .bold, alignment: .left)
+        draw(station.callsign.uppercased(), x: 0.08, y: 0.75, width: 0.64, height: 0.10, in: rect, size: rect.height * 0.07, weight: .heavy, alignment: .left)
+        draw(station.locationLine, x: 0.08, y: 0.68, width: 0.84, height: 0.05, in: rect, size: rect.height * 0.022, alignment: .left)
+        let columns: [(String, CGFloat, CGFloat)] = [
+            ("TO RADIO", 0.03, 0.175), ("DATE", 0.21, 0.15), ("UTC TIME", 0.36, 0.15),
+            ("MHz", 0.505, 0.11), ("MODE", 0.695, 0.09), ("RST", 0.82, 0.115)
+        ]
+        for (title, x, width) in columns {
+            draw(title, x: x, y: 0.58, width: width, height: 0.04, in: rect, size: rect.height * 0.022, weight: .bold)
+        }
+        draw("CONFIRMING OUR QSO · 73 PSE QSL TNX", x: 0.08, y: 0.12, width: 0.84, height: 0.06, in: rect, size: rect.height * 0.028, weight: .bold)
     }
 
     private static func draw(
@@ -390,14 +366,10 @@ private struct QSLCardQSO {
     }
 }
 
+#if !STANDALONE_PRIVACY_TEST
 struct QSLCardComposerView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var appState: AppState
-
-    @AppStorage("stationGrid") private var stationGrid = ""
-    @AppStorage("radioModel") private var radioModel = ""
-    @AppStorage("radioPowerWatts") private var radioPowerWatts = 100
-    @AppStorage("antennaDescription") private var antennaDescription = ""
 
     @State private var previewImage: NSImage?
     @State private var statusMessage = ""
@@ -406,14 +378,7 @@ struct QSLCardComposerView: View {
         let profile = appState.activeStationProfile
         let call = appState.currentStationCallsign == "DEFAULT" ? "NOCALL" : appState.currentStationCallsign
 
-        return QSLCardStationInfo(
-            callsign: call,
-            grid: profile?.normalizedGrid ?? stationGrid,
-            radio: profile?.radioModel ?? radioModel,
-            antenna: profile?.antennaDescription ?? antennaDescription,
-            powerWatts: profile?.powerWatts ?? radioPowerWatts,
-            antennaHeightMeters: profile?.antennaHeightMeters ?? 10
-        )
+        return QSLCardStationInfo(callsign: call, profile: profile)
     }
 
     var body: some View {
@@ -494,6 +459,8 @@ struct QSLCardComposerView: View {
         .resizablePresentation(minWidth: 840, minHeight: 620)
         .onAppear(perform: renderPreview)
         .onChange(of: appState.selectedQSLCardQSO?.id) { _, _ in renderPreview() }
+        .onChange(of: appState.activeStationProfile) { _, _ in renderPreview() }
+        .onChange(of: appState.currentStationCallsign) { _, _ in renderPreview() }
     }
 
     private func renderPreview() {
@@ -537,63 +504,4 @@ struct QSLCardComposerView: View {
         }
     }
 }
-
-class QSLBackPage: PDFPage {
-    let originalPage: PDFPage
-    let record: QSORecordModel
-    let station: QSLCardStationInfo
-    
-    init(originalPage: PDFPage, record: QSORecordModel, station: QSLCardStationInfo) {
-        self.originalPage = originalPage
-        self.record = record
-        self.station = station
-        super.init()
-    }
-    
-    override func bounds(for box: PDFDisplayBox) -> NSRect {
-        originalPage.bounds(for: box)
-    }
-    
-    override func draw(with box: PDFDisplayBox, to context: CGContext) {
-        // Draw the original template page
-        originalPage.draw(with: box, to: context)
-        
-        // Draw QSO fields on top
-        let previousContext = NSGraphicsContext.current
-        let nsContext = NSGraphicsContext(cgContext: context, flipped: false)
-        NSGraphicsContext.current = nsContext
-        
-        QSLCardRenderer.drawQSOFields(record: record, station: station, in: originalPage.bounds(for: box))
-        QSLCardRenderer.drawStationFlag(in: originalPage.bounds(for: box))
-        
-        NSGraphicsContext.current = previousContext
-    }
-}
-
-class QSLFallbackBackPage: PDFPage {
-    let station: QSLCardStationInfo
-    let record: QSORecordModel
-    
-    init(station: QSLCardStationInfo, record: QSORecordModel) {
-        self.station = station
-        self.record = record
-        super.init()
-    }
-    
-    override func bounds(for box: PDFDisplayBox) -> NSRect {
-        return NSRect(x: 0, y: 0, width: 1600, height: 1000)
-    }
-    
-    override func draw(with box: PDFDisplayBox, to context: CGContext) {
-        let previousContext = NSGraphicsContext.current
-        let nsContext = NSGraphicsContext(cgContext: context, flipped: false)
-        NSGraphicsContext.current = nsContext
-        
-        let rect = bounds(for: box)
-        QSLCardRenderer.drawFallbackTemplate(in: rect, station: station)
-        QSLCardRenderer.drawStationFlag(in: rect)
-        QSLCardRenderer.drawQSOFields(record: record, station: station, in: rect)
-        
-        NSGraphicsContext.current = previousContext
-    }
-}
+#endif

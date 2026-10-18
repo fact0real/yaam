@@ -19,7 +19,7 @@ run() {
 }
 if [[ "${1:-}" != "--cat-only" ]]; then
 run CWTextSecurityRegression YAAM/MorseTiming.swift
-for name in WinKeyerAutoCQRegression CATStopDestinationRegression CWStopOnQuitRegression
+for name in WinKeyerAutoCQRegression CATStopDestinationRegression CWStopOnQuitRegression CWConnectionLossRegression
 do
     run "$name" "${keyer[@]}"
 done

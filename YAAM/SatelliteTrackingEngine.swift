@@ -135,7 +135,7 @@ public final class SatelliteTrackingEngine: ObservableObject {
     @Published public private(set) var isFetchingTLEs: Bool = false
     @Published public private(set) var lastTLEUpdateDate: Date?
 
-    private var homeCoordinate: GeoCoordinate = GeoCoordinate(latitude: 35.6892, longitude: 51.3890) // Default Tehran
+    private var homeCoordinate: GeoCoordinate = GeoCoordinate(latitude: 0, longitude: 0) // Neutral origin until a station is configured.
     private var timerCancellable: AnyCancellable?
 
     private init() {

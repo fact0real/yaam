@@ -67,7 +67,7 @@ public struct HamClockShackView: View {
         if let prof = appState.activeStationProfile, !prof.grid.isEmpty {
             return MaidenheadGridEngine.coordinate(for: prof.grid)
         }
-        return GeoCoordinate(latitude: 35.6892, longitude: 51.3890)
+        return GeoCoordinate(latitude: 0, longitude: 0)
     }
 
     private var dxCoordinate: GeoCoordinate {

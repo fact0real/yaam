@@ -58,7 +58,7 @@ public final class ShackClockEngine: ObservableObject {
         }
     }
 
-    private var stationLongitude: Double = 51.4 // Default Tehran longitude, updated via Station Profile
+    private var stationLongitude: Double = 0 // Neutral longitude, updated via Station Profile
     private var tickerCancellable: AnyCancellable?
     private var stopwatchTimerCancellable: AnyCancellable?
     private var lastChimedHour: Int = -1
