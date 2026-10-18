@@ -94,3 +94,21 @@ Daily collection depends on server availability, a valid QRZ session and a live
 leaderboard entry. A missed day without a genuine observation remains a gap;
 neither the current-rank API nor the new collector can reconstruct unrecorded past
 QRZ rankings.
+
+## Follow-up: operator growth dashboard (#267)
+
+The later October 18 redesign replaces the all-stations absolute-rank monitor
+with a focused owner journey and a selectable two-station growth race. Periods
+are 7/30/90 days or all recorded history. Comparative growth uses identical
+observed UTC days for both stations; percentages use their respective ranks
+on the same first shared day. Rival cards report the change in their rank gap,
+with the shared date range shown explicitly. Existing collection, cache and API
+behavior are unchanged. Missing observations remain gaps, and a single point
+never becomes a growth estimate. The original chart modes described above refer
+to the earlier implementation; the current operator guide is in USER_MANUAL.md.
+
+Verification: RankGrowthRegression, the existing RankHistoryRegression, isolated
+light/dark dashboard renders at 760×500 and 1620×940 plus comparison, empty,
+one-day, loading and error states, and the YAAM Debug build. Render fixtures are
+synthetic and start no AppState or network client. No live service or installed
+application state is modified by those visual tests.

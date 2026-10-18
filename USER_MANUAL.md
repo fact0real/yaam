@@ -768,3 +768,11 @@ Use **Sync QRZ** to refresh contact details, **Copy all emails** to copy availab
 
 > **Support & Feedback:**  
 > Press `Cmd + Shift + F` anywhere within YAAM to open the feedback panel to submit suggestions, bug reports, or feature requests directly to the development team.
+
+### Operator growth and rival momentum
+
+Open **Leaderboard → Head-to-Head & Radar** to review recorded rank history. Choose QSO, Bands or DXCC rank and a 7-day, 30-day, 90-day or full-history period. The summary shows the latest observed rank, period movement, best observed rank and how many comparable rivals you gained ground against. Positive movement means an improved (lower) rank; it does not count new QSOs.
+
+**Your rank** focuses the vertical scale on your own history. **Growth race** compares you with one selected rival, showing percentage improvement from each station's rank on the same starting day. Only days recorded for both stations participate. The rival cards show rank positions gained/lost relative to that rival and the lead/deficit on the latest shared day; each card displays its comparison dates. Different rivals can have different shared-date ranges, so inspect those dates before comparing their totals.
+
+Click or drag across the chart to inspect a recorded date. Missing days break the lines, and missing recent observations leave the end of the time axis empty. One shared day can show a lead/deficit but cannot establish growth. Expand **Collection status & data coverage** for synchronization details; Refresh retrieves available server observations without inventing missing history. The period and chart choice are remembered. Existing radar and other leaderboard modes remain available below/alongside this dashboard.

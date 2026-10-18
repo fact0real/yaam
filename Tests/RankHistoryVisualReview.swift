@@ -1,5 +1,5 @@
-// Compile with the monitor/chart section extracted unchanged from LeaderboardView.swift,
-// RankHistory.swift, QRZRankAPIContract.swift, QRZRankService.swift and country helpers.
+// Compile with RankGrowthDashboard.swift, RankGrowthAnalysis.swift, RankHistory.swift,
+// QRZRankAPIContract.swift and QRZRankService.swift.
 // Uses an isolated preference suite and synthetic observations; never starts AppState.
 import SwiftUI
 import AppKit
@@ -28,24 +28,24 @@ import AppKit
         let series = RankHistoryAnalysis.series(snapshots: records, owner: calls[0], tracked: Array(calls.dropFirst()), metric: .qso, now: now)
         for (name, appearance) in [("light", NSAppearance.Name.aqua), ("dark", NSAppearance.Name.darkAqua)] {
             for (width, height) in [(1620.0, 940.0), (760.0, 500.0)] {
-                defaults.set(RankChartMode.actualRank.rawValue, forKey: "leaderboardRankChartMode")
+                defaults.set(false, forKey: "leaderboardGrowthRace")
                 snapshot(series: series, calls: Array(calls.dropFirst()), status: "Server daily tracking · 8/8 observed today (UTC). Missing past days remain gaps.",
                          loading: false, defaults: defaults, appearance: appearance, size: CGSize(width: width, height: height),
                          to: output.appendingPathComponent("rank-\(name)-\(Int(width)).png"))
             }
-            for mode in [RankChartMode.dailyChange, .sinceBaseline] {
-                defaults.set(mode.rawValue, forKey: "leaderboardRankChartMode")
+            for race in [false, true] {
+                defaults.set(race, forKey: "leaderboardGrowthRace")
                 snapshot(series: series, calls: Array(calls.dropFirst()), status: "Server daily tracking", loading: false, defaults: defaults,
-                         appearance: appearance, size: CGSize(width: 1100, height: 800), to: output.appendingPathComponent("\(mode.id)-\(name).png"))
+                         appearance: appearance, size: CGSize(width: 1100, height: 800), to: output.appendingPathComponent("\(race ? "race" : "journey")-\(name).png"))
             }
-            for state in ["empty", "loading", "error"] {
-                snapshot(series: state == "empty" ? [] : series, calls: state == "empty" ? [] : Array(calls.dropFirst()),
+            for state in ["empty", "loading", "error", "single"] {
+                snapshot(series: state == "empty" ? [] : state == "single" ? RankHistoryAnalysis.series(snapshots: Array(records.suffix(8)), owner: calls[0], tracked: Array(calls.dropFirst()), metric: .qso, now: now) : series, calls: state == "empty" ? [] : Array(calls.dropFirst()),
                          status: state == "error" ? "History sync failed. Saved observations remain available. The service is unavailable." : "Synchronizing server daily history…",
                          loading: state == "loading", defaults: defaults, appearance: appearance, size: CGSize(width: 760, height: 500),
                          to: output.appendingPathComponent("\(state)-\(name).png"))
             }
         }
-        print("Rendered 14 isolated rank monitor review images at \(output.path)")
+        print("Rendered isolated rank monitor review images at \(output.path)")
     }
 
     @MainActor static func snapshot(series: [RankTrendSeries], calls: [String], status: String, loading: Bool,
