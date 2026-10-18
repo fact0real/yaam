@@ -144,7 +144,20 @@ public final class SatelliteTrackingEngine: ObservableObject {
         self.selectedSatelliteID = satellites.contains(where: { $0.id == savedID }) ? savedID : "ISS"
 
         startTrackingLoop()
-        fetchLatestTLEsAsync()
+    }
+
+    private var downloadTask: URLSessionDataTask?
+    private var requestID = UUID()
+    private lazy var feedActivity = PublicDataFeedActivity(interval: 86400, refresh: { [weak self] in
+        self?.fetchLatestTLEsAsync()
+    }, cancel: { [weak self] in
+        self?.requestID = UUID()
+        self?.downloadTask?.cancel()
+        self?.isFetchingTLEs = false
+    })
+
+    func setFeedConsumer(_ id: UUID, active: Bool) {
+        feedActivity.setConsumer(id, active: active)
     }
 
     public func setObserverCoordinate(_ coordinate: GeoCoordinate) {
@@ -433,6 +446,7 @@ public final class SatelliteTrackingEngine: ObservableObject {
     // MARK: - Auto-fetch Latest TLEs from CelesTrak
 
     public func fetchLatestTLEsAsync() {
+        guard PublicDataFeedPolicy.shared.isEnabled else { return }
         guard !isFetchingTLEs else { return }
         isFetchingTLEs = true
 
@@ -441,10 +455,14 @@ public final class SatelliteTrackingEngine: ObservableObject {
             return
         }
 
-        URLSession.shared.dataTask(with: url) { [weak self] data, _, error in
+        downloadTask?.cancel()
+        requestID = UUID()
+        let requestID = self.requestID
+        downloadTask = URLSession.shared.dataTask(with: url) { [weak self] data, _, error in
             guard let self = self else { return }
             defer {
                 DispatchQueue.main.async {
+                    guard self.requestID == requestID, PublicDataFeedPolicy.shared.isEnabled else { return }
                     self.isFetchingTLEs = false
                 }
             }
@@ -454,9 +472,11 @@ public final class SatelliteTrackingEngine: ObservableObject {
             }
 
             DispatchQueue.main.async {
+                guard self.requestID == requestID, PublicDataFeedPolicy.shared.isEnabled else { return }
                 self.parseAndMergeCelesTrakTLE(text: text)
             }
-        }.resume()
+        }
+        downloadTask?.resume()
     }
 
     private func parseAndMergeCelesTrakTLE(text: String) {
@@ -484,12 +504,10 @@ public final class SatelliteTrackingEngine: ObservableObject {
             }
         }
 
-        DispatchQueue.main.async {
-            self.satellites = updatedList
-            self.lastTLEUpdateDate = Date()
-            self.calculateCurrentTelemetry()
-            self.calculateUpcomingPasses()
-        }
+        self.satellites = updatedList
+        self.lastTLEUpdateDate = Date()
+        self.calculateCurrentTelemetry()
+        self.calculateUpcomingPasses()
     }
 
     // MARK: - Bundled Default Satellites for Instant Offline Availability

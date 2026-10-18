@@ -37,6 +37,8 @@ public struct AzimuthalAndFlatMapCanvas: View {
     @ObservedObject private var auroraEngine = AuroralOvalEngine.shared
     @ObservedObject private var drapEngine = DRAPAbsorptionEngine.shared
     @ObservedObject private var balloonEngine = APRSBalloonTrackingEngine.shared
+    @State private var feedConsumerID = UUID()
+    @State private var feedsVisible = false
     @State private var liveDate = Date()
     private let timer = Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()
 
@@ -171,6 +173,17 @@ public struct AzimuthalAndFlatMapCanvas: View {
                     }
             )
         }
+        .onAppear { feedsVisible = true; updateFeedDemand() }
+        .onDisappear { feedsVisible = false; updateFeedDemand() }
+        .onChange(of: showSatelliteTracks) { _, _ in updateFeedDemand() }
+        .onChange(of: showAuroralOval) { _, _ in updateFeedDemand() }
+        .onChange(of: showDRAPLayer) { _, _ in updateFeedDemand() }
+    }
+
+    private func updateFeedDemand() {
+        satEngine.setFeedConsumer(feedConsumerID, active: feedsVisible && showSatelliteTracks)
+        auroraEngine.setFeedConsumer(feedConsumerID, active: feedsVisible && showAuroralOval)
+        drapEngine.setFeedConsumer(feedConsumerID, active: feedsVisible && showDRAPLayer)
     }
 
     private func formattedGMT(_ date: Date) -> String {

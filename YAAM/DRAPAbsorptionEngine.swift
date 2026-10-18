@@ -43,23 +43,23 @@ public final class DRAPAbsorptionEngine: ObservableObject {
     @Published public private(set) var isFetching: Bool = false
     @Published public private(set) var lastUpdatedDate: Date?
 
-    private var refreshCancellable: AnyCancellable?
-
     private init() {
         // Initial quiet snapshot
         self.snapshot = Self.calculateDrap(xrayFluxWattsM2: 1e-6, flareClass: "Quiet", protonFlux: 1.0)
-        startAutoRefresh()
     }
 
-    private func startAutoRefresh() {
-        // Refresh every 5 minutes from NOAA SWPC
-        refreshCancellable = Timer.publish(every: 300.0, on: .main, in: .common)
-            .autoconnect()
-            .sink { [weak self] _ in
-                self?.fetchLatestGOESXrayFlux()
-            }
+    private var downloadTask: URLSessionDataTask?
+    private var requestID = UUID()
+    private lazy var feedActivity = PublicDataFeedActivity(interval: 300, refresh: { [weak self] in
+        self?.fetchLatestGOESXrayFlux()
+    }, cancel: { [weak self] in
+        self?.requestID = UUID()
+        self?.downloadTask?.cancel()
+        self?.isFetching = false
+    })
 
-        fetchLatestGOESXrayFlux()
+    func setFeedConsumer(_ id: UUID, active: Bool) {
+        feedActivity.setConsumer(id, active: active)
     }
 
     public func updateFlareTelemetry(flareClass: String, fluxWattsM2: Double, protonFlux: Double = 1.0) {
@@ -111,6 +111,7 @@ public final class DRAPAbsorptionEngine: ObservableObject {
     // MARK: - NOAA SWPC Real-Time Fetch
 
     public func fetchLatestGOESXrayFlux() {
+        guard PublicDataFeedPolicy.shared.isEnabled else { return }
         guard !isFetching else { return }
         isFetching = true
 
@@ -119,10 +120,16 @@ public final class DRAPAbsorptionEngine: ObservableObject {
             return
         }
 
-        URLSession.shared.dataTask(with: url) { [weak self] data, _, error in
+        downloadTask?.cancel()
+        requestID = UUID()
+        let requestID = self.requestID
+        downloadTask = URLSession.shared.dataTask(with: url) { [weak self] data, _, error in
             guard let self = self else { return }
             defer {
-                DispatchQueue.main.async { self.isFetching = false }
+                DispatchQueue.main.async {
+                    guard self.requestID == requestID else { return }
+                    self.isFetching = false
+                }
             }
 
             guard let data = data, error == nil,
@@ -134,9 +141,11 @@ public final class DRAPAbsorptionEngine: ObservableObject {
 
             let flareName = Self.flareClassString(for: flux)
             DispatchQueue.main.async {
+                guard self.requestID == requestID, PublicDataFeedPolicy.shared.isEnabled else { return }
                 self.updateFlareTelemetry(flareClass: flareName, fluxWattsM2: flux)
             }
-        }.resume()
+        }
+        downloadTask?.resume()
     }
 
     // MARK: - D-RAP Physics Model (Empirical SWPC Formulation)

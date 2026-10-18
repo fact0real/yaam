@@ -129,10 +129,14 @@ final class WeatherRequestStub: URLProtocol {
         profile.ituZone = "0"
         let invalid = QSLCardStationInfo(callsign: "DEMO-C", profile: profile)
         precondition(invalid.flag.isEmpty && !invalid.locationLine.contains("CQ:") && !invalid.locationLine.contains("ITU:"))
+        precondition(QSLCardRenderer.usesPersonalTemplate(stationCallsign: " ep2aes\n"))
+        for call in ["", "DEMO-A", "EP2AES/P", "EP2AES2", "F/EP2AES"] {
+            precondition(!QSLCardRenderer.usesPersonalTemplate(stationCallsign: call))
+        }
         let record = QSORecordModel(fields: ["CALL": "DEMO-Z", "QSO_DATE": "20261018", "TIME_ON": "120000", "FREQ": "14.074", "MODE": "FT8", "RST_SENT": "-10", "RST_RCVD": "-08", "NAME": "Example Operator"])
         let output = URL(fileURLWithPath: "/tmp/yaam-privacy-review", isDirectory: true)
         try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
-        for (name, info) in [("profile", station), ("empty", empty)] {
+        for (name, info) in [("profile", station), ("empty", empty), ("ep2aes", QSLCardStationInfo(callsign: "EP2AES", profile: profile))] {
             let png = output.appendingPathComponent("\(name).png")
             let pdf = output.appendingPathComponent("\(name).pdf")
             try QSLCardRenderer.exportPNG(record: record, station: info, to: png)

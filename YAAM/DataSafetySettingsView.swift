@@ -23,6 +23,7 @@ struct DataSafetySettingsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
                     credentialSecuritySection
+                    PublicDataFeedSettingsView()
                     personalDataSection
                     restorePoints
                     auditTrail

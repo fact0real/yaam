@@ -34,11 +34,9 @@ public final class AuroralOvalEngine: ObservableObject {
     public static let northGeomagneticPole = GeoCoordinate(latitude: 80.5, longitude: -72.6)
     public static let southGeomagneticPole = GeoCoordinate(latitude: -80.5, longitude: 107.4)
 
-    private var cancellables = Set<AnyCancellable>()
 
     private init() {
         self.boundary = Self.calculateBoundary(kp: 2.0, bz: 1.0)
-        startAutoRefresh()
     }
 
     public func updateSpaceWeatherIndices(kp: Double, bz: Double) {
@@ -48,33 +46,40 @@ public final class AuroralOvalEngine: ObservableObject {
         self.boundary = Self.calculateBoundary(kp: currentKp, bz: currentBz)
     }
 
-    private func startAutoRefresh() {
-        // Refresh every 10 minutes from NOAA SWPC
-        Timer.publish(every: 600.0, on: .main, in: .common)
-            .autoconnect()
-            .sink { [weak self] _ in
-                self?.fetchLatestNOAAIndices()
-            }
-            .store(in: &cancellables)
+    private var downloadTask: URLSessionDataTask?
+    private var requestID = UUID()
+    private lazy var feedActivity = PublicDataFeedActivity(interval: 600, refresh: { [weak self] in
+        self?.fetchLatestNOAAIndices()
+    }, cancel: { [weak self] in
+        self?.requestID = UUID()
+        self?.downloadTask?.cancel()
+    })
 
-        fetchLatestNOAAIndices()
+    func setFeedConsumer(_ id: UUID, active: Bool) {
+        feedActivity.setConsumer(id, active: active)
     }
 
     public func fetchLatestNOAAIndices() {
+        guard PublicDataFeedPolicy.shared.isEnabled else { return }
         guard let url = URL(string: "https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json") else { return }
 
-        URLSession.shared.dataTask(with: url) { [weak self] data, _, error in
+        downloadTask?.cancel()
+        requestID = UUID()
+        let requestID = self.requestID
+        downloadTask = URLSession.shared.dataTask(with: url) { [weak self] data, _, error in
             guard let self = self, let data = data, error == nil else { return }
             do {
                 if let json = try JSONSerialization.jsonObject(with: data) as? [[String]],
                    let lastRow = json.last, lastRow.count >= 2,
                    let kpVal = Double(lastRow[1]) {
                     DispatchQueue.main.async {
+                        guard self.requestID == requestID, PublicDataFeedPolicy.shared.isEnabled else { return }
                         self.updateSpaceWeatherIndices(kp: kpVal, bz: self.currentBz)
                     }
                 }
             } catch {}
-        }.resume()
+        }
+        downloadTask?.resume()
     }
 
     // MARK: - Empirical Auroral Oval Physical Model (Holzworth-Meng / Feldstein)

@@ -63,7 +63,7 @@ public final class SDOSolarImageEngine: ObservableObject {
     @Published public var selectedChannel: SDOChannel = .hmiIntensity {
         didSet {
             UserDefaults.standard.set(selectedChannel.rawValue, forKey: "sdoSelectedChannel")
-            fetchChannelImage(selectedChannel)
+            if feedActivity.isActive { fetchChannelImage(selectedChannel) }
         }
     }
 
@@ -72,27 +72,30 @@ public final class SDOSolarImageEngine: ObservableObject {
     @Published public private(set) var lastFetchedDate: Date?
     @Published public private(set) var cachedImages: [SDOChannel: NSImage] = [:]
 
-    private var refreshCancellable: AnyCancellable?
 
     private init() {
         let savedChannelRaw = UserDefaults.standard.string(forKey: "sdoSelectedChannel") ?? SDOChannel.hmiIntensity.rawValue
         self.selectedChannel = SDOChannel(rawValue: savedChannelRaw) ?? .hmiIntensity
 
-        fetchChannelImage(selectedChannel)
-        startPeriodicRefresh()
     }
 
-    private func startPeriodicRefresh() {
-        // Refresh every 20 minutes (SDO updates every ~15 mins)
-        refreshCancellable = Timer.publish(every: 1200.0, on: .main, in: .common)
-            .autoconnect()
-            .sink { [weak self] _ in
-                guard let self = self else { return }
-                self.fetchChannelImage(self.selectedChannel, force: true)
-            }
+    private var downloadTask: URLSessionDataTask?
+    private var requestID = UUID()
+    private lazy var feedActivity = PublicDataFeedActivity(interval: 1200, refresh: { [weak self] in
+        guard let self else { return }
+        self.fetchChannelImage(self.selectedChannel, force: true)
+    }, cancel: { [weak self] in
+        self?.requestID = UUID()
+        self?.downloadTask?.cancel()
+        self?.isLoading = false
+    })
+
+    func setFeedConsumer(_ id: UUID, active: Bool) {
+        feedActivity.setConsumer(id, active: active)
     }
 
     public func fetchChannelImage(_ channel: SDOChannel, force: Bool = false) {
+        guard PublicDataFeedPolicy.shared.isEnabled else { return }
         if !force, let cached = cachedImages[channel] {
             self.currentImage = cached
             return
@@ -101,10 +104,14 @@ public final class SDOSolarImageEngine: ObservableObject {
         isLoading = true
         let url = channel.imageURL
 
-        URLSession.shared.dataTask(with: url) { [weak self] data, response, error in
+        downloadTask?.cancel()
+        requestID = UUID()
+        let requestID = self.requestID
+        downloadTask = URLSession.shared.dataTask(with: url) { [weak self] data, response, error in
             guard let self = self else { return }
             defer {
                 DispatchQueue.main.async {
+                    guard self.requestID == requestID, PublicDataFeedPolicy.shared.isEnabled else { return }
                     self.isLoading = false
                 }
             }
@@ -114,13 +121,15 @@ public final class SDOSolarImageEngine: ObservableObject {
             }
 
             DispatchQueue.main.async {
+                guard self.requestID == requestID, PublicDataFeedPolicy.shared.isEnabled else { return }
                 self.cachedImages[channel] = img
                 if self.selectedChannel == channel {
                     self.currentImage = img
                     self.lastFetchedDate = Date()
                 }
             }
-        }.resume()
+        }
+        downloadTask?.resume()
     }
 
     public func cycleChannel() {

@@ -19,6 +19,8 @@ public struct HamClockShackView: View {
     @Environment(\.openWindow) private var openWindow
 
     @ObservedObject private var clockEngine = ShackClockEngine.shared
+    @State private var feedConsumerID = UUID()
+    @State private var feedsVisible = false
     @ObservedObject private var satEngine = SatelliteTrackingEngine.shared
     @ObservedObject private var auroraEngine = AuroralOvalEngine.shared
     @ObservedObject private var sdoEngine = SDOSolarImageEngine.shared
@@ -144,10 +146,15 @@ public struct HamClockShackView: View {
             }
         }
         .onAppear {
+            feedsVisible = true
+            updateSolarFeedDemand()
             clockEngine.setStationLongitude(homeCoordinate.longitude)
             satEngine.setObserverCoordinate(homeCoordinate)
             updatePropagationMatrix()
         }
+        .onDisappear { feedsVisible = false; updateSolarFeedDemand() }
+        .onChange(of: selectedAuxPane) { _, _ in updateSolarFeedDemand() }
+        .onChange(of: showSDOZoomModal) { _, _ in updateSolarFeedDemand() }
         .sheet(isPresented: $showSDOZoomModal) {
             sdoZoomView
         }
@@ -578,6 +585,10 @@ public struct HamClockShackView: View {
         }
         .padding(3)
         .background(Color(NSColor.controlBackgroundColor).opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func updateSolarFeedDemand() {
+        sdoEngine.setFeedConsumer(feedConsumerID, active: feedsVisible && (selectedAuxPane == .sdoSolar || showSDOZoomModal))
     }
 
     @ViewBuilder

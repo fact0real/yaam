@@ -11,14 +11,31 @@ import PDFKit
 import UniformTypeIdentifiers
 
 enum QSLCardRenderer {
+    // The bundled artwork contains EP2AES branding and must never be used for other stations.
+    static func usesPersonalTemplate(stationCallsign: String) -> Bool {
+        stationCallsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == "EP2AES"
+    }
+
+    private static func templateDocument(station: QSLCardStationInfo) -> PDFDocument? {
+        guard usesPersonalTemplate(stationCallsign: station.callsign),
+              let url = Bundle.main.url(forResource: "EP2AES_QSL_Card_HQ", withExtension: "pdf") else { return nil }
+        return PDFDocument(url: url)
+    }
+
     static func render(record: QSORecordModel, station: QSLCardStationInfo) -> NSImage {
-        let size = CGSize(width: 1600, height: 1000)
+        let document = templateDocument(station: station)
+        let page = document.flatMap { $0.page(at: $0.pageCount > 1 ? 1 : 0) }
+        let size = page?.bounds(for: .mediaBox).size ?? CGSize(width: 1600, height: 1000)
         let image = NSImage(size: size)
         image.lockFocus()
         let rect = CGRect(origin: .zero, size: size)
-        drawFallbackTemplate(in: rect, station: station)
+        if let page, let context = NSGraphicsContext.current?.cgContext {
+            page.draw(with: .mediaBox, to: context)
+        } else {
+            drawFallbackTemplate(in: rect, station: station)
+        }
         drawStationFlag(in: rect, station: station)
-        drawQSOFields(record: record, station: station, in: rect)
+        drawQSOFields(record: record, station: station, in: rect, personalLayout: page != nil)
         image.unlockFocus()
 
         return image
@@ -36,14 +53,17 @@ enum QSLCardRenderer {
     }
 
     static func exportPDF(record: QSORecordModel, station: QSLCardStationInfo, to url: URL) throws {
-        let pageSize = CGSize(width: 780, height: 488)
-        let frontImage = renderPDFPage(page: nil, size: pageSize) { rect in
-            drawFront(in: rect, station: station)
+        let document = templateDocument(station: station)
+        let frontPage = document?.page(at: 0)
+        let backPage = document.flatMap { $0.pageCount > 1 ? $0.page(at: 1) : nil }
+        let pageSize = (backPage ?? frontPage)?.bounds(for: .mediaBox).size ?? CGSize(width: 780, height: 488)
+        let frontImage = renderPDFPage(page: frontPage, size: pageSize) { rect in
+            if frontPage == nil { drawFront(in: rect, station: station) }
         }
-        let backImage = renderPDFPage(page: nil, size: pageSize) { rect in
-            drawFallbackTemplate(in: rect, station: station)
+        let backImage = renderPDFPage(page: backPage, size: pageSize) { rect in
+            if backPage == nil { drawFallbackTemplate(in: rect, station: station) }
             drawStationFlag(in: rect, station: station)
-            drawQSOFields(record: record, station: station, in: rect)
+            drawQSOFields(record: record, station: station, in: rect, personalLayout: backPage != nil)
         }
 
         guard writeCompressedPDF(images: [frontImage, backImage], pageSize: pageSize, to: url) else {
@@ -58,16 +78,16 @@ enum QSLCardRenderer {
         return "\(myCall)_QSL_\(theirCall)_\(date).png"
     }
 
-    fileprivate static func drawQSOFields(record: QSORecordModel, station: QSLCardStationInfo, in rect: CGRect) {
+    fileprivate static func drawQSOFields(record: QSORecordModel, station: QSLCardStationInfo, in rect: CGRect, personalLayout: Bool = false) {
         let qso = QSLCardQSO(record: record)
         let height = rect.height
         let rowY: CGFloat = 0.500
 
         // Callsign (Higher position)
-        draw(qso.callDisplay, x: 0.030, y: rowY, width: 0.175, height: 0.050, in: rect, size: (height * 0.038) + 4, weight: .bold)
+        draw(qso.callDisplay, x: 0.030, y: personalLayout ? 0.535 : rowY, width: 0.175, height: 0.050, in: rect, size: (height * 0.038) + 4, weight: .bold)
         
         // Name (Below callsign)
-        draw(qso.name, x: 0.030, y: 0.455, width: 0.175, height: 0.030, in: rect, size: (height * 0.020) + 2, weight: .medium, color: .darkGray)
+        draw(qso.name, x: 0.030, y: personalLayout ? 0.495 : 0.455, width: 0.175, height: 0.030, in: rect, size: (height * 0.020) + 2, weight: .medium, color: .darkGray)
 
         // Date
         draw(qso.date, x: 0.210, y: rowY, width: 0.150, height: 0.052, in: rect, size: (height * 0.030) + 2, weight: .bold)
