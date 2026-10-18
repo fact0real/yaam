@@ -160,6 +160,42 @@ actor QRZRankService {
         return envelope.data
     }
 
+    func synchronizeHistory(callsigns: [String], token: String, userAgent: String) async throws -> [QRZRankHistorySnapshot] {
+        for replacement in [Optional(callsigns), nil] {
+            let request: URLRequest
+            do {
+                request = try QRZRankAPIContract.makeRankHistoryRequest(callsigns: replacement, token: token, userAgent: userAgent)
+            } catch QRZRankAPIContractError.missingToken {
+                throw QRZRankFetchFailure.authenticationRequired("")
+            } catch {
+                throw QRZRankFetchFailure.invalidResponse
+            }
+            let data: Data
+            let response: URLResponse
+            do { (data, response) = try await session.data(for: request) }
+            catch { throw QRZRankFetchFailure.transport(error.localizedDescription) }
+            guard let http = response as? HTTPURLResponse else { throw QRZRankFetchFailure.invalidResponse }
+            guard (200..<300).contains(http.statusCode) else {
+                let message = QRZRankAPIContract.decodeError(data)?.message ?? ""
+                switch http.statusCode {
+                case 401: throw QRZRankFetchFailure.authenticationFailed(message)
+                case 403: throw QRZRankFetchFailure.subscriptionRequired(message)
+                case 404, 405:
+                    throw QRZRankFetchFailure.server(status: http.statusCode, message: "Daily rank history is not deployed on the server yet. Saved observations remain available.")
+                case 429: throw QRZRankFetchFailure.rateLimited(message)
+                default: throw QRZRankFetchFailure.server(status: http.statusCode, message: message)
+                }
+            }
+            if replacement == nil {
+                do {
+                    let envelope = try JSONDecoder().decode(QRZRankHistoryEnvelope.self, from: data)
+                    return try envelope.validatedSnapshots(expected: Set(callsigns))
+                } catch { throw QRZRankFetchFailure.invalidResponse }
+            }
+        }
+        throw QRZRankFetchFailure.invalidResponse
+    }
+
     func fetchQuota(
         token: String,
         userAgent: String

@@ -11,30 +11,6 @@ import AppKit
 import UniformTypeIdentifiers
 import WebKit
 
-enum RankHistoryMetric: String, CaseIterable, Identifiable {
-    case qso
-    case bands
-    case dxcc
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .qso: return "QSO Rank"
-        case .bands: return "Bands Rank"
-        case .dxcc: return "DXCC Rank"
-        }
-    }
-
-    var icon: String {
-        switch self {
-        case .qso: return "antenna.radiowaves.left.and.right"
-        case .bands: return "waveform.path.ecg"
-        case .dxcc: return "globe.americas.fill"
-        }
-    }
-}
-
 enum NationalLeaderboardTab: String, CaseIterable, Identifiable {
     case headToHead = "Head-to-Head & Radar"
     case national = "National Standings"
@@ -51,76 +27,6 @@ enum NationalLeaderboardTab: String, CaseIterable, Identifiable {
         case .clubLog: return "trophy.fill"
         }
     }
-}
-
-struct QRZRankHistorySnapshot: Identifiable, Codable {
-    let date: Date
-    let callsign: String
-    let countryIso: String?
-    let qsoRank: Int?
-    let bandRank: Int?
-    let dxccRank: Int?
-    let qsoScore: Int?
-    let bandScore: Int?
-    let dxccScore: Int?
-
-    var id: String { "\(Self.dayKey(for: date))-\(callsign)" }
-
-    init(date: Date = Date(), response: QRZRankResponse) {
-        self.date = date
-        callsign = response.callsign?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
-        countryIso = response.country_iso
-        qsoRank = Self.parseRank(response.rank_qso)
-        bandRank = Self.parseRank(response.rank_band)
-        dxccRank = Self.parseRank(response.rank_countries)
-        qsoScore = Self.parseRank(response.score_qso)
-        bandScore = Self.parseRank(response.score_band)
-        dxccScore = Self.parseRank(response.score_countries)
-    }
-
-    func rank(for metric: RankHistoryMetric) -> Int? {
-        switch metric {
-        case .qso: return qsoRank
-        case .bands: return bandRank
-        case .dxcc: return dxccRank
-        }
-    }
-
-    static func dayKey(for date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.timeZone = .current
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter.string(from: date)
-    }
-
-    private static func parseRank(_ value: String?) -> Int? {
-        guard let value else { return nil }
-        let cleaned = value
-            .replacingOccurrences(of: "#", with: "")
-            .replacingOccurrences(of: ",", with: "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return Int(cleaned)
-    }
-}
-
-struct RankTrendPoint: Identifiable {
-    var id: String { "\(date.timeIntervalSince1970)-\(rank)" }
-    let date: Date
-    let label: String
-    let rank: Int
-}
-
-struct RankTrendSeries: Identifiable {
-    var id: String { callsign }
-    let callsign: String
-    let countryIso: String?
-    let isOwner: Bool
-    let latestRank: Int?
-    let latestGap: Int?
-    let latestMovement: Int?
-    let latestGapMovement: Int?
-    let points: [RankTrendPoint]
 }
 
 // MARK: - Band Statistics Model
@@ -1917,6 +1823,9 @@ class AppState: NSObject, ObservableObject {
     private var isSDRControlSyncRunning = false
     private var externalADIFSyncTimer: Timer?
     private var isExternalADIFSyncRunning = false
+    private var rankHistorySyncCancellables = Set<AnyCancellable>()
+    private var rankHistoryLastAttempt: Date?
+    private var rankHistoryNeedsResync = false
     private var qrzEmailBackfillTimer: Timer?
     private var qrzEmailBackfillBatchNumber = 0
     private var isQRZEmailBackfillRunning = false
@@ -2242,10 +2151,13 @@ class AppState: NSObject, ObservableObject {
             CredentialVault.migrateLegacyCredentials()
             if CredentialVault.isBiometricLockEnabled {
                 Task {
-                    _ = await CredentialVault.authenticateWithBiometrics()
+                    if await CredentialVault.authenticateWithBiometrics() {
+                        self.refreshTrackedRankHistoryIfNeeded()
+                    }
                 }
             }
             self.restoreSavedClubLogSessionCookies()
+            self.configureRankHistorySync()
         }
     }
 
@@ -3045,7 +2957,6 @@ class AppState: NSObject, ObservableObject {
                 Task { @MainActor in
                     if case .success(let response) = result {
                         self?.ownerRankData = response
-                        self?.saveRankResponseSnapshot(response)
                         self?.fetchStationAnalysis(callsign: ownerCall)
                     }
                     group.leave()
@@ -3063,7 +2974,6 @@ class AppState: NSObject, ObservableObject {
                 case .success(let response):
                     self?.qrzRankData = response
                     self?.rankServiceStatus = "Live QRZ ranking loaded."
-                    self?.saveRankResponseSnapshot(response)
                 case .failure(let error):
                     if let cached = self?.cachedRankResponse(for: targetCall) {
                         self?.qrzRankData = cached
@@ -3121,7 +3031,6 @@ class AppState: NSObject, ObservableObject {
                 Task { @MainActor in
                     if case .success(let response) = result {
                         self?.ownerRankData = response
-                        self?.saveRankResponseSnapshot(response)
                         self?.fetchStationAnalysis(callsign: ownerCall)
                     }
                     group.leave()
@@ -3153,7 +3062,6 @@ class AppState: NSObject, ObservableObject {
             guard let self else { return }
             self.qrzComparisonRankData = targets.compactMap { results[$0] }
             self.qrzRankData = self.qrzComparisonRankData.first
-            self.qrzComparisonRankData.filter(\.hasRankingValue).forEach { self.saveRankResponseSnapshot($0) }
             self.isFetchingRank = false
             if let firstFailure = failures.first {
                 let cachedCount = self.qrzComparisonRankData.filter(\.hasRankingValue).count
@@ -3183,7 +3091,6 @@ class AppState: NSObject, ObservableObject {
             Task { @MainActor in
                 if case .success(let response) = result {
                     self?.ownerRankData = response
-                    self?.saveRankResponseSnapshot(response)
                     self?.fetchStationAnalysis(callsign: ownerCall)
                 }
             }
@@ -3363,146 +3270,82 @@ class AppState: NSObject, ObservableObject {
         trackedRankCallsigns.removeAll { $0 == normalized }
         saveTrackedRankCallsigns()
         hydrateLeaderboardFromSavedRankHistory()
+        refreshTrackedRankHistoryIfNeeded(force: true)
+    }
+
+    private func configureRankHistorySync() {
+        Timer.publish(every: 15 * 60, on: .main, in: .common).autoconnect()
+            .sink { [weak self] _ in self?.refreshTrackedRankHistoryIfNeeded() }
+            .store(in: &rankHistorySyncCancellables)
+        NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.refreshTrackedRankHistoryIfNeeded() }
+            .store(in: &rankHistorySyncCancellables)
+        refreshTrackedRankHistoryIfNeeded()
     }
 
     func refreshTrackedRankHistoryIfNeeded(force: Bool = false) {
         guard Thread.isMainThread else {
-            DispatchQueue.main.async { [weak self] in
-                self?.refreshTrackedRankHistoryIfNeeded(force: force)
-            }
+            DispatchQueue.main.async { [weak self] in self?.refreshTrackedRankHistoryIfNeeded(force: force) }
             return
         }
-
-        let ownerCall = currentStationCallsign
-        let allCallsigns = Array(Set(([ownerCall] + trackedRankCallsigns).filter { !$0.isEmpty && $0 != "DEFAULT" })).sorted()
-        guard !allCallsigns.isEmpty else {
-            rankHistoryStatus = "Set your station callsign first."
+        guard !isRefreshingRankHistory else {
+            if force { rankHistoryNeedsResync = true }
             return
         }
-
-        let today = QRZRankHistorySnapshot.dayKey(for: Date())
-        let missingToday = allCallsigns.filter { callsign in
-            !rankHistorySnapshots.contains { snapshot in
-                snapshot.callsign == callsign && QRZRankHistorySnapshot.dayKey(for: snapshot.date) == today
-            }
-        }
-        let targets = force ? allCallsigns : missingToday
-
-        guard !targets.isEmpty else {
-            rankHistoryStatus = "Rank history is current for today."
+        guard force || rankHistoryLastAttempt.map({ Date().timeIntervalSince($0) >= 15 * 60 }) ?? true else { return }
+        let owner = currentStationCallsign
+        let calls = Array(Set(([owner] + trackedRankCallsigns).filter {
+            QRZRankAPIContract.isPlausibleCallsign($0) && $0 != "DEFAULT"
+        })).sorted()
+        guard !calls.isEmpty else { rankHistoryStatus = "Set your station callsign first."; return }
+        guard CredentialVault.isVaultSessionUnlocked else {
+            rankHistoryStatus = "Unlock YAAM to synchronize rank history. Server daily collection continues."
             return
         }
-        let credentials = rankServiceCredentials()
-
+        let token = force ? rankServiceCredentials().token : CredentialVault.valueIfAvailableWithoutPrompt(for: .qrzRankAPIToken)
+        guard !token.isEmpty else {
+            rankHistoryStatus = "Add your Rank Service token to enable server daily tracking. Saved history remains available."
+            return
+        }
         isRefreshingRankHistory = true
-        rankHistoryStatus = "Refreshing \(targets.count) QRZ rank snapshots..."
-
-        let group = DispatchGroup()
-        var snapshots: [QRZRankHistorySnapshot] = []
-        var failures: [QRZRankFetchFailure] = []
-        let lock = NSLock()
-
-        for callsign in targets {
-            group.enter()
-            fetchSingleRank(callsign: callsign, credentials: credentials) { result in
-                switch result {
-                case .success(let response):
-                    let snapshot = QRZRankHistorySnapshot(response: response)
-                    if !snapshot.callsign.isEmpty {
-                        lock.lock()
-                        snapshots.append(snapshot)
-                        lock.unlock()
-                    }
-                case .failure(let error):
-                    lock.lock()
-                    failures.append(error)
-                    lock.unlock()
-                }
-                group.leave()
-            }
-        }
-
-        group.notify(queue: .main) { [weak self] in
+        rankHistoryLastAttempt = Date()
+        rankHistoryStatus = "Synchronizing server daily history…"
+        Task { @MainActor [weak self] in
             guard let self else { return }
-            for snapshot in snapshots {
-                self.upsertRankHistorySnapshot(snapshot)
-                if snapshot.callsign == ownerCall {
-                    self.ownerRankData = QRZRankResponse(snapshot: snapshot)
+            defer {
+                self.isRefreshingRankHistory = false
+                if self.rankHistoryNeedsResync {
+                    self.rankHistoryNeedsResync = false
+                    self.refreshTrackedRankHistoryIfNeeded(force: true)
                 }
             }
-            self.rankHistorySnapshots.sort { $0.date < $1.date }
-            self.saveRankHistorySnapshots()
-            self.hydrateLeaderboardFromSavedRankHistory()
-            self.isRefreshingRankHistory = false
-            if let firstFailure = failures.first {
-                self.rankHistoryStatus = snapshots.isEmpty
-                    ? "Saved rivals are still available offline. \(firstFailure.localizedDescription)"
-                    : "Saved \(snapshots.count) snapshots; \(failures.count) could not refresh. \(firstFailure.localizedDescription)"
-                self.rankServiceStatus = self.rankHistoryStatus
-            } else {
-                self.rankHistoryStatus = "Saved \(snapshots.count) rank snapshots for today."
-                self.rankServiceStatus = self.rankHistoryStatus
+            do {
+                let snapshots = try await QRZRankService.shared.synchronizeHistory(
+                    callsigns: calls, token: token, userAgent: "YAAM-macOS/\(currentVersion)")
+                // A changed profile/watchlist gets its own sync; discard the old in-flight result.
+                guard owner == self.currentStationCallsign, Set(calls) == Set(([self.currentStationCallsign] + self.trackedRankCallsigns).filter {
+                    QRZRankAPIContract.isPlausibleCallsign($0) && $0 != "DEFAULT"
+                }) else { self.rankHistoryNeedsResync = true; return }
+                for snapshot in snapshots { self.upsertRankHistorySnapshot(snapshot) }
+                self.rankHistorySnapshots.sort { $0.date < $1.date }
+                self.saveRankHistorySnapshots()
+                self.hydrateLeaderboardFromSavedRankHistory()
+                let today = QRZRankHistorySnapshot.dayKey(for: Date())
+                let observed = Set(snapshots.filter { $0.day == today }.map(\.callsign))
+                let missing = calls.filter { !observed.contains($0) }
+                let pending = missing.isEmpty ? "" : " Awaiting: \(missing.joined(separator: ", "))."
+                self.rankHistoryStatus = "Server daily tracking · \(observed.count)/\(calls.count) observed today (UTC).\(pending) Collection retries every 15 min, even with YAAM closed. Missing past days remain gaps."
+            } catch {
+                self.rankHistoryStatus = "History sync failed. Saved observations remain available. \(error.localizedDescription)"
             }
-            self.appendLog("QRZ rank history refreshed: \(snapshots.count) snapshots saved.")
+            self.rankServiceStatus = self.rankHistoryStatus
         }
     }
 
     func rankTrendSeries(metric: RankHistoryMetric) -> [RankTrendSeries] {
-        let ownerCall = currentStationCallsign
-        let ownerSnapshots = rankHistorySnapshots
-            .filter { $0.callsign == ownerCall }
-            .sorted { $0.date < $1.date }
-        let ownerByDay = Dictionary(
-            ownerSnapshots.map { (QRZRankHistorySnapshot.dayKey(for: $0.date), $0) },
-            uniquingKeysWith: { _, latest in latest }
-        )
-
-        func makeSeries(callsign: String, isOwner: Bool) -> RankTrendSeries {
-            let snapshots = rankHistorySnapshots
-                .filter { $0.callsign == callsign }
-                .sorted { $0.date < $1.date }
-            let points = snapshots.compactMap { snapshot -> RankTrendPoint? in
-                guard let rank = snapshot.rank(for: metric) else { return nil }
-                return RankTrendPoint(
-                    date: snapshot.date,
-                    label: shortRankHistoryDateFormatter.string(from: snapshot.date),
-                    rank: rank
-                )
-            }
-            let latestRank = points.last?.rank
-            let latestMovement = points.count >= 2
-                ? points[points.count - 2].rank - points[points.count - 1].rank
-                : nil
-
-            let comparisonGaps: [Int] = isOwner ? [] : snapshots.compactMap { snapshot in
-                let day = QRZRankHistorySnapshot.dayKey(for: snapshot.date)
-                guard let ownerRank = ownerByDay[day]?.rank(for: metric),
-                      let rivalRank = snapshot.rank(for: metric) else { return nil }
-                return rivalRank - ownerRank
-            }
-            let latestGap = comparisonGaps.last
-            let latestGapMovement = comparisonGaps.count >= 2
-                ? comparisonGaps[comparisonGaps.count - 1] - comparisonGaps[comparisonGaps.count - 2]
-                : nil
-
-            return RankTrendSeries(
-                callsign: callsign,
-                countryIso: snapshots.last?.countryIso,
-                isOwner: isOwner,
-                latestRank: latestRank,
-                latestGap: latestGap,
-                latestMovement: latestMovement,
-                latestGapMovement: latestGapMovement,
-                points: points
-            )
-        }
-
-        var result: [RankTrendSeries] = []
-        if !ownerCall.isEmpty, ownerCall != "DEFAULT" {
-            result.append(makeSeries(callsign: ownerCall, isOwner: true))
-        }
-        result.append(contentsOf: trackedRankCallsigns.map { makeSeries(callsign: $0, isOwner: false) })
-        return result
+        RankHistoryAnalysis.series(snapshots: rankHistorySnapshots, owner: currentStationCallsign,
+                                   tracked: trackedRankCallsigns, metric: metric)
     }
 
     private func loadRankHistory() {
@@ -3513,7 +3356,7 @@ class AppState: NSObject, ObservableObject {
             .prefix(8)
             .map { $0 }
 
-        var allSnapshots: [QRZRankHistorySnapshot] = []
+        var allSnapshots = RankHistoryCache.load()
         if let data = UserDefaults.standard.data(forKey: qrzRankHistorySnapshotsKey),
            let snapshots = try? JSONDecoder().decode([QRZRankHistorySnapshot].self, from: data) {
             allSnapshots.append(contentsOf: snapshots)
@@ -3553,7 +3396,7 @@ class AppState: NSObject, ObservableObject {
         // Deduplicate snapshots by (callsign, dayKey), retaining the latest for each day
         var deduplicated: [String: QRZRankHistorySnapshot] = [:]
         for snapshot in allSnapshots {
-            let key = "\(snapshot.callsign)|\(QRZRankHistorySnapshot.dayKey(for: snapshot.date))"
+            let key = "\(snapshot.callsign)|\(snapshot.day)"
             if let existing = deduplicated[key] {
                 if snapshot.date >= existing.date {
                     deduplicated[key] = snapshot
@@ -3580,26 +3423,17 @@ class AppState: NSObject, ObservableObject {
     private func saveRankHistorySnapshots() {
         if let data = try? JSONEncoder().encode(rankHistorySnapshots) {
             UserDefaults.standard.set(data, forKey: qrzRankHistorySnapshotsKey)
+            RankHistoryCache.save(data)
         }
     }
 
     private func upsertRankHistorySnapshot(_ snapshot: QRZRankHistorySnapshot) {
-        let day = QRZRankHistorySnapshot.dayKey(for: snapshot.date)
+        let day = snapshot.day
+        if rankHistorySnapshots.contains(where: { $0.callsign == snapshot.callsign && $0.day == day && $0.date > snapshot.date }) { return }
         rankHistorySnapshots.removeAll {
-            $0.callsign == snapshot.callsign && QRZRankHistorySnapshot.dayKey(for: $0.date) == day
+            $0.callsign == snapshot.callsign && $0.day == day
         }
         rankHistorySnapshots.append(snapshot)
-    }
-
-    private func saveRankResponseSnapshot(_ response: QRZRankResponse) {
-        guard response.hasRankingValue else { return }
-        let snapshot = QRZRankHistorySnapshot(response: response)
-        guard !snapshot.callsign.isEmpty else { return }
-        let retainedCallsigns = Set(trackedRankCallsigns + [currentStationCallsign])
-        guard retainedCallsigns.contains(snapshot.callsign) else { return }
-        upsertRankHistorySnapshot(snapshot)
-        rankHistorySnapshots.sort { $0.date < $1.date }
-        saveRankHistorySnapshots()
     }
 
     private func cachedRankResponse(for callsign: String) -> QRZRankResponse? {
@@ -3626,12 +3460,6 @@ class AppState: NSObject, ObservableObject {
                 : "Restored \(trackedRankCallsigns.count) tracked rivals. Refresh to load rankings."
             rankHistoryStatus = rankServiceStatus
         }
-    }
-
-    private var shortRankHistoryDateFormatter: DateFormatter {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "MMM d"
-        return formatter
     }
 
     var dailyRankRequestsRemaining: Int {
@@ -5252,7 +5080,7 @@ class AppState: NSObject, ObservableObject {
                         rankDXCC = response.rank_countries ?? ""
                         shouldMarkRankLookup = true
                         rankStatus = "FOUND"
-                        self.saveRankResponseSnapshot(response)
+
                     case .failure(let failure):
                         shouldMarkRankLookup = failure.shouldRecordLookupOutcome
                         switch failure {
@@ -5465,7 +5293,7 @@ class AppState: NSObject, ObservableObject {
                         records: &workingRecords
                     )
                     hasUnsavedChanges = true
-                    self.saveRankResponseSnapshot(response)
+
 
                 case .failure(let failure):
                     unavailableCallsigns += 1

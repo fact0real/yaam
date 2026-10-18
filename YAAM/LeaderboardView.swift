@@ -436,6 +436,7 @@ struct LeaderboardView: View {
 private let rankTrendPalette: [Color] = [.blue, .purple, .orange, .green, .pink, .cyan, .red, .indigo, .mint]
 
 struct RankPerformanceMonitor: View {
+    @AppStorage("leaderboardRankChartMode") private var chartMode: RankChartMode = .actualRank
     @Binding var metric: RankHistoryMetric
     let series: [RankTrendSeries]
     let trackedCallsigns: [String]
@@ -446,30 +447,27 @@ struct RankPerformanceMonitor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 12) {
-                Label("Rival Performance Monitor", systemImage: "chart.line.uptrend.xyaxis")
-                    .font(.headline)
-
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Label("Rival Performance Monitor", systemImage: "chart.line.uptrend.xyaxis").font(.headline)
+                    Spacer()
+                    if isRefreshing { ProgressView().controlSize(.small) }
+                    Button(action: refreshAction) { Label("Refresh", systemImage: "arrow.clockwise") }
+                        .buttonStyle(.bordered).disabled(isRefreshing)
+                }
                 Picker("Metric", selection: $metric) {
-                    ForEach(RankHistoryMetric.allCases) { item in
-                        Label(item.title, systemImage: item.icon).tag(item)
-                    }
+                    ForEach(RankHistoryMetric.allCases) { item in Text(item.title).tag(item) }
                 }
                 .pickerStyle(.segmented)
-                .frame(width: 360)
-
-                Spacer()
-
-                if isRefreshing {
-                    ProgressView()
-                        .controlSize(.small)
+                .frame(maxWidth: 360)
+                Text("Tracked callsigns are saved to Rank Service for daily collection while YAAM is closed.")
+                    .font(.caption2).foregroundStyle(.secondary)
+                if !status.isEmpty {
+                    Text(status)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-
-                Button(action: refreshAction) {
-                    Label("Refresh", systemImage: "arrow.clockwise")
-                }
-                .buttonStyle(.bordered)
-                .disabled(isRefreshing)
             }
 
             LeaderboardMomentumBanner(series: series)
@@ -485,49 +483,15 @@ struct RankPerformanceMonitor: View {
                 }
                 .frame(maxWidth: .infinity, minHeight: 150)
             } else {
-                HStack(alignment: .top, spacing: 14) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        HStack(spacing: 8) {
-                            Text("QRZ Rank Trajectory & Progress")
-                                .font(.subheadline.weight(.semibold))
-                            Text("• Click any bullet to inspect rank & daily delta")
-                                .font(.caption2.weight(.medium))
-                                .foregroundColor(.cyan)
-                        }
-                        Text("Cumulative climb / slip relative to period baseline. Every line starts at zero on first tracked date.")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        RankMovementTrendChart(series: series)
-                            .frame(minHeight: 255)
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .top, spacing: 14) {
+                        chart.frame(minWidth: 420)
+                        positions.frame(width: 250)
                     }
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Current Position")
-                            .font(.caption)
-                            .fontWeight(.bold)
-                            .foregroundColor(.secondary)
-
-                        ForEach(Array(series.enumerated()), id: \.element.id) { index, item in
-                            TrackedRivalRow(
-                                callsign: item.callsign,
-                                countryIso: item.countryIso,
-                                isOwner: item.isOwner,
-                                latestRank: item.latestRank,
-                                latestGap: item.latestGap,
-                                latestMovement: item.latestMovement,
-                                trendColor: rankTrendPalette[index % rankTrendPalette.count],
-                                removeAction: item.isOwner ? nil : { removeAction(item.callsign) }
-                            )
-                        }
-
-                        if !status.isEmpty {
-                            Text(status)
-                                .font(.caption2)
-                                .foregroundColor(.secondary)
-                                .padding(.top, 4)
-                        }
+                    VStack(alignment: .leading, spacing: 14) {
+                        chart
+                        positions
                     }
-                    .frame(width: 280, alignment: .topLeading)
                 }
             }
         }
@@ -535,6 +499,51 @@ struct RankPerformanceMonitor: View {
         .background(Color(NSColor.controlBackgroundColor).opacity(0.65))
         .cornerRadius(8)
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.blue.opacity(0.22), lineWidth: 1))
+    }
+
+    private var chart: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("QRZ Rank Trajectory & Progress")
+                    .font(.subheadline.weight(.semibold))
+                Text("• Click a point for rank and daily change")
+                    .font(.caption2.weight(.medium))
+                    .foregroundColor(.cyan)
+            }
+            Picker("Display", selection: $chartMode) {
+                ForEach(RankChartMode.allCases) { mode in Text(mode.rawValue).tag(mode) }
+            }
+            .pickerStyle(.segmented)
+            .frame(maxWidth: 440)
+            Text(chartMode.explanation)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            RankMovementTrendChart(series: series, mode: chartMode)
+                .frame(height: 320)
+        }
+    }
+
+    private var positions: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Latest observed position")
+                .font(.caption)
+                .fontWeight(.bold)
+                .foregroundColor(.secondary)
+
+            ForEach(Array(series.enumerated()), id: \.element.id) { index, item in
+                TrackedRivalRow(
+                    callsign: item.callsign,
+                    countryIso: item.countryIso,
+                    isOwner: item.isOwner,
+                    latestRank: item.latestRank,
+                    latestGap: item.latestGap,
+                    latestMovement: item.latestMovement,
+                    observationDate: item.points.last?.date,
+                    trendColor: rankTrendPalette[index % rankTrendPalette.count],
+                    removeAction: item.isOwner ? nil : { removeAction(item.callsign) }
+                )
+            }
+        }
     }
 }
 
@@ -547,8 +556,8 @@ private struct LeaderboardMomentumBanner: View {
         let deltas = rivals.compactMap(\.latestGapMovement)
         guard !deltas.isEmpty else {
             return (
-                "Need one more day of rank snapshots",
-                "Track rivals and refresh once per day. The next snapshot will show each operator's climb or fall and your relative change.",
+                "Daily comparison needs consecutive observations",
+                "Today and yesterday (UTC) must both be recorded. Missing or stale observations are not treated as today’s change.",
                 "calendar.badge.plus",
                 .secondary
             )
@@ -698,6 +707,7 @@ struct TrackedRivalRow: View {
     let latestRank: Int?
     let latestGap: Int?
     let latestMovement: Int?
+    let observationDate: Date?
     let trendColor: Color
     let removeAction: (() -> Void)?
 
@@ -747,6 +757,10 @@ struct TrackedRivalRow: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+                if let observationDate {
+                    Text("Observed \(QRZRankHistorySnapshot.dayKey(for: observationDate)) UTC")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
                 Text(gapText)
                     .font(.caption2)
                     .foregroundColor(gapColor)
@@ -775,6 +789,7 @@ struct TrackedRivalRow: View {
 
 struct RankMovementTrendChart: View {
     let series: [RankTrendSeries]
+    var mode: RankChartMode = .actualRank
 
     private let maximumVisibleDays = 90
 
@@ -810,20 +825,27 @@ struct RankMovementTrendChart: View {
     }
 
     private var visibleDates: [Date] {
-        let days = Set(series.flatMap(\.points).map { Calendar.current.startOfDay(for: $0.date) })
-        return Array(days.sorted().suffix(maximumVisibleDays))
+        RankHistoryCalendar.timeline(points: series.flatMap(\.points), limit: maximumVisibleDays)
     }
 
     private var allMovements: [Int] {
         series.flatMap { item -> [Int] in
             let points = visiblePoints(item.points)
-            guard let startingRank = points.first?.rank else { return [] }
-            return points.map { startingRank - $0.rank }
+            guard let baseline = points.first?.rank else { return [] }
+            return points.compactMap { mode.value(for: $0, in: item.points, baseline: baseline) }
         }
     }
 
+    private var axisCenter: Int {
+        mode == .actualRank ? ((allMovements.min() ?? -1) + (allMovements.max() ?? -1)) / 2 : 0
+    }
+
     private var maxAbsMovement: Int {
-        max(allMovements.map(abs).max() ?? 1, 1)
+        max(allMovements.map { abs($0 - axisCenter) }.max() ?? 1, 1)
+    }
+
+    private func axisText(_ value: Int) -> String {
+        mode == .actualRank ? "#\(formattedNumber(max(1, -value)))" : (value > 0 ? "+" : "") + formattedNumber(value)
     }
 
     var body: some View {
@@ -929,12 +951,12 @@ struct RankMovementTrendChart: View {
 
             // GeometryReader for the chart
             GeometryReader { geometry in
-                if series.flatMap(\.points).isEmpty {
+                if allMovements.isEmpty {
                     VStack(spacing: 8) {
                         Image(systemName: "chart.xyaxis.line")
                             .font(.largeTitle)
                             .foregroundColor(.secondary)
-                        Text("Refresh once today; tomorrow's snapshot will start the visible trend.")
+                        Text("No observations in this period. Refresh to retrieve server history.")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                     }
@@ -955,11 +977,11 @@ struct RankMovementTrendChart: View {
                         HStack(alignment: .top, spacing: 0) {
                             // Pinned Y-Axis column
                             ZStack(alignment: .trailing) {
-                                axisLabel("▲ +\(formattedNumber(maxAbsMovement))", color: .green)
+                                axisLabel(axisText(axisCenter + maxAbsMovement), color: mode == .actualRank ? .secondary : .green)
                                     .position(x: yAxisWidth - 4, y: 14)
-                                axisLabel("0", color: .secondary)
+                                axisLabel(axisText(axisCenter), color: .secondary)
                                     .position(x: yAxisWidth - 4, y: origin.y)
-                                axisLabel("▼ -\(formattedNumber(maxAbsMovement))", color: .orange)
+                                axisLabel(axisText(axisCenter - maxAbsMovement), color: mode == .actualRank ? .secondary : .orange)
                                     .position(x: yAxisWidth - 4, y: 10 + plotHeight)
                             }
                             .frame(width: yAxisWidth, height: 10 + plotHeight + 20)
@@ -979,7 +1001,7 @@ struct RankMovementTrendChart: View {
                                             yScale: yScale
                                         )
 
-                                        linePath(plotted.map(\.position))
+                                        linePath(plotted)
                                             .stroke(
                                                 color,
                                                 style: StrokeStyle(
@@ -1023,7 +1045,7 @@ struct RankMovementTrendChart: View {
                                                         let sorted = visiblePoints(item.points)
                                                         let idx = sorted.firstIndex(where: { $0.id == plottedPoint.point.id }) ?? 0
                                                         let prev = idx > 0 ? sorted[idx - 1] : nil
-                                                        let delta = prev.map { $0.rank - plottedPoint.point.rank }
+                                                        let delta = prev.flatMap { RankHistoryCalendar.adjacent($0.date, plottedPoint.point.date) ? $0.rank - plottedPoint.point.rank : nil }
                                                         let startRank = sorted.first?.rank ?? plottedPoint.point.rank
                                                         let startDate = sorted.first?.date
                                                         selectedPointDetail = SelectedPointDetail(
@@ -1183,6 +1205,8 @@ struct RankMovementTrendChart: View {
                 return event
             }
         }
+        .onChange(of: mode) { _, _ in selectedPointDetail = nil }
+        .onChange(of: series.flatMap(\.points).map(\.id)) { _, _ in selectedPointDetail = nil }
         .onDisappear {
             if let monitor = scrollMonitor {
                 NSEvent.removeMonitor(monitor)
@@ -1220,9 +1244,11 @@ struct RankMovementTrendChart: View {
         let posY = detail.position.y > 105 ? detail.position.y - 58 : detail.position.y + 58
 
         let dateFormatter = DateFormatter()
+        dateFormatter.timeZone = RankHistoryCalendar.calendar.timeZone
         dateFormatter.dateFormat = "MMM d, yyyy"
 
         let shortDateFormatter = DateFormatter()
+        shortDateFormatter.timeZone = RankHistoryCalendar.calendar.timeZone
         shortDateFormatter.dateFormat = "MMM d"
 
         return VStack(alignment: .leading, spacing: 4) {
@@ -1281,7 +1307,7 @@ struct RankMovementTrendChart: View {
                     }
                     if let d = detail.deltaFromPrev {
                         HStack(spacing: 3) {
-                            Text("24h Delta:")
+                            Text("Daily change:")
                                 .font(.system(size: 8))
                                 .foregroundStyle(.secondary)
                             Text(d >= 0 ? "+\(formattedNumber(d))" : "-\(formattedNumber(abs(d)))")
@@ -1307,7 +1333,7 @@ struct RankMovementTrendChart: View {
     private func visiblePoints(_ points: [RankTrendPoint]) -> [RankTrendPoint] {
         guard let firstVisibleDate = visibleDates.first else { return [] }
         return points
-            .filter { Calendar.current.startOfDay(for: $0.date) >= firstVisibleDate }
+            .filter { RankHistoryCalendar.calendar.startOfDay(for: $0.date) >= firstVisibleDate }
             .sorted { $0.date < $1.date }
     }
 
@@ -1318,23 +1344,25 @@ struct RankMovementTrendChart: View {
         step: CGFloat,
         yScale: CGFloat
     ) -> [PlottedPoint] {
+        let allPoints = points.sorted { $0.date < $1.date }
         let points = visiblePoints(points)
         guard let startingRank = points.first?.rank else { return [] }
         let indexByDay = Dictionary(uniqueKeysWithValues: visibleDates.enumerated().map {
-            (Calendar.current.startOfDay(for: $0.element), $0.offset)
+            (RankHistoryCalendar.calendar.startOfDay(for: $0.element), $0.offset)
         })
 
         return points.compactMap { point in
-            let day = Calendar.current.startOfDay(for: point.date)
+            let day = RankHistoryCalendar.calendar.startOfDay(for: point.date)
             guard let dayIndex = indexByDay[day] else { return nil }
             let movement = startingRank - point.rank
+            guard let value = mode.value(for: point, in: allPoints, baseline: startingRank) else { return nil }
             let x = visibleDates.count > 1
                 ? origin.x + CGFloat(dayIndex) * step
                 : origin.x + plotWidth / 2
             return PlottedPoint(
                 point: point,
                 movement: movement,
-                position: CGPoint(x: x, y: origin.y - CGFloat(movement) * yScale)
+                position: CGPoint(x: x, y: origin.y - CGFloat(value - axisCenter) * yScale)
             )
         }
     }
@@ -1359,12 +1387,16 @@ struct RankMovementTrendChart: View {
         }
     }
 
-    private func linePath(_ coordinates: [CGPoint]) -> Path {
+    private func linePath(_ points: [PlottedPoint]) -> Path {
         Path { path in
-            guard let first = coordinates.first else { return }
-            path.move(to: first)
-            for point in coordinates.dropFirst() {
-                path.addLine(to: point)
+            var previous: Date?
+            for item in points {
+                if let previous, RankHistoryCalendar.adjacent(previous, item.point.date) {
+                    path.addLine(to: item.position)
+                } else {
+                    path.move(to: item.position)
+                }
+                previous = item.point.date
             }
         }
     }
@@ -1374,6 +1406,7 @@ struct RankMovementTrendChart: View {
         let startRank = sorted.first?.rank ?? plottedPoint.point.rank
         let startDate = sorted.first?.date
         let shortFmt = DateFormatter()
+        shortFmt.timeZone = RankHistoryCalendar.calendar.timeZone
         shortFmt.dateFormat = "MMM d"
         let startLabel = startDate.map { shortFmt.string(from: $0) } ?? "start"
 
@@ -1395,7 +1428,10 @@ struct RankMovementTrendChart: View {
     }
 
     private func dateLabel(_ date: Date) -> some View {
-        Text(date.formatted(.dateTime.month(.abbreviated).day()))
+        let formatter = DateFormatter()
+        formatter.timeZone = RankHistoryCalendar.calendar.timeZone
+        formatter.dateFormat = "MMM d"
+        return Text(formatter.string(from: date))
             .font(.caption2)
             .foregroundStyle(.secondary)
     }

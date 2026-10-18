@@ -784,6 +784,20 @@ nonisolated enum QRZRankAPIContract {
         return String(trimmed.prefix(500))
     }
 
+    static func makeRankHistoryRequest(callsigns: [String]? = nil, token: String, userAgent: String) throws -> URLRequest {
+        var request = try makeAuthorizedRequest(path: "/api/v1/rank-history", token: token, userAgent: userAgent)
+        if let callsigns {
+            let normalized = Array(Set(callsigns.map(normalizedCallsign))).sorted()
+            guard normalized.count <= 9, normalized.allSatisfy(isPlausibleCallsign) else {
+                throw QRZRankAPIContractError.invalidCallsign
+            }
+            request.httpMethod = "PUT"
+            request.httpBody = try JSONEncoder().encode(["callsigns": normalized])
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        }
+        return request
+    }
+
     private static func makeAuthorizedRequest(
         path: String,
         token rawToken: String,
