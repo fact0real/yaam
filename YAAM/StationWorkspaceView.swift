@@ -149,6 +149,7 @@ private enum WorkspaceData {
 }
 
 private struct WorkspaceRecordSummary: Sendable {
+    let latestContact: RecentQSOContact?
     let priorWorkedIDs: Set<UUID>
     let entityGroups: [String: [QSORecordModel]]
     let availableBands: [String]
@@ -168,6 +169,7 @@ private struct WorkspaceRecordSummary: Sendable {
 
     nonisolated init?(records: [QSORecordModel], now: Date) {
         guard !Task.isCancelled else { return nil }
+        latestContact = RecentQSOContact.latest(in: records.map(\.fields))
         var datedRecords: [(QSORecordModel, Date)] = []
         datedRecords.reserveCapacity(records.count)
         for record in records {
@@ -334,6 +336,8 @@ struct StationWorkspaceView: View {
     @AppStorage("stationWorkspace.pureBlack") private var pureBlack = false
     @AppStorage("stationWorkspace.useUTC") private var useUTC = false
     @State private var records: [QSORecordModel] = []
+    @State private var latestContact: RecentQSOContact?
+    @State private var highlightNow = Date()
     @State private var entityGroups: [String: [QSORecordModel]] = [:]
     @State private var logRows: [QSORecordModel] = []
     @State private var isPreparingLog = false
@@ -428,6 +432,7 @@ struct StationWorkspaceView: View {
     private func reloadRecords() {
         let source = appState.qsoRecords
         records = source
+        latestContact = nil
         reloadTask?.cancel()
         summaryWorker.invalidate()
         isPreparingSummary = true
@@ -440,6 +445,7 @@ struct StationWorkspaceView: View {
             }
             guard let completed, completed.key == requestID, !Task.isCancelled else { return }
             let summary = completed.value
+            latestContact = summary.latestContact
             priorWorkedIDs = summary.priorWorkedIDs
             entityGroups = summary.entityGroups
             availableBands = summary.availableBands
@@ -511,6 +517,8 @@ struct StationWorkspaceView: View {
         .background(pageBackground)
         .preferredColorScheme(pureBlack ? .dark : .light)
         .onAppear {
+            now = Date()
+            highlightNow = now
             reloadRecords()
             if let saved = UserDefaults.standard.string(forKey: "stationWorkspace.enabledProviders") {
                 enabledProviders = Set(saved.split(separator: ",").compactMap { QSLProvider(rawValue: String($0)) })
@@ -526,6 +534,19 @@ struct StationWorkspaceView: View {
                 appState.quickLogDraft.applyFrequency(snapshot.frequencyMHz)
                 if !snapshot.mode.isEmpty { appState.quickLogDraft.mode = snapshot.mode }
             }
+        }
+        .task(id: latestContact) {
+            highlightNow = Date()
+            guard let latestContact else { return }
+            let remaining = latestContact.expiresAt.timeIntervalSinceNow
+            guard remaining >= 0 else { return }
+            do {
+                try await Task.sleep(for: .seconds(remaining + 0.05))
+                highlightNow = Date()
+            } catch { /* Contact/profile changed, or the view was closed. */ }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            highlightNow = Date()
         }
         .onChange(of: appState.qsoRecordsRevision) { _, _ in reloadRecords() }
         .onChange(of: useUTC) { _, _ in
@@ -765,6 +786,32 @@ struct StationWorkspaceView: View {
         }
     }
 
+    private var recentQSORoute: RecentQSOMapRoute? {
+        guard let contact = latestContact, contact.isRecent(at: highlightNow),
+              let destination = contactCoordinate(contact.fields, prefix: "") else { return nil }
+        let profile = appState.activeStationProfile
+        let validHome = MaidenheadGridEngine.boundingBox(for: appState.effectiveStationGrid)?.center
+            ?? coordinate(latitude: profile?.latitude, longitude: profile?.longitude)
+        guard let origin = contactCoordinate(contact.fields, prefix: "MY_") ?? validHome,
+              GeodesicMath.distanceKm(from: origin, to: destination) > 0.1 else { return nil }
+        return RecentQSOMapRoute(
+            identity: "\(contact.timestamp.timeIntervalSince1970):\(contact.fields["CALL", default: ""])",
+            origin: origin, destination: destination,
+            sourceCallsign: contact.fields["STATION_CALLSIGN"].flatMap { $0.isEmpty ? nil : $0 } ?? appState.currentStationCallsign,
+            destinationCallsign: contact.fields["CALL", default: ""])
+    }
+
+    private func coordinate(latitude: String?, longitude: String?) -> GeoCoordinate? {
+        guard let latitude, let longitude, let lat = Double(latitude), let lon = Double(longitude),
+              lat.isFinite, lon.isFinite, (-90...90).contains(lat), (-180...180).contains(lon) else { return nil }
+        return GeoCoordinate(latitude: lat, longitude: lon)
+    }
+
+    private func contactCoordinate(_ fields: [String: String], prefix: String) -> GeoCoordinate? {
+        MaidenheadGridEngine.boundingBox(for: fields[prefix + "GRIDSQUARE", default: ""])?.center
+            ?? coordinate(latitude: fields[prefix + "LAT"], longitude: fields[prefix + "LON"])
+    }
+
     private var mapViewport: some View {
         ZStack(alignment: .topLeading) {
             Group {
@@ -774,6 +821,7 @@ struct StationWorkspaceView: View {
                         homeCallsign: appState.currentStationCallsign,
                         homeGrid: appState.effectiveStationGrid,
                         markers: mapMarkers,
+                        recentQSORoute: recentQSORoute,
                         logSummaries: [:],
                         mapType: .standard,
                         showDayNightShadow: showGreyline,
@@ -793,6 +841,7 @@ struct StationWorkspaceView: View {
                     Globe3DMapView(
                         homeCoordinate: appState.effectiveStationCoordinate,
                         markers: mapMarkers,
+                        recentQSORoute: recentQSORoute,
                         mapType: .hybrid,
                         showGreatCircleArcs: true,
                         showDayNightShadow: showGreyline,
@@ -850,6 +899,14 @@ struct StationWorkspaceView: View {
                 }
             }
             .padding(10)
+            if let route = recentQSORoute {
+                VStack {
+                    Spacer()
+                    RecentQSORouteBadge(source: route.sourceCallsign, destination: route.destinationCallsign)
+                }
+                .padding(12)
+                .allowsHitTesting(false)
+            }
         }
         .background(Color(nsColor: .controlBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: 12))

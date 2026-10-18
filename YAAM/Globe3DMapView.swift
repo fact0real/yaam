@@ -49,6 +49,7 @@ public final class Globe3DStationAnnotation: NSObject, MKAnnotation {
 public struct Globe3DMapView: NSViewRepresentable {
     public var homeCoordinate: GeoCoordinate
     public var markers: [Globe3DMarker]
+    public var recentQSORoute: RecentQSOMapRoute?
     public var mapType: MKMapType
     public var showGreatCircleArcs: Bool
     public var showDayNightShadow: Bool
@@ -60,6 +61,7 @@ public struct Globe3DMapView: NSViewRepresentable {
     public init(
         homeCoordinate: GeoCoordinate,
         markers: [Globe3DMarker],
+        recentQSORoute: RecentQSOMapRoute? = nil,
         mapType: MKMapType = .hybrid,
         showGreatCircleArcs: Bool = true,
         showDayNightShadow: Bool = true,
@@ -70,6 +72,7 @@ public struct Globe3DMapView: NSViewRepresentable {
     ) {
         self.homeCoordinate = homeCoordinate
         self.markers = markers
+        self.recentQSORoute = recentQSORoute
         self.mapType = mapType
         self.showGreatCircleArcs = showGreatCircleArcs
         self.showDayNightShadow = showDayNightShadow
@@ -137,6 +140,7 @@ public struct Globe3DMapView: NSViewRepresentable {
 
         private var lastAnnotationsSig: String = ""
         private var lastOverlaysSig: String = ""
+        private let recentQSOPresentation = RecentQSOMapPresentation()
         private var lastHoverUpdate: TimeInterval = 0
         private var lastZoomCommand: Int
 
@@ -195,6 +199,7 @@ public struct Globe3DMapView: NSViewRepresentable {
         func refreshAll(force: Bool) {
             updateOverlays(force: force)
             updateAnnotations(force: force)
+            if let mapView { recentQSOPresentation.update(parent.recentQSORoute, on: mapView) }
         }
 
         private func updateOverlays(force: Bool) {
@@ -314,6 +319,9 @@ public struct Globe3DMapView: NSViewRepresentable {
         }
 
         public func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
+            if overlay is RecentQSOArrowPolyline {
+                return RecentQSOArrowRenderer(overlay: overlay)
+            }
             if let arcPolyline = overlay as? GlobeArcPolyline {
                 let renderer = MKPolylineRenderer(polyline: arcPolyline)
                 if let custom = arcPolyline.customColor {

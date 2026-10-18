@@ -87,6 +87,7 @@ public struct GridTrackerMapView: NSViewRepresentable {
     public var homeCallsign: String
     public var homeGrid: String
     public var markers: [Globe3DMarker]
+    public var recentQSORoute: RecentQSOMapRoute?
     public var logSummaries: [String: GridLogSummary]
     public var mapType: MKMapType
     public var showDayNightShadow: Bool
@@ -103,6 +104,7 @@ public struct GridTrackerMapView: NSViewRepresentable {
         homeCallsign: String = "",
         homeGrid: String = "",
         markers: [Globe3DMarker],
+        recentQSORoute: RecentQSOMapRoute? = nil,
         logSummaries: [String: GridLogSummary],
         mapType: MKMapType = .standard,
         showDayNightShadow: Bool = true,
@@ -118,6 +120,7 @@ public struct GridTrackerMapView: NSViewRepresentable {
         self.homeCallsign = homeCallsign
         self.homeGrid = homeGrid
         self.markers = markers
+        self.recentQSORoute = recentQSORoute
         self.logSummaries = logSummaries
         self.mapType = mapType
         self.showDayNightShadow = showDayNightShadow
@@ -180,6 +183,7 @@ public struct GridTrackerMapView: NSViewRepresentable {
 
         private var lastAnnotationsSignature: String = ""
         private var lastOverlaysSignature: String = ""
+        private let recentQSOPresentation = RecentQSOMapPresentation()
         private var lastHoverUpdate: TimeInterval = 0
         private var lastZoomCommand: Int
 
@@ -245,6 +249,7 @@ public struct GridTrackerMapView: NSViewRepresentable {
         func refreshAll(force: Bool) {
             updateOverlays(force: force)
             updateAnnotations(force: force)
+            if let mapView { recentQSOPresentation.update(parent.recentQSORoute, on: mapView) }
         }
 
         private func updateOverlays(force: Bool) {
@@ -406,6 +411,9 @@ public struct GridTrackerMapView: NSViewRepresentable {
         }
 
         public func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
+            if overlay is RecentQSOArrowPolyline {
+                return RecentQSOArrowRenderer(overlay: overlay)
+            }
             if let gridOverlay = overlay as? MaidenheadGridOverlay {
                 return MaidenheadGridRenderer(overlay: gridOverlay)
             }
