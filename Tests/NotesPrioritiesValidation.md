@@ -24,9 +24,11 @@ swiftc -O -parse-as-library YAAM/FT8WaterfallRasterizer.swift Tests/FT8Waterfall
 /tmp/yaam-waterfall-raster
 swiftc -parse-as-library Tests/RankGrowthRegression.swift YAAM/RankGrowthAnalysis.swift YAAM/RankHistory.swift YAAM/QRZRankAPIContract.swift YAAM/QRZRankService.swift -o /tmp/yaam-selected-rank-growth
 /tmp/yaam-selected-rank-growth
+swiftc -parse-as-library YAAM/BandmapProvenanceNotice.swift Tests/BandmapProvenanceRegression.swift -o /tmp/yaam-provenance
+/tmp/yaam-provenance
 ```
 
-All four passed. Also ran `StationPrivacyRegression` with its documented standalone compile command: passed, including profile/empty-station PNG and two-page PDF exports.
+All four passed. `BandmapProvenanceRegression` also passed for Demo, Manual Sim, synthetic/emulator and live sources. Next Credit additionally excludes stale unconfirmed copies of already-confirmed QSO identities. Also ran `StationPrivacyRegression` with its documented standalone compile command: passed, including profile/empty-station PNG and two-page PDF exports.
 
 Measured workload (same Mac, optimized standalone binaries):
 

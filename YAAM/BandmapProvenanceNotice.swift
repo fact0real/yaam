@@ -1,5 +1,12 @@
 import SwiftUI
 
+nonisolated enum BandmapSourceProvenance {
+    static func isSimulated(_ source: String) -> Bool {
+        let tokens = source.lowercased().split(whereSeparator: { !$0.isLetter }).map(String.init)
+        return tokens.contains { ["demo", "sim", "simulation", "simulated", "simulator", "synthetic", "emulated", "emulator"].contains($0) }
+    }
+}
+
 struct BandmapProvenanceNotice: View {
     let spotCount: Int
     let includesSimulation: Bool

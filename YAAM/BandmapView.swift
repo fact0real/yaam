@@ -650,7 +650,7 @@ public struct BandmapView: View {
             Divider()
 
             BandmapProvenanceNotice(spotCount: activeSpots.count,
-                includesSimulation: activeSpots.contains(where: { $0.source.localizedCaseInsensitiveContains("demo") || $0.source.localizedCaseInsensitiveContains("simulat") }),
+                includesSimulation: activeSpots.contains(where: { BandmapSourceProvenance.isSimulated($0.source) }),
                 catConnected: isCATConnected)
                 .padding(.horizontal, 12)
             if activeSpots.isEmpty {

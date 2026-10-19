@@ -56,11 +56,13 @@ nonisolated enum NextCreditEngine {
     static func queue(contacts: [NextCreditContact], weights: NextCreditWeights, limit: Int = 100) -> [NextCreditSuggestion] {
         var covered = Set<String>()
         var previouslyConfirmedCalls = Set<String>()
+        var confirmedIdentities = Set<String>()
         for c in contacts where c.confirmed {
             covered.formUnion(credits(c)); previouslyConfirmedCalls.insert(c.call)
+            confirmedIdentities.insert(c.identity)
         }
         var seen = Set<String>()
-        let candidates = contacts.filter { !$0.confirmed && !$0.call.isEmpty && seen.insert($0.identity).inserted }
+        let candidates = contacts.filter { !$0.confirmed && !confirmedIdentities.contains($0.identity) && !$0.call.isEmpty && seen.insert($0.identity).inserted }
             .map { ($0, credits($0)) }
         var used = Set<UUID>()
         var result: [NextCreditSuggestion] = []
