@@ -8,13 +8,34 @@
 import Darwin
 import Foundation
 
+nonisolated struct RigctldServerLimits: Sendable {
+    var maximumClients = 8
+    var maximumLineBytes = 4096
+    var maximumPendingResponseBytes = 65536
+    var maximumCommandsPerSecond = 256
+}
+
 // MARK: - Hamlib Rigctld TCP Server
 nonisolated final class HamlibRigctldServer: @unchecked Sendable {
     private let queue = DispatchQueue(label: "app.yaam.hamlib-rigctld", qos: .userInitiated)
     private var serverSocket: Int32 = -1
     private var acceptSource: DispatchSourceRead?
     private var clientConnections: [Int32: RigctldClientSession] = [:]
-    private let lock = NSLock()
+    private let queueKey = DispatchSpecificKey<UInt8>()
+    private let limits: RigctldServerLimits
+    private var running = false
+    private var port: UInt16 = 4532
+
+    init(limits: RigctldServerLimits = RigctldServerLimits()) {
+        precondition(limits.maximumClients > 0 && limits.maximumLineBytes > 0 && limits.maximumPendingResponseBytes > 0 && limits.maximumCommandsPerSecond > 0)
+        self.limits = limits
+        queue.setSpecific(key: queueKey, value: 1)
+    }
+
+    private func onQueue<T>(_ work: () throws -> T) rethrows -> T {
+        if DispatchQueue.getSpecific(key: queueKey) != nil { return try work() }
+        return try queue.sync(execute: work)
+    }
 
     // Callbacks to emulator engine
     var getFrequency: (@Sendable () -> UInt64)?
@@ -27,17 +48,19 @@ nonisolated final class HamlibRigctldServer: @unchecked Sendable {
     var onClientCountChanged: (@Sendable (Int) -> Void)?
     var onLogMessage: (@Sendable (String) -> Void)?
 
-    private(set) var isRunning: Bool = false
-    private(set) var boundPort: UInt16 = 4532
+    var isRunning: Bool { onQueue { running } }
+    var boundPort: UInt16 { onQueue { port } }
 
     deinit {
         stop()
     }
 
     func start(port: UInt16 = 4532) throws {
-        lock.lock()
-        defer { lock.unlock() }
-        guard !isRunning else { return }
+        try onQueue { try startOnQueue(port: port) }
+    }
+
+    private func startOnQueue(port: UInt16) throws {
+        guard !running else { return }
 
         let fd = Darwin.socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)
         guard fd >= 0 else {
@@ -74,15 +97,26 @@ nonisolated final class HamlibRigctldServer: @unchecked Sendable {
         }
 
         let flags = fcntl(fd, F_GETFL)
-        if flags >= 0 { _ = fcntl(fd, F_SETFL, flags | O_NONBLOCK) }
+        guard flags >= 0, fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0 else {
+            Darwin.close(fd)
+            throw NSError(domain: "HamlibRigctldServer", code: 4, userInfo: [NSLocalizedDescriptionKey: "Failed to configure a non-blocking server socket."])
+        }
 
         serverSocket = fd
-        boundPort = port
-        isRunning = true
+        var localAddress = sockaddr_in()
+        var localLength = socklen_t(MemoryLayout<sockaddr_in>.size)
+        withUnsafeMutablePointer(to: &localAddress) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                _ = getsockname(fd, $0, &localLength)
+            }
+        }
+        self.port = UInt16(bigEndian: localAddress.sin_port)
+        running = true
 
         let source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: queue)
         source.setEventHandler { [weak self] in
-            self?.acceptIncoming()
+            guard let self, self.running, self.serverSocket == fd else { return }
+            self.acceptIncoming()
         }
         source.setCancelHandler {
             Darwin.close(fd)
@@ -90,29 +124,28 @@ nonisolated final class HamlibRigctldServer: @unchecked Sendable {
         source.resume()
         acceptSource = source
 
-        onLogMessage?("[rigctld] Server listening on TCP port \(port)")
+        onLogMessage?("[rigctld] Server listening on loopback TCP port \(self.port)")
     }
 
     func stop() {
-        lock.lock()
-        guard isRunning else { lock.unlock(); return }
-        isRunning = false
-
-        acceptSource?.cancel()
-        acceptSource = nil
-
-        for (_, client) in clientConnections {
-            client.close()
+        onQueue {
+            guard running else { return }
+            running = false
+            serverSocket = -1
+            acceptSource?.cancel()
+            acceptSource = nil
+            let sessions = Array(clientConnections.values)
+            clientConnections.removeAll()
+            for client in sessions { client.close() }
+            onClientCountChanged?(0)
+            onLogMessage?("[rigctld] Server stopped")
         }
-        clientConnections.removeAll()
-        lock.unlock()
-
-        onClientCountChanged?(0)
-        onLogMessage?("[rigctld] Server stopped")
     }
 
     private func acceptIncoming() {
-        while true {
+        // Yield between accept batches so existing clients and STOP are not starved.
+        for _ in 0..<16 {
+            guard running else { return }
             var clientAddr = sockaddr_in()
             var len = socklen_t(MemoryLayout<sockaddr_in>.size)
             let clientFd = withUnsafeMutablePointer(to: &clientAddr) { ptr in
@@ -121,12 +154,22 @@ nonisolated final class HamlibRigctldServer: @unchecked Sendable {
                 }
             }
 
-            guard clientFd >= 0 else { break }
+            guard clientFd >= 0 else {
+                if errno == EINTR { continue }
+                break
+            }
+            guard clientConnections.count < limits.maximumClients else {
+                Darwin.close(clientFd)
+                continue
+            }
 
             var opt: Int32 = 1
-            setsockopt(clientFd, SOL_SOCKET, SO_NOSIGPIPE, &opt, socklen_t(MemoryLayout<Int32>.size))
+            let noSigpipe = setsockopt(clientFd, SOL_SOCKET, SO_NOSIGPIPE, &opt, socklen_t(MemoryLayout<Int32>.size))
             let flags = fcntl(clientFd, F_GETFL)
-            if flags >= 0 { _ = fcntl(clientFd, F_SETFL, flags | O_NONBLOCK) }
+            guard noSigpipe == 0, flags >= 0, fcntl(clientFd, F_SETFL, flags | O_NONBLOCK) == 0 else {
+                Darwin.close(clientFd)
+                continue
+            }
 
             var clientIP = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
             var sinAddr = clientAddr.sin_addr
@@ -139,6 +182,8 @@ nonisolated final class HamlibRigctldServer: @unchecked Sendable {
                 remoteIP: ipString,
                 remotePort: clientPort,
                 queue: queue,
+                queueKey: queueKey,
+                limits: limits,
                 onCommand: { [weak self] cmd in
                     self?.handleCommand(cmd) ?? "RPRT -1\n"
                 },
@@ -147,10 +192,8 @@ nonisolated final class HamlibRigctldServer: @unchecked Sendable {
                 }
             )
 
-            lock.lock()
             clientConnections[clientFd] = session
             let count = clientConnections.count
-            lock.unlock()
 
             onClientCountChanged?(count)
             onLogMessage?("[rigctld] Client connected from \(ipString):\(clientPort)")
@@ -159,10 +202,8 @@ nonisolated final class HamlibRigctldServer: @unchecked Sendable {
     }
 
     private func removeClient(fd: Int32) {
-        lock.lock()
-        clientConnections.removeValue(forKey: fd)
+        guard clientConnections.removeValue(forKey: fd) != nil else { return }
         let count = clientConnections.count
-        lock.unlock()
         onClientCountChanged?(count)
         onLogMessage?("[rigctld] Client disconnected (fd \(fd))")
     }
@@ -295,85 +336,141 @@ nonisolated final class HamlibRigctldServer: @unchecked Sendable {
 }
 
 // MARK: - Individual Client TCP Session
+// All mutable session/socket state belongs to the server queue.
 nonisolated final class RigctldClientSession: @unchecked Sendable {
     let fd: Int32
     let remoteIP: String
     let remotePort: UInt16
     private let queue: DispatchQueue
+    private let queueKey: DispatchSpecificKey<UInt8>
+    private let limits: RigctldServerLimits
     private let onCommand: (String) -> String
     private let onClose: (Int32) -> Void
     private var source: DispatchSourceRead?
+    private var writeSource: DispatchSourceWrite?
     private var receiveBuffer = Data()
+    private var pendingResponse = Data()
     private var isClosed = false
-    private let lock = NSLock()
+    private var descriptorClosed = false
+    private var activeSources = 0
+    private var commandWindowStart = DispatchTime.now().uptimeNanoseconds
+    private var commandsInWindow = 0
 
-    init(
-        fd: Int32,
-        remoteIP: String,
-        remotePort: UInt16,
-        queue: DispatchQueue,
-        onCommand: @escaping (String) -> String,
-        onClose: @escaping (Int32) -> Void
-    ) {
+    init(fd: Int32, remoteIP: String, remotePort: UInt16, queue: DispatchQueue,
+         queueKey: DispatchSpecificKey<UInt8>, limits: RigctldServerLimits,
+         onCommand: @escaping (String) -> String, onClose: @escaping (Int32) -> Void) {
         self.fd = fd
         self.remoteIP = remoteIP
         self.remotePort = remotePort
         self.queue = queue
+        self.queueKey = queueKey
+        self.limits = limits
         self.onCommand = onCommand
         self.onClose = onClose
     }
 
     func start() {
+        precondition(DispatchQueue.getSpecific(key: queueKey) != nil)
+        guard !isClosed, source == nil else { return }
         let readSource = DispatchSource.makeReadSource(fileDescriptor: fd, queue: queue)
-        readSource.setEventHandler { [weak self] in
-            self?.readData()
-        }
-        readSource.setCancelHandler { [weak self] in
-            guard let self else { return }
-            Darwin.close(self.fd)
-            self.onClose(self.fd)
-        }
+        readSource.setEventHandler { [weak self] in self?.readData() }
+        // Keep the session alive until all cancelled sources release the descriptor.
+        readSource.setCancelHandler { self.sourceCancelled() }
+        activeSources += 1
         source = readSource
         readSource.resume()
     }
 
     func close() {
-        lock.lock()
-        guard !isClosed else { lock.unlock(); return }
+        precondition(DispatchQueue.getSpecific(key: queueKey) != nil)
+        guard !isClosed else { return }
         isClosed = true
         source?.cancel()
         source = nil
-        lock.unlock()
+        writeSource?.cancel()
+        writeSource = nil
+        receiveBuffer.removeAll()
+        pendingResponse.removeAll()
+        if activeSources == 0 { finishClose() }
+    }
+
+    private func sourceCancelled() {
+        activeSources -= 1
+        if isClosed && activeSources == 0 { finishClose() }
+    }
+
+    private func finishClose() {
+        guard !descriptorClosed else { return }
+        descriptorClosed = true
+        Darwin.close(fd)
+        onClose(fd)
     }
 
     private func readData() {
+        guard !isClosed else { return }
         var buffer = [UInt8](repeating: 0, count: 4096)
         let bytesRead = Darwin.recv(fd, &buffer, buffer.count, 0)
         guard bytesRead > 0 else {
+            if bytesRead < 0 && [EINTR, EAGAIN, EWOULDBLOCK].contains(errno) { return }
             close()
             return
         }
-
-        receiveBuffer.append(buffer, count: bytesRead)
-
-        // Process line-by-line (\n or \r\n)
-        while let newlineIndex = receiveBuffer.firstIndex(of: 0x0A) {
-            let lineData = receiveBuffer.subdata(in: 0..<newlineIndex)
-            receiveBuffer.removeSubrange(0...newlineIndex)
-
-            if let line = String(data: lineData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines), !line.isEmpty {
-                let response = onCommand(line)
-                if !response.isEmpty {
+        // Frame bytes before decoding. One oversized line is never dispatched, even if
+        // followed by a valid PTT command in the same packet. Memory stays bounded.
+        for byte in buffer.prefix(bytesRead) {
+            guard !isClosed else { return }
+            if byte == 0x0A {
+                guard let line = String(data: receiveBuffer, encoding: .utf8),
+                      !receiveBuffer.contains(0) else { close(); return }
+                receiveBuffer.removeAll(keepingCapacity: true)
+                let command = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !command.isEmpty {
+                    let now = DispatchTime.now().uptimeNanoseconds
+                    if now - commandWindowStart >= 1_000_000_000 {
+                        commandWindowStart = now
+                        commandsInWindow = 0
+                    }
+                    guard commandsInWindow < limits.maximumCommandsPerSecond else { close(); return }
+                    commandsInWindow += 1
+                    let response = onCommand(command)
+                    guard !isClosed else { return }
                     send(response)
                 }
+            } else {
+                guard receiveBuffer.count < limits.maximumLineBytes else { close(); return }
+                receiveBuffer.append(byte)
             }
         }
     }
 
     private func send(_ string: String) {
-        guard let data = string.data(using: .utf8) else { return }
-        data.withUnsafeBytes { ptr in
-            _ = Darwin.send(fd, ptr.baseAddress, ptr.count, 0)
+        guard !string.isEmpty else { return }
+        let data = Data(string.utf8)
+        guard data.count <= limits.maximumPendingResponseBytes - pendingResponse.count else { close(); return }
+        pendingResponse.append(data)
+        flushResponse()
+    }
+
+    private func flushResponse() {
+        guard !isClosed else { return }
+        // One bounded send per callback; retain partial writes and retry when writable.
+        let sent = pendingResponse.withUnsafeBytes { Darwin.send(fd, $0.baseAddress, $0.count, 0) }
+        if sent > 0 {
+            pendingResponse.removeFirst(sent)
+        } else if sent < 0 && ![EINTR, EAGAIN, EWOULDBLOCK].contains(errno) {
+            close()
+            return
+        }
+        if pendingResponse.isEmpty {
+            writeSource?.cancel()
+            writeSource = nil
+        } else if writeSource == nil {
+            let writable = DispatchSource.makeWriteSource(fileDescriptor: fd, queue: queue)
+            writable.setEventHandler { [weak self] in self?.flushResponse() }
+            writable.setCancelHandler { self.sourceCancelled() }
+            activeSources += 1
+            writeSource = writable
+            writable.resume()
         }
     }
 }
