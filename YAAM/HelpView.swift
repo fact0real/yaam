@@ -21,7 +21,7 @@ private enum HelpTopic: String, CaseIterable, Identifiable {
         case .convertExport: return "Convert & Export"
         case .globeGrids: return "3D Globe & GridTracker"
         case .greylineOverlay: return "Live Greyline & Solar Ducting"
-        case .bandmap: return "Spectrum Bandmap & Waterfall"
+        case .bandmap: return "Bandmap & Spot Activity"
         case .pileupSniper: return "Pileup Sniper & Split QSX"
         case .cwWinKeyer: return "CW Keyer & WinKeyer"
         case .cwAcademy: return "CW Academy & Audio Decoder"
@@ -393,6 +393,8 @@ struct HelpView: View {
                 HelpDefinition(icon: "flag.2.crossed", title: "Country names stay consistent", text: "YAAM recognizes formal names, capitalization differences, abbreviations, and common legacy spellings as the same country. Federal Republic of Germany becomes Germany, Mt Athos becomes Mount Athos, Rodrigez Is. becomes Rodrigues Island, and Balearic Is. becomes Balearic Islands. Distinct DXCC entities such as Crete, European Russia, and Asiatic Russia remain separate; the ambiguous label Russia is preserved until a callsign or DXCC identifier can resolve it safely.", color: .green)
             }
             helpSection("Confirmation Credit Intelligence") {
+                HelpDefinition(icon: "sparkles", title: "Next Credit", text: "Open Next Credit above the Log Table to rank unconfirmed contacts from the active station. Adjust country-band, grid, award milestone, confirmation evidence and effort/age weights. Credits already counted in earlier recommendations are discounted. Response likelihood remains a disclosed heuristic, not a percentage. Review QSO opens an editable reminder; nothing is sent automatically.", color: .purple)
+                HelpDefinition(icon: "paperclip", title: "QSL card before confirmation", text: "Email your card for any recorded contact with an address, even before the other operator confirms it. Preview PDF shows the exact attachment to be sent; export failure prevents sending. A successful email marks the card sent, never confirmed. Rank emails omit unknown or invalid ranks and warn that available observations may be older.", color: .blue)
                 HelpDefinition(icon: "rectangle.stack.badge.plus", title: "BAND CREDIT", text: "For an unconfirmed QSO, NEW means that confirming it would create the first confirmed contact on that band for the contact's country. HAVE means that country-band combination is already confirmed.", color: .blue)
                 HelpDefinition(icon: "square.grid.3x3.fill", title: "GRID CREDIT", text: "NEW means confirmation would add a new confirmed four-character Maidenhead grid. YAAM uses the leftmost four grid characters and can derive the grid from latitude and longitude when needed.", color: .mint)
                 HelpDefinition(icon: "checkmark.seal.fill", title: "Badge meanings", text: "DONE marks an already confirmed QSO. NEW identifies a useful confirmation opportunity, HAVE means the credit already exists, and N/A means the QSO does not contain enough country, band, grid, or coordinate data.", color: .green)
@@ -2475,8 +2477,8 @@ struct HelpView: View {
     private var bandmapView: some View {
         Group {
             helpHeader(
-                title: "Spectrum Bandmap & Waterfall",
-                subtitle: "Interactive 3-pane radio spectrum workspace featuring a vertical frequency ruler, live SDR waterfall, DX cluster spots, dual VFO split tracking, and 1-click transceiver QSY.",
+                title: "Bandmap & Spot Activity",
+                subtitle: "A 3-pane spot workspace with a frequency ruler, illustrated spot activity, dual VFO markers and CAT tuning. These graphics are not received RF or measured waterfall history.",
                 icon: "waveform.path.ecg.rectangle",
                 color: .mint
             )
@@ -2484,9 +2486,9 @@ struct HelpView: View {
             HelpBandmapMockup()
 
             HelpFlow(steps: [
-                HelpFlowStep(icon: "square.split.3x1", title: "1. Choose View Mode", detail: "Switch between Studio (3-Pane), Ruler & Spots, SDR Waterfall, or 4-Band Multi-Band Panorama."),
+                HelpFlowStep(icon: "square.split.3x1", title: "1. Choose View Mode", detail: "Switch between Studio (3-Pane), Ruler & Spots, Spot Waterfall, or Multi-Band Panorama."),
                 HelpFlowStep(icon: "link", title: "2. Connect Rig CAT", detail: "Connect via Hamlib rigctld, FLRig, or TCI SDR for zero-latency bidirectional frequency synchronization."),
-                HelpFlowStep(icon: "waveform.path.ecg", title: "3. Monitor Activity", detail: "Observe RF density on the thermal heatmap ribbon and watch real-time waterfall signal traces."),
+                HelpFlowStep(icon: "waveform.path.ecg", title: "3. Monitor Activity", detail: "Observe reported spot density. Curves and waterfall colors illustrate spot activity, not measured RF strength. Empty bands show no spot data; simulated sources are labeled."),
                 HelpFlowStep(icon: "hand.tap.fill", title: "4. One-Click QSY & Log", detail: "Click any spot or frequency on the ruler to jump your VFO instantly; double-click to populate Quick Log.")
             ])
 
@@ -2499,8 +2501,8 @@ struct HelpView: View {
                 )
                 HelpDefinition(
                     icon: "waveform.path.ecg",
-                    title: "Center Pane: Live SDR Spectrum & Waterfall",
-                    text: "Real-time spectrum analyzer with adjustable FFT zoom (0.5x to 4x), peak hold indicators, and smooth cascading multi-color waterfall gradient.",
+                    title: "Center Pane: Illustrated Spot Activity",
+                    text: "The center illustrates DX spots by frequency. CAT connection supplies tuning information only and does not turn this view into an RF receiver. Use the digital station receive waterfall for measured audio activity.",
                     color: .blue
                 )
                 HelpDefinition(
@@ -3888,7 +3890,7 @@ struct HelpBandmapMockup: View {
                 Image(systemName: "waveform.path.ecg.rectangle")
                     .font(.headline)
                     .foregroundStyle(.mint)
-                Text("Spectrum Bandmap & Waterfall Studio — 3-Pane Pro Layout")
+                Text("Bandmap & Spot Activity — illustrated example")
                     .font(.subheadline.weight(.bold))
                 Spacer()
                 HStack(spacing: 6) {
@@ -3933,7 +3935,7 @@ struct HelpBandmapMockup: View {
                 // Center: SDR Spectrum & Waterfall
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
-                        Text("SDR SPECTRUM & WATERFALL").font(.system(size: 8.5, weight: .bold)).foregroundStyle(.tertiary)
+                        Text("ILLUSTRATED SPOT ACTIVITY").font(.system(size: 8.5, weight: .bold)).foregroundStyle(.tertiary)
                         Spacer()
                         Text("VFO A: 14.074.000").font(.system(size: 9, weight: .bold, design: .monospaced)).foregroundStyle(.green)
                     }

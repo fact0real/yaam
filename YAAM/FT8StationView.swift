@@ -2601,6 +2601,7 @@ struct FT8StationView: View {
 struct FT8SpectrumWaterfallView: View {
     @ObservedObject var engine: FT8EngineService
     @State private var cachedWaterfallImage: CGImage?
+    @State private var rasterizer = FT8WaterfallRasterizer()
     var onSelectRxFrequency: (Float) -> Void
     var onSelectTxFrequency: (Float) -> Void
 
@@ -2637,9 +2638,12 @@ struct FT8SpectrumWaterfallView: View {
                     }
             )
         }
-        .onAppear { cachedWaterfallImage = Self.createWaterfallImage(rows: engine.waterfallRows) }
-        .onChange(of: engine.waterfallRevision) { _, _ in
-            cachedWaterfallImage = Self.createWaterfallImage(rows: engine.waterfallRows)
+        .task(id: engine.waterfallRevision) {
+            let revision = engine.waterfallRevision
+            let rows = engine.waterfallRows
+            let image = await rasterizer.image(rows: rows, revision: revision)
+            guard !Task.isCancelled, revision == engine.waterfallRevision else { return }
+            cachedWaterfallImage = image
         }
     }
 
@@ -2827,93 +2831,6 @@ struct FT8SpectrumWaterfallView: View {
             txLine.addLine(to: CGPoint(x: txX, y: cSize.height))
             context.stroke(txLine, with: .color(Color.red.opacity(0.7)), lineWidth: 1.0)
         }
-    }
-
-    private static func createWaterfallImage(rows: [[Float]]) -> CGImage? {
-        guard !rows.isEmpty else { return nil }
-        let height = rows.count
-        guard let width = rows.first?.count, width > 0, height > 0 else { return nil }
-
-        var pixels = [UInt32](repeating: 0, count: width * height)
-        for r in 0..<height {
-            // Invert row index so newest row (rows.last) appears at r = 0 (top line directly under frequency ruler)
-            let row = rows[height - 1 - r]
-            let rowOffset = r * width
-            let colCount = min(width, row.count)
-            for c in 0..<colCount {
-                let index = Int(min(255, max(0, row[c] * 255)))
-                pixels[rowOffset + c] = waterfallPalette[index]
-            }
-        }
-
-        let data = Data(bytes: &pixels, count: pixels.count * 4)
-        guard let provider = CGDataProvider(data: data as CFData) else { return nil }
-        let colorSpace = CGColorSpaceCreateDeviceRGB()
-        let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
-
-        return CGImage(
-            width: width,
-            height: height,
-            bitsPerComponent: 8,
-            bitsPerPixel: 32,
-            bytesPerRow: width * 4,
-            space: colorSpace,
-            bitmapInfo: bitmapInfo,
-            provider: provider,
-            decode: nil,
-            shouldInterpolate: true,
-            intent: .defaultIntent
-        )
-    }
-
-    private static let waterfallPalette = (0...255).map { waterfallRGB32(Float($0) / 255) }
-
-    private static func waterfallRGB32(_ rawValue: Float) -> UInt32 {
-        let v = min(1.0, max(0.0, rawValue))
-        let r: UInt8
-        let g: UInt8
-        let b: UInt8
-
-        if v < 0.10 {
-            // Inky space black to deep midnight navy (noise floor)
-            let t = v / 0.10
-            r = UInt8(1 * t)
-            g = UInt8(2 * t)
-            b = UInt8(10 * t)
-        } else if v < 0.25 {
-            // Faint noise: Deep navy to rich cobalt blue
-            let t = (v - 0.10) / 0.15
-            r = UInt8(1 + t * 5)
-            g = UInt8(2 + t * 35)
-            b = UInt8(10 + t * 135)
-        } else if v < 0.45 {
-            // Weak FT8 signal tones: Cobalt blue to electric glowing cyan
-            let t = (v - 0.25) / 0.20
-            r = UInt8(6 + t * 14)
-            g = UInt8(37 + t * 185)
-            b = UInt8(145 + t * 110)
-        } else if v < 0.65 {
-            // Solid FT8 tones: Electric cyan to brilliant neon emerald green
-            let t = (v - 0.45) / 0.20
-            r = UInt8(20 + t * 65)
-            g = UInt8(222 + t * 33)
-            b = UInt8(255 - t * 215)
-        } else if v < 0.85 {
-            // Strong signals: Neon green to bright sun yellow and amber
-            let t = (v - 0.65) / 0.20
-            r = UInt8(85 + t * 170)
-            g = UInt8(255 - t * 45)
-            b = UInt8(40 - t * 30)
-        } else {
-            // S9+ local signals: Flaming orange to white-hot peak
-            let t = (v - 0.85) / 0.15
-            r = 255
-            let gVal = 210 * (1.0 - t * 0.4)
-            g = UInt8(max(0, min(255, gVal)))
-            b = UInt8(10 + t * 235)
-        }
-
-        return (0xFF << 24) | (UInt32(b) << 16) | (UInt32(g) << 8) | UInt32(r)
     }
 
     private func xForFrequency(_ freq: Float, width: CGFloat) -> CGFloat {

@@ -1891,8 +1891,9 @@ class AppState: NSObject, ObservableObject {
     @Published var ownerRankData: QRZRankResponse? = nil {
         didSet { invalidateStatisticsCache() }
     }
-    @Published var trackedRankCallsigns: [String] = []
-    @Published var rankHistorySnapshots: [QRZRankHistorySnapshot] = []
+    @Published var trackedRankCallsigns: [String] = [] { didSet { rankTrendSeriesCache.removeAll() } }
+    @Published var rankHistorySnapshots: [QRZRankHistorySnapshot] = [] { didSet { rankTrendSeriesCache.removeAll() } }
+    private var rankTrendSeriesCache: [RankHistoryMetric: (owner: String, series: [RankTrendSeries])] = [:]
     @Published var isRefreshingRankHistory: Bool = false
     @Published var rankHistoryStatus: String = ""
     @Published var rankServiceStatus: String = ""
@@ -3344,8 +3345,12 @@ class AppState: NSObject, ObservableObject {
     }
 
     func rankTrendSeries(metric: RankHistoryMetric) -> [RankTrendSeries] {
-        RankHistoryAnalysis.series(snapshots: rankHistorySnapshots, owner: currentStationCallsign,
-                                   tracked: trackedRankCallsigns, metric: metric)
+        let owner = currentStationCallsign
+        if let cached = rankTrendSeriesCache[metric], cached.owner == owner { return cached.series }
+        let series = RankHistoryAnalysis.series(snapshots: rankHistorySnapshots, owner: owner,
+                                               tracked: trackedRankCallsigns, metric: metric)
+        rankTrendSeriesCache[metric] = (owner, series)
+        return series
     }
 
     private func loadRankHistory() {
@@ -6130,17 +6135,9 @@ class AppState: NSObject, ObservableObject {
         let email = record["EMAIL"]
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
-        guard record.isConfirmed else {
-            alertTitle = "QSO Not Confirmed"
-            alertMessage = "QSL card delivery is available after the QSO is confirmed."
-            showAlert = true
-            playActivitySound(.failure)
-            return
-        }
-
         guard !callsign.isEmpty, !email.isEmpty else {
             alertTitle = "Email Address Missing"
-            alertMessage = "This confirmed QSO does not have an email address yet. Enrich the callsign or add an EMAIL value first."
+            alertMessage = "This QSO does not have an email address yet. Enrich the callsign or add an EMAIL value first."
             showAlert = true
             playActivitySound(.failure)
             return

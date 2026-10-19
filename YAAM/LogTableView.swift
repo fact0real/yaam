@@ -133,8 +133,9 @@ struct LogTableView: View {
     @State private var showFullConfirmationSyncPrompt = false
     @State private var selectedEQSLRecord: QSORecordModel? = nil
     @State private var showEQSLCardSheet = false
+    @State private var showNextCredit = false
+    @State private var nextCreditSelectedRecordID: UUID?
     @State private var activeTablePopover: ActiveTablePopover? = nil
-    @State private var pinnedOffsetX: CGFloat = 0
     @State private var isRoverControlSheetPresented = false
     @State private var localSearchText: String = ""
     @State private var searchDebounceTask: Task<Void, Never>? = nil
@@ -188,6 +189,12 @@ struct LogTableView: View {
 
         ScrollViewReader { scrollProxy in
             VStack(spacing: 0) {
+            HStack {
+                Button { showNextCredit = true } label: { Label("Next Credit", systemImage: "sparkles") }
+                    .help("Rank unconfirmed contacts by their next country-band, grid and award credit")
+                Text("Find the most valuable confirmation to follow up next").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+            }.padding(.horizontal, 12).padding(.vertical, 6)
             // MARK: - Toolbar & Quick Actions Summary Bar
             HStack(spacing: 8) {
                 Menu {
@@ -966,16 +973,13 @@ struct LogTableView: View {
 
                             GeometryReader { geo in
                                 let frame = geo.frame(in: .named("logTableScrollSpace"))
-                                let rawX = frame.minX
-                                let scrollX = max(0, -rawX)
-                                let quantizedX = scrollX < 10.0 ? 0.0 : (floor(scrollX / 8.0) * 8.0)
                                 let rawY = frame.minY
                                 let scrollY = max(0, -rawY)
                                 let isScrolledDown = scrollY > 60.0
 
                                 Color.clear.preference(
                                     key: LogTableScrollStateKey.self,
-                                    value: LogTableScrollState(quantizedX: quantizedX, isScrolledDown: isScrolledDown)
+                                    value: LogTableScrollState(isScrolledDown: isScrolledDown)
                                 )
                             }
                             .frame(height: 0)
@@ -1001,7 +1005,6 @@ struct LogTableView: View {
                                                 ordinal: appState.filteredChronologicalOrdinal(for: record.id),
                                                 sentEmail: appState.emailHistoryByCallsign[cleanCall],
                                                 opportunity: appState.confirmationOpportunityIndex.opportunity(for: record.id),
-                                                pinnedOffsetX: pinnedOffsetX,
                                                 isEditingThisRow: editingCellID == record.id,
                                                 editingHeader: editingCellID == record.id ? editingHeader : nil,
                                                 editingText: $editingText,
@@ -1051,9 +1054,6 @@ struct LogTableView: View {
                         }
                         .coordinateSpace(name: "logTableScrollSpace")
                         .onPreferenceChange(LogTableScrollStateKey.self) { state in
-                            if pinnedOffsetX != state.quantizedX {
-                                pinnedOffsetX = state.quantizedX
-                            }
                             if showBackToTop != state.isScrolledDown {
                                 withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
                                     showBackToTop = state.isScrolledDown
@@ -1200,6 +1200,21 @@ struct LogTableView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("YAAM will page through every confirmed QRZ record and download LoTW confirmations from the beginning. The active station needs its QRZ Logbook API key and Settings needs your LoTW credentials. Existing log entries are preserved; only confirmation fields are reconciled.")
+        }
+        .sheet(isPresented: $showNextCredit, onDismiss: {
+            if let id = nextCreditSelectedRecordID, let record = appState.qsoRecords.first(where: { $0.id == id }) {
+                if record["EMAIL"].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    activeTablePopover = .callsign(record)
+                } else {
+                    appState.openQSLReminderEmailComposer(for: record)
+                }
+            }
+            nextCreditSelectedRecordID = nil
+        }) {
+            NextCreditView { id in
+                nextCreditSelectedRecordID = id
+                showNextCredit = false
+            }.environmentObject(appState)
         }
         .sheet(isPresented: $showEQSLCardSheet) {
             if let record = selectedEQSLRecord {
@@ -1400,9 +1415,9 @@ struct LogTableView: View {
                     }
                 }
                 .background(Color(white: 0.12))
-                .offset(x: pinnedOffsetX)
+                .modifier(PinnedLogColumns())
                 .zIndex(20)
-                .shadow(color: pinnedOffsetX > 2 ? Color.black.opacity(0.4) : Color.clear, radius: 4, x: 2, y: 0)
+                .shadow(color: Color.black.opacity(0.15), radius: 4, x: 2, y: 0)
 
                 // Scrollable Trailing Headers
                 HStack(spacing: 0) {
@@ -1837,7 +1852,6 @@ fileprivate struct LogRowView: View, Equatable {
     let ordinal: Int?
     let sentEmail: EmailHistoryEntry?
     let opportunity: QSOConfirmationOpportunity?
-    let pinnedOffsetX: CGFloat
     let isEditingThisRow: Bool
     let editingHeader: String?
     @Binding var editingText: String
@@ -1859,7 +1873,6 @@ fileprivate struct LogRowView: View, Equatable {
         lhs.isNewlyConfirmed == rhs.isNewlyConfirmed &&
         lhs.isTodayConfirmed == rhs.isTodayConfirmed &&
         lhs.ordinal == rhs.ordinal &&
-        lhs.pinnedOffsetX == rhs.pinnedOffsetX &&
         lhs.isEditingThisRow == rhs.isEditingThisRow &&
         lhs.editingHeader == rhs.editingHeader &&
         (!lhs.isEditingThisRow || lhs.editingText == rhs.editingText) &&
@@ -1931,11 +1944,11 @@ fileprivate struct LogRowView: View, Equatable {
                 }
             }
             .background(Color(NSColor.textBackgroundColor))
-            .offset(x: pinnedOffsetX)
+            .modifier(PinnedLogColumns())
             .zIndex(10)
             .overlay(
                 Rectangle()
-                    .fill(pinnedOffsetX > 2 ? Color.black.opacity(0.3) : Color.clear)
+                    .fill(Color.black.opacity(0.15))
                     .frame(width: 1),
                 alignment: .trailing
             )
@@ -2111,11 +2124,11 @@ fileprivate struct LogRowView: View, Equatable {
                                 }
                             }
 
-                            if record.isConfirmed {
+                            if !val.isEmpty {
                                 Button {
                                     onAction(.openQSLCardComposer)
                                 } label: {
-                                    Image(systemName: "photo.badge.checkmark")
+                                    Image(systemName: "rectangle.on.rectangle")
                                         .font(.system(size: 8.5))
                                         .foregroundColor(.secondary)
                                         .padding(2.5)
@@ -2381,7 +2394,7 @@ fileprivate struct LogRowView: View, Equatable {
             Button("Email QSL Card") {
                 onAction(.openEmailQSLCard)
             }
-            .disabled(!record.isConfirmed || record["EMAIL"].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .disabled(record["EMAIL"].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
             if ["RANK_QSO", "RANK_BAND", "RANK_DXCC"].contains(where: { !record[$0].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
                 Button("Congratulate QRZ Achievement & Request Confirmation") {
@@ -3549,7 +3562,6 @@ struct GridInspectionCard: View {
 }
 
 private struct LogTableScrollState: Equatable {
-    var quantizedX: CGFloat = 0
     var isScrolledDown: Bool = false
 }
 

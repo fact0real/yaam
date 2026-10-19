@@ -262,14 +262,14 @@ nonisolated struct QRZRankHistorySnapshot: Identifiable, Codable, Sendable {
     }
 }
 
-nonisolated struct RankTrendPoint: Identifiable, Sendable {
+nonisolated struct RankTrendPoint: Identifiable, Sendable, Equatable {
     var id: String { "\(date.timeIntervalSince1970)-\(rank)" }
     let date: Date
     let label: String
     let rank: Int
 }
 
-nonisolated struct RankTrendSeries: Identifiable, Sendable {
+nonisolated struct RankTrendSeries: Identifiable, Sendable, Equatable {
     var id: String { callsign }
     let callsign: String
     let countryIso: String?

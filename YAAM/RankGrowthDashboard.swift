@@ -16,8 +16,9 @@ struct RankPerformanceMonitor: View {
     var now: Date = Date()
 
     private var owner: RankTrendSeries? { series.first(where: \.isOwner) }
-    private var points: [RankTrendPoint] { RankGrowthAnalysis.points(owner?.points ?? [], period: period, now: now) }
-    private var comparisons: [RankGrowthComparison] { RankGrowthAnalysis.comparisons(series: series, period: period, now: now) }
+    @State private var points: [RankTrendPoint] = []
+    @State private var comparisons: [RankGrowthComparison] = []
+    private var observationDay: Int { Int(now.timeIntervalSince1970 / 86400) }
     private var comparison: RankGrowthComparison? { comparisons.first(where: { $0.callsign == selectedRival }) ?? comparisons.first(where: { $0.dates.count >= 2 }) ?? comparisons.first }
     private var movement: Int? { RankGrowthAnalysis.improvement(points) }
     private var comparable: [RankGrowthComparison] { comparisons.filter { $0.gain != nil } }
@@ -53,10 +54,18 @@ struct RankPerformanceMonitor: View {
         .background(.background, in: RoundedRectangle(cornerRadius: 16))
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.blue.opacity(0.2)))
         .environment(\.timeZone, TimeZone(secondsFromGMT: 0)!)
-        .onChange(of: period) { _, _ in selectedDate = nil }
+        .onAppear { refreshAnalysis() }
+        .onChange(of: series) { _, _ in refreshAnalysis() }
+        .onChange(of: observationDay) { _, _ in refreshAnalysis() }
+        .onChange(of: period) { _, _ in selectedDate = nil; refreshAnalysis() }
         .onChange(of: metric) { _, _ in selectedDate = nil }
         .onChange(of: selectedRival) { _, _ in selectedDate = nil }
         .onChange(of: race) { _, _ in selectedDate = nil }
+    }
+
+    private func refreshAnalysis() {
+        points = RankGrowthAnalysis.points(owner?.points ?? [], period: period, now: now)
+        comparisons = RankGrowthAnalysis.comparisons(series: series, period: period, now: now)
     }
 
     @ViewBuilder private var summaryCards: some View {

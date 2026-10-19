@@ -17,11 +17,16 @@ struct EmailComposerView: View {
     @State private var emailSubject: String = ""
     @State private var emailBody: String = ""
     @State private var isSending: Bool = false
+    @State private var cardPreviewURL: URL?
+    @State private var cardStationProfileID: UUID?
+    @State private var cardAttachmentData: Data?
+    @State private var cardAttachmentName: String?
+    @State private var cardAttachmentError: String?
     @AppStorage("qslCardDeliveryEmailSubject") private var qslCardDeliveryEmailSubject = "QSL Card for our QSO - {CALLSIGN} de {MY_CALL}"
     @AppStorage("qslCardDeliveryEmailBody") private var qslCardDeliveryEmailBody = """
 Hello {NAME},
 
-It was a genuine pleasure to meet you on the air. I have attached my QSL card for our confirmed contact.{QSO_DETAILS}
+It was a genuine pleasure to meet you on the air. I have attached my QSL card for our recorded contact.{QSO_DETAILS}
 
 Thank you for the QSO. This card was prepared with YAAM.
 
@@ -210,6 +215,22 @@ Warm 73,
                     .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.gray.opacity(0.3), lineWidth: 1))
             }
             
+            if QSLMailPolicy.requiresCard(template: selectedTemplate) {
+                HStack {
+                    Label(cardAttachmentName ?? "QSL card unavailable", systemImage: "paperclip")
+                        .font(.caption)
+                    Spacer()
+                    if let cardPreviewURL {
+                        Button("Preview PDF") { NSWorkspace.shared.open(cardPreviewURL) }
+                    } else {
+                        Button("Retry PDF") { prepareCardAttachment(template: selectedTemplate) }
+                    }
+                }
+                if let cardAttachmentError {
+                    Text(cardAttachmentError).font(.caption).foregroundStyle(.red)
+                }
+            }
+
             HStack {
                 if isSending {
                     ProgressView()
@@ -237,6 +258,7 @@ Warm 73,
                 .tint(.blue)
                 .disabled(
                     isSending ||
+                    (QSLMailPolicy.requiresCard(template: selectedTemplate) && cardAttachmentData == nil) ||
                     !hasUsableRecipient ||
                     emailSubject.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
                     emailBody.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -265,12 +287,14 @@ Warm 73,
             loadTemplate(selectedTemplate)
         }
         .onDisappear {
+            if let cardPreviewURL { try? FileManager.default.removeItem(at: cardPreviewURL) }
             resetDraftContext()
         }
     }
     
     // MARK: - Template Engine with Exact QSO Details Extractor
     private func loadTemplate(_ template: String) {
+        prepareCardAttachment(template: template)
         let myCall = resolvedMyCallsign
         let targetCall = appState.selectedEmailCallsign
         let requestQSOs = unconfirmedQSOsForRequest
@@ -348,9 +372,11 @@ Warm 73,
 
         case "QRZ Rank Congratulations & QSL":
             let matchedRank = appState.qrzComparisonRankData.first { $0.callsign?.uppercased() == targetCall.uppercased() }
-            let qsoRankVal = formatRankDisplay(qso?["RANK_QSO"]) ?? formatRankDisplay(matchedRank?.rank_qso) ?? "#40,829"
-            let bandRankVal = formatRankDisplay(qso?["RANK_BAND"]) ?? formatRankDisplay(matchedRank?.rank_band) ?? "#33,425"
-            let dxccRankVal = formatRankDisplay(qso?["RANK_DXCC"]) ?? formatRankDisplay(matchedRank?.rank_countries) ?? "#41,100"
+            let rankParagraph = QSLMailPolicy.rankParagraph(
+                qso: QSLMailPolicy.rank(qso?["RANK_QSO"]) ?? QSLMailPolicy.rank(matchedRank?.rank_qso),
+                band: QSLMailPolicy.rank(qso?["RANK_BAND"]) ?? QSLMailPolicy.rank(matchedRank?.rank_band),
+                dxcc: QSLMailPolicy.rank(qso?["RANK_DXCC"]) ?? QSLMailPolicy.rank(matchedRank?.rank_countries)
+            )
 
             let confirmationBlock: String
             if qso?.isConfirmed == true {
@@ -368,7 +394,8 @@ Warm 73,
 
             let qsoDetailsFormatted = qsoDetailsLines.isEmpty ? "" : "QSO Details:\n" + qsoDetailsLines.joined(separator: "\n")
 
-            emailSubject = "Great QSO\(bandMention) / QSL & QRZ note - \(myCall)"
+            let hasRanks = [qso?["RANK_QSO"], qso?["RANK_BAND"], qso?["RANK_DXCC"], matchedRank?.rank_qso, matchedRank?.rank_band, matchedRank?.rank_countries].contains { QSLMailPolicy.rank($0) != nil }
+            emailSubject = QSLMailPolicy.rankSubject(hasRanks: hasRanks, bandMention: bandMention, station: myCall)
 
             emailBody = """
             Hi \(greetingName),
@@ -377,12 +404,7 @@ Warm 73,
             \(confirmationBlock)
             \(qsoDetailsFormatted)
             
-            After our contact, I checked your profile on QRZ and was genuinely impressed by your standings:
-              • QSO World Rank: \(qsoRankVal)
-              • Bands World Rank: \(bandRankVal)
-              • DXCC World Rank: \(dxccRankVal)
-            
-            Reaching results like this clearly reflects consistent operating, broad band coverage, and disciplined logging. As someone working toward that kind of steady performance, I would love to learn from your experience. What habits, operating style, or station setup have helped you build such a strong record?
+            \(rankParagraph)
             
             Speaking of logging, your progress is a huge motivation for a personal project of mine. I keep my station log, confirmations, and award tracking in YAAM—a lightweight amateur-radio logbook software that I am developing and use every day.
             If you'd like to take a look: 
@@ -450,7 +472,10 @@ Warm 73,
                 myCall: myCall,
                 details: detailsBlock
             )
-            
+            if qso?.isConfirmed != true {
+                emailBody = emailBody.replacingOccurrences(of: "our confirmed contact", with: "our recorded contact")
+            }
+
         default:
             break
         }
@@ -477,18 +502,6 @@ Warm 73,
         let m = rawDate.dropFirst(4).prefix(2)
         let d = rawDate.suffix(2)
         return "\(y)-\(m)-\(d)"
-    }
-
-    private func formatRankDisplay(_ raw: String?) -> String? {
-        guard let raw = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else { return nil }
-        if raw.starts(with: "#") { return raw }
-        if let num = Int(raw.filter(\.isNumber)) {
-            let formatter = NumberFormatter()
-            formatter.numberStyle = .decimal
-            let formatted = formatter.string(from: NSNumber(value: num)) ?? "\(num)"
-            return "#\(formatted)"
-        }
-        return raw
     }
 
     private func formatTime(_ rawTime: String) -> String {
@@ -526,41 +539,19 @@ Warm 73,
         isSending = true
         showDebugLog = false
         
-        let shouldAttach = (["QSL Card Delivery", "QRZ Rank Congratulations & QSL"].contains(selectedTemplate) && currentQSO?.isConfirmed == true)
+        let shouldAttach = QSLMailPolicy.requiresCard(template: selectedTemplate)
         let targetQSO = currentQSO
+        guard !shouldAttach || (targetQSO != nil && cardAttachmentData != nil && cardStationProfileID == appState.activeStationProfileID) else {
+            isSending = false
+            cardAttachmentError = "A recorded QSO and a card for the active station are required. Reopen the draft after changing stations. No email was sent."
+            return
+        }
         let recipient = appState.selectedEmailAddress
         let subject = emailSubject
         let body = emailBody
         let incomingDetailsDraft = isIncomingDetailsDraft
-        
-        let myCall = resolvedMyCallsign
-        let profile = appState.activeStationProfile
-        let resolvedStation = QSLCardStationInfo(callsign: myCall, profile: profile)
-
-        
-        var attachmentData: Data? = nil
-        var attachmentName: String? = nil
-        
-        if shouldAttach, let qso = targetQSO {
-            let tempURL = FileManager.default.temporaryDirectory
-                .appendingPathComponent(UUID().uuidString)
-                .appendingPathExtension("pdf")
-            do {
-                try QSLCardRenderer.exportPDF(record: qso, station: resolvedStation, to: tempURL)
-                attachmentData = try Data(contentsOf: tempURL)
-                try? FileManager.default.removeItem(at: tempURL)
-                
-                let cleanCall = QSLCardRenderer.cleanFileComponent(qso["CALL"])
-                attachmentName = "\(myCall)_QSL_\(cleanCall).pdf"
-            } catch {
-                try? FileManager.default.removeItem(at: tempURL)
-                isSending = false
-                appState.alertTitle = "QSL Card Export Failed"
-                appState.alertMessage = "The QSL card PDF could not be generated, so the email was not sent.\n\n\(error.localizedDescription)"
-                appState.showAlert = true
-                return
-            }
-        }
+        let attachmentData = shouldAttach ? cardAttachmentData : nil
+        let attachmentName = shouldAttach ? cardAttachmentName : nil
         
         appState.sendEmail(
             to: recipient,
@@ -587,6 +578,31 @@ Warm 73,
                     self.showDebugLog = true
                 }
             }
+        }
+    }
+
+    private func prepareCardAttachment(template: String) {
+        if let cardPreviewURL { try? FileManager.default.removeItem(at: cardPreviewURL) }
+        cardPreviewURL = nil
+        cardAttachmentData = nil
+        cardAttachmentName = nil
+        cardAttachmentError = nil
+        cardStationProfileID = appState.activeStationProfileID
+        guard QSLMailPolicy.requiresCard(template: template) else { return }
+        guard let qso = currentQSO, appState.qsoRecords.contains(where: { $0.id == qso.id }) else {
+            cardAttachmentError = "Select a QSO in the active station log to attach your card."
+            return
+        }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension("pdf")
+        do {
+            let station = QSLCardStationInfo(callsign: resolvedMyCallsign, profile: appState.activeStationProfile)
+            try QSLCardRenderer.exportPDF(record: qso, station: station, to: url)
+            cardAttachmentData = try Data(contentsOf: url)
+            cardAttachmentName = "\(QSLCardRenderer.cleanFileComponent(resolvedMyCallsign))_QSL_\(QSLCardRenderer.cleanFileComponent(qso["CALL"])).pdf"
+            cardPreviewURL = url
+        } catch {
+            try? FileManager.default.removeItem(at: url)
+            cardAttachmentError = "The card could not be generated. No email will be sent: \(error.localizedDescription)"
         }
     }
 
@@ -620,7 +636,7 @@ struct SMTPSettingsView: View {
     @AppStorage("qslCardDeliveryEmailBody") private var qslCardDeliveryEmailBody = """
 Hello {NAME},
 
-It was a genuine pleasure to meet you on the air. I have attached my QSL card for our confirmed contact.{QSO_DETAILS}
+It was a genuine pleasure to meet you on the air. I have attached my QSL card for our recorded contact.{QSO_DETAILS}
 
 Thank you for the QSO. This card was prepared with YAAM.
 
