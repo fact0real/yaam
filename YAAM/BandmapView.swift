@@ -20,6 +20,7 @@ public enum BandmapStudioMode: String, CaseIterable, Identifiable {
     case panorama = "Multi-Band Panorama"
 
     public var id: String { rawValue }
+    public var title: String { self == .waterfallOnly ? "Spot Waterfall" : rawValue }
 
     public var icon: String {
         switch self {
@@ -38,6 +39,7 @@ public enum CenterDeckMode: String, CaseIterable, Identifiable {
     case waterfall = "Smooth Waterfall"
 
     public var id: String { rawValue }
+    public var title: String { self == .waterfall ? "Spot Waterfall" : rawValue }
 
     public var icon: String {
         switch self {
@@ -173,7 +175,7 @@ public struct BandmapView: View {
                     Text("Interactive Bandmap Studio")
                         .font(.subheadline.bold())
                         .foregroundColor(.primary)
-                    Text("Live Spectrum · Dual VFO · Heatmap Ribbon")
+                    Text("Spot activity · Dual VFO · Band plan")
                         .font(.system(size: 9.5, weight: .medium))
                         .foregroundColor(.secondary)
                 }
@@ -279,7 +281,7 @@ public struct BandmapView: View {
                 values: BandmapStudioMode.allCases,
                 selection: $studioMode,
                 segmentWidth: 140,
-                title: { $0.rawValue }
+                title: { $0.title }
             )
         }
         .padding(.horizontal, 14)
@@ -647,9 +649,18 @@ public struct BandmapView: View {
 
             Divider()
 
+            BandmapProvenanceNotice(spotCount: activeSpots.count,
+                includesSimulation: activeSpots.contains(where: { BandmapSourceProvenance.isSimulated($0.source) }),
+                catConnected: isCATConnected)
+                .padding(.horizontal, 12)
+            if activeSpots.isEmpty {
+                ContentUnavailableView("No spots on this band", systemImage: "antenna.radiowaves.left.and.right", description: Text("Waiting for DX Cluster or digital activity. No RF measurement is connected to this view."))
+                    .frame(height: spectrumH)
+            } else {
             // 2. Panadapter Spectrum View (Upper half)
             panadapterSpectrumView(bandRange: bandRange, activeSpots: activeSpots, vfoAKHz: vfoAKHz, vfoBKHz: vfoBKHz, height: spectrumH)
 
+            }
             // 3. Horizontal IARU Band Plan Ribbon
             bandPlanHorizontalRibbon(segments: segments, bandRange: bandRange)
 
@@ -674,7 +685,7 @@ public struct BandmapView: View {
                 Circle()
                     .fill(isCATConnected ? Color.green : Color.orange)
                     .frame(width: 8, height: 8)
-                Text(isCATConnected ? "LIVE SDR SPECTRUM & PANADAPTER" : "DX CLUSTER SPECTRUM PANADAPTER · STANDBY")
+                Text("SPOT ACTIVITY · NOT MEASURED RF")
                     .font(.system(size: 10.5, weight: .bold))
                     .foregroundColor(.primary)
                     .lineLimit(2)
@@ -722,7 +733,7 @@ public struct BandmapView: View {
                 values: CenterDeckMode.allCases,
                 selection: $centerDeckMode,
                 segmentWidth: 145,
-                title: { $0.rawValue }
+                title: { $0.title }
             )
 
 
@@ -771,11 +782,8 @@ public struct BandmapView: View {
             let width = specGeo.size.width
             ZStack(alignment: .topLeading) {
                 // 1. RF Canvas with Gaussian curves, S-meter scales & Frequency ticks
-                TimelineView(.animation(minimumInterval: 0.1)) { timeline in
-                    Canvas { context, sz in
-                        drawSpectrumGraph(context: context, size: sz, range: bandRange, spots: activeSpots,
-                                          phase: timeline.date.timeIntervalSinceReferenceDate * 2)
-                    }
+                Canvas { context, sz in
+                    drawSpectrumGraph(context: context, size: sz, range: bandRange, spots: activeSpots)
                 }
                 .frame(width: width, height: height)
                 .background(colorScheme == .dark ? Color(red: 0.03, green: 0.05, blue: 0.08) : Color(red: 0.04, green: 0.07, blue: 0.12))
@@ -1300,21 +1308,15 @@ public struct BandmapView: View {
         context: GraphicsContext,
         size: CGSize,
         range: ClosedRange<Double>,
-        spots: [BandmapSpot],
-        phase: Double
+        spots: [BandmapSpot]
     ) {
         let width = size.width
         let height = size.height
         let baseline = height - 16.0
 
-        // 1. S-Meter Reference Grid Lines
+        // Relative illustration guides; deliberately no RF measurement units.
         let sLevels: [(label: String, frac: CGFloat)] = [
-            ("+20dB", 0.15),
-            ("S9", 0.32),
-            ("S7", 0.48),
-            ("S5", 0.64),
-            ("S3", 0.78),
-            ("NF", 0.90)
+            ("SPOT", 0.20), ("ACTIVITY", 0.50), ("", 0.80)
         ]
 
         for item in sLevels {
@@ -1352,7 +1354,7 @@ public struct BandmapView: View {
             }
         }
 
-        // 3. Construct RF Spectrum Curve using Gaussian Distributions
+        // Illustrate current spots with Gaussian curves; this is not an RF measurement.
         var path = Path()
         path.move(to: CGPoint(x: 0, y: baseline))
 
@@ -1362,11 +1364,10 @@ public struct BandmapView: View {
         for i in 0...steps {
             let x = CGFloat(i) * stepX
 
-            // Gentle organic RF noise floor
-            let noise = sin(Double(x) * 0.09 + phase) * 2.5 + cos(Double(x) * 0.16 - phase * 0.6) * 1.8
-            var y = baseline - 6.0 + CGFloat(noise)
+            // Flat illustration baseline.
+            var y = baseline - 6.0
 
-            // Gaussian RF signal peaks
+            // Illustrative spot peaks.
             for spot in spots {
                 let spotX = xPosition(forKHz: spot.frequencyKHz, range: range, width: width)
                 let dist = abs(x - spotX)
@@ -1413,6 +1414,7 @@ public struct BandmapView: View {
         let rowHeight: CGFloat = 4.0
         let rows = Int(height / rowHeight)
 
+        guard !spots.isEmpty else { return }
         // 180 fine resolution columns for silky smooth waterfall
         let segCount = 180
         let segWidth = width / CGFloat(segCount)
@@ -1426,7 +1428,7 @@ public struct BandmapView: View {
                 let x = CGFloat(s) * segWidth
                 let freq = khzForX(x + segWidth / 2, range: range, width: width)
 
-                // Soft background RF thermal noise (no diagonal block stripes)
+                // Decorative background; no received noise samples are used.
                 var intensity = (sin(Double(s) * 0.12 + rowPhase * 0.25) * 0.03 + 0.06)
 
                 // Exponentially decaying vertical signal trails for spots

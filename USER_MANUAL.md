@@ -363,8 +363,8 @@ For contacts confirmed today:
 A unified 3-pane panadapter environment:
 1. **Vertical Frequency Ruler (Left Pane):**  
    Precision frequency scale with color-coded band segments for CW, Digital/Data, and Phone (SSB) adhering to IARU Regions 1, 2, and 3. DX cluster spots are mapped directly onto the ruler with freshness decay indicators.
-2. **Live SDR Spectrum & Waterfall (Center Pane):**  
-   Real-time FFT spectrum analyzer with variable zoom (0.5x to 4x), peak hold detection, and continuous waterfall history.
+2. **Illustrated Spot Activity (Center Pane):**
+   Curves and waterfall colors illustrate DX spots by frequency. They are not received RF, measured strength or waterfall history. CAT provides tuning only. Empty bands and simulated sources are explicitly identified.
 3. **DX Spot Hunter Table (Right Pane):**  
    Curated spot list with 1-click filtering for All-Time New Ones (ATNO), needed bands, and SNR thresholds, paired with a **Tune Rig** CAT button.
 4. **Dual VFO Tracking & Split Operations:**  
@@ -789,3 +789,9 @@ Table filters do not change which contact receives the highlight. The map fits a
 ### Local rigctld emulator connection limits
 
 The network transceiver emulator's rigctld endpoint accepts connections only from this Mac. It supports up to eight simultaneous clients. Each client may send command lines of up to 4096 bytes (including any carriage return, excluding the newline), with at most 256 non-empty commands per second. Clients that exceed these limits, send invalid text, or accumulate more than 64 KiB of unsent replies are disconnected. Other clients can continue normally. If a client is disconnected, correct its command format or polling rate before reconnecting.
+
+### Next Credit and reviewed QSL delivery
+
+Open **Log Table → Next Credit** for the active station's unconfirmed contacts. The queue scores marginal country-band, four-character grid and award milestones (DXCC countries, US states and CQ zones), plus recorded follow-up routes, prior confirmation evidence and age. Adjust weights under **Adjust priorities**. Each credit is counted only once across the queue; scores are priorities, not response probabilities or official award certification. Calculations run in the background and refresh after log/profile/weight changes. **Review QSO** opens an editable confirmation reminder when an email address exists; it does not send it. Without an address, it opens the existing callsign inspector.
+
+Use **Email QSL Card** for a recorded QSO even before receiving confirmation. **Preview PDF** opens the exact attachment prepared for delivery. Missing QSO/card export failure blocks sending; a successful SMTP send marks the card sent without creating confirmation. Rank-congratulation messages include only available positive numeric ranks, acknowledge potentially older observations, and use an advice/QSL subject when no ranks are available.
