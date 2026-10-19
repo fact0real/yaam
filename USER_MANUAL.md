@@ -412,6 +412,9 @@ Instantly detect and recognize members of specialized international amateur radi
 ## 17. Club Log Live Spots & Band Intelligence Engine
 
 Real-time spot intelligence powered by Club Log feeds:
+
+Personal Spots combines the separate band tables returned by Club Log. If a refresh fails or the page format is not recognized, YAAM shows an error and retains the last successful list and refresh time. A sign-in error requires re-authentication with the Club Log authenticator.
+
 1. **Band Opportunity Engine:**  
    Scores band activity relative to your verified logbook:
    Score = Total Spots + (Needed DXCC * 3.5)

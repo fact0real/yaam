@@ -137,218 +137,72 @@ final class ClubLogSpotsService: ObservableObject {
 
     private var activeFetcher: ClubLogSpotsFetcher?
 
-    // JavaScript extractor tailored specifically to Club Log's personal_spots.php table structure
-    static let domSpotsExtractorJS: String = """
-    (function() {
-        var tables = Array.from(document.querySelectorAll('table'));
-        var allRows = [];
-
-        for (var t = 0; t < tables.length; t++) {
-            var table = tables[t];
-            var rows = Array.from(table.querySelectorAll('tr'));
-            if (rows.length === 0) continue;
-
-            for (var r = 0; r < rows.length; r++) {
-                var cells = Array.from(rows[r].querySelectorAll('td'));
-                if (cells.length < 6) continue;
-
-                // Cell 0: Spotter
-                var spotter = (cells[0].innerText || '').trim();
-
-                // Cell 1: Frequency in kHz (e.g. 21010.3)
-                var freqKHzStr = (cells[1].innerText || '').trim();
-                var freqKHz = parseFloat(freqKHzStr);
-                if (isNaN(freqKHz) || freqKHz <= 0) continue;
-
-                // Cell 2: DX Callsign
-                var call = (cells[2].innerText || '').trim().replace(/^[^A-Z0-9]+|[^A-Z0-9\\/]+$/gi, '').toUpperCase();
-                if (!call || call.length > 16 || !/[A-Z]/.test(call)) continue;
-
-                // Cell 3: Comment
-                var comment = (cells[3].innerText || '').trim();
-                if (comment === '&nbsp;') comment = '';
-
-                // Cell 4: DXCC Entity and Status
-                var dxcc = '';
-                var aTag = cells[4].querySelector('a');
-                if (aTag) {
-                    dxcc = (aTag.innerText || '').trim();
-                } else {
-                    dxcc = (cells[4].innerText || '').trim();
-                }
-
-                var status = 'Needed';
-                var smallTag = cells[4].querySelector('small');
-                if (smallTag) {
-                    var sText = (smallTag.innerText || '').trim();
-                    if (sText) status = sText;
-                }
-
-                // Cell 5: Time (UTC)
-                var time = (cells[5].innerText || '').trim();
-
-                // Determine Band from Frequency in kHz
-                var band = '';
-                if (freqKHz >= 1800 && freqKHz <= 2000) band = '160M';
-                else if (freqKHz >= 3500 && freqKHz <= 4000) band = '80M';
-                else if (freqKHz >= 5300 && freqKHz <= 5500) band = '60M';
-                else if (freqKHz >= 7000 && freqKHz <= 7300) band = '40M';
-                else if (freqKHz >= 10100 && freqKHz <= 10150) band = '30M';
-                else if (freqKHz >= 14000 && freqKHz <= 14350) band = '20M';
-                else if (freqKHz >= 18068 && freqKHz <= 18168) band = '17M';
-                else if (freqKHz >= 21000 && freqKHz <= 21450) band = '15M';
-                else if (freqKHz >= 24890 && freqKHz <= 24990) band = '12M';
-                else if (freqKHz >= 28000 && freqKHz <= 29700) band = '10M';
-                else if (freqKHz >= 50000 && freqKHz <= 54000) band = '6M';
-                else if (freqKHz >= 144000 && freqKHz <= 148000) band = '2M';
-                else if (freqKHz >= 430000 && freqKHz <= 450000) band = '70CM';
-
-                // Determine Mode from Comment or Frequency
-                var mode = 'CW';
-                var cLower = comment.toLowerCase();
-                if (cLower.includes('ft8')) {
-                    mode = 'FT8';
-                } else if (cLower.includes('ft4')) {
-                    mode = 'FT4';
-                } else if (cLower.includes('rtty')) {
-                    mode = 'RTTY';
-                } else if (cLower.includes('psk')) {
-                    mode = 'PSK';
-                } else if (cLower.includes('js8')) {
-                    mode = 'JS8';
-                } else if (cLower.includes('cw') || cLower.includes('cwt') || cLower.includes('qsx') || cLower.includes('up ') || cLower.startsWith('up') || cLower.includes(' up')) {
-                    mode = 'CW';
-                } else if (cLower.includes('usb')) {
-                    mode = 'USB';
-                } else if (cLower.includes('lsb')) {
-                    mode = 'LSB';
-                } else if (cLower.includes('ssb') || cLower.includes('pota') || cLower.includes('phone')) {
-                    mode = 'SSB';
-                } else if (Math.abs(freqKHz - 14074) < 1.5 || Math.abs(freqKHz - 21074) < 1.5 || Math.abs(freqKHz - 7074) < 1.5 || Math.abs(freqKHz - 7056) < 1.5 || Math.abs(freqKHz - 3573) < 1.5 || Math.abs(freqKHz - 10136) < 1.5 || Math.abs(freqKHz - 24915) < 1.5 || Math.abs(freqKHz - 28074) < 1.5 || Math.abs(freqKHz - 18100) < 1.5 || Math.abs(freqKHz - 50313) < 1.5 || Math.abs(freqKHz - 1840) < 1.5) {
-                    mode = 'FT8';
-                } else if (Math.abs(freqKHz - 7047.5) < 1.5 || Math.abs(freqKHz - 14080) < 1.5 || Math.abs(freqKHz - 21140) < 1.5 || Math.abs(freqKHz - 28180) < 1.5 || Math.abs(freqKHz - 3575) < 1.5 || Math.abs(freqKHz - 10140) < 1.5 || Math.abs(freqKHz - 18104) < 1.5 || Math.abs(freqKHz - 24919) < 1.5) {
-                    mode = 'FT4';
-                } else if (band === '20M' && freqKHz >= 14100) {
-                    mode = 'SSB';
-                } else if (band === '15M' && freqKHz >= 21200) {
-                    mode = 'SSB';
-                } else if (band === '40M' && freqKHz >= 7100) {
-                    mode = 'SSB';
-                } else if (band === '80M' && freqKHz >= 3600) {
-                    mode = 'SSB';
-                } else if (band === '10M' && freqKHz >= 28300) {
-                    mode = 'SSB';
-                }
-
-                // Format MHz frequency (e.g. 21.0103)
-                var freqMHz = (freqKHz / 1000.0).toFixed(4).replace(/\\.?0+$/, '');
-
-                allRows.push({
-                    call: call,
-                    freq: freqMHz,
-                    band: band,
-                    mode: mode,
-                    time: time,
-                    dxcc: dxcc,
-                    spotter: spotter,
-                    comment: comment,
-                    status: status
-                });
-            }
-            if (allRows.length > 0) break;
-        }
-        return JSON.stringify(allRows);
-    })();
-    """
-
+    // Both transports use the same parser: the page now has a table for each band.
     func fetchPersonalSpots(credentials: QSLServiceCredentials) async {
+        guard !isLoading else { return }
         isLoading = true
         errorMessage = nil
+        defer { isLoading = false }
 
-        // 1. WebKit-based background extractor (shares live WebKit cookies)
         let fetcher = ClubLogSpotsFetcher()
-        self.activeFetcher = fetcher
-        let webKitSpots = await fetcher.fetchSpots()
-        self.activeFetcher = nil
+        activeFetcher = fetcher
+        let renderedHTML = await fetcher.fetchHTML()
+        activeFetcher = nil
 
-        if let webKitSpots = webKitSpots, !webKitSpots.isEmpty {
-            self.spots = webKitSpots
-            self.lastRefreshed = Date()
-            self.errorMessage = nil
-            self.isLoading = false
-            return
-        }
-
-        // 2. Fallback to HTTP URLSession fetch
         do {
-            var spotsReq = URLRequest(url: URL(string: "https://clublog.org/personal_spots.php")!)
-            spotsReq.httpMethod = "GET"
-            spotsReq.setValue(QRZWebKitSession.userAgent, forHTTPHeaderField: "User-Agent")
-            let cookieHeader = ClubLogSessionStore.savedCookieHeader()
-            if !cookieHeader.isEmpty {
-                spotsReq.setValue(cookieHeader, forHTTPHeaderField: "Cookie")
-            }
-
-            let (spotsData, _) = try await URLSession.shared.data(for: spotsReq)
-            guard let html = String(data: spotsData, encoding: .utf8) else {
-                throw NSError(domain: "ClubLogSpots", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed to read response from Club Log"])
-            }
-
-            let parsedSpots = Self.parsePersonalSpotsHTML(html)
-            if !parsedSpots.isEmpty {
-                self.spots = parsedSpots
-                self.lastRefreshed = Date()
-                self.errorMessage = nil
-            } else if html.lowercased().contains("loginform.php") || html.lowercased().contains("login.php") || html.contains("Password") || html.contains("Sign in") {
-                self.spots = []
-                if !cookieHeader.isEmpty {
-                    self.errorMessage = "Club Log session expired. Please click '2FA Authenticator' to sign in."
-                } else {
-                    self.errorMessage = "Club Log 2FA login required. Please click '2FA Authenticator' above to sign in."
-                }
+            let html: String
+            if let renderedHTML {
+                html = renderedHTML
             } else {
-                self.spots = []
-                self.lastRefreshed = Date()
-                self.errorMessage = nil
+                var request = URLRequest(url: URL(string: "https://clublog.org/personal_spots.php")!)
+                request.timeoutInterval = 20
+                request.setValue(QRZWebKitSession.userAgent, forHTTPHeaderField: "User-Agent")
+                let cookieHeader = ClubLogSessionStore.savedCookieHeader()
+                if !cookieHeader.isEmpty { request.setValue(cookieHeader, forHTTPHeaderField: "Cookie") }
+                let (data, response) = try await URLSession.shared.data(for: request)
+                guard let http = response as? HTTPURLResponse else { throw ClubLogSpotsPageError.unrecognized }
+                if http.statusCode == 401 { throw ClubLogSpotsPageError.loginRequired }
+                guard (200..<300).contains(http.statusCode) else {
+                    throw NSError(domain: "ClubLogSpots", code: http.statusCode,
+                                  userInfo: [NSLocalizedDescriptionKey: "Club Log returned HTTP \(http.statusCode). Please try again later."])
+                }
+                guard let text = String(data: data, encoding: .utf8) else { throw ClubLogSpotsPageError.unrecognized }
+                html = text
             }
+            let parsed = try await Task.detached(priority: .userInitiated) {
+                try Self.parsePersonalSpotsPage(html)
+            }.value
+            spots = parsed
+            lastRefreshed = Date()
         } catch {
-            self.errorMessage = "Error fetching Club Log spots: \(error.localizedDescription)"
+            // Keep the last good snapshot and its timestamp when refresh fails.
+            errorMessage = error.localizedDescription
         }
-
-        isLoading = false
     }
 
-    nonisolated static func parseSpotsFromJSON(_ jsonString: String) -> [ClubLogSpotModel] {
-        guard let data = jsonString.data(using: .utf8),
-              let jsonArray = try? JSONSerialization.jsonObject(with: data) as? [[String: String]] else {
+    nonisolated static func parsePersonalSpotsPage(_ html: String) throws -> [ClubLogSpotModel] {
+        if html.range(of: #"(?is)<input\b[^>]*type\s*=\s*["']?password\b|<form\b[^>]*(?:loginform|clublogform)"#,
+                      options: .regularExpression) != nil {
+            throw ClubLogSpotsPageError.loginRequired
+        }
+        let result = parsePersonalSpotsHTML(html)
+        if !result.isEmpty { return result }
+        let text = plainText(html).lowercased()
+        // A heading alone is not evidence of an empty search; a changed layout must be visible.
+        if text.contains("dx spots for needed dxccs") &&
+            ["no spots", "no matching spots", "no dx spots"].contains(where: { text.contains($0) }) {
             return []
         }
+        throw ClubLogSpotsPageError.unrecognized
+    }
 
-        return jsonArray.compactMap { dict -> ClubLogSpotModel? in
-            let call = (dict["call"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-            guard !call.isEmpty && call.count <= 16 && call.contains(where: { $0.isLetter }) else { return nil }
-
-            let freq = dict["freq"] ?? ""
-            let band = (dict["band"] ?? "").uppercased()
-            let mode = (dict["mode"] ?? "").uppercased()
-            let time = dict["time"] ?? ""
-            let dxcc = dict["dxcc"] ?? ""
-            let spotter = (dict["spotter"] ?? "").uppercased()
-            let comment = dict["comment"] ?? ""
-            let status = dict["status"] ?? "Needed"
-
-            return ClubLogSpotModel(
-                callsign: call,
-                frequency: freq,
-                band: band,
-                mode: mode,
-                timeStr: time,
-                dxcc: dxcc,
-                spotter: spotter,
-                comment: comment,
-                status: status
-            )
-        }
+    nonisolated private static func plainText(_ html: String) -> String {
+        var text = html.replacingOccurrences(of: "(?is)<(?:script|style)\\b[^>]*>.*?</(?:script|style)>", with: "", options: .regularExpression)
+            .replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression)
+        let entities = ["&nbsp;": " ", "&#160;": " ", "&lt;": "<", "&gt;": ">", "&quot;": "\"", "&#39;": "'", "&apos;": "'", "&amp;": "&"]
+        for key in entities.keys.sorted() where key != "&amp;" { text = text.replacingOccurrences(of: key, with: entities[key]!) }
+        text = text.replacingOccurrences(of: "&amp;", with: "&")
+        return text.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     nonisolated static func parsePersonalSpotsHTML(_ html: String) -> [ClubLogSpotModel] {
@@ -372,47 +226,30 @@ final class ClubLogSpotsService: ObservableObject {
             guard cellMatches.count >= 6 else { continue }
 
             let rawCells = cellMatches.map { (rowContent as NSString).substring(with: $0.range(at: 1)) }
-            let cleanCells = rawCells.map {
-                $0.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
-                  .replacingOccurrences(of: "&nbsp;", with: "")
-                  .trimmingCharacters(in: .whitespacesAndNewlines)
-            }
+            let cleanCells = rawCells.map(plainText)
+            // Anchor the entity to Club Log's DXCC link, rather than assuming a comment cell.
+            // Current rows may omit the comment; legacy rows have an empty fourth cell.
+            guard let entityIndex = rawCells.indices.first(where: {
+                rawCells[$0].range(of: #"(?is)<a\b[^>]*href\s*=\s*["'][^"']*mostwanted2?\.php\?[^"']*dxcc="#,
+                                  options: .regularExpression) != nil
+            }), entityIndex == 3 || entityIndex == 4, cleanCells.indices.contains(entityIndex + 1) else { continue }
 
-            // Cell 0: Spotter (e.g. AC2PB)
             let spotter = cleanCells[0].uppercased()
-
-            // Cell 1: Freq in kHz (e.g. 21010.3)
-            let freqKHzStr = cleanCells[1]
-            guard let freqKHz = Double(freqKHzStr), freqKHz > 0 else { continue }
-
-            // Cell 2: DX Callsign (e.g. RI1FJL)
-            let rawCall = cleanCells[2].uppercased()
-            let call = rawCall.trimmingCharacters(in: CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "/")).inverted)
-            guard !call.isEmpty && call.count <= 16 && call.contains(where: { $0.isLetter }) else { continue }
-
-            // Cell 3: Comment (e.g. cw spasibo gl)
-            let comment = cleanCells[3]
-
-            // Cell 4: DXCC Entity & Status
-            var dxcc = cleanCells[4]
-            if let aRange = rawCells[4].range(of: "(?is)<a[^>]*>(.*?)</a>", options: .regularExpression) {
-                let aSnippet = String(rawCells[4][aRange])
-                dxcc = aSnippet.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression).trimmingCharacters(in: .whitespacesAndNewlines)
-            }
-
+            guard let freqKHz = Double(cleanCells[1]), freqKHz.isFinite, freqKHz > 0 else { continue }
+            let call = cleanCells[2].uppercased()
+            guard call.range(of: #"^[A-Z0-9/]{2,16}$"#, options: .regularExpression) != nil,
+                  call.contains(where: { $0.isLetter }), call.contains(where: { $0.isNumber }) else { continue }
+            let comment = entityIndex == 4 ? cleanCells[3] : ""
+            let entityHTML = rawCells[entityIndex]
+            guard let linkRange = entityHTML.range(of: "(?is)<a[^>]*>.*?</a>", options: .regularExpression) else { continue }
+            let dxcc = plainText(String(entityHTML[linkRange]))
             var status = "Needed"
-            if rawCells[4].lowercased().contains("most-wanted") || rawCells[4].lowercased().contains("lotw") {
-                if let smallRange = rawCells[4].range(of: "(?is)<small[^>]*>(.*?)</small>", options: .regularExpression) {
-                    let smallSnippet = String(rawCells[4][smallRange])
-                    let cleanStatus = smallSnippet.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression).trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !cleanStatus.isEmpty {
-                        status = cleanStatus
-                    }
-                }
+            if let smallRange = entityHTML.range(of: "(?is)<small[^>]*>.*?</small>", options: .regularExpression) {
+                let value = plainText(String(entityHTML[smallRange]))
+                if !value.isEmpty { status = value }
             }
-
-            // Cell 5: Time (e.g. 2026-08-26 19:48)
-            let timeStr = cleanCells[5]
+            let timeStr = cleanCells[entityIndex + 1]
+            guard ClubLogSpotModel.reportDate(timeStr, relativeTo: Date()) != nil else { continue }
 
             // Band from Frequency
             let band = bandFromFrequencyKHz(freqKHz)
@@ -422,7 +259,7 @@ final class ClubLogSpotsService: ObservableObject {
 
             // Formatted frequency in MHz
             let mhz = freqKHz / 1000.0
-            let freqFormatted = String(format: "%.4f", mhz).trimmingCharacters(in: CharacterSet(charactersIn: "0")).trimmingCharacters(in: CharacterSet(charactersIn: "."))
+            let freqFormatted = String(format: "%.4f", locale: Locale(identifier: "en_US_POSIX"), mhz).replacingOccurrences(of: #"\.?0+$"#, with: "", options: .regularExpression)
 
             let spot = ClubLogSpotModel(
                 callsign: call,
@@ -525,15 +362,28 @@ final class ClubLogSpotsService: ObservableObject {
     }
 }
 
+nonisolated enum ClubLogSpotsPageError: LocalizedError {
+    case loginRequired, unrecognized
+
+    var errorDescription: String? {
+        switch self {
+        case .loginRequired:
+            return "Club Log sign-in is required. Please click '2FA Authenticator' to sign in again."
+        case .unrecognized:
+            return "Club Log returned an unrecognized spots page. Please try again or check the page in your browser."
+        }
+    }
+}
+
 // MARK: - Background WebKit Spots Fetcher
 @MainActor
 final class ClubLogSpotsFetcher: NSObject, WKNavigationDelegate {
     private var webView: WKWebView?
-    private var continuation: CheckedContinuation<[ClubLogSpotModel]?, Never>?
+    private var continuation: CheckedContinuation<String?, Never>?
     private var timeoutTask: Task<Void, Never>?
 
-    func fetchSpots() async -> [ClubLogSpotModel]? {
-        await withCheckedContinuation { (cont: CheckedContinuation<[ClubLogSpotModel]?, Never>) in
+    func fetchHTML() async -> String? {
+        await withCheckedContinuation { (cont: CheckedContinuation<String?, Never>) in
             self.continuation = cont
             let config = WKWebViewConfiguration()
             config.websiteDataStore = .default()
@@ -571,15 +421,9 @@ final class ClubLogSpotsFetcher: NSObject, WKNavigationDelegate {
             return
         }
 
-        let js = ClubLogSpotsService.domSpotsExtractorJS
-        webView.evaluateJavaScript(js) { [weak self] result, _ in
-            guard let self = self else { return }
-            if let jsonString = result as? String, !jsonString.isEmpty && jsonString != "[]" {
-                let spots = ClubLogSpotsService.parseSpotsFromJSON(jsonString)
-                self.finish(with: spots)
-            } else {
-                self.finish(with: [])
-            }
+        // Capture every band table and classify the rendered page with the HTTP parser.
+        webView.evaluateJavaScript("document.documentElement.outerHTML") { [weak self] result, _ in
+            self?.finish(with: result as? String)
         }
     }
 
@@ -591,7 +435,7 @@ final class ClubLogSpotsFetcher: NSObject, WKNavigationDelegate {
         finish(with: nil)
     }
 
-    private func finish(with spots: [ClubLogSpotModel]?) {
+    private func finish(with html: String?) {
         timeoutTask?.cancel()
         timeoutTask = nil
         webView?.navigationDelegate = nil
@@ -599,6 +443,6 @@ final class ClubLogSpotsFetcher: NSObject, WKNavigationDelegate {
         webView = nil
         let cont = continuation
         continuation = nil
-        cont?.resume(returning: spots)
+        cont?.resume(returning: html)
     }
 }
