@@ -2,9 +2,8 @@
 //  KeychainStore.swift
 //  YAAM
 //
-//  Hardware-Bound AES-256-GCM Secure Vault Engine & Biometric Authentication
-//  Eliminates ALL macOS Keychain prompts by deriving a 256-bit cryptographic key bound
-//  directly to the local machine hardware (IOPlatformUUID) and user account.
+//  AES-GCM vault with a random root protected by the macOS Keychain.
+//  Touch ID is an optional application-session gate, not a per-item Keychain ACL.
 //
 
 import CryptoKit
@@ -37,14 +36,22 @@ enum SecureCredential: String, CaseIterable {
     case hrdlogCode = "hrdlog.upload-code"
 }
 
-// MARK: - Hardware-Bound AES-256-GCM Secure Vault Engine
+// MARK: - Keychain-Protected AES-GCM Vault
 
 nonisolated enum KeychainStore {
     private final class VaultManager: @unchecked Sendable {
         private let lock = NSLock()
         private var memoryVault: [String: Data] = [:]
         private var isLoaded: Bool = false
-        private var masterKey: SymmetricKey?
+        private var lastFailure: String?
+        private var storage: ProtectedCredentialStorage {
+            ProtectedCredentialStorage(file: vaultDirectoryURL.appendingPathComponent("secure_vault.v4.dat"), keys: MacCredentialRootKeyStore())
+        }
+        func clearSession() {
+            lock.lock(); defer { lock.unlock() }
+            memoryVault.removeAll(); isLoaded = false
+        }
+        var failure: String? { lock.lock(); defer { lock.unlock() }; return lastFailure }
 
         private var vaultDirectoryURL: URL {
             let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first ?? URL(fileURLWithPath: NSTemporaryDirectory())
@@ -74,19 +81,20 @@ nonisolated enum KeychainStore {
         func prewarm() {
             lock.lock()
             defer { lock.unlock() }
+            guard KeychainStore.isVaultSessionUnlocked else { return }
             ensureLoaded()
         }
 
         func data(for account: String) -> Data? {
             lock.lock()
             defer { lock.unlock() }
-            ensureLoaded()
+            guard KeychainStore.isVaultSessionUnlocked, ensureLoaded() else { return nil }
             if let inMemory = memoryVault[account] {
                 return inMemory
             }
             if !isLegacyMigrationFinished(), let legacyData = queryLegacyKeychain(account: account) {
                 memoryVault[account] = legacyData
-                _ = persistVault()
+                guard persistVault() else { memoryVault.removeValue(forKey: account); return nil }
                 deleteLegacyKeychainItem(account: account)
                 return legacyData
             }
@@ -96,101 +104,60 @@ nonisolated enum KeychainStore {
         func set(_ data: Data, for account: String) -> Bool {
             lock.lock()
             defer { lock.unlock() }
-            ensureLoaded()
+            guard KeychainStore.isVaultSessionUnlocked, ensureLoaded() else { return false }
+            let previous = memoryVault
             memoryVault[account] = data
+            guard persistVault() else { memoryVault = previous; return false }
             deleteLegacyKeychainItem(account: account)
-            return persistVault()
+            return true
         }
 
         func delete(_ account: String) -> Bool {
             lock.lock()
             defer { lock.unlock() }
-            ensureLoaded()
-            deleteLegacyKeychainItem(account: account)
+            guard KeychainStore.isVaultSessionUnlocked, ensureLoaded() else { return false }
+            let previous = memoryVault
             guard memoryVault[account] != nil else { return true }
             memoryVault.removeValue(forKey: account)
-            return persistVault()
+            guard persistVault() else { memoryVault = previous; return false }
+            deleteLegacyKeychainItem(account: account)
+            return true
         }
 
-        // MARK: - Cryptographic Key Derivation & Hardware Binding
+        // MARK: - Protected storage and one-time legacy migration
 
-        private func ensureLoaded() {
-            guard !isLoaded else { return }
-            isLoaded = true
-
-            // 1. Derive machine-bound 256-bit symmetric key
-            let key = deriveHardwareBoundKey()
-            self.masterKey = key
-
-            // 2. Read and decrypt vault file if present
-            if let fileData = try? Data(contentsOf: vaultFileURL), !fileData.isEmpty {
-                var decryptedDict: [String: Data]?
-                if let sealedBox = try? AES.GCM.SealedBox(combined: fileData) {
-                    if let decryptedData = try? AES.GCM.open(sealedBox, using: key),
-                       let dictionary = try? JSONDecoder().decode([String: Data].self, from: decryptedData) {
-                        decryptedDict = dictionary
-                    } else if let altKey = deriveAlternateHardwareBoundKey(),
-                              let decryptedData = try? AES.GCM.open(sealedBox, using: altKey),
-                              let dictionary = try? JSONDecoder().decode([String: Data].self, from: decryptedData) {
-                        decryptedDict = dictionary
-                    }
-                }
-                if let decryptedDict {
-                    self.memoryVault = decryptedDict
-                    importSiblingVaultIfNeeded()
-                    migrateFromUserDefaultsSilently()
-                    if !isLegacyMigrationFinished() {
-                        migrateFromLegacyKeychainSilently()
-                    }
-                    _ = persistVault()
-                    return
-                }
-            }
-
-            // 3. Fallback migrations if fresh or empty
-            importSiblingVaultIfNeeded()
-            migrateFromUserDefaultsSilently()
-            if !isLegacyMigrationFinished() {
-                migrateFromLegacyKeychainSilently()
-            }
-        }
-
-        private func persistVault() -> Bool {
-            let key = masterKey ?? deriveHardwareBoundKey()
-            self.masterKey = key
-
-            guard let jsonData = try? JSONEncoder().encode(memoryVault) else { return false }
-            guard let sealedBox = try? AES.GCM.seal(jsonData, using: key),
-                  let combined = sealedBox.combined else { return false }
-
+        @discardableResult private func ensureLoaded() -> Bool {
+            guard !isLoaded else { return true }
             do {
-                try combined.write(to: vaultFileURL, options: .atomic)
-                #if os(macOS)
-                try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: vaultFileURL.path)
-                #endif
+                lastFailure = nil
+                var retirement: (() -> Void)?
+                memoryVault = try storage.load(afterMigration: { retirement?() }) {
+                    let plan = try legacyMigrationPlan()
+                    retirement = plan.retire
+                    return plan.values
+                }
+                isLoaded = true
+                // Existing v4 storage never consults weak files/defaults or repeats their retirement.
                 return true
             } catch {
+                memoryVault.removeAll(); isLoaded = false; lastFailure = error.localizedDescription
                 return false
             }
         }
 
-        private func deriveHardwareBoundKey() -> SymmetricKey {
+        private func persistVault() -> Bool {
+            do { try storage.save(memoryVault); lastFailure = nil; return true }
+            catch { lastFailure = error.localizedDescription; return false }
+        }
+
+        private func deriveHardwareBoundKey() -> SymmetricKey? {
             let hwUUID = getHardwareUUID() ?? "YAAM-FALLBACK-MAC-UUID"
             let userHome = NSHomeDirectory()
             let bundleID = Bundle.main.bundleIdentifier ?? "ASIS.YAAM"
             let ikmString = "\(hwUUID):\(userHome):\(bundleID)"
             let ikmData = ikmString.data(using: .utf8) ?? Data("YAAM-ROOT-KEY".utf8)
 
-            var salt = (try? Data(contentsOf: saltFileURL)) ?? Data()
-            if salt.count < 32 {
-                var randomBytes = [UInt8](repeating: 0, count: 32)
-                _ = SecRandomCopyBytes(kSecRandomDefault, randomBytes.count, &randomBytes)
-                salt = Data(randomBytes)
-                try? salt.write(to: saltFileURL, options: .atomic)
-                #if os(macOS)
-                try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: saltFileURL.path)
-                #endif
-            }
+            guard let salt = try? Data(contentsOf: saltFileURL), salt.count >= 32 else { return nil }
 
             let inputKey = SymmetricKey(data: ikmData)
             return HKDF<SHA256>.deriveKey(
@@ -230,106 +197,80 @@ nonisolated enum KeychainStore {
             )
         }
 
-        private func importSiblingVaultIfNeeded() {
+        private func legacyMigrationPlan() throws -> (values: [String: Data], retire: () -> Void) {
             let fm = FileManager.default
-            let bundleID = Bundle.main.bundleIdentifier ?? "ASIS.YAAM"
-            let userHome = fm.homeDirectoryForCurrentUser.path
-            let isSandboxed = ProcessInfo.processInfo.environment["APP_SANDBOX_CONTAINER_ID"] != nil
-                || NSHomeDirectory().contains("/Library/Containers/")
-
-            let siblingDir: URL
-            let siblingHome: String
-            if isSandboxed {
-                siblingDir = URL(fileURLWithPath: userHome).appendingPathComponent("Library/Application Support/ASIS.YAAM", isDirectory: true)
-                siblingHome = userHome
-            } else {
-                let containerData = URL(fileURLWithPath: userHome).appendingPathComponent("Library/Containers/\(bundleID)/Data", isDirectory: true)
-                siblingDir = containerData.appendingPathComponent("Library/Application Support/ASIS.YAAM", isDirectory: true)
-                siblingHome = containerData.path
+            var values: [String: Data] = [:]
+            var files: [URL] = []
+            var defaultsToRemove: [String] = []
+            var accountsToRemove = Set<String>()
+            var keychainMigrationSucceeded = isLegacyMigrationFinished()
+            if fm.fileExists(atPath: vaultFileURL.path) {
+                let bytes = try Data(contentsOf: vaultFileURL)
+                guard let key = deriveHardwareBoundKey() else { throw ProtectedCredentialStorage.Failure.unreadableVault }
+                let keys = [key] + [deriveAlternateHardwareBoundKey()].compactMap { $0 }
+                let decoded = try ProtectedCredentialStorage.decodeLegacy(bytes, using: keys)
+                values = decoded; files += [vaultFileURL, saltFileURL]
             }
-
-            let siblingVaultFile = siblingDir.appendingPathComponent("secure_vault.dat")
-            let siblingSaltFile = siblingDir.appendingPathComponent(".vault_salt")
-
-            guard fm.fileExists(atPath: siblingVaultFile.path),
-                  let siblingSalt = try? Data(contentsOf: siblingSaltFile),
-                  let siblingVaultData = try? Data(contentsOf: siblingVaultFile) else {
-                return
+            let bundle = Bundle.main.bundleIdentifier ?? "ASIS.YAAM"
+            let home = fm.homeDirectoryForCurrentUser.path
+            let sandboxed = NSHomeDirectory().contains("/Library/Containers/") || ProcessInfo.processInfo.environment["APP_SANDBOX_CONTAINER_ID"] != nil
+            let siblingHome = sandboxed ? home : "\(home)/Library/Containers/\(bundle)/Data"
+            let sibling = URL(fileURLWithPath: siblingHome).appendingPathComponent("Library/Application Support/ASIS.YAAM")
+            let oldFile = sibling.appendingPathComponent("secure_vault.dat"), oldSalt = sibling.appendingPathComponent(".vault_salt")
+            if oldFile.standardizedFileURL != vaultFileURL.standardizedFileURL,
+               let bytes = try? Data(contentsOf: oldFile), let salt = try? Data(contentsOf: oldSalt), salt.count >= 32 {
+                let input = Data("\(getHardwareUUID() ?? "YAAM-FALLBACK-MAC-UUID"):\(siblingHome):\(bundle)".utf8)
+                let key = HKDF<SHA256>.deriveKey(inputKeyMaterial: SymmetricKey(data: input), salt: salt,
+                    info: Data("ASIS.YAAM.HardwareBoundVault.v3".utf8), outputByteCount: 32)
+                if let decoded = try? ProtectedCredentialStorage.decodeLegacy(bytes, using: [key]) {
+                    for (account, value) in decoded where values[account] == nil { values[account] = value }
+                    files += [oldFile, oldSalt]
+                }
             }
-
-            let hwUUID = getHardwareUUID() ?? "YAAM-FALLBACK-MAC-UUID"
-            let ikmString = "\(hwUUID):\(siblingHome):\(bundleID)"
-            guard let ikmData = ikmString.data(using: .utf8) else { return }
-            let inputKey = SymmetricKey(data: ikmData)
-            let siblingKey = HKDF<SHA256>.deriveKey(
-                inputKeyMaterial: inputKey,
-                salt: siblingSalt,
-                info: "ASIS.YAAM.HardwareBoundVault.v3".data(using: .utf8)!,
-                outputByteCount: 32
-            )
-
-            guard let sealedBox = try? AES.GCM.SealedBox(combined: siblingVaultData),
-                  let decrypted = try? AES.GCM.open(sealedBox, using: siblingKey),
-                  let siblingDict = try? JSONDecoder().decode([String: Data].self, from: decrypted) else {
-                return
+            let defaults = UserDefaults.standard
+            let legacyKeys: [(SecureCredential, String)] = [(.qrzPassword,"qrzPassword"), (.qrzAPIKey,"qrzApiKey"),
+                (.lotwPassword,"lotwPassword"), (.hamqthPassword,"hamqthPassword"), (.eqslPassword,"eqslPassword"),
+                (.clubLogPassword,"clubLogPassword"), (.clubLogAPIKey,"clubLogAPIKey"), (.smtpPassword,"smtpPass"),
+                (.qrzCookieHeader,"qrzSessionCookie")]
+            for (credential, name) in legacyKeys {
+                if let text = defaults.string(forKey: name), !text.isEmpty {
+                    if values[credential.rawValue] == nil { values[credential.rawValue] = Data(text.utf8) }
+                    defaultsToRemove.append(name)
+                }
             }
-
-            let currentModDate = (try? fm.attributesOfItem(atPath: vaultFileURL.path)[.modificationDate] as? Date) ?? .distantPast
-            let siblingModDate = (try? fm.attributesOfItem(atPath: siblingVaultFile.path)[.modificationDate] as? Date) ?? .distantPast
-
-            var changed = false
-            for (key, val) in siblingDict {
-                if self.memoryVault[key] == nil || siblingModDate > currentModDate {
-                    if self.memoryVault[key] != val {
-                        self.memoryVault[key] = val
-                        changed = true
+            if let data = defaults.data(forKey: "qrzSessionCookies") {
+                if values[SecureCredential.qrzCookieArchive.rawValue] == nil { values[SecureCredential.qrzCookieArchive.rawValue] = data }
+                defaultsToRemove.append("qrzSessionCookies")
+            }
+            if !isLegacyMigrationFinished() {
+                keychainMigrationSucceeded = true
+                for service in Set([bundle, "ASIS.YAAM"]) {
+                    let context = LAContext(); context.interactionNotAllowed = true
+                    let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+                        kSecAttrService as String: service, kSecReturnAttributes as String: true,
+                        kSecReturnData as String: true, kSecMatchLimit as String: kSecMatchLimitAll,
+                        kSecUseAuthenticationContext as String: context]
+                    var result: CFTypeRef?
+                    let status = SecItemCopyMatching(query as CFDictionary, &result)
+                    if status != errSecSuccess && status != errSecItemNotFound { keychainMigrationSucceeded = false }
+                    let items = (result as? [[String: Any]]) ?? (result as? [String: Any]).map { [$0] } ?? []
+                    for item in items {
+                        guard let account = item[kSecAttrAccount as String] as? String,
+                              account != "ASIS.YAAM.MasterVaultKey", let data = item[kSecValueData as String] as? Data else { continue }
+                        if values[account] == nil { values[account] = data }
+                        accountsToRemove.insert(account)
                     }
                 }
             }
-
-            if changed {
-                _ = persistVault()
-            }
-        }
-
-        private func migrateFromUserDefaultsSilently() {
-            let defaults = UserDefaults.standard
-            var found = false
-
-            let legacyKeys: [(SecureCredential, String)] = [
-                (.qrzPassword, "qrzPassword"),
-                (.qrzAPIKey, "qrzApiKey"),
-                (.lotwPassword, "lotwPassword"),
-                (.hamqthPassword, "hamqthPassword"),
-                (.eqslPassword, "eqslPassword"),
-                (.clubLogPassword, "clubLogPassword"),
-                (.clubLogAPIKey, "clubLogAPIKey"),
-                (.smtpPassword, "smtpPass")
-            ]
-
-            for (cred, legacyKey) in legacyKeys {
-                if let val = defaults.string(forKey: legacyKey), !val.isEmpty {
-                    self.memoryVault[cred.rawValue] = Data(val.utf8)
-                    found = true
-                    defaults.removeObject(forKey: legacyKey)
+            return (values, { [self] in
+                for file in files where fm.fileExists(atPath: file.path) {
+                    do { try fm.removeItem(at: file) }
+                    catch { lastFailure = "The protected vault was saved, but a legacy credential copy could not be removed. Check the app's Application Support folder permissions." }
                 }
-            }
-
-            if let cookieData = defaults.data(forKey: "qrzSessionCookies"), !cookieData.isEmpty {
-                self.memoryVault[SecureCredential.qrzCookieArchive.rawValue] = cookieData
-                found = true
-                defaults.removeObject(forKey: "qrzSessionCookies")
-            }
-
-            if let cookieHeader = defaults.string(forKey: "qrzSessionCookie"), !cookieHeader.isEmpty {
-                self.memoryVault[SecureCredential.qrzCookieHeader.rawValue] = Data(cookieHeader.utf8)
-                found = true
-                defaults.removeObject(forKey: "qrzSessionCookie")
-            }
-
-            if found {
-                _ = persistVault()
-            }
+                for name in defaultsToRemove { defaults.removeObject(forKey: name) }
+                for account in accountsToRemove { deleteLegacyKeychainItem(account: account) }
+                if keychainMigrationSucceeded { markLegacyMigrationFinished() }
+            })
         }
 
         private func queryLegacyKeychain(account: String) -> Data? {
@@ -342,8 +283,11 @@ nonisolated enum KeychainStore {
                     kSecReturnData as String: true,
                     kSecMatchLimit as String: kSecMatchLimitOne
                 ]
+                var request = query
+                let context = LAContext(); context.interactionNotAllowed = true
+                request[kSecUseAuthenticationContext as String] = context
                 var result: CFTypeRef?
-                let status = SecItemCopyMatching(query as CFDictionary, &result)
+                let status = SecItemCopyMatching(request as CFDictionary, &result)
                 if status == errSecSuccess, let data = result as? Data, !data.isEmpty {
                     return data
                 }
@@ -363,70 +307,11 @@ nonisolated enum KeychainStore {
             }
         }
 
-        private func migrateFromLegacyKeychainSilently() {
-            guard !isLegacyMigrationFinished() else { return }
-            markLegacyMigrationFinished()
 
-            let services = [Bundle.main.bundleIdentifier, "ASIS.YAAM"].compactMap { $0 }
-            var foundAny = false
-            var migratedAccounts: [String] = []
-
-            for service in Set(services) {
-                let query: [String: Any] = [
-                    kSecClass as String: kSecClassGenericPassword,
-                    kSecAttrService as String: service,
-                    kSecReturnAttributes as String: true,
-                    kSecReturnData as String: true,
-                    kSecMatchLimit as String: kSecMatchLimitAll
-                ]
-                var result: CFTypeRef?
-                let status = SecItemCopyMatching(query as CFDictionary, &result)
-                if status == errSecSuccess {
-                    let items: [[String: Any]]
-                    if let array = result as? [[String: Any]] {
-                        items = array
-                    } else if let dict = result as? [String: Any] {
-                        items = [dict]
-                    } else {
-                        items = []
-                    }
-
-                    for item in items {
-                        if let account = item[kSecAttrAccount as String] as? String,
-                           let data = item[kSecValueData as String] as? Data,
-                           !account.isEmpty,
-                           !data.isEmpty,
-                           account != "ASIS.YAAM.MasterVaultKey" {
-                            if memoryVault[account] == nil {
-                                memoryVault[account] = data
-                                foundAny = true
-                            }
-                            migratedAccounts.append(account)
-                        }
-                    }
-                }
-            }
-
-            for cred in SecureCredential.allCases {
-                if memoryVault[cred.rawValue] == nil,
-                   let data = queryLegacyKeychain(account: cred.rawValue) {
-                    memoryVault[cred.rawValue] = data
-                    foundAny = true
-                    migratedAccounts.append(cred.rawValue)
-                }
-            }
-
-            if foundAny {
-                _ = persistVault()
-            }
-
-            for account in Set(migratedAccounts) {
-                deleteLegacyKeychainItem(account: account)
-            }
-        }
     }
 
     private static let vault = VaultManager()
+    public static var storageFailure: String? { vault.failure }
 
     // MARK: - Biometric & Touch ID Capabilities
 
@@ -472,37 +357,36 @@ nonisolated enum KeychainStore {
         }
         set {
             UserDefaults.standard.set(newValue, forKey: biometricLockPreferenceKey)
+            lockSession()
         }
     }
 
     private static let sessionLock = NSLock()
-    private static var _isVaultSessionUnlocked: Bool = false
+    private static var sessionGate = CredentialSessionGate()
 
     public static var isVaultSessionUnlocked: Bool {
         sessionLock.lock()
         defer { sessionLock.unlock() }
-        if !isBiometricLockEnabled {
-            return true
-        }
-        return _isVaultSessionUnlocked
+        return sessionGate.allowsAccess(requiresAuthentication: isBiometricLockEnabled)
     }
 
-    public static func markSessionUnlocked() {
-        sessionLock.lock()
-        _isVaultSessionUnlocked = true
-        sessionLock.unlock()
+    private static func completeAuthentication(ticket: Int, success: Bool) -> Bool {
+        sessionLock.lock(); defer { sessionLock.unlock() }
+        return sessionGate.completeAuthentication(ticket: ticket, success: success)
     }
 
     public static func lockSession() {
         sessionLock.lock()
-        _isVaultSessionUnlocked = false
+        sessionGate.lock()
         sessionLock.unlock()
+        vault.clearSession()
     }
 
     @discardableResult
     public static func authenticateWithBiometrics(
         reason: String = "Scan your fingerprint to securely unlock YAAM radio credentials"
     ) async -> Bool {
+        let ticket = sessionLock.withLock { sessionGate.generation }
         let context = LAContext()
         context.localizedCancelTitle = "Cancel"
         var error: NSError?
@@ -513,11 +397,9 @@ nonisolated enum KeychainStore {
                     .deviceOwnerAuthenticationWithBiometrics,
                     localizedReason: reason
                 )
-                if success {
-                    markSessionUnlocked()
-                    vault.prewarm()
-                }
-                return success
+                let granted = completeAuthentication(ticket: ticket, success: success)
+                if granted { prewarm() }
+                return granted
             } catch {
                 return false
             }
@@ -527,24 +409,21 @@ nonisolated enum KeychainStore {
                     .deviceOwnerAuthentication,
                     localizedReason: reason
                 )
-                if success {
-                    markSessionUnlocked()
-                    vault.prewarm()
-                }
-                return success
+                let granted = completeAuthentication(ticket: ticket, success: success)
+                if granted { prewarm() }
+                return granted
             } catch {
                 return false
             }
         }
 
-        markSessionUnlocked()
-        vault.prewarm()
-        return true
+        return false
     }
 
-    // MARK: - Public API (Zero-Prompt In-Memory Access)
+    // MARK: - Session-gated credential access
 
     public static func prewarm() {
+        guard isVaultSessionUnlocked else { return }
         vault.prewarm()
     }
 
@@ -571,12 +450,14 @@ nonisolated enum KeychainStore {
 
     @discardableResult
     public static func set(_ data: Data, for account: String) -> Bool {
-        vault.set(data, for: account)
+        guard isVaultSessionUnlocked else { return false }
+        return vault.set(data, for: account)
     }
 
     @discardableResult
     public static func delete(_ account: String) -> Bool {
-        vault.delete(account)
+        guard isVaultSessionUnlocked else { return false }
+        return vault.delete(account)
     }
 }
 

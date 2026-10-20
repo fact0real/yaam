@@ -140,7 +140,7 @@ Whenever you add a new location or renew a certificate inside the official TQSL 
 
 ### 2.5 Importing .p12 Container Certificates & Keychain Security
 * In `Settings > LoTW`, click **Choose .p12...** to select your exported TQSL certificate file. YAAM establishes a persistent **Security-Scoped Bookmark** to maintain safe filesystem access across macOS reboots.
-* Passwords for your certificates and LoTW web accounts are protected in a **Hardware-Bound Keychain Vault**, encrypted with AES-256-GCM using hardware keys derived from your Mac’s unique serial number (`IOPlatformUUID`).
+* Passwords for your certificates and LoTW web accounts are protected by AES-256-GCM using a **random secret stored in the macOS login Keychain**. Hardware identifiers are used only to read the old vault during migration; they are not the new encryption key.
 
 ### 2.6 Zero-Click Cloud Upload Background Daemon
 Enable **Zero-Click LoTW Upload** in settings. Whenever a QSO is finalized in Quick Log or via FT8, the background daemon bundles the contact, cryptographically signs it with TQSL, and uploads it to ARRL servers without requiring manual button clicks. Successfully uploaded QSOs are marked with `LOTW_QSL_SENT = Y`.
@@ -803,3 +803,18 @@ Open **QRZ Incoming Requests**, then **Review…** on a request. Incoming can re
 Compare your own log/notes or the other operator's reply. Supply the actual UTC date/time, ADIF band/mode, station callsign and source of the details. No time, band or mode is filled from QRZ form defaults. Use **Use local details** to review an existing candidate; correct an inaccurate existing contact in the log editor before reviewing it again. Only select **separate contact** for a genuinely different QSO. Unknown details must remain pending.
 
 Explicitly verify the details and **Save verified contact**. An exact local contact is reused; a genuinely missing contact is saved with request provenance. This does not mark it confirmed or trigger Quick Log automatic uploads. **Prepare LoTW / QRZ / Club Log** then uses the existing durable QSL Hub queue and station checks. Follow each service there; completed destinations are not repeated. Drafts are retained per station/request, but verification must be performed again when reopening.
+
+
+### Credential protection, contact reuse and verified sign-in
+
+The credential vault uses a random 256-bit root in the local, non-synchronizing macOS Keychain and an encrypted `secure_vault.v4.dat` file. Existing readable vault/defaults credentials migrate on first use; their old copies are retired only after the protected file is written and verified. Later launches do not import weak legacy files over the new vault. If the key is missing, denied or the vault is corrupt, YAAM preserves the file and reports the problem instead of generating a replacement. For recovery, retain the matching Keychain item and vault on the same Mac; a copied vault alone is insufficient. On another Mac, re-enter service credentials. Removing/reinstalling the app does not intentionally remove its key or vault.
+
+**Touch ID** is an optional application-session gate, not a per-credential biometric Keychain ACL. Failed/cancelled authentication leaves a locked session locked; a pending authentication cannot undo a later lock. Locking clears the in-memory credential cache. Disabling a locked session gate through Settings requires authentication. A denied Keychain read does not fall back to plaintext.
+
+In Quick Log's recent contacts, **New** / **Use as New QSO…** asks before replacing the draft. It creates a fresh draft for another contact and preserves the original QSO. Review the new time/reports before saving; correct an existing record in the Log Table editor.
+
+FT8/FT4 and Multi-Rig logging retain the observed exchange start, completion time, actual protocol, RF frequencies and reports actually exchanged. FT4 exports as `MODE=MFSK`, `SUBMODE=FT4`. Unknown reports are omitted. The station's log is saved before automatic uploads are dispatched; duplicate completion callbacks reuse the recorded contact. Multi-Rig contacts use the same upload routing as the single-radio station.
+
+Upload notices distinguish accepted services, waiting work and failures that need review. Provider acceptance must be explicit; an empty QRZ HTTP success response does not mark a QSO sent. Retries use structured transport/service outcomes rather than English message text. Uncertain submissions need manual review. For iCloud logs, use the downloaded file rather than a `.icloud` placeholder; YAAM requests a missing download and asks you to retry once available, then reads a coordinated private signing copy.
+
+QRZ Login stays open during password entry, MFA and browser verification. **Verify & Save** requires a trusted HTTPS QRZ page with an authenticated account action, no pending login/challenge, and a current session cookie. A pre-authentication cookie is insufficient. **Retry** reloads sign-in; **Cancel** prevents later page callbacks from saving a session. If the credential vault cannot save the session, the window remains open with an actionable message.

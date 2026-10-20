@@ -140,7 +140,7 @@ public actor TQSLCoordinator {
             if let adifContent {
                 input = adifContent
             } else if let adifFileURL {
-                let data = try Data(contentsOf: adifFileURL)
+                let data = try UploadFileReader.read(adifFileURL)
                 guard let decoded = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) else {
                     return (false, "Could not decode the ADIF file for LoTW signing.")
                 }
@@ -149,7 +149,7 @@ public actor TQSLCoordinator {
                 return (false, "No ADIF log was provided for LoTW signing.")
             }
         } catch {
-            return (false, "Could not read the ADIF file for LoTW signing.")
+            return (false, "Could not read the ADIF file for LoTW signing: \(error.localizedDescription)")
         }
         let (_, records) = parseADIF(content: input)
         guard !records.isEmpty else { return (false, "No QSOs found for LoTW signing.") }

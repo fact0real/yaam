@@ -109,6 +109,7 @@ private struct RecentQSORowView: View {
     let onDelete: () -> Void
 
     @State private var isHovered = false
+    @State private var showNewDraftConfirmation = false
 
     var body: some View {
         let call = record["CALL"]
@@ -254,16 +255,16 @@ private struct RecentQSORowView: View {
             // ACTION BUTTON
             HStack(spacing: 2) {
                 Button {
-                    onLoad()
+                    showNewDraftConfirmation = true
                 } label: {
-                    Image(systemName: "arrow.up.left.and.arrow.down.right")
-                        .font(.system(size: 9.5))
-                        .foregroundStyle(isHovered ? Color.accentColor : Color.secondary.opacity(0.4))
+                    Label("New", systemImage: "doc.on.doc")
+                        .font(.system(size: 10, weight: .medium))
                 }
-                .buttonStyle(.plain)
-                .help("Load into Quick Log form")
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+                .help("Copy into a new QSO draft — does not edit this contact")
             }
-            .frame(width: 24, alignment: .center)
+            .frame(width: 64, alignment: .center)
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 4.5)
@@ -277,13 +278,19 @@ private struct RecentQSORowView: View {
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }
         .onTapGesture(count: 2) {
-            onLoad()
+            showNewDraftConfirmation = true
+        }
+        .confirmationDialog("Create a new QSO draft from \(call)?", isPresented: $showNewDraftConfirmation, titleVisibility: .visible) {
+            Button("Create New Draft") { onLoad() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This replaces the current draft. The original contact stays unchanged. Review the new contact's date, time, band and reports before saving. To correct the original, use the Log Table editor.")
         }
         .contextMenu {
             Button {
-                onLoad()
+                showNewDraftConfirmation = true
             } label: {
-                Label("Load into Quick Log", systemImage: "square.and.pencil")
+                Label("Use as New QSO…", systemImage: "doc.on.doc")
             }
 
             Button {
@@ -1237,21 +1244,12 @@ private struct QuickLogPanel: View {
     }
 
     private func loadRecordIntoForm(_ record: QSORecordModel) {
-        appState.quickLogDraft.callsign = record["CALL"]
-        appState.quickLogDraft.frequencyMHz = record["FREQ"]
-        appState.quickLogDraft.band = record["BAND"]
-        appState.quickLogDraft.mode = record["MODE"]
-        appState.quickLogDraft.submode = record["SUBMODE"]
-        appState.quickLogDraft.rstSent = record["RST_SENT"]
-        appState.quickLogDraft.rstReceived = record["RST_RCVD"]
-        appState.quickLogDraft.name = record["NAME"]
-        appState.quickLogDraft.qth = record["QTH"]
-        appState.quickLogDraft.grid = record["GRIDSQUARE"].isEmpty ? record["GRID"] : record["GRIDSQUARE"]
-        appState.quickLogDraft.country = record["COUNTRY"]
-        appState.quickLogDraft.comment = record["COMMENT"]
+        appState.quickLogDraft = QuickLogReusePolicy.newDraft(from: record.fields)
+        appState.quickLogLookup = nil
+        duplicateWasAcknowledged = false
         appState.refreshQuickLogAssessment()
         focusedField = .callsign
-        appState.quickLogStatus = "Loaded \(record["CALL"])"
+        appState.quickLogStatus = "New draft from \(record["CALL"]) — original unchanged; review before saving"
     }
 
     private var recentQSOsTable: some View {

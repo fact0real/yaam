@@ -2131,8 +2131,8 @@ struct HelpView: View {
 
                 HelpDefinition(
                     icon: "key.horizontal.fill",
-                    title: "Hardware-Bound Password Vault",
-                    text: "Your certificate passphrase and LoTW account password are encrypted using AES-256-GCM with a hardware key derived from your Mac's unique platform UUID (IOPlatformUUID). They are stored safely in macOS Keychain.",
+                    title: "Keychain-Protected Password Vault",
+                    text: "Your certificate passphrase and LoTW account password use AES-256-GCM with a random root secret held in the macOS login Keychain. Keep the matching Keychain item and encrypted vault for same-Mac recovery.",
                     color: .green
                 )
             }
@@ -2368,17 +2368,17 @@ struct HelpView: View {
 
     private var credentials: some View {
         Group {
-            helpHeader(title: "Credentials & Keychain", subtitle: "Passwords, API keys, and QRZ browser session cookies are protected by the macOS credential store and Hardware-Bound AES-256-GCM encryption.", icon: "lock.shield.fill", color: .green)
+            helpHeader(title: "Credentials & Keychain", subtitle: "Passwords, API keys, and QRZ browser session cookies use AES-256-GCM with a random secret protected by the macOS login Keychain.", icon: "lock.shield.fill", color: .green)
             HelpFlow(steps: [
                 HelpFlowStep(icon: "rectangle.and.pencil.and.ellipsis", title: "Enter", detail: "Add the secret in the relevant Settings tab."),
-                HelpFlowStep(icon: "key.fill", title: "Protect", detail: "Press Save once to write it to macOS Keychain and Secure Vault."),
-                HelpFlowStep(icon: "network", title: "Use", detail: "The value is decrypted in memory only when contacting that service."),
+                HelpFlowStep(icon: "key.fill", title: "Protect", detail: "Save the encrypted credential vault; its random root stays in the macOS Keychain."),
+                HelpFlowStep(icon: "network", title: "Use", detail: "Services use the unlocked credential session. Locking clears cached credential values."),
                 HelpFlowStep(icon: "trash.slash", title: "Keep private", detail: "It is never written to plain text preferences or exported with ADIF.")
             ])
-            helpSection("Hardware-Bound AES-256-GCM Secure Vault") {
-                HelpDefinition(icon: "cpu", title: "Bound to Mac Hardware", text: "Sensitive tokens and credentials are encrypted using AES-256-GCM with a key derived from your Mac's unique hardware platform UUID (IOPlatformUUID). Even if database or setting files are copied to another computer, they cannot be decrypted.")
-                HelpDefinition(icon: "shield.lefthalf.filled", title: "Cryptographic Salt & POSIX Permissions", text: "Each installation generates a unique 256-bit cryptographic salt stored with POSIX 0o600 permissions (user-read/write only), safeguarding credentials against unauthorized access.")
-                HelpDefinition(icon: "key.viewfinder", title: "Dual Keychain Fallback", text: "YAAM pairs macOS Keychain Services with the Hardware-Bound Vault for maximum reliability across sandboxed environments and headless operations.")
+            helpSection("Keychain-Protected Credential Vault") {
+                HelpDefinition(icon: "key.fill", title: "Random protected root", text: "A random 256-bit secret in the macOS login Keychain encrypts the local vault. Hardware identifiers cannot derive the new key; a copied vault file alone is insufficient for recovery.")
+                HelpDefinition(icon: "shield.lefthalf.filled", title: "Session authentication", text: "Optional Touch ID or Mac authentication gates the YAAM credential session. It is not a per-item biometric Keychain lock. Failed authentication does not unlock a locked session.")
+                HelpDefinition(icon: "arrow.clockwise.circle", title: "Preserve and recover", text: "If the Keychain key is unavailable or encrypted data is damaged, YAAM preserves the saved vault without a weak or plaintext fallback. Retain the matching Keychain key and file for same-Mac recovery; re-enter credentials on another Mac.")
             }
             helpSection("Credential Scope") {
                 HelpDefinition(icon: "person.crop.circle", title: "Account-wide", text: "QRZ login password, LoTW password, HAMQTH password, and SMTP app password.")
@@ -2386,8 +2386,8 @@ struct HelpView: View {
                 HelpDefinition(icon: "antenna.radiowaves.left.and.right", title: "Per station", text: "The QRZ Logbook API key follows the active station profile.")
                 HelpDefinition(icon: "safari.fill", title: "QRZ session", text: "Saved QRZ cookies support Awards and authenticated lookups, and can be refreshed with QRZ Login.")
             }
-            helpCallout(icon: "bolt.slash.fill", title: "No startup interruption", text: "The Master Log loads before online credentials. Keychain values are requested only when their Settings tab or related service is used.", color: .blue)
-            helpCallout(icon: "arrow.triangle.2.circlepath", title: "Automatic migration", text: "Existing secrets from older YAAM versions are moved into Keychain after the log is available and removed from ordinary preferences only after a successful transfer.", color: .green)
+            helpCallout(icon: "bolt.slash.fill", title: "Background access", text: "Background credential reads do not display Keychain authentication UI. If the key is unavailable or the session is locked, services must wait for access to be restored.", color: .blue)
+            helpCallout(icon: "arrow.triangle.2.circlepath", title: "Automatic migration", text: "Readable legacy vaults and preferences migrate to the protected vault. Old copies are retired only after encrypted persistence is verified; later launches do not import weak files over the new vault.", color: .green)
         }
     }
 

@@ -35,20 +35,23 @@ func deriveHardwareKeyTest(salt: Data) -> SymmetricKey {
 @main
 struct SecureVaultRegression {
     static func main() {
-        print("Running Hardware-Bound Secure Vault & Zero-Prompt Cryptography Tests...")
+        print("Running legacy v3 migration compatibility tests (not the current security design)...")
 
         testHardwareUUIDRetrieval()
         testHardwareBoundKeyDerivationAndEncryption()
         testMigrationFlagPreventsRepeatedQueries()
         testBiometricContextAvailability()
 
-        print("All Hardware-Bound Secure Vault Regression Tests PASSED successfully!")
+        print("Legacy v3 migration compatibility tests passed. Current protection is tested by ProtectedCredentialStorageRegression.")
     }
 
     private static func testMigrationFlagPreventsRepeatedQueries() {
         let flagKey = "ASIS.YAAM.LegacyKeychainMigrationFinished_v2"
-        UserDefaults.standard.set(true, forKey: flagKey)
-        let isFinished = UserDefaults.standard.bool(forKey: flagKey)
+        let suite = "YAAM.test.vault." + UUID().uuidString
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(true, forKey: flagKey)
+        let isFinished = defaults.bool(forKey: flagKey)
         precondition(isFinished == true, "Migration flag must be true")
         print("Verified Migration Flag: \(flagKey) = true")
     }
@@ -64,7 +67,7 @@ struct SecureVaultRegression {
     private static func testHardwareUUIDRetrieval() {
         let uuid = getHardwareUUIDTest()
         precondition(uuid != nil && !uuid!.isEmpty, "Failed to retrieve hardware UUID")
-        print("Verified Hardware UUID: \(uuid!)")
+        print("Legacy migration hardware identifier is available (value redacted)")
     }
 
     private static func testHardwareBoundKeyDerivationAndEncryption() {

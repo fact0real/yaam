@@ -11,6 +11,7 @@ struct DataSafetySettingsView: View {
     @State private var backupToRestore: BackupSnapshot?
     @State private var isBiometricsEnabled: Bool = CredentialVault.isBiometricLockEnabled
     @State private var biometricTestStatus: String = ""
+    @State private var biometricTestSucceeded: Bool?
     @AppStorage("uploadShareNameAndQTH") private var uploadShareNameAndQTH = false
     @AppStorage("uploadShareContactDetails") private var uploadShareContactDetails = false
     @AppStorage("uploadShareFreeText") private var uploadShareFreeText = false
@@ -183,13 +184,13 @@ struct DataSafetySettingsView: View {
 
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 6) {
-                            Text("Hardware-Bound AES-256-GCM Vault")
+                            Text("Keychain-Protected Credential Vault")
                                 .font(.callout.weight(.semibold))
-                            Image(systemName: "checkmark.seal.fill")
-                                .foregroundStyle(.green)
+                            Image(systemName: "key.fill")
+                                .foregroundStyle(.blue)
                                 .font(.caption)
                         }
-                        Text("Passwords and API secrets are protected by machine hardware UUID and AES-256-GCM encryption.")
+                        Text("AES-256-GCM protects the vault with a random secret held in the macOS login Keychain.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -203,14 +204,21 @@ struct DataSafetySettingsView: View {
                         }
                         .toggleStyle(.switch)
                         .onChange(of: isBiometricsEnabled) { _, newValue in
-                            CredentialVault.isBiometricLockEnabled = newValue
+                            guard newValue != CredentialVault.isBiometricLockEnabled else { return }
                             if newValue {
+                                CredentialVault.isBiometricLockEnabled = true
                                 Task {
                                     let ok = await CredentialVault.authenticateWithBiometrics()
-                                    if !ok {
-                                        isBiometricsEnabled = false
-                                        CredentialVault.isBiometricLockEnabled = false
-                                    }
+                                    biometricTestSucceeded = ok
+                                    biometricTestStatus = ok ? "Session unlocked" : "Authentication cancelled or failed; the vault remains locked"
+                                }
+                            } else if CredentialVault.isVaultSessionUnlocked {
+                                CredentialVault.isBiometricLockEnabled = false
+                            } else {
+                                Task {
+                                    let ok = await CredentialVault.authenticateWithBiometrics(reason: "Authorize changing YAAM's credential session lock")
+                                    if ok { CredentialVault.isBiometricLockEnabled = false }
+                                    else { isBiometricsEnabled = true; biometricTestSucceeded = false; biometricTestStatus = "The session lock remains enabled" }
                                 }
                             }
                         }
@@ -224,7 +232,7 @@ struct DataSafetySettingsView: View {
                         Image(systemName: "shield.lefthalf.filled")
                             .foregroundStyle(.secondary)
                             .font(.caption)
-                        Text("Multi-prompt Keychain loops permanently eliminated. Zero password dialogs on recompile.")
+                        Text("Touch ID gates this YAAM session. It is not a per-item Keychain biometric lock. Keep the matching Keychain key when restoring this Mac.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -236,6 +244,7 @@ struct DataSafetySettingsView: View {
                             Task {
                                 biometricTestStatus = "Authenticating..."
                                 let success = await CredentialVault.authenticateWithBiometrics(reason: "Testing Touch ID sensor functionality for YAAM")
+                                biometricTestSucceeded = success
                                 biometricTestStatus = success ? "Verified successfully" : "Authentication failed or cancelled"
                             }
                         } label: {
@@ -246,10 +255,14 @@ struct DataSafetySettingsView: View {
                     }
                 }
 
+                if let failure = KeychainStore.storageFailure {
+                    Label(failure, systemImage: "exclamationmark.lock.fill")
+                        .font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+                }
                 if !biometricTestStatus.isEmpty {
                     Text(biometricTestStatus)
                         .font(.caption.weight(.medium))
-                        .foregroundStyle(biometricTestStatus.contains("successfully") ? .green : .orange)
+                        .foregroundStyle(biometricTestSucceeded == true ? .green : .orange)
                         .transition(.opacity)
                 }
             }

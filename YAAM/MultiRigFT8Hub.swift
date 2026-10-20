@@ -535,34 +535,13 @@ final class MultiRigFT8Hub: ObservableObject {
         let engine = slot.engine
 
         // Connect logging handler to centralized SQLite logbook with Radio Tag
-        engine.logQSOHandler = { [weak self, weak appState] call, grid, sent, rcvd, band, freq in
-            guard let appState else { return }
-            let radioName = slot.name
-            if Thread.isMainThread {
-                self?.logMultiRigQSO(
-                    appState: appState,
-                    radioName: radioName,
-                    call: call,
-                    grid: grid,
-                    sentRST: sent,
-                    rcvdRST: rcvd,
-                    band: band,
-                    freqMHz: freq
-                )
-            } else {
-                Task { @MainActor in
-                    self?.logMultiRigQSO(
-                        appState: appState,
-                        radioName: radioName,
-                        call: call,
-                        grid: grid,
-                        sentRST: sent,
-                        rcvdRST: rcvd,
-                        band: band,
-                        freqMHz: freq
-                    )
-                }
-            }
+        engine.logQSOHandler = { [weak self, weak appState] completion in
+            guard let appState else { return false }
+            let saved = appState.logFT8StationQSO(completion, radioName: slot.name)
+            self?.masterStatusMessage = saved
+                ? "Contact with \(completion.call) saved by \(slot.name)"
+                : "Contact from \(slot.name) was not saved; check the active station and logbook"
+            return saved
         }
 
         // Shared logbook lookup handlers
@@ -610,66 +589,6 @@ final class MultiRigFT8Hub: ObservableObject {
                 (rec.fields["GRIDSQUARE"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased().hasPrefix(targetGrid)
             }
         }
-    }
-
-    private func logMultiRigQSO(
-        appState: AppState,
-        radioName: String,
-        call: String,
-        grid: String,
-        sentRST: String,
-        rcvdRST: String,
-        band: String,
-        freqMHz: Double
-    ) {
-        let cleanCall = call.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        guard !cleanCall.isEmpty else { return }
-
-        let now = Date()
-        let dateFormatter = DateFormatter()
-        dateFormatter.locale = Locale(identifier: "en_US_POSIX")
-        dateFormatter.timeZone = TimeZone(secondsFromGMT: 0)
-
-        dateFormatter.dateFormat = "yyyyMMdd"
-        let qsoDate = dateFormatter.string(from: now)
-
-        dateFormatter.dateFormat = "HHmmss"
-        let timeOn = dateFormatter.string(from: now)
-
-        let entity = DXCCDatabase.resolve(callsign: cleanCall)
-
-        var fields: [String: String] = [
-            "CALL": cleanCall,
-            "BAND": band,
-            "MODE": "FT8",
-            "FREQ": String(format: "%.6f", freqMHz),
-            "QSO_DATE": qsoDate,
-            "TIME_ON": timeOn,
-            "TIME_OFF": timeOn,
-            "RST_SENT": sentRST.isEmpty ? "-10" : sentRST,
-            "RST_RCVD": rcvdRST.isEmpty ? "-10" : rcvdRST,
-            "COUNTRY": entity.entityName,
-            "CONT": entity.continent,
-            "CQZ": "\(entity.cqZone)",
-            "ITUZ": "\(entity.ituZone)",
-            "COMMENT": "Logged via YAAM Multi-Rig FT8 Cluster (\(radioName))",
-            "APP_YAAM_SOURCE": "Multi-Rig FT8",
-            "RADIO": radioName
-        ]
-        if !grid.isEmpty { fields["GRIDSQUARE"] = grid.uppercased() }
-
-        fields = appState.stationTaggedFields(fields)
-        guard !appState.isSelfContact(fields) else { return }
-        let newRecord = QSORecordModel(index: appState.qsoRecords.count + 1, fields: fields)
-
-        guard !appState.qsoRecords.contains(where: { $0.uniqueKey == newRecord.uniqueKey }) else {
-            return
-        }
-
-        appState.qsoRecords.append(newRecord)
-        appState.persistQuickLog(newRecord)
-        appState.playActivitySound(.success)
-        masterStatusMessage = "⭐️ QSO with \(cleanCall) on \(band) logged by \(radioName)!"
     }
 
     private func wireInterlock() {

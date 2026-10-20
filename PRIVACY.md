@@ -58,3 +58,10 @@ Bundled demonstration membership/history/verified-call entries no longer populat
 ## Maintenance / source boundaries
 
 Primary paths: `StationWeatherSafetyEngine.swift`, `WeatherLocationPrivacy.swift`, `QRZRankAPIContract.swift`, `AppState.swift`, `ZeroClickCloudUploadDaemon.swift`, `QSLSyncEngine.swift`, `AppStateSyncCenter.swift`, `CallsignLookupService.swift`, `QRZIncomingAndAssistant.swift`, `ConnectivityServices.swift`, `AppStateConnectivity.swift`, and the provider engines named above. Recheck this inventory when adding endpoints, background timers or payload fields. No external provider’s logging/retention policy is asserted here.
+
+
+### Credential vault boundary
+
+YAAM's current vault uses AES-256-GCM and a random 256-bit root held in a non-synchronizing, device-local macOS login Keychain item (`ASIS.YAAM.ProtectedVault.v1` / `random-root-key`). Public hardware/account metadata cannot derive this root. The encrypted vault file alone is not a portable credential backup. Readable legacy files/defaults migrate once; removal follows verified encrypted persistence. Missing/denied keys or corrupt data fail closed and preserve the existing file. Background Keychain access does not request authentication UI or fall back to plaintext.
+
+The optional Touch ID/Mac authentication preference gates the application's credential session. It is not a Secure Enclave claim or a per-item biometric ACL. Locking clears cached values; authorization results from before that lock cannot reopen it. Keep the matching Keychain item and encrypted file for same-Mac recovery; re-enter credentials on another Mac. Tests use synthetic values and isolated stores, not production credentials.

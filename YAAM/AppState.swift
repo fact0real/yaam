@@ -150,16 +150,16 @@ nonisolated struct QRZStoredCookie: Codable {
 
 enum QRZSessionStore {
     static func save(cookies: [HTTPCookie]) -> String {
-        let qrzCookies = cookies.filter { $0.domain.contains("qrz.com") }
+        let qrzCookies = cookies.filter { QRZAuthenticationPolicy.trustedHost($0.domain) }
         let cookieHeader = qrzCookies
             .map { "\($0.name)=\($0.value)" }
             .joined(separator: "; ")
-        _ = CredentialVault.set(cookieHeader, for: .qrzCookieHeader)
+        guard !cookieHeader.isEmpty else { return "" }
 
         let storedCookies = qrzCookies.map(QRZStoredCookie.init(cookie:))
-        if let data = try? JSONEncoder().encode(storedCookies) {
-            _ = CredentialVault.set(data, for: .qrzCookieArchive)
-        }
+        guard let data = try? JSONEncoder().encode(storedCookies),
+              CredentialVault.set(data, for: .qrzCookieArchive),
+              CredentialVault.set(cookieHeader, for: .qrzCookieHeader) else { return "" }
 
         return cookieHeader
     }
@@ -2757,13 +2757,15 @@ class AppState: NSObject, ObservableObject {
         }
     }
     
-    func saveQRZSessionCookies(_ cookies: [HTTPCookie]) {
+    @discardableResult func saveQRZSessionCookies(_ cookies: [HTTPCookie]) -> Bool {
         let cookieHeader = QRZSessionStore.save(cookies: cookies)
         if cookieHeader.isEmpty {
-            appendLog("⚠️ QRZ session save requested, but no qrz.com cookies were found.")
+            appendLog("QRZ session was not saved. Check QRZ authentication and credential vault access.")
+            return false
         } else {
             QRZSessionStore.restoreToWebKit()
-            appendLog("✅ QRZ session saved for future app launches.")
+            appendLog("QRZ session saved for future app launches.")
+            return true
         }
     }
 

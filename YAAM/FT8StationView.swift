@@ -696,20 +696,9 @@ struct FT8StationView: View {
 
             // Manual / Auto Log Button
             Button {
-                if !engine.dxCall.isEmpty {
-                    let currentBand = engine.currentBandName
-                    let dialMHz = Double(engine.dialFrequencyHz) / 1_000_000.0
-                    appState.logFT8StationQSO(
-                        call: engine.dxCall,
-                        grid: engine.dxGrid,
-                        sentRST: engine.dxReport,
-                        rcvdRST: "-10",
-                        band: currentBand,
-                        freqMHz: dialMHz
-                    )
-                }
+                _ = engine.saveCurrentContact()
             } label: {
-                Label("LOG", systemImage: "square.and.pencil")
+                Label("SAVE CONTACT", systemImage: "tray.and.arrow.down")
                     .font(.caption.weight(.bold))
                     .frame(height: 28)
             }

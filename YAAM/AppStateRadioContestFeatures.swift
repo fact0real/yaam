@@ -94,8 +94,8 @@ extension AppState {
             .store(in: &operatorFeatureCancellables)
 
         // Bridge FT8 Station Engine with AppState Logbook
-        ft8Engine.logQSOHandler = { [weak self] call, grid, sent, rcvd, band, freq in
-            self?.logFT8StationQSO(call: call, grid: grid, sentRST: sent, rcvdRST: rcvd, band: band, freqMHz: freq)
+        ft8Engine.logQSOHandler = { [weak self] completion in
+            self?.logFT8StationQSO(completion) ?? false
         }
 
         $qsoRecords
@@ -169,73 +169,6 @@ extension AppState {
 
         // Bridge Multi-Rig FT8 Cluster with AppState Logbook
         multiRigFT8Hub.configureBridges(with: self)
-    }
-
-    func logFT8StationQSO(call: String, grid: String, sentRST: String, rcvdRST: String, band: String, freqMHz: Double) {
-        let cleanCall = call.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        guard !cleanCall.isEmpty else { return }
-
-        let now = Date()
-        let dateFormatter = DateFormatter()
-        dateFormatter.locale = Locale(identifier: "en_US_POSIX")
-        dateFormatter.timeZone = TimeZone(secondsFromGMT: 0)
-
-        dateFormatter.dateFormat = "yyyyMMdd"
-        let qsoDate = dateFormatter.string(from: now)
-
-        dateFormatter.dateFormat = "HHmmss"
-        let timeOn = dateFormatter.string(from: now)
-
-        let entity = DXCCDatabase.resolve(callsign: cleanCall)
-
-        var fields: [String: String] = [
-            "CALL": cleanCall,
-            "BAND": band,
-            "MODE": "FT8",
-            "FREQ": String(format: "%.6f", freqMHz),
-            "QSO_DATE": qsoDate,
-            "TIME_ON": timeOn,
-            "TIME_OFF": timeOn,
-            "RST_SENT": sentRST.isEmpty ? "-10" : sentRST,
-            "RST_RCVD": rcvdRST.isEmpty ? "-10" : rcvdRST,
-            "COUNTRY": entity.entityName,
-            "CONT": entity.continent,
-            "CQZ": "\(entity.cqZone)",
-            "ITUZ": "\(entity.ituZone)",
-            "COMMENT": "Logged via YAAM FT8 Station",
-            "APP_YAAM_SOURCE": "FT8 Station"
-        ]
-        if !grid.isEmpty {
-            fields["GRIDSQUARE"] = grid
-        }
-
-        fields = stationTaggedFields(fields)
-        guard !isSelfContact(fields) else { return }
-        let newRecord = QSORecordModel(index: qsoRecords.count + 1, fields: fields)
-
-        guard !qsoRecords.contains(where: { $0.uniqueKey == newRecord.uniqueKey }) else {
-            return
-        }
-
-        qsoRecords.append(newRecord)
-        persistQuickLog(newRecord)
-        ft8Engine.rememberLoggedContact(cleanCall, grid: grid, band: band)
-        ZeroClickCloudUploadDaemon.shared.dispatch(
-            record: newRecord,
-            stationID: activeStationProfileID?.uuidString,
-            stationLocation: activeStationProfile?.lotwStationLocation,
-            qrzKeyOverride: activeQRZAPIKey
-        )
-        if !ZeroClickCloudUploadDaemon.shared.ownsWavelogPush {
-            WavelogSyncEngine.shared.autoPushSingleQSO(record: newRecord)
-        }
-        if HRDLogClient.shared.autoUploadEnabled {
-            Task { _ = await HRDLogClient.shared.uploadSingleQSO(record: newRecord) }
-        }
-        if HamQTHUploadClient.shared.autoUploadEnabled {
-            Task { _ = await HamQTHUploadClient.shared.uploadSingleQSO(record: newRecord) }
-        }
-        playActivitySound(.success)
     }
 
     /// A QSO from a Digital Suite engine. The engines pass a fixed frequency and band (14.0x MHz, "20m"), so those are

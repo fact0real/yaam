@@ -485,13 +485,16 @@ final class FT8EngineService: ObservableObject {
         case 24.89...24.99: return "12m"
         case 28.0...29.7: return "10m"
         case 50.0...54.0: return "6m"
-        default: return "20m"
+        default: return AmateurBandPlan.band(forMHz: mhz) ?? ""
         }
     }
 
     // ─── Operational Properties for Dual-Pane Console & Spectrum ───
     @Published var rxAudioFrequencyHz: Float = 1_500
-    @Published var dxCall = ""
+    private var contactTracker = DigitalContactTracker()
+    @Published var dxCall = "" {
+        didSet { if dxCall != oldValue { contactTracker.reset() } }
+    }
     @Published var dxGrid = ""
     @Published var dxReport = "-10"
     @Published var lockTxRxFreq = false
@@ -513,7 +516,7 @@ final class FT8EngineService: ObservableObject {
     @Published private(set) var clockSkewAlert: String?
 
     // Handlers for logging and duplicate checking against local logbook
-    var logQSOHandler: ((_ call: String, _ grid: String, _ sentRST: String, _ rcvdRST: String, _ band: String, _ freqMHz: Double) -> Void)?
+    var logQSOHandler: ((DigitalContactCompletion) -> Bool)?
     var isCountryWorkedOnBand: ((_ country: String, _ band: String) -> Bool)?
     var isCallWorkedToday: ((_ call: String, _ band: String) -> Bool)?
     var isCallWorked: ((_ call: String) -> Bool)?
@@ -616,6 +619,7 @@ final class FT8EngineService: ObservableObject {
 
     func setOperatingProtocol(_ proto: FT8Protocol) {
         guard operatingProtocol != proto else { return }
+        contactTracker.reset()
         operatingProtocol = proto
         let band = currentBandName
         if proto == .ft4 {
@@ -1117,6 +1121,7 @@ final class FT8EngineService: ObservableObject {
     }
 
     public func engageQueuedCaller(_ queued: ContestQueuedCaller) {
+        contactTracker.reset()
         dxCall = queued.callsign
         dxGrid = queued.grid ?? ""
         dxReport = String(format: "%+03d", queued.snr)
@@ -1154,9 +1159,11 @@ final class FT8EngineService: ObservableObject {
             fail("The selected decode is not a valid message with a callsign.")
             return
         }
+        if sequencer?.isComplete == true { contactTracker.reset() }
         selectedDecodeID = row.id
         dxCall = caller
         dxGrid = row.callerGrid ?? ""
+        if row.isDirectedToMe { observeContact(row) }
         let heard = normalizedReport(row.estimatedSNR)
         dxReport = String(format: "%+03d", heard)
 
@@ -1440,6 +1447,11 @@ final class FT8EngineService: ObservableObject {
                     }
                 }
 
+                if let parsed = QSOMessages.parse(message), parsed.toCall == dxCall, !dxCall.isEmpty {
+                    contactTracker.observe(call: dxCall, grid: dxGrid, protocolName: protoStr, band: currentBandName,
+                        stationCall: myCall, stationGrid: myGrid, at: transmitStartedAt ?? slot,
+                        transmitHz: DigitalContactTracker.rfFrequency(dialHz: dialFrequencyHz, audioHz: audioFrequency), sentReport: parsed.report)
+                }
                 transmitProgress = 1
                 state = decodeTask == nil ? .idle : .monitoring
                 status = "\(protoStr) transmission completed; PTT released"
@@ -1793,7 +1805,30 @@ final class FT8EngineService: ObservableObject {
         answerCallsign(target)
     }
 
+    private func observeContact(_ row: FT8DecodedRow) {
+        guard row.isDirectedToMe, let call = row.callerCall, call == dxCall else { return }
+        contactTracker.observe(call: call, grid: row.callerGrid ?? dxGrid, protocolName: operatingProtocol == .ft4 ? "FT4" : "FT8",
+            band: currentBandName, stationCall: myCall, stationGrid: myGrid, at: row.slotStart,
+            receiveHz: DigitalContactTracker.rfFrequency(dialHz: dialFrequencyHz, audioHz: row.audioFrequencyHz), receivedReport: row.parsed?.report)
+    }
+
+    @discardableResult func saveCurrentContact() -> Bool {
+        saveCompletedContact(dxCall, endingAt: Date())
+    }
+    private func saveCompletedContact(_ call: String, endingAt: Date) -> Bool {
+        guard let completion = contactTracker.completion(call: call, at: endingAt), let handler = logQSOHandler else {
+            status = "Exchange completed; contact timing is incomplete. Review and log it manually."
+            return false
+        }
+        let saved = handler(completion)
+        if !saved { status = "Exchange completed; contact could not be saved. Check the active station and logbook." }
+        qsoStreamItems.append(.status(id: UUID(), time: endingAt,
+            text: saved ? "Contact with \(call) saved to the logbook" : "Contact with \(call) was not saved; check the active station/logbook", isMilestone: true))
+        return saved
+    }
+
     private func consumeSequence(_ rows: [FT8DecodedRow]) {
+        for row in rows where row.isDirectedToMe { observeContact(row) }
         // Continuous CQ handling:
         if isCallingCQContinually {
             let callers = rows.filter { $0.isDirectedToMe }
@@ -1879,19 +1914,12 @@ final class FT8EngineService: ObservableObject {
                         )
 
                         let multBadge = logged?.isGridMultiplier == true || logged?.isDXCCMultiplier == true ? " 🌟 [MULT!]" : ""
-                        qsoStreamItems.append(.status(id: UUID(), time: Date(), text: "🏆 Contest QSO with \(completedDX) LOGGED! +\(logged?.points ?? 0) PTS\(multBadge)", isMilestone: true))
+                        qsoStreamItems.append(.status(id: UUID(), time: Date(), text: "🏆 Contest exchange with \(completedDX) completed! +\(logged?.points ?? 0) PTS\(multBadge)", isMilestone: true))
                         status = "Contest QSO with \(completedDX) logged! Claimed Score: \(contestEngine.claimedScore)"
 
-                        logQSOHandler?(
-                            completedDX,
-                            dxGrid,
-                            dxReport,
-                            String(format: "%+03d", normalizedReport(targetRow.estimatedSNR)),
-                            currentBand,
-                            dialMHz
-                        )
-                        if logQSOHandler != nil { rememberLoggedContact(completedDX, grid: dxGrid, band: currentBand) }
-                        appendAllTextLog(line: "\(Self.utcTime(Date())) \(dialMHz) Contest QSO Logged: \(completedDX) \(dxGrid) \(operatingProtocol == .ft4 ? "FT4" : "FT8") \(currentBand)")
+                        let saved = saveCompletedContact(completedDX, endingAt: Date())
+                        if saved { rememberLoggedContact(completedDX, grid: dxGrid, band: currentBand) }
+                        appendAllTextLog(line: "\(Self.utcTime(Date())) \(dialMHz) Contest contact \(saved ? "saved" : "not saved"): \(completedDX) \(dxGrid) \(operatingProtocol == .ft4 ? "FT4" : "FT8") \(currentBand)")
 
                         dxCall = ""
 
@@ -1937,20 +1965,13 @@ final class FT8EngineService: ObservableObject {
                     let currentBand = currentBandName
                     let dialMHz = Double(dialFrequencyHz) / 1_000_000.0
 
-                    qsoStreamItems.append(.status(id: UUID(), time: Date(), text: "★ QSO with \(completedDX) successfully finished and logged!", isMilestone: true))
+                    qsoStreamItems.append(.status(id: UUID(), time: Date(), text: "★ Exchange with \(completedDX) completed; saving contact…", isMilestone: true))
                     status = "FT8 exchange with \(completedDX) is complete; logged to YAAM Log Table"
 
                     // Auto-log to Log Table!
-                    logQSOHandler?(
-                        completedDX,
-                        dxGrid,
-                        dxReport,
-                        String(format: "%+03d", normalizedReport(row.estimatedSNR)),
-                        currentBand,
-                        dialMHz
-                    )
-                    if logQSOHandler != nil { rememberLoggedContact(completedDX, grid: dxGrid, band: currentBand) }
-                    appendAllTextLog(line: "\(Self.utcTime(Date())) \(dialMHz) QSO Logged: \(completedDX) \(dxGrid) \(operatingProtocol == .ft4 ? "FT4" : "FT8") \(currentBand)")
+                    let saved = saveCompletedContact(completedDX, endingAt: Date())
+                    if saved { rememberLoggedContact(completedDX, grid: dxGrid, band: currentBand) }
+                    appendAllTextLog(line: "\(Self.utcTime(Date())) \(dialMHz) Contact \(saved ? "saved" : "not saved"): \(completedDX) \(dxGrid) \(operatingProtocol == .ft4 ? "FT4" : "FT8") \(currentBand)")
 
                     // Zero-Idle Auto-Engage next caller if queued
                     if contestEngine.autoEngageNext, let nextCaller = contestEngine.popNextCaller() {

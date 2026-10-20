@@ -144,7 +144,9 @@ struct MultiRigFT8RegressionTests {
             precondition(slot1.engine.logQSOHandler != nil, "logQSOHandler must be bridged to AppState")
 
             // Simulate QSO completion on Slot 1 (20m FT8)
-            slot1.engine.logQSOHandler?("JA1ABC", "PM95", "-05", "-10", "20m", 14.074)
+            _ = slot1.engine.logQSOHandler?(DigitalContactCompletion(id: UUID(), call: "JA1ABC", grid: "PM95", protocolName: "FT8", band: "20m",
+                stationCall: appState.currentStationCallsign, stationGrid: "", startedAt: Date().addingTimeInterval(-60), endedAt: Date(),
+                transmitHz: 14_074_000, receiveHz: nil, sentReport: "-05", receivedReport: "-10"))
 
             // Verify QSO was inserted into AppState records
             let logged = appState.qsoRecords.first { $0.fields["CALL"] == "JA1ABC" }

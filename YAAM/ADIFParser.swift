@@ -299,7 +299,7 @@ nonisolated func generateADIF(originalContent: String, records: [[String: String
         let freq = Double(rec["FREQ"] ?? "")
         let effective = AmateurBandPlan.effectiveADIFMode(mode: currentMode, submode: currentSubmode, frequencyMHz: freq)
         if !effective.isEmpty {
-            rec["MODE"] = effective
+            rec["MODE"] = ["FT4", "JS8"].contains(effective) ? "MFSK" : effective
             if effective == "FT8" || effective == "FT4" || effective == "JS8" {
                 rec["SUBMODE"] = effective
             }
