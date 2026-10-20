@@ -428,9 +428,9 @@ Warm 73,
             emailBody = """
             Hello \(targetCall),
 
-            I noticed your incoming QRZ Logbook confirmation request for our QSO on \(requestedDate).\(receivedNote) Unfortunately, that entry appears to be missing from my local log, and I would rather ask you than guess any of the details.
+            I noticed your incoming QRZ Logbook confirmation request for our QSO on \(requestedDate).\(receivedNote) That contact may be missing from my local log or have inconsistent details. I would like to compare our actual records.
 
-            When you have a moment, would you please send me the time in UTC, band or frequency, mode, and the reports we exchanged? I will reconstruct the contact carefully and confirm it in QRZ as soon as I have the matching details.
+            When you have a moment, would you please send me the time in UTC, band or frequency, mode, the callsign/location you worked, and the reports we exchanged? I will compare them with my own records before correcting or submitting anything.
 
             I am sorry for the extra step, and I appreciate your help. I am glad you reached out.
 

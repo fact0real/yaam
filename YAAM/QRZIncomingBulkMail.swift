@@ -21,9 +21,9 @@ enum QRZIncomingBulkMail {
     static let defaultBody = """
     Hi {name} ({callsign}),
 
-    I noticed your incoming QRZ Logbook confirmation request for {qso_dates}. Those contacts don't appear in my local log, so I'd like to check the details with you rather than guess.
+    I noticed your incoming QRZ Logbook confirmation request for {qso_dates}. Those contacts may be missing from my log or have inconsistent details, so I would like to compare our actual records.
 
-    Could you please send me the UTC time, band or frequency, mode, and the reports we exchanged? I'll compare them carefully with my records and confirm the matching contact in QRZ.
+    Could you please send me the UTC time, band or frequency, mode, the callsign/location you worked, and the reports we exchanged? I will compare them with my own records before correcting or submitting anything.
 
     Sorry for the extra step, and thanks for helping me sort this out.
 

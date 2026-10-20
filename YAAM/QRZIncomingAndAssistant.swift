@@ -724,13 +724,8 @@ extension AppState {
         }
     }
 
-    func hasLocalQSO(for incoming: QRZIncomingConfirmation) -> Bool {
-        qsoRecords.contains { record in
-            let sameCall = record["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == incoming.callsign
-            guard sameCall else { return false }
-            guard !incoming.qsoDate.isEmpty else { return true }
-            return record["QSO_DATE"].replacingOccurrences(of: "-", with: "") == incoming.qsoDate.replacingOccurrences(of: "-", with: "")
-        }
+    func hasIncomingCandidate(for incoming: QRZIncomingConfirmation) -> Bool {
+        !incomingCandidates(incoming).isEmpty
     }
 
     func draftIncomingQRZDetailsEmail(for incoming: QRZIncomingConfirmation) {
@@ -818,6 +813,8 @@ extension AppState {
 struct QRZIncomingRequestsView: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
+    @State private var detailsAfterReview: QRZIncomingConfirmation?
+    @State private var requestToReview: QRZIncomingConfirmation?
     @State private var requestToReject: QRZIncomingConfirmation?
     @State private var showRejectSheet = false
     @State private var selectedRequestIDs = Set<String>()
@@ -825,7 +822,7 @@ struct QRZIncomingRequestsView: View {
     @State private var showBulkComposer = false
 
     private var outstanding: [QRZIncomingConfirmation] {
-        appState.qrzIncomingRequests.filter { !appState.hasLocalQSO(for: $0) }
+        appState.qrzIncomingRequests
     }
 
     var body: some View {
@@ -834,7 +831,7 @@ struct QRZIncomingRequestsView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Label("QRZ Incoming Confirmation Requests", systemImage: "tray.and.arrow.down.fill")
                         .font(.title3.weight(.bold))
-                    Text("Requests that do not match a local QSO can be followed up by email for the missing contact details or rejected directly on QRZ.com.")
+                    Text("Compare every request with your log. Missing or inconsistent contacts need actual details and explicit verification before preparing LoTW, QRZ and Club Log.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -850,18 +847,18 @@ struct QRZIncomingRequestsView: View {
 
             HStack(spacing: 10) {
                 incomingSummary(title: "Returned", value: appState.qrzIncomingRequests.count, color: .blue, icon: "tray.full.fill")
-                incomingSummary(title: "Need details", value: outstanding.count, color: .orange, icon: "envelope.badge.fill")
+                incomingSummary(title: "To review", value: outstanding.count, color: .orange, icon: "envelope.badge.fill")
                 incomingSummary(
-                    title: "Matched locally",
-                    value: appState.qrzIncomingRequests.count - outstanding.count,
-                    color: .green,
-                    icon: "checkmark.circle.fill"
+                    title: "Local candidates",
+                    value: appState.qrzIncomingRequests.filter { appState.hasIncomingCandidate(for: $0) }.count,
+                    color: .orange,
+                    icon: "doc.text.magnifyingglass"
                 )
             }
 
             HStack(spacing: 10) {
                 Button(selectedRequestIDs.count == outstanding.count && !outstanding.isEmpty
-                       ? "Clear selection" : "Select all needing details") {
+                       ? "Clear selection" : "Select all requests") {
                     if selectedRequestIDs.count == outstanding.count {
                         selectedRequestIDs.removeAll()
                     } else {
@@ -904,7 +901,7 @@ struct QRZIncomingRequestsView: View {
             } else {
                 List(appState.qrzIncomingRequests) { request in
                     HStack(spacing: 12) {
-                        if !appState.hasLocalQSO(for: request) {
+                        Group {
                             Toggle("Select \(request.callsign)", isOn: Binding(
                                 get: { selectedRequestIDs.contains(request.id) },
                                 set: { selected in
@@ -914,22 +911,21 @@ struct QRZIncomingRequestsView: View {
                             ))
                             .labelsHidden()
                             .toggleStyle(.checkbox)
-                        } else {
-                            Color.clear.frame(width: 14, height: 14)
                         }
-                        Image(systemName: appState.hasLocalQSO(for: request) ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
-                            .foregroundStyle(appState.hasLocalQSO(for: request) ? .green : .orange)
+                        Image(systemName: "exclamationmark.circle.fill")
+                            .foregroundStyle(Color.orange)
                         VStack(alignment: .leading, spacing: 3) {
                             Text(request.callsign).font(.headline.monospaced())
                             Text("QSO \(request.qsoDate.isEmpty ? "date not reported" : request.qsoDate) · requested \(request.requestedAt.isEmpty ? "unknown" : request.requestedAt)")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
-                            Text(appState.hasLocalQSO(for: request) ? "A matching local QSO exists." : "No local QSO matched. Request the QSO details before adding anything.")
+                            Text(appState.hasIncomingCandidate(for: request) ? "Local call/date candidate — details still need review." : "No call/date candidate. Obtain actual details before adding anything.")
                                 .font(.caption)
-                                .foregroundStyle(appState.hasLocalQSO(for: request) ? .green : .orange)
+                                .foregroundStyle(Color.orange)
                         }
                         Spacer()
-                        if !appState.hasLocalQSO(for: request) {
+                        Button("Review…") { requestToReview = request }
+                        Group {
                             Button {
                                 appState.draftIncomingQRZDetailsEmail(for: request)
                             } label: {
@@ -1001,6 +997,13 @@ struct QRZIncomingRequestsView: View {
         }
         .onChange(of: appState.qsoRecordsRevision) { _, _ in
             selectedRequestIDs.formIntersection(Set(outstanding.map(\.id)))
+        }
+        .sheet(item: $requestToReview, onDismiss: {
+            if let request = detailsAfterReview { detailsAfterReview = nil; appState.draftIncomingQRZDetailsEmail(for: request) }
+        }) { request in
+            QRZIncomingReviewView(request: request, onRequestDetails: {
+                detailsAfterReview = request; requestToReview = nil
+            }).environmentObject(appState)
         }
         .sheet(isPresented: $appState.showIncomingEmailComposer) {
             EmailComposerView()
