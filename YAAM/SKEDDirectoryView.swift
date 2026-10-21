@@ -26,6 +26,9 @@ struct SKEDDirectoryView: View {
     @EnvironmentObject private var appState: AppState
     @State private var showDiscovery = false
     @State private var preparingDiscovery = false
+    @State private var discoveryCountryHistory = SKEDCountryBandHistory()
+    @State private var discoveryLogRevision = 0
+    @State private var discoveryUsesLocalCatalog = false
     @State private var discoveryGeography: SKEDGeographyCatalog?
     @State private var discoveryContacts: [SKEDDiscoveryContact] = []
     @State private var pendingDiscovery: ([SKEDDiscoveryContact], Set<String>)?
@@ -243,6 +246,10 @@ struct SKEDDirectoryView: View {
         .sheet(isPresented: $showDiscovery, onDismiss: {
             if let (contacts, bands) = pendingDiscovery {
                 pendingDiscovery = nil
+                guard appState.qsoRecordsRevision == discoveryLogRevision else {
+                    errorMessage = "Your log changed. Reopen Find contacts to refresh country history before preparing invitations."
+                    return
+                }
                 for contact in contacts { bandPlans[contact.id] = bands }
                 openComposer(for: contacts.map(\.operatorInfo))
                 composeSelection?.destinations = Dictionary(uniqueKeysWithValues: contacts.map { ($0.id, $0) })
@@ -250,6 +257,7 @@ struct SKEDDirectoryView: View {
             }
         }) {
             SKEDContactDiscoveryView(geography: discoveryGeography, localContacts: discoveryContacts,
+                countryHistory: discoveryCountryHistory, usesLocalCatalog: discoveryUsesLocalCatalog, logChanged: appState.qsoRecordsRevision != discoveryLogRevision,
                 token: CredentialVault.value(for: .qrzRankAPIToken), userAgent: "YAAM-macOS/\(appState.currentVersion)",
                 stationCallsign: appState.activeStationProfile?.normalizedCallsign ?? "") {
                     pendingDiscovery = ($0, $1)
@@ -974,19 +982,28 @@ struct SKEDDirectoryView: View {
         let records = appState.qsoRecords
         let catalog = geography
         let stationID = appState.activeStationProfileID
+        let logRevision = appState.qsoRecordsRevision
         let stationCall = appState.activeStationProfile?.normalizedCallsign ?? ""
         let result = await Task.detached(priority: .userInitiated) {
-            return SKEDContactDiscovery.loggedContacts(rows: records.map(\.fields), stationCallsign: stationCall,
-                resolve: { call, country in
-                    let entity = DXCCDatabase.resolve(callsign: call, country: country)
-                    let iso = call.hasPrefix("PJ4") ? "bq1" : entity.countryCode.lowercased()
-                    return SKEDCountryOption(iso: iso, regionID: entity.continent.lowercased(),
-                        serviceName: catalog?.countries.first(where: { $0.iso == iso })?.serviceName ?? entity.entityName)
-                }, bandForFrequency: { AmateurBandPlan.band(for: $0) })
+            let rows = records.map(\.fields)
+            @Sendable func resolve(_ call: String, _ country: String) -> SKEDCountryOption {
+                let entity = DXCCDatabase.resolve(callsign: call, country: country)
+                let iso = call.hasPrefix("PJ4") ? "bq1" : entity.countryCode.lowercased()
+                return SKEDCountryOption(iso: iso, regionID: entity.continent.lowercased(),
+                    serviceName: catalog?.countries.first(where: { $0.iso == iso })?.serviceName ?? entity.entityName)
+            }
+            let contacts = SKEDContactDiscovery.loggedContacts(rows: rows, stationCallsign: stationCall,
+                resolve: resolve, bandForFrequency: { AmateurBandPlan.band(for: $0) })
+            let history = SKEDCountryBandHistory.make(rows: rows, stationCallsign: stationCall,
+                resolve: resolve, bandForFrequency: { AmateurBandPlan.band(for: $0) })
+            return (contacts.0, contacts.1, history)
         }.value
         preparingDiscovery = false
-        guard appState.activeStationProfileID == stationID else { return }
+        guard appState.activeStationProfileID == stationID, appState.qsoRecordsRevision == logRevision else { return }
         discoveryContacts = result.0
+        discoveryCountryHistory = result.2
+        discoveryLogRevision = logRevision
+        discoveryUsesLocalCatalog = catalog == nil
         discoveryGeography = catalog ?? SKEDGeographyCatalog(regions: [], countries: result.1, states: [])
         showDiscovery = true
     }

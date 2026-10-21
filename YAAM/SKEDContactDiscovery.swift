@@ -108,11 +108,13 @@ nonisolated struct SKEDDiscoverySnapshot: Sendable {
     var contacts: [SKEDDiscoveryContact]
     var failures: [String]
     var progress: String
+    var countryStatuses: [String: SKEDCountryLoadStatus] = [:]
 }
 
 nonisolated enum SKEDDiscoveryLoader {
     /// Sequential requests keep continent searches cancellable without flooding the provider.
     static func load(countries: [SKEDCountryOption], localContacts: [SKEDDiscoveryContact],
+                     targetEmailCount: Int? = nil, excludingCallsign: String = "",
                      fetch: @Sendable (String, String) async throws -> SKEDDirectory,
                      update: @Sendable (SKEDDiscoverySnapshot) async -> Void) async throws {
         let allowed = Set(countries.map(\.iso))
@@ -124,7 +126,9 @@ nonisolated enum SKEDDiscoveryLoader {
         for (index, country) in countries.enumerated() {
             try Task.checkCancellation()
             state.progress = "\(index + 1) / \(countries.count) · \(country.serviceName)"
+            state.countryStatuses[country.iso] = .loading
             await update(state)
+            var successfulCategories = 0
             for category in ["qso", "countries", "band"] {
                 do {
                     let directory = try await fetch(country.iso, category)
@@ -134,6 +138,16 @@ nonisolated enum SKEDDiscoveryLoader {
                             countryName: country.serviceName, workedBands: history[item.callsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()] ?? [], sources: ["QRZ Rank"])
                     }
                     state.contacts = SKEDContactDiscovery.merge(state.contacts + additions)
+                    successfulCategories += 1
+                    let emailCount = state.contacts.filter {
+                        $0.countryISO == country.iso && $0.id != excludingCallsign.uppercased()
+                    }.count
+                    if let targetEmailCount, targetEmailCount > 0, emailCount >= targetEmailCount,
+                       successfulCategories < 3 {
+                        state.countryStatuses[country.iso] = .suggested
+                        await update(state)
+                        break
+                    }
                     await update(state)
                 } catch {
                     try Task.checkCancellation()
@@ -145,6 +159,7 @@ nonisolated enum SKEDDiscoveryLoader {
                         stop = [401, 403, 429].contains(status)
                     default: break
                     }
+                    state.countryStatuses[country.iso] = successfulCategories > 0 ? .partial : .failed
                     state.failures.append("\(country.serviceName): \(error.localizedDescription)")
                     if stop {
                         state.failures.append("Search stopped; remaining directory results were not loaded")
@@ -156,6 +171,8 @@ nonisolated enum SKEDDiscoveryLoader {
                     break
                 }
             }
+            if successfulCategories == 3 { state.countryStatuses[country.iso] = .complete }
+            await update(state)
         }
         state.progress = ""
         await update(state)
