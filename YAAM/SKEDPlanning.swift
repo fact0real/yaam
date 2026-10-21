@@ -102,6 +102,15 @@ nonisolated enum SKEDMailTemplate {
     static let defaultBody = """
     Hi {greeting} ({callsign}),
 
+    It's {my_callsign}{my_location}. I'd love to set up a digital SKED with you on {bands}, using {mode}. Would any of these bands work with your station and availability?
+
+    {time_window}
+
+    Let me know what works for you. It'll be great to catch you on the air!
+    """
+    static let previousDigitalDefaultBody = """
+    Hi {greeting} ({callsign}),
+
     It's {my_callsign}{my_location}. I'd love to set up a digital SKED with you on {bands}, using {mode}. Those bands look promising with the current propagation, and they're a good match for my antenna's resonance.
 
     {time_window}

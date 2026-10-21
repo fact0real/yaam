@@ -44,8 +44,8 @@ struct SKEDPlanningRegression {
         precondition(message.contains("Hi Alex (EP1AAA),"))
         precondition(message.contains("40m, 20m, and 17m"))
         precondition(message.contains("W1ABC in Boston (grid FN42)"))
-        precondition(message.contains("current propagation"))
-        precondition(message.contains("antenna's resonance"))
+        precondition(message.contains("station and availability"))
+        precondition(!message.contains("antenna's resonance"))
         precondition(message.contains("using FT8 or FT4"))
         precondition(SKEDMailTemplate.defaultSubject.contains("{mode}"))
         let ft4 = SKEDMailTemplate.render("Let's use {mode} on {bands}.", callsign: "EP1AAA",

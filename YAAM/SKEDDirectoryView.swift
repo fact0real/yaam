@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 private struct SKEDComposeSelection: Identifiable {
     let id = UUID()
     let operators: [SKEDOperator]
+    var destinations: [String: SKEDDiscoveryContact] = [:]
 }
 
 private struct SKEDPreparedEmail {
@@ -23,6 +24,11 @@ private struct SKEDCountryChoice: Identifiable {
 
 struct SKEDDirectoryView: View {
     @EnvironmentObject private var appState: AppState
+    @State private var showDiscovery = false
+    @State private var preparingDiscovery = false
+    @State private var discoveryGeography: SKEDGeographyCatalog?
+    @State private var discoveryContacts: [SKEDDiscoveryContact] = []
+    @State private var pendingDiscovery: ([SKEDDiscoveryContact], Set<String>)?
     @State private var regionID = "me"
     @State private var countryISO = "ir"
     @State private var selectedUSState = ""
@@ -215,6 +221,8 @@ struct SKEDDirectoryView: View {
             loadBandPlans()
         }
         .onChange(of: appState.activeStationProfileID) { _, _ in
+            showDiscovery = false
+            pendingDiscovery = nil
             selectedCallsigns.removeAll()
             loadBandPlans()
             loadSenderName()
@@ -232,10 +240,25 @@ struct SKEDDirectoryView: View {
 
     private var presentedView: some View {
         observedView
+        .sheet(isPresented: $showDiscovery, onDismiss: {
+            if let (contacts, bands) = pendingDiscovery {
+                pendingDiscovery = nil
+                for contact in contacts { bandPlans[contact.id] = bands }
+                openComposer(for: contacts.map(\.operatorInfo))
+                composeSelection?.destinations = Dictionary(uniqueKeysWithValues: contacts.map { ($0.id, $0) })
+                saveBandPlans()
+            }
+        }) {
+            SKEDContactDiscoveryView(geography: discoveryGeography, localContacts: discoveryContacts,
+                token: CredentialVault.value(for: .qrzRankAPIToken), userAgent: "YAAM-macOS/\(appState.currentVersion)",
+                stationCallsign: appState.activeStationProfile?.normalizedCallsign ?? "") {
+                    pendingDiscovery = ($0, $1)
+                }
+        }
         .sheet(item: $selectedOperator) { item in
             operatorDetails(item)
         }
-        .sheet(item: $composeSelection) { selection in
+        .sheet(item: $composeSelection, onDismiss: { loadBandPlans() }) { selection in
             composer(selection)
         }
         .sheet(isPresented: $showSKEDHistory) {
@@ -271,6 +294,9 @@ struct SKEDDirectoryView: View {
             }
             Spacer(minLength: 8)
             if isLoading { ProgressView().controlSize(.small) }
+            Button { Task { await prepareDiscovery() } } label: {
+                Label(preparingDiscovery ? "Reading contacts…" : "Find contacts", systemImage: "magnifyingglass")
+            }.buttonStyle(.borderedProminent).disabled(preparingDiscovery)
         }
         .padding(.horizontal, 22)
         .padding(.vertical, 14)
@@ -730,8 +756,12 @@ struct SKEDDirectoryView: View {
     }
 
     private var bandPlanStorageKey: String {
+        bandPlanStorageKey(for: destinationKey)
+    }
+
+    private func bandPlanStorageKey(for destination: String) -> String {
         let station = appState.activeStationProfile?.normalizedCallsign ?? "no-station"
-        return "sked.bandPlans.v1.\(station).\(destinationKey)"
+        return "sked.bandPlans.v1.\(station).\(destination)"
     }
 
     private func loadBandPlans() {
@@ -744,6 +774,11 @@ struct SKEDDirectoryView: View {
     }
 
     private func saveBandPlans() {
+        if let destinations = composeSelection?.destinations, !destinations.isEmpty {
+            SKEDContactDiscovery.savePlans(contacts: Array(destinations.values), bandsByCallsign: bandPlans,
+                stationCallsign: appState.activeStationProfile?.normalizedCallsign ?? "no-station", defaults: .standard)
+            return
+        }
         let saved = bandPlans.mapValues { SKEDMailTemplate.ordered($0) }
         if let data = try? JSONEncoder().encode(saved) {
             UserDefaults.standard.set(data, forKey: bandPlanStorageKey)
@@ -934,6 +969,28 @@ struct SKEDDirectoryView: View {
         }
     }
 
+    private func prepareDiscovery() async {
+        preparingDiscovery = true
+        let records = appState.qsoRecords
+        let catalog = geography
+        let stationID = appState.activeStationProfileID
+        let stationCall = appState.activeStationProfile?.normalizedCallsign ?? ""
+        let result = await Task.detached(priority: .userInitiated) {
+            return SKEDContactDiscovery.loggedContacts(rows: records.map(\.fields), stationCallsign: stationCall,
+                resolve: { call, country in
+                    let entity = DXCCDatabase.resolve(callsign: call, country: country)
+                    let iso = call.hasPrefix("PJ4") ? "bq1" : entity.countryCode.lowercased()
+                    return SKEDCountryOption(iso: iso, regionID: entity.continent.lowercased(),
+                        serviceName: catalog?.countries.first(where: { $0.iso == iso })?.serviceName ?? entity.entityName)
+                }, bandForFrequency: { AmateurBandPlan.band(for: $0) })
+        }.value
+        preparingDiscovery = false
+        guard appState.activeStationProfileID == stationID else { return }
+        discoveryContacts = result.0
+        discoveryGeography = catalog ?? SKEDGeographyCatalog(regions: [], countries: result.1, states: [])
+        showDiscovery = true
+    }
+
     private func load() async {
         isLoading = true
         errorMessage = nil
@@ -983,7 +1040,7 @@ struct SKEDDirectoryView: View {
                 ? SKEDMailTemplate.defaultSubject : saved
         }
         if let saved = UserDefaults.standard.string(forKey: "sked.mailBody.v1") {
-            if saved.contains("I hope you're doing well!") || saved == SKEDMailTemplate.previousDefaultBody {
+            if saved.contains("I hope you're doing well!") || saved == SKEDMailTemplate.previousDefaultBody || saved == SKEDMailTemplate.previousDigitalDefaultBody {
                 mailBodyTemplate = SKEDMailTemplate.defaultBody
             } else {
                 let oldFooter = "\n\n73,\n{my_callsign}"
@@ -1434,8 +1491,8 @@ struct SKEDDirectoryView: View {
                 return SKEDPreparedEmail(callsign: item.callsign, email: email,
                                          subject: renderedSubject(for: item), body: body,
                                          details: SKEDMailDetails(recipientName: item.name,
-                                            senderCallsign: stationCallsign, destinationKey: destination,
-                                            destinationName: destinationName, body: body,
+                                            senderCallsign: stationCallsign, destinationKey: selection.destinations[item.callsign]?.countryISO ?? destination,
+                                            destinationName: selection.destinations[item.callsign]?.countryName ?? destinationName, body: body,
                                             bands: SKEDMailTemplate.ordered(bandPlans[item.callsign, default: []]),
                                             mode: digitalMode.title,
                                             schedule: schedule))

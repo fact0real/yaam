@@ -14,8 +14,9 @@ nonisolated struct SKEDOperator: Identifiable, Sendable {
 
     var validEmail: String? {
         guard let email = email?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !email.isEmpty, !email.contains(where: { $0.isWhitespace }),
-              email.contains("@"), !email.contains(";") else { return nil }
+              email.utf8.count <= 254,
+              email.range(of: #"^[A-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Z0-9](?:[A-Z0-9-]*[A-Z0-9])?(?:\.[A-Z0-9](?:[A-Z0-9-]*[A-Z0-9])?)+$"#,
+                          options: [.regularExpression, .caseInsensitive]) != nil else { return nil }
         return email
     }
 }
