@@ -737,9 +737,14 @@ public final class CWKeyerService: ObservableObject {
         }
     }
 
-    func prepareForTermination() async {
+    func beginTermination() {
+        guard !isShuttingDown else { return }
         isShuttingDown = true
         stop()
+    }
+
+    func prepareForTermination() async {
+        beginTermination()
         await catStopTask?.value
         // Leave time for already-enqueued network STOP writes before the process exits.
         try? await Task.sleep(for: .milliseconds(300))

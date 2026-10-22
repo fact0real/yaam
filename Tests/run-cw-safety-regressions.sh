@@ -10,13 +10,26 @@ flags=(-parse-as-library -swift-version 5 -default-isolation MainActor
     -enable-upcoming-feature InferSendableFromCaptures
     -enable-upcoming-feature MemberImportVisibility -module-name YAAM)
 keyer=(Tests/Support/TransmitGateStubs.swift Tests/Support/TransmitGateDXCCStub.swift
-    YAAM/CWKeyerService.swift YAAM/TransmitIdentity.swift YAAM/GridLocator.swift YAAM/MorseTiming.swift)
+    YAAM/TransmitShutdown.swift YAAM/TXLimits.swift YAAM/CWKeyerService.swift YAAM/TransmitIdentity.swift YAAM/GridLocator.swift YAAM/MorseTiming.swift)
 run() {
     local name=$1
     shift
     swiftc "${flags[@]}" "Tests/$name.swift" "$@" -o "$out/$name"
     "$out/$name"
 }
+run_digital() {
+run TransmitGatesBehaviourRegression "${keyer[@]}" YAAM/ContestESMEngine.swift YAAM/DigitalModemEngine.swift
+for name in DigitalModemResendRegression DigitalModemRadioControlRegression TransmitShutdownDigitalRegression
+do
+    run "$name" "${keyer[@]}" YAAM/ContestESMEngine.swift YAAM/DigitalModemEngine.swift
+done
+run QuitReleasesTransmitRegression "${keyer[@]}" YAAM/YAAMAppDelegate.swift
+run AudioOnlyTransmitRegression "${keyer[@]}" YAAM/AudioOnlyTransmit.swift YAAM/OliviaMFSKEngine.swift YAAM/HellschreiberEngine.swift YAAM/JS8Engine.swift YAAM/SSTVEngine.swift
+}
+if [[ "${1:-}" == "--digital-only" ]]; then
+    run_digital
+    exit 0
+fi
 if [[ "${1:-}" != "--cat-only" ]]; then
 run CWTextSecurityRegression YAAM/MorseTiming.swift
 for name in WinKeyerAutoCQRegression CATStopDestinationRegression CWStopOnQuitRegression CWConnectionLossRegression
@@ -31,10 +44,13 @@ for name in FlrigCWErrorRegression CWTextFoldingRegression CWReplacedMessageRegr
 do
     run "$name" "${keyer[@]}"
 done
-run TransmitGatesBehaviourRegression "${keyer[@]}" YAAM/ContestESMEngine.swift YAAM/DigitalModemEngine.swift
+run_digital
 run SerialKeyerReplacedMessageRegression YAAM/SerialKeyerDriver.swift
 run WinKeyerDatasheetRegression YAAM/WinKeyerDriver.swift YAAM/MorseTiming.swift
-run HamlibCWStopRegression YAAM/RigControlClient.swift YAAM/MorseTiming.swift
+run HamlibCWStopRegression YAAM/RigControlClient.swift YAAM/MorseTiming.swift YAAM/TXLimits.swift YAAM/TransmitNotices.swift YAAM/TransmitShutdown.swift
+run RigctldNoticePerClientRegression YAAM/RigControlClient.swift YAAM/MorseTiming.swift YAAM/TXLimits.swift YAAM/TransmitNotices.swift YAAM/TransmitShutdown.swift
+run TransmitNoticesShownRegression YAAM/TransmitNotices.swift YAAM/TransmitNoticesView.swift
+run TXLimitsRegression YAAM/TXLimits.swift
 run TransmitIdentityRegression YAAM/TransmitIdentity.swift YAAM/GridLocator.swift
 for name in BandAdvisorDecodeCountRegression BandAdvisorClusterRegression
 do
@@ -48,6 +64,13 @@ for name in CATChunkStopRegression CATChunkPacingRegression
 do
     run "$name" -I "$out" -L "$out" -lFT8808Engine -Xlinker -rpath -Xlinker "$out" \
         Tests/Support/CATDriverStandIns.swift YAAM/Lab599TX500Driver.swift YAAM/FX4CRDriver.swift \
-        YAAM/Lab599TX500SMeter.swift YAAM/MorseTiming.swift
+        YAAM/Lab599TX500SMeter.swift YAAM/MorseTiming.swift YAAM/TXLimits.swift YAAM/TransmitShutdown.swift YAAM/TransmitNotices.swift
+done
+drivers=(Tests/Support/CATDriverStandIns.swift YAAM/Lab599TX500Driver.swift YAAM/FX4CRDriver.swift
+    YAAM/IcomUSBRadioDriver.swift YAAM/Xiegu6100Driver.swift YAAM/TXLimits.swift
+    YAAM/MorseTiming.swift YAAM/Lab599TX500SMeter.swift YAAM/TransmitShutdown.swift YAAM/TransmitNotices.swift)
+for name in DriverNotConnectedMessageRegression DriverSafetyTimerMessageRegression
+do
+    run "$name" -I "$out" -L "$out" -lFT8808Engine -Xlinker -rpath -Xlinker "$out" "${drivers[@]}"
 done
 echo "Requested CW safety regressions passed. Results built in $out"

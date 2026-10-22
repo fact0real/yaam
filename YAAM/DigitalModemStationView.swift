@@ -343,7 +343,20 @@ public struct DigitalModemStationView: View {
             Divider()
 
             // Type-Ahead Text Input Field
-            TextEditor(text: $engine.txBufferText)
+            if engine.txSentCount > 0 {
+                DisclosureGroup("Sent or dropped · \(engine.txSentCount) characters") {
+                    ScrollView {
+                        Text(String(engine.txBufferText.prefix(engine.txSentCount)))
+                            .font(.caption.monospaced())
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(maxHeight: 80)
+                }
+                .font(.caption)
+                .padding(.horizontal, 10)
+            }
+            TextEditor(text: Binding(get: { engine.pendingTransmitText }, set: { engine.pendingTransmitText = $0 }))
                 .font(.system(size: 11.5, design: .monospaced))
                 .foregroundColor(.white)
                 .background(Color(red: 0.08, green: 0.06, blue: 0.04))
@@ -366,6 +379,10 @@ public struct DigitalModemStationView: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 8)
             }
+
+            // A PTT safety timer released a radio: kept until the operator closes it (TransmitNotices).
+            TransmitNoticesView()
+                .padding(.horizontal, 8)
 
             if !engine.txRefusal.isEmpty {
                 Text(engine.txRefusal)
@@ -394,6 +411,7 @@ public struct DigitalModemStationView: View {
                 .tint(engine.isTransmitting ? .red : .orange)
 
                 Button("Clear TX") {
+                    engine.stopTransmission()
                     engine.txBufferText = ""
                     engine.txRemainingText = ""
                 }

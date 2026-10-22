@@ -36,11 +36,19 @@ public final class TCIClient: ObservableObject {
     private var webSocketTask: URLSessionWebSocketTask?
     private var isIntentionalDisconnect: Bool = false
     private var pingTimer: Timer?
+    private var pttReceivers = Set<Int>()
+    private var tuneReceivers = Set<Int>()
+    private var transmitWatchdog: Task<Void, Never>?
+    private let noticeSource = TransmitNotices.Source(name: "TCI")
+    var holdsTransmit: Bool { isPTTActive || isTuneActive || !pttReceivers.isEmpty || !tuneReceivers.isEmpty }
+
 
     public init() {
         self.host = UserDefaults.standard.string(forKey: "tciHost") ?? "127.0.0.1"
         let savedPort = UserDefaults.standard.integer(forKey: "tciPort")
         self.port = savedPort > 0 ? savedPort : 40001
+        TransmitShutdown.register("TCI", isTransmitting: { [weak self] in self?.holdsTransmit ?? false },
+                                  owner: self, release: { [weak self] in self?.disconnect() })
     }
 
     public var frequencyMHz: String {
@@ -88,12 +96,28 @@ public final class TCIClient: ObservableObject {
         isIntentionalDisconnect = true
         pingTimer?.invalidate()
         pingTimer = nil
-        webSocketTask?.cancel(with: .goingAway, reason: nil)
+        transmitWatchdog?.cancel()
+        transmitWatchdog = nil
+        let task = webSocketTask
         webSocketTask = nil
+        if holdsTransmit, let task {
+            var commands = "cw_macros_stop;"
+            let receivers = pttReceivers.union(tuneReceivers).union([0])
+            for receiver in receivers.sorted() {
+                commands += "trx:\(receiver),false;tune:\(receiver),false;"
+            }
+            // Give release bytes time to leave before closing; this is not confirmation of physical receive.
+            task.send(.string(commands)) { _ in task.cancel(with: .goingAway, reason: nil) }
+            Task { try? await Task.sleep(for: .seconds(2)); task.cancel(with: .goingAway, reason: nil) }
+        } else {
+            task?.cancel(with: .goingAway, reason: nil)
+        }
         isConnected = false
         isPTTActive = false
         isTuneActive = false
-        statusMessage = "Disconnected"
+        pttReceivers.removeAll()
+        tuneReceivers.removeAll()
+        statusMessage = "Disconnected; check the radio is on receive"
     }
 
     private func startPingTimer() {
@@ -126,7 +150,7 @@ public final class TCIClient: ObservableObject {
 
         task.receive { [weak self] result in
             Task { @MainActor [weak self] in
-                guard let self = self else { return }
+                guard let self = self, self.webSocketTask === task else { return }
 
                 switch result {
                 case .success(let message):
@@ -202,13 +226,21 @@ public final class TCIClient: ObservableObject {
         case "trx":
             // trx:<receiver>,<true|false>
             if let last = args.last {
-                self.isPTTActive = (last.lowercased() == "true" || last == "1")
+                let receiver = args.count > 1 ? (Int(args[0]) ?? 0) : 0
+                if last.lowercased() == "true" || last == "1" { pttReceivers.insert(receiver) }
+                else { pttReceivers.remove(receiver) }
+                self.isPTTActive = !pttReceivers.isEmpty
+                if pttReceivers.isEmpty && tuneReceivers.isEmpty { transmitWatchdog?.cancel(); transmitWatchdog = nil }
             }
 
         case "tune":
             // tune:<receiver>,<true|false>
             if let last = args.last {
-                self.isTuneActive = (last.lowercased() == "true" || last == "1")
+                let receiver = args.count > 1 ? (Int(args[0]) ?? 0) : 0
+                if last.lowercased() == "true" || last == "1" { tuneReceivers.insert(receiver) }
+                else { tuneReceivers.remove(receiver) }
+                self.isTuneActive = !tuneReceivers.isEmpty
+                if pttReceivers.isEmpty && tuneReceivers.isEmpty { transmitWatchdog?.cancel(); transmitWatchdog = nil }
             }
 
         case "drive":
@@ -268,13 +300,38 @@ public final class TCIClient: ObservableObject {
     }
 
     public func setPTT(_ active: Bool, receiver: Int = 0) {
-        self.isPTTActive = active
+        if active {
+            guard !TransmitShutdown.isShuttingDown, isConnected else { return }
+            pttReceivers.insert(receiver)
+            startTransmitWatchdog()
+        } else { pttReceivers.remove(receiver) }
+        self.isPTTActive = !pttReceivers.isEmpty
+        if pttReceivers.isEmpty && tuneReceivers.isEmpty { transmitWatchdog?.cancel(); transmitWatchdog = nil }
         sendCommand("trx:\(receiver),\(active ? "true" : "false");")
     }
 
     public func setTune(_ active: Bool, receiver: Int = 0) {
-        self.isTuneActive = active
+        if active {
+            guard !TransmitShutdown.isShuttingDown, isConnected else { return }
+            tuneReceivers.insert(receiver)
+            startTransmitWatchdog()
+        } else { tuneReceivers.remove(receiver) }
+        self.isTuneActive = !tuneReceivers.isEmpty
+        if pttReceivers.isEmpty && tuneReceivers.isEmpty { transmitWatchdog?.cancel(); transmitWatchdog = nil }
         sendCommand("tune:\(receiver),\(active ? "true" : "false");")
+    }
+
+    private func startTransmitWatchdog() {
+        guard transmitWatchdog == nil else { return }
+        let keyedAt = Date(), started = ProcessInfo.processInfo.systemUptime
+        transmitWatchdog = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(TXLimits.hardPTT))
+            guard !Task.isCancelled, let self else { return }
+            self.disconnect()
+            let text = TXLimits.safetyTimerMessage(radio: "TCI", keyedAt: keyedAt, limit: TXLimits.hardPTT,
+                elapsed: ProcessInfo.processInfo.systemUptime - started)
+            TransmitNotices.shared.post(self.noticeSource, text: text)
+        }
     }
 
     public func setDrivePower(_ level: Int) {
@@ -286,6 +343,7 @@ public final class TCIClient: ObservableObject {
     // MARK: - CW Transmission via SDR DSP
 
     public func sendCW(text: String, receiver: Int = 0, wpm: Int = 25) {
+        guard !TransmitShutdown.isShuttingDown else { return }
         sendCommand("cw_macros_speed:\(wpm);")
         sendCommand("cw_macro:\(receiver),\(text);")
     }

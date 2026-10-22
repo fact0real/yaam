@@ -232,6 +232,11 @@ public struct JS8StationView: View {
 
             Divider()
 
+            Label("Native JS8 transmit is unavailable. Use JS8Call to send; receiving remains available.", systemImage: "info.circle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 10)
             // Message Composer
             if !engine.transmitRefusal.isEmpty {
                 Text(engine.transmitRefusal)
@@ -259,7 +264,8 @@ public struct JS8StationView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.purple)
-                .disabled(messageInputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(!engine.nativeTransmitAvailable || messageInputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .help("Native JS8 encoding is not available. Use JS8Call to transmit; your message stays here.")
             }
             .padding(.horizontal, 10)
             .padding(.bottom, 8)

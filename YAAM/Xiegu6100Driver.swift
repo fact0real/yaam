@@ -123,6 +123,8 @@ public final class Xiegu6100Driver: ObservableObject {
     private let rxBufferLock = NSLock()
     private var pollingTimer: DispatchSourceTimer?
     private var pttWatchdog: DispatchWorkItem?
+    private var pttGeneration = UUID()
+    private let noticeSource = TransmitNotices.Source(name: "Xiegu X6100")
     private let serialQueue = DispatchQueue(label: "com.yaam.xiegu6100.driver", qos: .userInitiated)
     private var pollCycle: UInt64 = 0
 
@@ -141,6 +143,9 @@ public final class Xiegu6100Driver: ObservableObject {
         if autoConnect && !selectedPort.isEmpty {
             connect()
         }
+        // Registered so that quitting YAAM can release this path (TransmitShutdown).
+        TransmitShutdown.register("Xiegu X6100", isTransmitting: { [weak self] in self?.isTransmitting ?? false },
+                                  owner: self, release: { [weak self] in self?.setPTT(false) })
     }
 
     deinit {
@@ -396,12 +401,27 @@ public final class Xiegu6100Driver: ObservableObject {
     // MARK: - Transmit PTT with Safety Watchdog
 
     /// Asserts or releases CAT PTT with hardware safety watchdog timer
-    public func setPTT(_ active: Bool, maximumDuration: TimeInterval = 15.0) {
-        guard isConnected else {
-            if !active { isTransmitting = false }
+    public func setPTT(_ active: Bool, maximumDuration: TimeInterval = TXLimits.xieguPTT) {
+
+        if !active, !isConnected {
+            pttGeneration = UUID()
+            pttWatchdog?.cancel()
+            pttWatchdog = nil
+            isTransmitting = false
+            if enableHardwareRTSPTT { serialPort.setRTS(active: false) }
             return
         }
-
+        if active {
+            guard !TransmitShutdown.isShuttingDown else { return }
+            guard isConnected else {
+                lastMessage = TXLimits.notConnectedMessage(radio: "Xiegu X6100")
+                return
+            }
+            // Repeated key-down is idempotent: it cannot renew the first key-down's deadline.
+            if pttWatchdog != nil { return }
+        }
+        pttGeneration = UUID()
+        let generation = pttGeneration
         pttWatchdog?.cancel()
         pttWatchdog = nil
 
@@ -417,16 +437,18 @@ public final class Xiegu6100Driver: ObservableObject {
             sendCIV(command: [0x1C, 0x00, 0x01])
             self.lastMessage = "Xiegu X6100 Transmitting (PTT Active)"
 
-            // Safety watchdog timer: automatically release PTT if app stalls or disconnects
+            let limit = TXLimits.pttSafetyTimer(maximumDuration)
+            let keyedAt = Date()
+            let started = ProcessInfo.processInfo.systemUptime
             let watchdog = DispatchWorkItem { [weak self] in
-                Task { @MainActor [weak self] in
-                    guard let self = self, self.isTransmitting else { return }
-                    self.setPTT(false)
-                    self.lastMessage = "⚠️ PTT watchdog tripped after \(Int(maximumDuration))s"
-                }
+                guard let self, self.pttGeneration == generation, self.isTransmitting else { return }
+                self.setPTT(false)
+                self.lastMessage = TXLimits.safetyTimerMessage(radio: "Xiegu X6100", keyedAt: keyedAt, limit: limit,
+                    elapsed: ProcessInfo.processInfo.systemUptime - started)
+                TransmitNotices.shared.post(self.noticeSource, text: self.lastMessage)
             }
-            self.pttWatchdog = watchdog
-            DispatchQueue.main.asyncAfter(deadline: .now() + max(1.0, maximumDuration), execute: watchdog)
+            pttWatchdog = watchdog
+            DispatchQueue.main.asyncAfter(deadline: .now() + limit, execute: watchdog)
         } else {
             // CI-V CAT PTT OFF: 1C 00 00
             sendCIV(command: [0x1C, 0x00, 0x00])

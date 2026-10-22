@@ -84,6 +84,7 @@ struct FT8StationView: View {
     @State private var isPasswordVisible = false
     @State private var credentialStatus = ""
     @State private var showHardwareSettings = false
+    @ObservedObject private var transmitNotices = TransmitNotices.shared
     @State private var selectedTxMessageIndex = 1
     @State private var showChecksheetPopover = false
     @State private var showCabrilloExportSheet = false
@@ -117,6 +118,16 @@ struct FT8StationView: View {
             let upperLimit = max(100, geometry.size.height - spectrumHeight - 210 - 38)
 
             VStack(spacing: 0) {
+                // A PTT safety timer released a radio: the status banner moves on to "Receive" and the connection panel
+                // folds away once connected, so the notice is shown here, above the controls that scroll, where it stays
+                // in sight until the operator closes it (TransmitNotices).
+                if !transmitNotices.notices.isEmpty {
+                    TransmitNoticesView()
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                    Divider()
+                }
+
                 ScrollView(.vertical, showsIndicators: true) {
                     upperStationControls
                         .frame(maxWidth: .infinity, alignment: .topLeading)

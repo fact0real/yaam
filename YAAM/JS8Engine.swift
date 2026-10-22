@@ -223,79 +223,17 @@ public final class JS8Engine: ObservableObject {
             transmitRefusal = issue
             return false
         }
-        guard audioEngine?.isRunning == true, playerNode?.isPlaying == true else {
-            transmitRefusal = "Native JS8 audio transmission is unavailable. No message was sent."
-            return false
-        }
-        transmitRefusal = ""
-
-        let dest = target.isEmpty ? "@ALLCALL" : target.uppercased()
-        let newMsg = JS8Message(
-            fromCall: myCallsign,
-            toCall: dest,
-            text: clean,
-            isOutgoing: true
-        )
-        messages.append(newMsg)
-        composerText = ""
-
-        // Synthesize 8-GFSK audio transmission
-        transmitJS8Message(newMsg)
-        return true
+        transmitRefusal = "JS8: native transmit is unavailable at \(TXLimits.utc()). YAAM does not yet encode JS8 messages; no audio was played and the message is kept. Use JS8Call for transmission. Receiving, simulation and logging remain available."
+        return false
     }
 
-    private func transmitJS8Message(_ msg: JS8Message) {
-        isTransmitting = true
-
-        txTask = Task.detached(priority: .userInitiated) { [weak self] in
-            guard let self else { return }
-
-            let duration = await self.speed.frameSeconds
-            let sRate = await self.sampleRate
-            let baseFreq = await self.audioOffsetHz
-            let toneSpacing = (await self.speed.bandwidthHz) / 8.0
-
-            // 8-GFSK 79 symbols
-            let symbols = (0..<79).map { _ in Int.random(in: 0..<8) }
-            let symDuration = duration / 79.0
-            let frameCount = Int(symDuration * sRate)
-
-            for sym in symbols {
-                let toneFreq = baseFreq + Double(sym) * toneSpacing
-                await self.playGFSKTone(frequency: toneFreq, frameCount: frameCount)
-            }
-
-            await MainActor.run {
-                self.isTransmitting = false
-            }
-        }
-    }
-
-    private func playGFSKTone(frequency: Double, frameCount: Int) async {
-        guard frameCount > 0 else { return }
-        let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1)!
-        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frameCount)) else { return }
-        buffer.frameLength = AVAudioFrameCount(frameCount)
-
-        if let channel = buffer.floatChannelData?[0] {
-            let omega = 2.0 * .pi * frequency / sampleRate
-            for i in 0..<frameCount {
-                // Gaussian shaped envelope
-                let t = (Double(i) / Double(frameCount)) - 0.5
-                let gEnv = exp(-12.0 * t * t)
-                channel[i] = sin(Float(omega * Double(i))) * Float(gEnv) * 0.75
-            }
-        }
-
-        if let player = self.playerNode, player.isPlaying {
-            await player.scheduleBuffer(buffer)
-        }
-    }
+    public var nativeTransmitAvailable: Bool { false }
 
     public func stopTransmission() {
         txTask?.cancel()
         txTask = nil
         isTransmitting = false
+        if AudioOnlyTransmit.isNotice(transmitRefusal) { transmitRefusal = "" } // over: clear only the notice
         playerNode?.stop()
     }
 

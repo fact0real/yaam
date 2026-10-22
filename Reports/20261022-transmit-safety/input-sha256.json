@@ -1,0 +1,11 @@
+{
+  "0017-Digital-modes-send-each-character-of-the-TX-box-once.patch": "535dddadce89bac6c062d384037b4087b82672a2d025cad518a41a335070f0cf",
+  "0018-Transmit-register-every-PTT-path-so-they-can-all-be-.patch": "b3ed17a672aa0d9784408fb5f4fb8feb72faa88932f74b39055a313d94ceca34",
+  "0019-Quit-release-every-transmit-path-not-only-CW.patch": "9533dfffeee385bdbadca62cfd436ff58bc536abd747ab06d488fd13551d030c",
+  "0020-Drivers-say-what-the-PTT-safety-timer-did-with-time-.patch": "da6775309e2c65a1303ff193ff4df57fb9bb0cc36ecc7a99eb9c2ebcb2112753",
+  "0021-Drivers-say-so-when-PTT-is-refused-because-the-radio.patch": "ab3c134e676dc8d0a2cc98173f9525bb720bcdf8262370eef3b689282275cc4f",
+  "0022-Digital-modes-do-not-start-when-Radio-Control-s-radi.patch": "84aa0a04d7534fdc785fad425d45f18f404b175ecb1639153d02c3b1615fda2e",
+  "0023-Drivers-keep-the-PTT-safety-timer-message-as-a-notic.patch": "8473c09c314c20114fc164ef723da22646647b81931f5c0f7af5f88a197f4f7d",
+  "0024-Show-the-PTT-safety-notices-where-the-operator-trans.patch": "86c5bd52781f715a32346da2a0d38452f4491104d3b772fc5363f71a4fc5088c",
+  "0025-Audio-only-modes-say-that-they-do-not-key-the-radio.patch": "82f9c02e332611b19134849d5d98e2e5bb2a439e427dd3e0497be2c36fa12155"
+}

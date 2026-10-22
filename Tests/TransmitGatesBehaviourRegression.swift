@@ -13,7 +13,7 @@ import Foundation
 //       -module-name YAAM \
 //       Tests/TransmitGatesBehaviourRegression.swift Tests/Support/TransmitGateStubs.swift \
 //       Tests/Support/TransmitGateDXCCStub.swift YAAM/CWKeyerService.swift YAAM/ContestESMEngine.swift \
-//       YAAM/DigitalModemEngine.swift YAAM/TransmitIdentity.swift YAAM/GridLocator.swift -o tgb && ./tgb
+//       YAAM/DigitalModemEngine.swift YAAM/TransmitShutdown.swift YAAM/TransmitIdentity.swift YAAM/GridLocator.swift -o tgb && ./tgb
 // Nothing opens a port or a socket. The real audio engines may ask macOS for the microphone (33-ITEM.md).
 // The operators in the checks are EA3JIC and EP2AES, with four-character island locators as if on holiday
 // (BL10, Hawaii; LG89, Mauritius), not their home ones. The longer locators are those of a POTA activation,
@@ -293,7 +293,7 @@ struct TransmitGatesBehaviourRegression {
             _ = handedToRadio(0.05)
 
             dm.txRefusal = ""
-            dm.txRemainingText = "CQ"
+            dm.txBufferText = "CQ" // typed in the TX box: TRANSMIT sends what has not been sent yet
             dm.startTransmission()
             let keyed = handedToRadio(0.1)
             let wasTransmitting = dm.isTransmitting

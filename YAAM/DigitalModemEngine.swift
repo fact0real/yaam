@@ -282,7 +282,33 @@ public final class DigitalModemEngine: ObservableObject {
     // Decoded Output & Terminals
     @Published public var rxText: String = ""
     @Published public var decodedTokens: [DigitalDecodedToken] = []
-    @Published public var txBufferText: String = ""
+    /// The TX box: what the operator typed and the macros added. Its first txSentCount characters have been sent.
+    @Published public var txBufferText: String = "" {
+        didSet { followEdit(from: oldValue) }
+    }
+    /// How many characters at the start of txBufferText have been sent; what is still to send is the rest.
+    private(set) var txSentCount = 0
+    private var restoringTXBuffer = false
+
+    /// Only the pending suffix is editable in the station UI. Sent text is immutable history, so repeated text
+    /// such as AAAA or ABAB never needs an inferred edit location.
+    public var pendingTransmitText: String {
+        get { String(txBufferText.dropFirst(txSentCount)) }
+        set { txBufferText = String(txBufferText.prefix(txSentCount)) + newValue }
+    }
+
+    private func followEdit(from oldValue: String) {
+        guard !restoringTXBuffer else { return }
+        if txBufferText.isEmpty { txSentCount = 0; return }
+        guard txSentCount > 0 else { return }
+        let sent = String(oldValue.prefix(txSentCount))
+        if !txBufferText.hasPrefix(sent) {
+            restoringTXBuffer = true
+            txBufferText = oldValue
+            restoringTXBuffer = false
+            txRefusal = "Sent text is kept as history. Edit the pending text, or stop and use Clear TX for a new message."
+        }
+    }
     @Published public var txTransmittedText: String = ""
     @Published public var txRemainingText: String = ""
     @Published public var txProgress: Double = 0.0
@@ -339,6 +365,7 @@ public final class DigitalModemEngine: ObservableObject {
 
     // TX Generation
     private var txTask: Task<Void, Never>?
+    private var releaseTransmitPTT: (() -> Void)?
     private var simulationTimer: Timer?
     private var simulationPhraseIndex: Int = 0
 
@@ -353,6 +380,9 @@ public final class DigitalModemEngine: ObservableObject {
         self.samplesPerBit = 48000.0 / operatingMode.baudRate
         self.pskSamplesPerBit = 48000.0 / 31.25
         self.recentScopeBuffer.reserveCapacity(256)
+        // Registered so that quitting YAAM can release this path (TransmitShutdown).
+        TransmitShutdown.register("Digital modes", isTransmitting: { [weak self] in self?.isTransmitting ?? false }, producer: true,
+                                  owner: self, release: { [weak self] in self?.stopTransmission() })
     }
 
     // MARK: - Pitch & Frequency Tuning Controls
@@ -811,45 +841,70 @@ public final class DigitalModemEngine: ObservableObject {
             txRefusal = issue
             return
         }
+        // With Radio Control unable to key the radio, a macro is not added: pressing it again would queue it twice.
+        if !isTransmitting, let issue = radioControlRefusal(textKept: false) {
+            txRefusal = issue
+            return
+        }
         txRefusal = ""
         txBufferText += text
-        txRemainingText = txBufferText
+        txRemainingText = String(txBufferText.dropFirst(txSentCount))
         if !isTransmitting {
             startTransmission()
         }
     }
 
+    /// Why a transmission cannot start because no radio can be keyed, or nil. Radio Control must be able to key its
+    /// radio, or a TX-500 or X6100 must be connected from its own panel (they are keyed directly); otherwise the
+    /// transmission would play with no PTT (or, with VOX, keyed and unseen). With Radio Control "Disabled" (VOX or an
+    /// external PTT) nothing is checked.
+    func radioControlRefusal(textKept: Bool) -> String? {
+        if Lab599TX500Driver.shared.isConnected && Xiegu6100Driver.shared.isConnected,
+           !RigControlEngine.shared.isConnected || RigControlEngine.shared.driverType == .disabled {
+            return "\(operatingMode.rawValue): nothing sent at \(TXLimits.utc()). Two direct radio panels are connected; select one connected radio in Radio Control before sending. Receiving and logging remain available."
+        }
+        let rig = RigControlEngine.shared
+        guard rig.driverType != .disabled, !rig.isConnected,
+              !Lab599TX500Driver.shared.isConnected, !Xiegu6100Driver.shared.isConnected else { return nil }
+        return "\(operatingMode.rawValue): nothing sent. Radio Control is set to \(rig.driverType.rawValue), which is not "
+            + "connected, so YAAM could not key the radio. Connect it in Radio Control, or set Radio Control to Disabled "
+            + "to transmit with VOX or an external PTT. Receiving and logging remain available. At \(TXLimits.utc()). " + (textKept ? "The text in the TX box is kept." : "The text was not added.")
+    }
+
     public func startTransmission() {
-        guard !txRemainingText.isEmpty, !isTransmitting else { return }
+        guard !TransmitShutdown.isShuttingDown else { return }
+        guard !isTransmitting else { return }
+        // What is still to send: the part of the box not sent yet, typed or from a macro.
+        txRemainingText = String(txBufferText.dropFirst(txSentCount))
+        guard !txRemainingText.isEmpty else {
+            if !txBufferText.isEmpty {
+                txRefusal = "\(operatingMode.rawValue): nothing new to send. Everything in the TX box has been processed (or "
+                    + "dropped with ABORT TX). Type new text, or use Clear TX to start again."
+            }
+            return
+        }
         if let issue = TransmitIdentity.callsignRefusal(myCallsign) {
             txRefusal = issue
             return
         }
+        if let issue = radioControlRefusal(textKept: true) {
+            txRefusal = issue
+            return
+        }
+        if audioEngine?.isRunning == true { playerNode?.play() }
         guard audioEngine?.isRunning == true, playerNode?.isPlaying == true else {
             txRefusal = "Audio transmitter is unavailable. No message was sent; the queued text is kept."
             return
         }
+        txRefusal = "" // a refusal from an earlier attempt no longer applies
         isTransmitting = true
-        RigControlEngine.shared.setPTT(true)
-        if Lab599TX500Driver.shared.isConnected {
-            Lab599TX500Driver.shared.setPTT(true)
-        }
-        if Xiegu6100Driver.shared.isConnected {
-            Xiegu6100Driver.shared.setPTT(true)
-        }
+        acquireTransmitPTT()
 
         txTask = Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else { return }
 
-            while true {
-                let nextChar: Character? = await MainActor.run {
-                    guard self.isTransmitting, !self.txRemainingText.isEmpty else { return nil }
-                    let char = self.txRemainingText.removeFirst()
-                    self.txTransmittedText.append(char)
-                    let total = max(1, self.txBufferText.count)
-                    self.txProgress = Double(self.txTransmittedText.count) / Double(total)
-                    return char
-                }
+            while !Task.isCancelled {
+                let nextChar: Character? = await MainActor.run { self.nextCharacterToSend() }
 
                 guard let char = nextChar else { break }
 
@@ -858,31 +913,61 @@ public final class DigitalModemEngine: ObservableObject {
             }
 
             await MainActor.run {
+                guard !Task.isCancelled else { return }
                 self.isTransmitting = false
                 self.txProgress = 1.0
-                RigControlEngine.shared.setPTT(false)
-                if Lab599TX500Driver.shared.isConnected {
-                    Lab599TX500Driver.shared.setPTT(false)
-                }
-                if Xiegu6100Driver.shared.isConnected {
-                    Xiegu6100Driver.shared.setPTT(false)
-                }
+                self.releaseTransmitPTT?()
+                self.releaseTransmitPTT = nil
             }
         }
     }
 
+    /// Acquires at most one transport. A second connected panel must not key an unrelated radio.
+    func acquireTransmitPTT() {
+        guard !TransmitShutdown.isShuttingDown, radioControlRefusal(textKept: true) == nil else { return }
+        // One chosen route only. A second connected panel must never key an unrelated radio.
+        let rig = RigControlEngine.shared
+        if rig.driverType != .disabled, rig.isConnected {
+            rig.setPTT(true)
+            releaseTransmitPTT = rig.capturePTTRelease()
+        } else if Lab599TX500Driver.shared.isConnected {
+            let radio = Lab599TX500Driver.shared
+            radio.setPTT(true)
+            releaseTransmitPTT = { radio.setPTT(false) }
+        } else if Xiegu6100Driver.shared.isConnected {
+            let radio = Xiegu6100Driver.shared
+            radio.setPTT(true)
+            releaseTransmitPTT = { radio.setPTT(false) }
+        }
+    }
+
+    /// The next character of the box not sent yet (text typed while transmitting included), marked as sent; nil when
+    /// there is none or the transmission has stopped.
+    func nextCharacterToSend() -> Character? {
+        guard !Task.isCancelled, isTransmitting else { return nil }
+        let pending = txBufferText.dropFirst(txSentCount)
+        guard let char = pending.first else {
+            txRemainingText = ""
+            return nil
+        }
+        txSentCount += 1
+        txRemainingText = String(pending.dropFirst())
+        txTransmittedText.append(char)
+        txProgress = Double(txSentCount) / Double(max(1, txBufferText.count))
+        return char
+    }
+
     public func stopTransmission() {
+        let wasTransmitting = isTransmitting
         txTask?.cancel()
         txTask = nil
         isTransmitting = false
-        RigControlEngine.shared.setPTT(false)
-        if Lab599TX500Driver.shared.isConnected {
-            Lab599TX500Driver.shared.setPTT(false)
-        }
-        if Xiegu6100Driver.shared.isConnected {
-            Xiegu6100Driver.shared.setPTT(false)
-        }
+        releaseTransmitPTT?()
+        releaseTransmitPTT = nil
         playerNode?.stop()
+        // ABORT TX drops what was still to send: it is not sent by a later TRANSMIT. Stopping when nothing was being
+        // transmitted (for example when the receiver stops) keeps the text still to send.
+        if wasTransmitting { txSentCount = txBufferText.count }
         txRemainingText = ""
     }
 
@@ -926,7 +1011,7 @@ public final class DigitalModemEngine: ObservableObject {
     }
 
     private func playSineTone(frequency: Double, frameCount: Int) async {
-        guard frameCount > 0 else { return }
+        guard !Task.isCancelled, isTransmitting, frameCount > 0 else { return }
         let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1)!
         guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frameCount)) else { return }
         buffer.frameLength = AVAudioFrameCount(frameCount)
@@ -946,13 +1031,13 @@ public final class DigitalModemEngine: ObservableObject {
             }
         }
 
-        if let player = self.playerNode, player.isPlaying {
+        if !Task.isCancelled, isTransmitting, let player = self.playerNode, player.isPlaying {
             await player.scheduleBuffer(buffer)
         }
     }
 
     private func playPSKTone(centerFreq: Double, phaseShift: Double, frameCount: Int) async {
-        guard frameCount > 0 else { return }
+        guard !Task.isCancelled, isTransmitting, frameCount > 0 else { return }
         let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1)!
         guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frameCount)) else { return }
         buffer.frameLength = AVAudioFrameCount(frameCount)
@@ -966,7 +1051,7 @@ public final class DigitalModemEngine: ObservableObject {
             }
         }
 
-        if let player = self.playerNode, player.isPlaying {
+        if !Task.isCancelled, isTransmitting, let player = self.playerNode, player.isPlaying {
             await player.scheduleBuffer(buffer)
         }
     }

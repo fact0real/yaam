@@ -175,6 +175,8 @@ public final class IcomUSBRadioDriver: ObservableObject {
     private let rxBufferLock = NSLock()
     private var pollingTimer: DispatchSourceTimer?
     private var pttWatchdog: DispatchWorkItem?
+    private var pttGeneration = UUID()
+    private let noticeSource = TransmitNotices.Source(name: "Icom USB")
     private var pollCycle: Int = 0
     private let serialQueue = DispatchQueue(label: "com.yaam.icom.usb.driver", qos: .userInitiated)
 
@@ -197,6 +199,9 @@ public final class IcomUSBRadioDriver: ObservableObject {
         if autoConnect && !selectedPort.isEmpty {
             connect()
         }
+        // Registered so that quitting YAAM can release this path (TransmitShutdown).
+        TransmitShutdown.register("Icom USB", isTransmitting: { [weak self] in self?.isTransmitting ?? false },
+                                  owner: self, release: { [weak self] in self?.setPTT(false) })
     }
 
     deinit {
@@ -448,7 +453,26 @@ public final class IcomUSBRadioDriver: ObservableObject {
 
     // MARK: - Transmit PTT with Watchdog
 
-    public func setPTT(_ active: Bool, maximumDuration: TimeInterval = 16.0) {
+    public func setPTT(_ active: Bool, maximumDuration: TimeInterval = TXLimits.icomUSBPTT) {
+        if !active, !isConnected {
+            pttGeneration = UUID()
+            pttWatchdog?.cancel()
+            pttWatchdog = nil
+            isTransmitting = false
+            if enableHardwareRTSPTT { serialPort.setRTS(active: false) }
+            return
+        }
+        if active {
+            guard !TransmitShutdown.isShuttingDown else { return }
+            guard isConnected else {
+                lastMessage = TXLimits.notConnectedMessage(radio: "Icom USB")
+                return
+            }
+            // Repeated key-down is idempotent: it cannot renew the first key-down's deadline.
+            if pttWatchdog != nil { return }
+        }
+        pttGeneration = UUID()
+        let generation = pttGeneration
         pttWatchdog?.cancel()
         pttWatchdog = nil
 
@@ -463,16 +487,18 @@ public final class IcomUSBRadioDriver: ObservableObject {
             // CI-V CAT PTT ON: 1C 00 01
             sendCIV(command: [0x1C, 0x00, 0x01])
 
-            // Fail-safe watchdog: drop PTT if stalled
+            let limit = TXLimits.pttSafetyTimer(maximumDuration)
+            let keyedAt = Date()
+            let started = ProcessInfo.processInfo.systemUptime
             let watchdog = DispatchWorkItem { [weak self] in
-                Task { @MainActor [weak self] in
-                    guard let self = self, self.isTransmitting else { return }
-                    self.setPTT(false)
-                    self.lastMessage = "⚠️ PTT watchdog tripped after \(Int(maximumDuration))s"
-                }
+                guard let self, self.pttGeneration == generation, self.isTransmitting else { return }
+                self.setPTT(false)
+                self.lastMessage = TXLimits.safetyTimerMessage(radio: "Icom USB", keyedAt: keyedAt, limit: limit,
+                    elapsed: ProcessInfo.processInfo.systemUptime - started)
+                TransmitNotices.shared.post(self.noticeSource, text: self.lastMessage)
             }
             pttWatchdog = watchdog
-            DispatchQueue.main.asyncAfter(deadline: .now() + maximumDuration, execute: watchdog)
+            DispatchQueue.main.asyncAfter(deadline: .now() + limit, execute: watchdog)
         } else {
             // CI-V CAT PTT OFF: 1C 00 00
             sendCIV(command: [0x1C, 0x00, 0x00])

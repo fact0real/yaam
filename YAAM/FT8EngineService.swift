@@ -546,6 +546,17 @@ final class FT8EngineService: ObservableObject {
     private var smoothedRange: Float = 25.0
 
     init() {
+        TransmitShutdown.register("FT8/FT4", isTransmitting: { [weak self] in
+            guard let self else { return false }
+            return self.transmitTask != nil || self.transmitArmed || self.isCallingCQContinually
+        }, producer: true, owner: self, release: { [weak self] in
+            guard let self else { return }
+            self.transmitArmed = false
+            self.isCallingCQContinually = false
+            self.autoSequenceEnabled = false
+            self.autoHunterEnabled = false
+            self.cancelTransmission(reason: "YAAM is quitting; receive requested")
+        })
         refreshAudioDevices()
         startClock()
     }
@@ -1228,6 +1239,7 @@ final class FT8EngineService: ObservableObject {
     }
 
     func scheduleTransmission() {
+        guard !TransmitShutdown.isShuttingDown else { return }
         guard transmitTask == nil else { return }
         guard transmitArmed else {
             fail("Arm TX before scheduling a transmission.")

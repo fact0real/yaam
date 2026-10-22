@@ -110,6 +110,9 @@ public final class RigControlEngine: ObservableObject {
     private var tcpConnection: NWConnection?
     private let flrigChain = FlrigCommandChain()
     private var flrigErrors = FlrigErrorState()
+    private var rigctldKeyed = false
+    private var rigctldPTTWatchdog: Task<Void, Never>?
+    private let noticeSource = TransmitNotices.Source(name: "Radio Control")
     private var flrigPTTWatchdog: Task<Void, Never>?
 
     private init() {
@@ -123,6 +126,13 @@ public final class RigControlEngine: ObservableObject {
         if autoConnect && driverType != .disabled {
             connect()
         }
+        // Registered so that quitting YAAM can release this path (TransmitShutdown).
+        TransmitShutdown.register("Radio Control", isTransmitting: { [weak self] in
+                                      // isPTT lags behind the drivers and flrig polling clears it; a key-down still counts.
+                                      guard let self else { return false }
+                                      return self.isPTT || self.rigctldKeyed || self.flrigPTTWatchdog != nil
+                                  },
+                                  owner: self, release: { [weak self] in self?.setPTT(false) })
     }
 
     deinit {
@@ -171,7 +181,15 @@ public final class RigControlEngine: ObservableObject {
         flrigPTTWatchdog = nil
         pollingTask?.cancel()
         pollingTask = nil
-        tcpConnection?.cancel()
+        if driverType == .rigctld, rigctldKeyed, let connection = tcpConnection {
+            connection.send(content: Data("T 0\n".utf8), completion: .contentProcessed { _ in connection.cancel() })
+            Task { try? await Task.sleep(for: .seconds(2)); connection.cancel() }
+        } else {
+            tcpConnection?.cancel()
+        }
+        rigctldKeyed = false
+        rigctldPTTWatchdog?.cancel()
+        rigctldPTTWatchdog = nil
         tcpConnection = nil
         tx500Cancellables.removeAll()
         icomUSBCancellables.removeAll()
@@ -313,6 +331,15 @@ public final class RigControlEngine: ObservableObject {
     }
 
     public func setPTT(_ transmit: Bool) {
+        if transmit {
+            guard !TransmitShutdown.isShuttingDown else { return }
+            guard isConnected else {
+                lastError = TXLimits.notConnectedMessage(radio: driverType.rawValue)
+                return
+            }
+            if driverType == .flrig, flrigPTTWatchdog != nil { return }
+            if driverType == .rigctld, rigctldKeyed { return }
+        }
         self.isPTT = transmit
         switch driverType {
         case .flrig:
@@ -320,26 +347,70 @@ public final class RigControlEngine: ObservableObject {
             flrigPTTWatchdog?.cancel()
             flrigPTTWatchdog = nil
             if transmit {
-                // A stalled audio task must not leave flrig keyed indefinitely.
+                let keyedAt = Date(), started = ProcessInfo.processInfo.systemUptime
                 flrigPTTWatchdog = Task { [weak self] in
-                    try? await Task.sleep(for: .seconds(120))
-                    guard !Task.isCancelled, let self, self.driverType == .flrig, self.isPTT else { return }
-                    NSLog("[flrig] PTT watchdog released a transmission after 120 seconds")
+                    try? await Task.sleep(for: .seconds(TXLimits.flrigPTT))
+                    guard !Task.isCancelled, let self, self.driverType == .flrig else { return }
                     self.setPTT(false)
+                    let text = TXLimits.safetyTimerMessage(radio: "flrig", keyedAt: keyedAt, limit: TXLimits.flrigPTT,
+                        elapsed: ProcessInfo.processInfo.systemUptime - started)
+                    TransmitNotices.shared.post(self.noticeSource, text: text)
                 }
             }
         case .rigctld:
+            rigctldKeyed = transmit
             sendRigctldCommand(transmit ? "T 1\n" : "T 0\n")
-        case .tx500:
-            Lab599TX500Driver.shared.setPTT(transmit)
-        case .icomUSB:
-            IcomUSBRadioDriver.shared.setPTT(transmit)
-        case .fx4cr:
-            FX4CRDriver.shared.setPTT(transmit)
-        case .xiegu6100:
-            Xiegu6100Driver.shared.setPTT(transmit)
-        case .disabled:
-            break
+            rigctldPTTWatchdog?.cancel()
+            rigctldPTTWatchdog = nil
+            if transmit {
+                let keyedAt = Date(), started = ProcessInfo.processInfo.systemUptime
+                rigctldPTTWatchdog = Task { [weak self] in
+                    try? await Task.sleep(for: .seconds(TXLimits.rigctldPTT))
+                    guard !Task.isCancelled, let self, self.rigctldKeyed else { return }
+                    self.setPTT(false)
+                    let text = TXLimits.safetyTimerMessage(radio: "Radio Control rigctld", keyedAt: keyedAt, limit: TXLimits.rigctldPTT,
+                        elapsed: ProcessInfo.processInfo.systemUptime - started)
+                    TransmitNotices.shared.post(self.noticeSource, text: text)
+                }
+            }
+        case .tx500: Lab599TX500Driver.shared.setPTT(transmit)
+        case .icomUSB: IcomUSBRadioDriver.shared.setPTT(transmit)
+        case .fx4cr: FX4CRDriver.shared.setPTT(transmit)
+        case .xiegu6100: Xiegu6100Driver.shared.setPTT(transmit)
+        case .disabled: break
+        }
+    }
+
+    /// Snapshot the acquired destination: a later settings change must not send this transmission's release to a new radio.
+    func capturePTTRelease() -> () -> Void {
+        switch driverType {
+        case .tx500: return { Lab599TX500Driver.shared.setPTT(false) }
+        case .icomUSB: return { IcomUSBRadioDriver.shared.setPTT(false) }
+        case .fx4cr: return { FX4CRDriver.shared.setPTT(false) }
+        case .xiegu6100: return { Xiegu6100Driver.shared.setPTT(false) }
+        case .flrig:
+            let keyedHost = host, keyedPort = port
+            return { [weak self] in
+                guard let self else { return }
+                self.flrigEnqueue(.setPTT(false), targetHost: keyedHost, targetPort: keyedPort)
+                if self.driverType == .flrig, self.host == keyedHost, self.port == keyedPort {
+                    self.flrigPTTWatchdog?.cancel()
+                    self.flrigPTTWatchdog = nil
+                    self.isPTT = false
+                }
+            }
+        case .rigctld:
+            guard let keyedConnection = tcpConnection else { return {} }
+            return { [weak self] in
+                keyedConnection.send(content: Data("T 0\n".utf8), completion: .contentProcessed { _ in })
+                if let self, self.driverType == .rigctld, self.tcpConnection === keyedConnection {
+                    self.rigctldPTTWatchdog?.cancel()
+                    self.rigctldPTTWatchdog = nil
+                    self.rigctldKeyed = false
+                    self.isPTT = false
+                }
+            }
+        case .disabled: return {}
         }
     }
 
@@ -694,8 +765,8 @@ public final class RigControlEngine: ObservableObject {
     /// A command for flrig, behind every command queued before it. Returns at once; the answer is handled when it comes.
     /// rig.set_ptt 0 is read back and repeated inside the same job (FlrigPTTRelease): the release stays the last
     /// command, and nothing else is sent between it, the read-back and the repeats.
-    private func flrigEnqueue(_ command: FlrigCommand) {
-        let host = self.host, port = self.port
+    private func flrigEnqueue(_ command: FlrigCommand, targetHost: String? = nil, targetPort: Int? = nil) {
+        let host = targetHost ?? self.host, port = targetPort ?? self.port
         flrigChain.enqueue {
             let send: FlrigSequences.Send = { await FlrigTransport.sendUncancelled($0, host: host, port: port, timeout: 1.5) }
             let outcome: FlrigOutcome
@@ -704,8 +775,12 @@ public final class RigControlEngine: ObservableObject {
             } else {
                 outcome = FlrigOutcome(method: command.method, reply: await send(command))
             }
-            await self.flrigReport(outcome)
+            if await self.isCurrentFlrigEndpoint(host: host, port: port) { await self.flrigReport(outcome) }
         }
+    }
+
+    private func isCurrentFlrigEndpoint(host: String, port: Int) -> Bool {
+        driverType == .flrig && self.host == host && self.port == port
     }
 
     /// A fault is kept as the error until flrig accepts a command or the link changes; it is not thrown away.
@@ -750,9 +825,9 @@ public final class RigControlEngine: ObservableObject {
         let conn = NWConnection(host: endpointHost, port: endpointPort, using: .tcp)
         self.tcpConnection = conn
 
-        conn.stateUpdateHandler = { [weak self] state in
-            Task { @MainActor [weak self] in
-                guard let self = self else { return }
+        conn.stateUpdateHandler = { [weak self, weak conn] state in
+            Task { @MainActor [weak self, weak conn] in
+                guard let self, let conn, self.tcpConnection === conn else { return }
                 switch state {
                 case .ready:
                     self.isConnected = true

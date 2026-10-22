@@ -26,7 +26,7 @@ import Foundation
 //       -enable-upcoming-feature InferSendableFromCaptures -enable-upcoming-feature MemberImportVisibility \
 //       -module-name YAAM -I w -L w -lFT8808Engine -Xlinker -rpath -Xlinker @executable_path \
 //       Tests/CATChunkPacingRegression.swift Tests/Support/CATDriverStandIns.swift \
-//       YAAM/Lab599TX500Driver.swift YAAM/FX4CRDriver.swift YAAM/Lab599TX500SMeter.swift YAAM/MorseTiming.swift \
+//       YAAM/Lab599TX500Driver.swift YAAM/FX4CRDriver.swift YAAM/Lab599TX500SMeter.swift YAAM/MorseTiming.swift YAAM/TransmitShutdown.swift \
 //       -o w/catpace && w/catpace
 // Instead of the stand-in module, the package's own build can be used (-I and -L on an ft8-808 build, as
 // Tests/TransmitGatesFT8Regression.swift describes). Nothing opens a port, a socket or a device, and nothing is

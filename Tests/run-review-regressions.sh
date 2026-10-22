@@ -11,7 +11,7 @@ flags=(-parse-as-library -swift-version 5 -default-isolation MainActor
     -enable-upcoming-feature MemberImportVisibility -module-name YAAM)
 swiftc "${flags[@]}" Tests/DigitalReceiveReviewRegression.swift Tests/Support/TransmitGateStubs.swift \
     Tests/Support/TransmitGateDXCCStub.swift YAAM/DigitalModemEngine.swift YAAM/HellschreiberEngine.swift \
-    YAAM/OliviaMFSKEngine.swift YAAM/TransmitIdentity.swift YAAM/GridLocator.swift -o "$out/digital"
+    YAAM/OliviaMFSKEngine.swift YAAM/TransmitShutdown.swift YAAM/AudioOnlyTransmit.swift YAAM/TXLimits.swift YAAM/TransmitIdentity.swift YAAM/GridLocator.swift -o "$out/digital"
 "$out/digital"
 swiftc "${flags[@]}" Tests/CWConnectionLossRegression.swift Tests/Support/TransmitGateStubs.swift \
     Tests/Support/TransmitGateDXCCStub.swift YAAM/CWKeyerService.swift YAAM/MorseTiming.swift \

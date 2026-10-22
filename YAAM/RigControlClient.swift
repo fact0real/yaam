@@ -60,6 +60,13 @@ final class RigControlClient: ObservableObject {
     private var pendingMode = ""
     private var pendingPassband: Int?
     private var pttWatchdog: DispatchWorkItem?
+    private var pttGeneration = UUID()
+    private var noticeSource = TransmitNotices.Source(name: "rigctld") // this radio's own safety notices
+
+    init() {
+        TransmitShutdown.register("rigctld", isTransmitting: { [weak self] in self?.isTransmitting ?? false },
+                                  owner: self, release: { [weak self] in self?.setPTT(false) })
+    }
 
     deinit {
         pttWatchdog?.cancel()
@@ -76,6 +83,7 @@ final class RigControlClient: ObservableObject {
         }
 
         disconnect()
+        noticeSource.name = "rigctld (\(host):\(rawPort))"
         let id = UUID()
         connectionID = id
         let connection = NWConnection(host: NWEndpoint.Host(host), port: port, using: .tcp)
@@ -96,21 +104,27 @@ final class RigControlClient: ObservableObject {
     }
 
     func disconnect() {
-        if isTransmitting { send("T 0\n") }
+        let old = connection
+        let wasTransmitting = isTransmitting
+        pttGeneration = UUID()
         pttWatchdog?.cancel()
         pttWatchdog = nil
+        isTransmitting = false
         connectionID = UUID()
         pollTimer?.cancel()
         pollTimer = nil
-        connection?.stateUpdateHandler = nil
-        connection?.cancel()
+        old?.stateUpdateHandler = nil
         connection = nil
-        receiveBuffer = ""
-        DispatchQueue.main.async {
-            self.isTransmitting = false
-            self.state = .disconnected
-            self.lastMessage = "Rig Control disconnected"
+        if wasTransmitting, let old {
+            // Keep the old transport until its release write completes; never route that release to a replacement.
+            old.send(content: Data("T 0\n".utf8), completion: .contentProcessed { _ in old.cancel() })
+            Task { try? await Task.sleep(for: .seconds(2)); old.cancel() }
+        } else {
+            old?.cancel()
         }
+        receiveBuffer = ""
+        state = .disconnected
+        lastMessage = "Rig Control disconnected"
     }
 
     func refresh() {
@@ -133,33 +147,34 @@ final class RigControlClient: ObservableObject {
 
     /// Keys Hamlib PTT with a hard watchdog so a stalled FT8 task cannot leave
     /// the transmitter on. Calling with `false` is always safe and idempotent.
-    func setPTT(_ enabled: Bool, maximumDuration: TimeInterval = 14) {
-        guard state.isConnected else {
-            if !enabled {
-                DispatchQueue.main.async { self.isTransmitting = false }
+    func setPTT(_ enabled: Bool, maximumDuration: TimeInterval = TXLimits.rigctldPTT) {
+        if enabled {
+            guard !TransmitShutdown.isShuttingDown else { return }
+            guard state.isConnected else {
+                lastMessage = TXLimits.notConnectedMessage(radio: "rigctld")
+                return
             }
-            return
+            if pttWatchdog != nil { return }
         }
-
+        pttGeneration = UUID()
+        let generation = pttGeneration
         pttWatchdog?.cancel()
         pttWatchdog = nil
         send(enabled ? "T 1\n" : "T 0\n")
-        DispatchQueue.main.async {
-            self.isTransmitting = enabled
-            self.lastMessage = enabled ? "PTT active" : "PTT released"
-        }
-
+        isTransmitting = enabled
+        lastMessage = enabled ? "PTT active" : "PTT release requested; verify receive on the radio"
         guard enabled else { return }
+        let keyedAt = Date(), started = ProcessInfo.processInfo.systemUptime
+        let limit = TXLimits.pttSafetyTimer(maximumDuration)
         let watchdog = DispatchWorkItem { [weak self] in
-            guard let self, self.isTransmitting else { return }
-            self.send("T 0\n")
-            DispatchQueue.main.async {
-                self.isTransmitting = false
-                self.lastMessage = "PTT released by safety timer"
-            }
+            guard let self, self.pttGeneration == generation, self.isTransmitting else { return }
+            self.setPTT(false)
+            self.lastMessage = TXLimits.safetyTimerMessage(radio: self.noticeSource.name, keyedAt: keyedAt, limit: limit,
+                elapsed: ProcessInfo.processInfo.systemUptime - started)
+            TransmitNotices.shared.post(self.noticeSource, text: self.lastMessage)
         }
         pttWatchdog = watchdog
-        queue.asyncAfter(deadline: .now() + max(1, maximumDuration), execute: watchdog)
+        DispatchQueue.main.asyncAfter(deadline: .now() + limit, execute: watchdog)
     }
 
     // MARK: - Hamlib CAT CW Keying

@@ -172,6 +172,8 @@ public final class FX4CRDriver: ObservableObject {
     private var receiveBuffer = ""
     private var pollingTimer: DispatchSourceTimer?
     private var pttWatchdog: DispatchWorkItem?
+    private var pttGeneration = UUID()
+    private let noticeSource = TransmitNotices.Source(name: "FX-4CR")
     // The KY pieces of a CW message still to be sent; cancelled by a new message, STOP and disconnect
     private var pendingMorseChunks: [DispatchWorkItem] = []
     private var morseGeneration: UInt64 = 0
@@ -196,6 +198,9 @@ public final class FX4CRDriver: ObservableObject {
         if autoConnect && !selectedPort.isEmpty {
             connect()
         }
+        // Registered so that quitting YAAM can release this path (TransmitShutdown).
+        TransmitShutdown.register("FX-4CR", isTransmitting: { [weak self] in self?.isTransmitting ?? false },
+                                  owner: self, release: { [weak self] in self?.setPTT(false) })
     }
 
     deinit {
@@ -407,12 +412,26 @@ public final class FX4CRDriver: ObservableObject {
     }
 
     /// Asserts or releases CAT PTT with hardware safety watchdog timer
-    public func setPTT(_ transmit: Bool, maximumDuration: TimeInterval = 14.0) {
-        guard isConnected else {
-            if !transmit { isTransmitting = false }
+    public func setPTT(_ transmit: Bool, maximumDuration: TimeInterval = TXLimits.fx4crPTT) {
+
+        if !transmit, !isConnected {
+            pttGeneration = UUID()
+            pttWatchdog?.cancel()
+            pttWatchdog = nil
+            isTransmitting = false
             return
         }
-
+        if transmit {
+            guard !TransmitShutdown.isShuttingDown else { return }
+            guard isConnected else {
+                lastMessage = TXLimits.notConnectedMessage(radio: "FX-4CR")
+                return
+            }
+            // Repeated key-down is idempotent: it cannot renew the first key-down's deadline.
+            if pttWatchdog != nil { return }
+        }
+        pttGeneration = UUID()
+        let generation = pttGeneration
         pttWatchdog?.cancel()
         pttWatchdog = nil
 
@@ -422,14 +441,18 @@ public final class FX4CRDriver: ObservableObject {
             self.lastMessage = "FX-4CR Transmitting (PTT Active via \(transportLabel))"
             sendRaw("TX;")
 
-            // Safety watchdog timer: automatically release PTT if software stalls or times out
+            let limit = TXLimits.pttSafetyTimer(maximumDuration)
+            let keyedAt = Date()
+            let started = ProcessInfo.processInfo.systemUptime
             let watchdog = DispatchWorkItem { [weak self] in
-                guard let self = self, self.isTransmitting else { return }
+                guard let self, self.pttGeneration == generation, self.isTransmitting else { return }
                 self.setPTT(false)
-                self.lastMessage = "PTT released by FX-4CR safety watchdog"
+                self.lastMessage = TXLimits.safetyTimerMessage(radio: "FX-4CR", keyedAt: keyedAt, limit: limit,
+                    elapsed: ProcessInfo.processInfo.systemUptime - started)
+                TransmitNotices.shared.post(self.noticeSource, text: self.lastMessage)
             }
-            self.pttWatchdog = watchdog
-            DispatchQueue.main.asyncAfter(deadline: .now() + max(1.0, maximumDuration), execute: watchdog)
+            pttWatchdog = watchdog
+            DispatchQueue.main.asyncAfter(deadline: .now() + limit, execute: watchdog)
         } else {
             self.isTransmitting = false
             let transportLabel = connectionType == .usb ? "USB" : "Bluetooth"

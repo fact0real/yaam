@@ -119,6 +119,8 @@ public final class OliviaMFSKEngine: ObservableObject {
     private var simCIdx: Int = 0
 
     public init() {
+        TransmitShutdown.register("Olivia/MFSK", isTransmitting: { [weak self] in self?.isTransmitting ?? false }, producer: true,
+                                  owner: self, release: { [weak self] in self?.stopTransmission() })
         self.samplesPerSymbol = 48000.0 / config.baudRate
         self.symbolSampleAccumulator = Array(repeating: 0.0, count: config.toneCount)
     }
@@ -325,7 +327,8 @@ public final class OliviaMFSKEngine: ObservableObject {
             txRefusal = issue
             return
         }
-        txRefusal = ""
+        // While sending, the field holds the audio-only notice: keep it. Anything else is no longer current.
+        if !(isTransmitting && AudioOnlyTransmit.isNotice(txRefusal)) { txRefusal = "" }
         txBufferText += text
         if !isTransmitting {
             startTransmission()
@@ -333,6 +336,7 @@ public final class OliviaMFSKEngine: ObservableObject {
     }
 
     public func startTransmission() {
+        guard !TransmitShutdown.isShuttingDown else { return }
         guard !txBufferText.isEmpty, !isTransmitting else { return }
         if let issue = TransmitIdentity.callsignRefusal(myCallsign) {
             txRefusal = issue
@@ -343,13 +347,15 @@ public final class OliviaMFSKEngine: ObservableObject {
             return
         }
         isTransmitting = true
+        // This mode never keys a radio: say so if one is connected (AudioOnlyTransmit, B-018).
+        txRefusal = AudioOnlyTransmit.notice(mode: config.rawValue, radio: AudioOnlyTransmit.radioInUse()) ?? ""
 
         txTask = Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else { return }
 
-            while true {
+            while !Task.isCancelled {
                 let nextChar: Character? = await MainActor.run {
-                    guard self.isTransmitting, !self.txBufferText.isEmpty else { return nil }
+                    guard !Task.isCancelled, self.isTransmitting, !self.txBufferText.isEmpty else { return nil }
                     let ch = self.txBufferText.removeFirst()
                     self.txTransmittedText.append(ch)
                     return ch
@@ -360,7 +366,9 @@ public final class OliviaMFSKEngine: ObservableObject {
             }
 
             await MainActor.run {
+                guard !Task.isCancelled else { return }
                 self.isTransmitting = false
+                if AudioOnlyTransmit.isNotice(self.txRefusal) { self.txRefusal = "" } // over: clear only the notice
                 self.txProgress = 1.0
             }
         }
@@ -370,6 +378,7 @@ public final class OliviaMFSKEngine: ObservableObject {
         txTask?.cancel()
         txTask = nil
         isTransmitting = false
+        if AudioOnlyTransmit.isNotice(txRefusal) { txRefusal = "" } // over: clear only the notice
         playerNode?.stop()
     }
 
@@ -389,7 +398,7 @@ public final class OliviaMFSKEngine: ObservableObject {
     }
 
     private func playContinuousTone(frequency: Double, frameCount: Int) async {
-        guard frameCount > 0 else { return }
+        guard !Task.isCancelled, isTransmitting, frameCount > 0 else { return }
         let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1)!
         guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frameCount)) else { return }
         buffer.frameLength = AVAudioFrameCount(frameCount)
@@ -409,7 +418,7 @@ public final class OliviaMFSKEngine: ObservableObject {
             }
         }
 
-        if let player = self.playerNode, player.isPlaying {
+        if !Task.isCancelled, isTransmitting, let player = self.playerNode, player.isPlaying {
             await player.scheduleBuffer(buffer)
         }
     }

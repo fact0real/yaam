@@ -449,7 +449,7 @@ struct TransmitIdentityRegression {
               refusalBlock(issue, equals: ["txRefusal = issue", "return"], before: "txBufferText += text",
                            in: functionBody("public func queueTextForTransmission(", in: dm)))
         check("RTTY/PSK start: refuses with the reason and returns, before it keys the PTT",
-              refusalBlock(issue, equals: ["txRefusal = issue", "return"], before: "RigControlEngine.shared.setPTT(true)",
+              refusalBlock(issue, equals: ["txRefusal = issue", "return"], before: "acquireTransmitPTT()",
                            in: functionBody("public func startTransmission(", in: dm)))
         check("RTTY/PSK start: the refusal comes before the transmission state is set",
               before(issue, "isTransmitting = true", in: functionBody("public func startTransmission(", in: dm)))

@@ -263,12 +263,21 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
     private var keepaliveTimer: DispatchSourceTimer?
     private var tokenTimer: DispatchSourceTimer?
     private var pttWatchdog: DispatchWorkItem?
+    /// When PTT was first keyed and not yet released, so the safety timer message says how long it was really on.
+    @MainActor private var pttGeneration = UUID()
+    @MainActor private var noticeSource = TransmitNotices.Source(name: "Icom network") // this radio's own safety notices
     private var _audioSampleHandler: (@Sendable ([Float], Date) -> Void)?
     private var isStopping = false
     private var learnedCivAddress: UInt8?
     private var isTransmitActive = false
     private var savedOriginalMode: UInt8?
     private var savedSettingsToRestore: [[UInt8]: [UInt8]] = [:]
+
+    @MainActor
+    init() {
+        TransmitShutdown.register("Icom network", isTransmitting: { [weak self] in self?.isTransmitting ?? false },
+                                  owner: self, release: { [weak self] in self?.setPTT(false) })
+    }
 
     deinit {
         keepaliveTimer?.cancel()
@@ -320,6 +329,7 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
         pttWatchdog = nil
         isTransmitting = false
         transmitArmed = false
+        noticeSource.name = "Icom network (\(clean.host))"
         selectedModel = clean.model
         state = .connecting
         lastMessage = "Opening \(clean.host):\(clean.controlPort)..."
@@ -429,32 +439,35 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
     }
 
     @MainActor
-    func setPTT(_ enabled: Bool, maximumDuration: TimeInterval = 16) {
+    func setPTT(_ enabled: Bool, maximumDuration: TimeInterval = TXLimits.icomNetworkPTT) {
         if enabled {
+            guard !TransmitShutdown.isShuttingDown else { return }
             guard transmitArmed, state.isConnected else {
-                lastMessage = IcomNetworkError.transmitNotArmed.localizedDescription
+                lastMessage = "Icom network: PTT refused at \(TXLimits.utc()). Connect and arm transmit first. No audio was started; receiving and logging remain available."
                 return
             }
+            if pttWatchdog != nil { return }
         }
-
+        pttGeneration = UUID()
+        let generation = pttGeneration
         pttWatchdog?.cancel()
         pttWatchdog = nil
         isTransmitting = enabled
         queue.async { [weak self] in self?.sendPTT(enabled) }
-        lastMessage = enabled ? "PTT active on \(radioName)" : "PTT released"
-
+        lastMessage = enabled ? "PTT active on \(radioName)" : "PTT release requested; verify receive on the radio"
         guard enabled else { return }
+        let limit = TXLimits.pttSafetyTimer(maximumDuration)
+        let keyedAt = Date(), started = ProcessInfo.processInfo.systemUptime
         let watchdog = DispatchWorkItem { [weak self] in
-            guard let self, self.isTransmitting else { return }
-            self.queue.async { [weak self] in self?.sendPTT(false) }
-            DispatchQueue.main.async {
-                self.isTransmitting = false
-                self.transmitArmed = false
-                self.lastMessage = "PTT released by the safety timer"
-            }
+            guard let self, self.pttGeneration == generation, self.isTransmitting else { return }
+            self.setPTT(false)
+            self.transmitArmed = false
+            self.lastMessage = TXLimits.safetyTimerMessage(radio: self.noticeSource.name, keyedAt: keyedAt, limit: limit,
+                elapsed: ProcessInfo.processInfo.systemUptime - started, extra: "Transmit is now disarmed; arm it again only after checking receive.")
+            TransmitNotices.shared.post(self.noticeSource, text: self.lastMessage)
         }
         pttWatchdog = watchdog
-        DispatchQueue.main.asyncAfter(deadline: .now() + max(1, maximumDuration), execute: watchdog)
+        DispatchQueue.main.asyncAfter(deadline: .now() + limit, execute: watchdog)
     }
 
     /// Streams mono float audio as 48 kHz LPCM16 in real time. Each 10 ms frame

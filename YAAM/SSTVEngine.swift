@@ -135,6 +135,8 @@ public final class SSTVEngine: ObservableObject {
     private var txTask: Task<Void, Never>?
 
     public init() {
+        TransmitShutdown.register("SSTV", isTransmitting: { [weak self] in self?.isTransmitting ?? false }, producer: true,
+                                  owner: self, release: { [weak self] in self?.stopTransmission() })
         resetPixelBuffer()
     }
 
@@ -345,6 +347,7 @@ public final class SSTVEngine: ObservableObject {
     // MARK: - SSTV Image Transmission (Generates Test Card Audio)
 
     public func transmitTestCard() {
+        guard !TransmitShutdown.isShuttingDown else { return }
         guard !isTransmitting else { return }
         if let issue = TransmitIdentity.savedCallsignRefusal() {
             transmitRefusal = issue
@@ -354,8 +357,9 @@ public final class SSTVEngine: ObservableObject {
             transmitRefusal = "SSTV test-card audio transmission is unavailable. Nothing was sent."
             return
         }
-        transmitRefusal = ""
         isTransmitting = true
+        // This mode never keys a radio: say so if one is connected (AudioOnlyTransmit, B-018).
+        transmitRefusal = AudioOnlyTransmit.notice(mode: "SSTV", radio: AudioOnlyTransmit.radioInUse()) ?? ""
 
         txTask = Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else { return }
@@ -378,7 +382,9 @@ public final class SSTVEngine: ObservableObject {
             }
 
             await MainActor.run {
+                guard !Task.isCancelled else { return }
                 self.isTransmitting = false
+                if AudioOnlyTransmit.isNotice(self.transmitRefusal) { self.transmitRefusal = "" } // over: clear only the notice
             }
         }
     }
@@ -387,12 +393,13 @@ public final class SSTVEngine: ObservableObject {
         txTask?.cancel()
         txTask = nil
         isTransmitting = false
+        if AudioOnlyTransmit.isNotice(transmitRefusal) { transmitRefusal = "" } // over: clear only the notice
         playerNode?.stop()
     }
 
     private func playFMTone(freq: Double, durationSec: Double) async {
         let frameCount = Int(durationSec * sampleRate)
-        guard frameCount > 0 else { return }
+        guard !Task.isCancelled, isTransmitting, frameCount > 0 else { return }
 
         let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1)!
         guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frameCount)) else { return }
@@ -405,7 +412,7 @@ public final class SSTVEngine: ObservableObject {
             }
         }
 
-        if let player = self.playerNode, player.isPlaying {
+        if !Task.isCancelled, isTransmitting, let player = self.playerNode, player.isPlaying {
             await player.scheduleBuffer(buffer)
         }
     }

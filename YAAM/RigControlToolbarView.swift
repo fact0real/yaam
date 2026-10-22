@@ -12,6 +12,7 @@ import SwiftUI
 
 public struct RigControlToolbarView: View {
     @ObservedObject var rig = RigControlEngine.shared
+    @ObservedObject private var transmitNotices = TransmitNotices.shared
     @State private var showConfigPopover = false
 
     public init() {}
@@ -36,7 +37,7 @@ public struct RigControlToolbarView: View {
                         .foregroundStyle(rig.isConnected ? Color.primary : Color.secondary)
 
                     // flrig: a release of PTT that could not be confirmed. The text is in the popover and in the help tag.
-                    if rig.flrigPTTWarning != nil {
+                    if rig.flrigPTTWarning != nil || !transmitNotices.notices.isEmpty {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .font(.system(size: 11))
                             .foregroundStyle(.orange)
@@ -58,7 +59,7 @@ public struct RigControlToolbarView: View {
                 )
             }
             .buttonStyle(.plain)
-            .help(rig.flrigPTTWarning.map { Text(verbatim: $0) } ?? Text("Configure Transceiver CAT Control"))
+            .help((transmitNotices.notices.last?.text ?? rig.flrigPTTWarning).map { Text(verbatim: $0) } ?? Text("Configure Transceiver CAT Control"))
             .popover(isPresented: $showConfigPopover) {
                 RigConfigPopoverView(rig: rig)
             }
@@ -587,6 +588,8 @@ struct RigConfigPopoverView: View {
                     }
                 }
             }
+
+            TransmitNoticesView()
 
             // Live Connection Status or Error Banner
             if let err = rig.lastError, !rig.isConnected || rig.driverType == .flrig {

@@ -97,6 +97,8 @@ public final class Lab599TX500Driver: ObservableObject {
     private var receiveBuffer = ""
     private var pollingTimer: DispatchSourceTimer?
     private var pttWatchdog: DispatchWorkItem?
+    private var pttGeneration = UUID()
+    private let noticeSource = TransmitNotices.Source(name: "TX-500")
     // The KY pieces of a CW message still to be sent; cancelled by a new message, STOP and disconnect
     private var pendingMorseChunks: [DispatchWorkItem] = []
     private var morseGeneration: UInt64 = 0
@@ -117,6 +119,9 @@ public final class Lab599TX500Driver: ObservableObject {
         if autoConnect && !selectedPort.isEmpty {
             connect()
         }
+        // Registered so that quitting YAAM can release this path (TransmitShutdown).
+        TransmitShutdown.register("TX-500", isTransmitting: { [weak self] in self?.isTransmitting ?? false },
+                                  owner: self, release: { [weak self] in self?.setPTT(false) })
     }
 
     deinit {
@@ -280,12 +285,26 @@ public final class Lab599TX500Driver: ObservableObject {
     }
 
     /// Asserts or releases CAT PTT with hardware safety watchdog timer
-    public func setPTT(_ transmit: Bool, maximumDuration: TimeInterval = 14.0) {
-        guard isConnected else {
-            if !transmit { isTransmitting = false }
+    public func setPTT(_ transmit: Bool, maximumDuration: TimeInterval = TXLimits.tx500PTT) {
+
+        if !transmit, !isConnected {
+            pttGeneration = UUID()
+            pttWatchdog?.cancel()
+            pttWatchdog = nil
+            isTransmitting = false
             return
         }
-
+        if transmit {
+            guard !TransmitShutdown.isShuttingDown else { return }
+            guard isConnected else {
+                lastMessage = TXLimits.notConnectedMessage(radio: "TX-500")
+                return
+            }
+            // Repeated key-down is idempotent: it cannot renew the first key-down's deadline.
+            if pttWatchdog != nil { return }
+        }
+        pttGeneration = UUID()
+        let generation = pttGeneration
         pttWatchdog?.cancel()
         pttWatchdog = nil
 
@@ -294,14 +313,18 @@ public final class Lab599TX500Driver: ObservableObject {
             self.lastMessage = "TX-500 Transmitting (PTT Active)"
             sendRaw("TX;")
 
-            // Safety watchdog timer: automatically release PTT if app stalls or disconnects
+            let limit = TXLimits.pttSafetyTimer(maximumDuration)
+            let keyedAt = Date()
+            let started = ProcessInfo.processInfo.systemUptime
             let watchdog = DispatchWorkItem { [weak self] in
-                guard let self = self, self.isTransmitting else { return }
+                guard let self, self.pttGeneration == generation, self.isTransmitting else { return }
                 self.setPTT(false)
-                self.lastMessage = "PTT released by TX-500 safety timer"
+                self.lastMessage = TXLimits.safetyTimerMessage(radio: "TX-500", keyedAt: keyedAt, limit: limit,
+                    elapsed: ProcessInfo.processInfo.systemUptime - started)
+                TransmitNotices.shared.post(self.noticeSource, text: self.lastMessage)
             }
-            self.pttWatchdog = watchdog
-            DispatchQueue.main.asyncAfter(deadline: .now() + max(1.0, maximumDuration), execute: watchdog)
+            pttWatchdog = watchdog
+            DispatchQueue.main.asyncAfter(deadline: .now() + limit, execute: watchdog)
         } else {
             self.isTransmitting = false
             self.lastMessage = "TX-500 Receive (PTT Released)"

@@ -182,9 +182,20 @@ final class CallHistoryLookupEngine {
     func lookup(callsign: String) -> CallHistoryRecord? { nil }
 }
 
+/// The names are those of YAAM/RigControlEngine.swift.
+enum RigDriverType: String {
+    case icomUSB = "Icom Transceiver (USB CI-V)", flrig = "Flrig (XML-RPC)", rigctld = "Hamlib (rigctld TCP)"
+    case tx500 = "Lab599 TX-500 (USB-C Serial)", fx4cr = "FX-4CR (USB / Bluetooth)", xiegu6100 = "Xiegu X6100 (USB-C)"
+    case disabled = "Disabled"
+}
+
 final class RigControlEngine {
     static let shared = RigControlEngine()
+    /// "Disabled" by default, as when no radio is chosen, so tests that do not set it are not refused for it.
+    var driverType: RigDriverType = .disabled
+    var isConnected = false
     func setPTT(_ on: Bool) { KeyLog.add("PTT \(on) via RigControlEngine") }
+    func capturePTTRelease() -> () -> Void { { KeyLog.add("PTT false via RigControlEngine") } }
 }
 
 // Icom network radio: only the members FT8EngineService uses.
