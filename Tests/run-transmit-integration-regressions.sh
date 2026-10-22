@@ -46,4 +46,19 @@ swiftc "${flags[@]}" -I "$out" -L "$out" -lFT8808Engine -Xlinker -rpath -Xlinker
     YAAM/IcomUSBRadioDriver.swift YAAM/Xiegu6100Driver.swift YAAM/Lab599TX500SMeter.swift YAAM/MorseTiming.swift \
     YAAM/TXLimits.swift YAAM/TransmitShutdown.swift YAAM/TransmitNotices.swift -o "$out/rig-destination"
 "$out/rig-destination"
+# Accelerate only the timer's sleep in a temporary source copy; keep the routing/release implementation verbatim.
+python3 - "$out" <<'PYFIXTURE'
+from pathlib import Path
+import sys
+source = Path("YAAM/RigControlEngine.swift").read_text()
+clock = "try? await Task.sleep(for: .seconds(TXLimits.rigctldPTT))"
+assert source.count(clock) == 1
+Path(sys.argv[1], "RigControlEngine.swift").write_text(source.replace(clock, "try? await Task.sleep(for: .milliseconds(50))"))
+PYFIXTURE
+swiftc "${flags[@]}" -I "$out" -L "$out" -lFT8808Engine -Xlinker -rpath -Xlinker "$out" \
+    Tests/RigControlReleaseDestinationRegression.swift Tests/Support/CATDriverStandIns.swift \
+    "$out/RigControlEngine.swift" YAAM/FlrigXMLRPC.swift YAAM/Lab599TX500Driver.swift YAAM/FX4CRDriver.swift \
+    YAAM/IcomUSBRadioDriver.swift YAAM/Xiegu6100Driver.swift YAAM/Lab599TX500SMeter.swift YAAM/MorseTiming.swift \
+    YAAM/TXLimits.swift YAAM/TransmitShutdown.swift YAAM/TransmitNotices.swift -o "$out/rig-watchdog"
+"$out/rig-watchdog" --watchdog-only
 echo "Transmit integration regressions passed. Binaries: $out"

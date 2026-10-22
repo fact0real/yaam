@@ -348,11 +348,15 @@ public final class RigControlEngine: ObservableObject {
             flrigPTTWatchdog = nil
             if transmit {
                 let keyedAt = Date(), started = ProcessInfo.processInfo.systemUptime
+                let release = capturePTTRelease()
+                let radio = "flrig (\(host):\(port))"
                 flrigPTTWatchdog = Task { [weak self] in
                     try? await Task.sleep(for: .seconds(TXLimits.flrigPTT))
-                    guard !Task.isCancelled, let self, self.driverType == .flrig else { return }
-                    self.setPTT(false)
-                    let text = TXLimits.safetyTimerMessage(radio: "flrig", keyedAt: keyedAt, limit: TXLimits.flrigPTT,
+                    guard !Task.isCancelled, let self else { return }
+                    release()
+                    self.flrigPTTWatchdog = nil
+                    if self.driverType == .disabled { self.isPTT = false }
+                    let text = TXLimits.safetyTimerMessage(radio: radio, keyedAt: keyedAt, limit: TXLimits.flrigPTT,
                         elapsed: ProcessInfo.processInfo.systemUptime - started)
                     TransmitNotices.shared.post(self.noticeSource, text: text)
                 }
@@ -364,11 +368,16 @@ public final class RigControlEngine: ObservableObject {
             rigctldPTTWatchdog = nil
             if transmit {
                 let keyedAt = Date(), started = ProcessInfo.processInfo.systemUptime
+                let release = capturePTTRelease()
+                let radio = "Radio Control rigctld (\(host):\(port))"
                 rigctldPTTWatchdog = Task { [weak self] in
                     try? await Task.sleep(for: .seconds(TXLimits.rigctldPTT))
-                    guard !Task.isCancelled, let self, self.rigctldKeyed else { return }
-                    self.setPTT(false)
-                    let text = TXLimits.safetyTimerMessage(radio: "Radio Control rigctld", keyedAt: keyedAt, limit: TXLimits.rigctldPTT,
+                    guard !Task.isCancelled, let self else { return }
+                    release()
+                    self.rigctldPTTWatchdog = nil
+                    self.rigctldKeyed = false
+                    if self.driverType == .disabled { self.isPTT = false }
+                    let text = TXLimits.safetyTimerMessage(radio: radio, keyedAt: keyedAt, limit: TXLimits.rigctldPTT,
                         elapsed: ProcessInfo.processInfo.systemUptime - started)
                     TransmitNotices.shared.post(self.noticeSource, text: text)
                 }

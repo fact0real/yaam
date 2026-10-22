@@ -29,6 +29,16 @@ struct RigControlReleaseDestinationRegression {
         rig.host = "fixture.invalid"; rig.port = 4532
         rig.connect(); pump()
         precondition(rig.isConnected)
+        if CommandLine.arguments.contains("--watchdog-only") {
+            let keyed = NWConnection.instances.last!
+            rig.setPTT(true)
+            rig.driverType = .disabled // settings changed without a transport disconnect
+            RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+            precondition(keyed.sent.contains("T 0\n"), "The timer must release its original connection even after the driver selection changes")
+            precondition(TransmitShutdown.transmitting.isEmpty, "A completed safety timer must leave no stale transmit owner")
+            print("PASS Radio Control watchdog retains original destination across settings changes (accelerated fixture clock)")
+            return
+        }
         let first = NWConnection.instances.last!
         rig.setPTT(true)
         let release = rig.capturePTTRelease()
