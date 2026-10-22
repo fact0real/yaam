@@ -223,6 +223,16 @@ Evaluates all 11 amateur HF/VHF bands (160m through 6m), categorizing each into 
 
 ## 6. Station Weather & Location Privacy
 
+### Choosing a precise station grid
+
+Open **Settings → Stations**, select the station profile, then click **Choose location on map…** in its Location section. The picker offers three routes:
+
+- **Locate me** requests macOS location access only when clicked. It looks for a fresh fix, reports the received accuracy in meters, and can be stopped. Unavailable or denied access leaves manual entry and map selection available.
+- **Enter manually** accepts decimal latitude/longitude (including Persian digits and decimal commas), or a complete 4, 6, 8 or 10-character Maidenhead locator. Click **Use coordinates** or **Use grid center** to preview that entry. A grid alone identifies a cell, so its center is shown without claiming an exact station position.
+- Click the **world map** to place the pin. Pan and zoom to refine it, choose **Satellite** for imagery, or use **World** and **Zoom to pin** to navigate. The outlined rectangle is the selected grid cell. Polar coordinates can be entered manually even though the map projection cannot display the poles.
+
+Choose **Grid length** (4/6/8/10) and inspect the generated grid, coordinates and approximate cell dimensions. Grid resolution and reported device accuracy are different measurements. Pending manual edits must be applied or restored before confirming; invalid input cannot replace the selected location. **Use this location** updates the current station draft. Click **Save** in the station editor to persist it. **Cancel** leaves the station draft untouched. This changes the profile’s location fields through the existing profile save workflow; it does not rewrite historical QSOs. Weather requests continue to follow their separately selected privacy precision.
+
 ### 6.1 Enable forecasts and choose precision
 Open **Settings → Antenna Weather Radar**. Weather starts disabled on new installations; existing enable preferences are preserved. **Approximate** mode, the default, sends the centre of the station’s 4-character Maidenhead square (2° longitude × 1° latitude) to Open-Meteo. Optional **Precise** mode uses up to 6 characters and can place the station within a few kilometres. No callsign or logbook is sent.
 

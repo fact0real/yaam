@@ -291,6 +291,8 @@
 				INFOPLIST_KEY_CFBundleDisplayName = YAAM;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSLocationUsageDescription = "YAAM uses your location only when you choose Locate me to preview your station grid.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "YAAM uses your location only when you choose Locate me to preview your station grid.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "YAAM needs radio receive audio to decode FT8 signals.";
 				INFOPLIST_KEY_NSScreenCaptureUsageDescription = "YAAM captures system playback audio to decode WebSDR FT8 signals without using the microphone.";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -342,6 +344,8 @@
 				INFOPLIST_KEY_CFBundleDisplayName = YAAM;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSLocationUsageDescription = "YAAM uses your location only when you choose Locate me to preview your station grid.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "YAAM uses your location only when you choose Locate me to preview your station grid.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "YAAM needs radio receive audio to decode FT8 signals.";
 				INFOPLIST_KEY_NSScreenCaptureUsageDescription = "YAAM captures system playback audio to decode WebSDR FT8 signals without using the microphone.";
 				LD_RUNPATH_SEARCH_PATHS = (

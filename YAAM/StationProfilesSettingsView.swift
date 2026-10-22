@@ -12,6 +12,7 @@ struct StationProfilesSettingsView: View {
     @State private var original = StationProfile()
     @State private var qrzAPIKey = ""
     @State private var statusMessage = ""
+    @State private var showLocationPicker = false
     @State private var profileToDelete: StationProfile?
 
     private var isDirty: Bool {
@@ -28,6 +29,12 @@ struct StationProfilesSettingsView: View {
         .onAppear {
             let initial = appState.activeStationProfile ?? appState.stationProfiles.first
             if let initial { selectProfile(initial) }
+        }
+        .sheet(isPresented: $showLocationPicker) {
+            StationLocationPickerView(grid: draft.grid, latitude: draft.latitude, longitude: draft.longitude) { selection in
+                draft = selection.applying(to: draft)
+                statusMessage = "Location updated in the draft. Save the station profile to keep it."
+            }
         }
         .alert("Delete Station Profile?", isPresented: Binding(
             get: { profileToDelete != nil },
@@ -158,6 +165,11 @@ struct StationProfilesSettingsView: View {
                     }
 
                     Section("Location") {
+                        Button { showLocationPicker = true } label: {
+                            Label("Choose location on map…", systemImage: "location.viewfinder")
+                        }
+                        Text("Use your device location, enter coordinates, or select a precise point on the world map.")
+                            .font(.caption).foregroundStyle(.secondary)
                         TextField("Grid Locator", text: $draft.grid)
                         HStack {
                             TextField("Latitude", text: $draft.latitude)

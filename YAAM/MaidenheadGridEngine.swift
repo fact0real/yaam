@@ -62,56 +62,11 @@ public enum MaidenheadGridEngine {
 
     /// Converts a Maidenhead locator (2, 4, or 6 characters) to its bounding box and center coordinate
     public static func boundingBox(for locator: String) -> MaidenheadBoundingBox? {
-        let clean = locator.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        guard clean.count >= 2 else { return nil }
-
-        let chars = Array(clean)
-        guard let fieldA = chars[0].asciiValue, fieldA >= Character("A").asciiValue!, fieldA <= Character("R").asciiValue!,
-              let fieldB = chars[1].asciiValue, fieldB >= Character("A").asciiValue!, fieldB <= Character("R").asciiValue! else {
-            return nil
-        }
-
-        var minLon = Double(fieldA - Character("A").asciiValue!) * 20.0 - 180.0
-        var maxLon = minLon + 20.0
-        var minLat = Double(fieldB - Character("A").asciiValue!) * 10.0 - 90.0
-        var maxLat = minLat + 10.0
-
-        // 4-character Square (e.g. LL65)
-        if clean.count >= 4 {
-            guard let sqNum1 = chars[2].wholeNumberValue, (0...9).contains(sqNum1),
-                  let sqNum2 = chars[3].wholeNumberValue, (0...9).contains(sqNum2) else {
-                return nil
-            }
-            minLon += Double(sqNum1) * 2.0
-            maxLon = minLon + 2.0
-            minLat += Double(sqNum2) * 1.0
-            maxLat = minLat + 1.0
-        }
-
-        // 6-character Subsquare (e.g. LL65ns)
-        if clean.count >= 6 {
-            guard let subA = chars[4].asciiValue, subA >= Character("A").asciiValue!, subA <= Character("X").asciiValue!,
-                  let subB = chars[5].asciiValue, subB >= Character("A").asciiValue!, subB <= Character("X").asciiValue! else {
-                return nil
-            }
-            let subLonWidth = 2.0 / 24.0 // 5 minutes of arc
-            let subLatHeight = 1.0 / 24.0 // 2.5 minutes of arc
-
-            minLon += Double(subA - Character("A").asciiValue!) * subLonWidth
-            maxLon = minLon + subLonWidth
-            minLat += Double(subB - Character("A").asciiValue!) * subLatHeight
-            maxLat = minLat + subLatHeight
-        }
-
-        let center = GeoCoordinate(latitude: (minLat + maxLat) / 2.0, longitude: (minLon + maxLon) / 2.0)
-        return MaidenheadBoundingBox(
-            grid: clean,
-            minLat: minLat,
-            maxLat: maxLat,
-            minLon: minLon,
-            maxLon: maxLon,
-            center: center
-        )
+        guard let box = PreciseGridLocator.bounds(locator) else { return nil }
+        return MaidenheadBoundingBox(grid: box.grid, minLat: box.minLatitude,
+            maxLat: box.minLatitude + box.latitudeSize, minLon: box.minLongitude,
+            maxLon: box.minLongitude + box.longitudeSize,
+            center: GeoCoordinate(latitude: box.center.latitude, longitude: box.center.longitude))
     }
 
     /// Converts a GeoCoordinate into a 4-character Maidenhead locator (e.g. LL65)
