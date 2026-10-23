@@ -104,6 +104,22 @@ public final class Lab599TX500Driver: ObservableObject {
     private var pttWatchdog: DispatchWorkItem?
     private var pttGeneration = UUID()
     private let noticeSource = TransmitNotices.Source(name: "TX-500")
+    @Published public private(set) var catError: String?
+    private let refusalSource = TransmitNotices.Source(name: "TX-500 CAT refusal / release")
+    private let receiveSource = TransmitNotices.Source(name: "TX-500 receive readback")
+    private var recentTransmitCommand: (text: String, until: Date)?
+
+    private func catRefusal() {
+        let pending = recentTransmitCommand.flatMap { $0.until > Date() ? $0.text : nil }
+        let text = "TX-500: the radio returned ?; at \(TXLimits.utc())" + (pending.map { " while \($0) was requested" } ?? "") + "."
+        lastMessage = text
+        catError = text
+        if pending != nil || isTransmitting {
+            TransmitNotices.shared.post(refusalSource, text: text + " Receive is unconfirmed. Stop locally and check the radio before sending again.")
+        }
+        recentTransmitCommand = nil
+    }
+
     // The KY pieces of a CW message still to be sent; cancelled by a new message, STOP and disconnect
     private var pendingMorseChunks: [DispatchWorkItem] = []
     private var morseGeneration: UInt64 = 0
@@ -179,6 +195,7 @@ public final class Lab599TX500Driver: ObservableObject {
         let connectionID = connectionGeneration
         catReplies.removeAll()
         receiveBuffer = ""
+        recentTransmitCommand = nil
         isConnecting = true
         lastMessage = "Connecting to TX-500 on \(selectedPort)..."
 
@@ -339,8 +356,9 @@ public final class Lab599TX500Driver: ObservableObject {
             DispatchQueue.main.asyncAfter(deadline: .now() + limit, execute: watchdog)
         } else {
             self.isTransmitting = false
-            self.lastMessage = "TX-500 Receive (PTT Released)"
+            self.lastMessage = "TX-500: RX requested; waiting for PT0 receive readback"
             sendRaw("RX;")
+            if !verifyingFT8 { checkReceive(context: "RX was requested") }
         }
     }
 
@@ -399,20 +417,27 @@ public final class Lab599TX500Driver: ObservableObject {
 
     /// Runs independently of the cancelled FT8 task after its synchronous RX request.
     /// A newer key-down or serial session invalidates this readback, so it cannot affect another transmission.
-    func checkFT8Receive() {
+    func checkFT8Receive() { checkReceive(context: "FT8 ended and RX was requested") }
+
+    private func checkReceive(context: String) {
         let session = connectionGeneration, generation = pttGeneration
         Task { @MainActor [weak self] in
             guard let self, self.connectionGeneration == session, self.pttGeneration == generation else { return }
             do {
                 let reply = try await self.freshCATReply("PT", session: session, before: Date().addingTimeInterval(0.4))
                 guard self.connectionGeneration == session, self.pttGeneration == generation else { return }
-                if reply == "PT0" { return }
+                if reply == "PT0" {
+                    self.lastMessage = "TX-500: fresh PT0 reports receive at \(TXLimits.utc())."
+                    self.recentTransmitCommand = nil
+                    return
+                }
             } catch {
                 guard self.connectionGeneration == session, self.pttGeneration == generation else { return }
             }
-            let text = "TX-500: FT8 ended and RX was requested at \(TXLimits.utc()), but fresh PT0 receive was NOT confirmed. Other YAAM tools remain available. Release PTT locally and check the radio is on receive before sending again."
+            let text = "TX-500: \(context) at \(TXLimits.utc()), but fresh PT0 receive was NOT confirmed. Other YAAM tools remain available. Release PTT locally and check the radio is on receive before sending again."
             self.lastMessage = text
-            TransmitNotices.shared.post(self.noticeSource, text: text)
+            self.catError = text
+            TransmitNotices.shared.post(self.receiveSource, text: text)
         }
     }
 
@@ -462,7 +487,8 @@ public final class Lab599TX500Driver: ObservableObject {
         cancelPendingMorseChunks()
         guard isConnected else { return }
         sendRaw("KY ;RX;")
-        self.lastMessage = "CW Transmission Aborted"
+        self.lastMessage = "TX-500: CW stop and RX requested; waiting for PT0 readback"
+        checkReceive(context: "CW stop and RX were requested")
     }
 
     /// Cancels the KY pieces of the last message that have not been sent yet
@@ -488,7 +514,18 @@ public final class Lab599TX500Driver: ObservableObject {
     public func sendRaw(_ command: String) -> Bool {
         guard isConnected else { return false }
         guard let data = command.data(using: .ascii) else { return false }
-        return serialPort.writeData(data)
+        if command.contains("TX;") || command.contains("RX;") || command.hasPrefix("KY") {
+            recentTransmitCommand = (command, Date().addingTimeInterval(2))
+        }
+        let sent = serialPort.writeData(data)
+        if !sent {
+            lastMessage = "TX-500: CAT write failed at \(TXLimits.utc())."
+            catError = lastMessage
+            if recentTransmitCommand != nil || isTransmitting {
+                TransmitNotices.shared.post(refusalSource, text: lastMessage + " Receive is unconfirmed. Stop locally and check the radio.")
+            }
+        }
+        return sent
     }
 
     private func handleIncomingSerialData(_ data: Data) {
@@ -506,6 +543,8 @@ public final class Lab599TX500Driver: ObservableObject {
     }
 
     private func parseKenwoodResponse(_ response: String) {
+        if response == "?" { catRefusal(); return }
+
         if response.hasPrefix("MD") || response.hasPrefix("PT") {
             replySequence &+= 1
             catReplies[String(response.prefix(2))] = (replySequence, response)

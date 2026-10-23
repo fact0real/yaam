@@ -1057,7 +1057,8 @@ public final class SixMeterPropagationEngine: ObservableObject {
             let receiverGrid = attrs["receiverLocator"] ?? ""
             let mode = attrs["mode"] ?? "FT8"
             let snr = Int(attrs["sNR"] ?? "")
-            let flowSeconds = Double(attrs["flowStartSeconds"] ?? "") ?? Date().timeIntervalSince1970
+            guard let flowSeconds = Double(attrs["flowStartSeconds"] ?? ""),
+                  let reportSeconds = ReportTimeBounds.seconds(flowSeconds) else { continue }
             let spotTime = Date(timeIntervalSince1970: flowSeconds)
 
             let dist = calculateGridDistanceKm(grid1: senderGrid, grid2: receiverGrid)
@@ -1071,7 +1072,7 @@ public final class SixMeterPropagationEngine: ObservableObject {
 
             let isRegional = (distFromHome ?? 9999) <= 2200 || SixMeterRegionFilter.middleEast.matches(grid: receiverGrid, distanceFromHomeKm: distFromHome) || SixMeterRegionFilter.middleEast.matches(grid: senderGrid, distanceFromHomeKm: distFromHome)
 
-            let spotId = "\(sender)-\(receiver)-\(freq)-\(Int(flowSeconds))"
+            let spotId = "\(sender)-\(receiver)-\(freq)-\(reportSeconds)"
 
             parsed.append(SixMeterSpot(
                 id: spotId,

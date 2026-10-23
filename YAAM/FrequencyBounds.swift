@@ -23,3 +23,12 @@ nonisolated enum FrequencyBounds {
         return UInt64(kHz * 1000)
     }
 }
+
+
+/// External report dates must be finite Unix seconds within Foundation's civil calendar range.
+nonisolated enum ReportTimeBounds {
+    static func seconds(_ value: Double) -> Int? {
+        guard value.isFinite, value >= 0, value <= 253_402_300_799 else { return nil }
+        return Int(exactly: value.rounded(.down))
+    }
+}

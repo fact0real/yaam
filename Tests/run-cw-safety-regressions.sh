@@ -47,8 +47,8 @@ done
 run_digital
 run SerialKeyerReplacedMessageRegression YAAM/SerialKeyerDriver.swift
 run WinKeyerDatasheetRegression YAAM/WinKeyerDriver.swift YAAM/MorseTiming.swift
-run HamlibCWStopRegression YAAM/RigControlClient.swift YAAM/MorseTiming.swift YAAM/TXLimits.swift YAAM/TransmitNotices.swift YAAM/TransmitShutdown.swift
-run RigctldNoticePerClientRegression YAAM/RigControlClient.swift YAAM/MorseTiming.swift YAAM/TXLimits.swift YAAM/TransmitNotices.swift YAAM/TransmitShutdown.swift
+run HamlibCWStopRegression YAAM/RigControlClient.swift YAAM/RigctldReplyStream.swift YAAM/MorseTiming.swift YAAM/TXLimits.swift YAAM/TransmitNotices.swift YAAM/TransmitShutdown.swift
+run RigctldNoticePerClientRegression YAAM/RigControlClient.swift YAAM/RigctldReplyStream.swift YAAM/MorseTiming.swift YAAM/TXLimits.swift YAAM/TransmitNotices.swift YAAM/TransmitShutdown.swift
 run TransmitNoticesShownRegression YAAM/TransmitNotices.swift YAAM/TransmitNoticesView.swift
 run TXLimitsRegression YAAM/TXLimits.swift
 run TransmitIdentityRegression YAAM/TransmitIdentity.swift YAAM/GridLocator.swift

@@ -68,6 +68,9 @@ public final class FLRigClient: ObservableObject {
         self.urlSession = URLSession(configuration: config)
     }
 
+    /// Injectable transport for deterministic local protocol tests.
+    init(session: URLSession) { self.urlSession = session }
+
     // MARK: - Connect & Disconnect
 
     public func connect(host: String = "127.0.0.1", port: Int = 12345) {
@@ -135,9 +138,9 @@ public final class FLRigClient: ObservableObject {
         guard newLink.isReporting else { return }
 
         // 2. VFO, 3. mode, 4. S-meter, 5. PTT. A fault or a missing answer leaves the old value; it is never read as data.
-        if let freq = try await query(.getVFO, generation)?.text.flatMap({ Double($0) }), freq > 0 { frequencyHz = freq }
+        if let freq = try await query(.getVFO, generation)?.text.flatMap({ Double($0) }), FrequencyBounds.isUsable(kHz: freq / 1000) { frequencyHz = freq }
         if let newMode = try await query(.getMode, generation)?.text, !newMode.isEmpty { mode = newMode }
-        if let sm = try await query(.getSmeter, generation)?.text.flatMap({ Double($0) }) { sMeter = sm }
+        if let sm = try await query(.getSmeter, generation)?.text.flatMap({ Double($0) }), sm.isFinite { sMeter = min(15, max(0, sm)) }
         if let ptt = try await query(.getPTT, generation)?.text.flatMap({ Int($0) }) {
             isPTTActive = (ptt == 1)
             // flrig reporting PTT off ends a warning that the radio may be keyed (see pttWarning).

@@ -11,13 +11,15 @@ import Combine
 import SwiftUI
 
 public struct FieldSpotsRadarView: View {
-    @ObservedObject private var spotsClient = POTASpotsClient.shared
+    @ObservedObject private var spotsClient: POTASpotsClient
+    @ObservedObject private var rig = RigControlEngine.shared
     @ObservedObject private var potaEngine = POTASOTAEngine.shared
 
     private static let bands = ["ALL", "160M", "80M", "60M", "40M", "30M", "20M", "17M", "15M", "12M", "10M", "6M", "2M"]
     private static let modes = ["ALL", "CW", "SSB", "FT8"]
 
-    public init() {}
+    public init() { spotsClient = .shared }
+    init(client: POTASpotsClient) { spotsClient = client }
 
     public var body: some View {
         VStack(spacing: 0) {
@@ -28,6 +30,19 @@ public struct FieldSpotsRadarView: View {
             if let message = spotsClient.tuneErrorMessage {
                 RadioTuningNotice(message: message) { spotsClient.tuneErrorMessage = nil }
             }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(spotsClient.freshnessMessage).font(.caption).foregroundStyle(.secondary)
+                if let message = spotsClient.selectedError {
+                    Label(message, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
+                }
+                if let error = rig.lastError {
+                    Label(error, systemImage: "antenna.radiowaves.left.and.right.slash").font(.caption).foregroundStyle(.orange)
+                }
+            }
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 14).padding(.vertical, 6)
 
             // Spots Content Table
             if spotsClient.selectedProgram == .pota {
@@ -48,6 +63,7 @@ public struct FieldSpotsRadarView: View {
                 Text("SOTA Spots").tag(FieldProgramType.sota)
             }
             .pickerStyle(.segmented)
+            .labelsHidden()
             .frame(width: 200)
 
             Divider().frame(height: 18)
@@ -56,13 +72,13 @@ public struct FieldSpotsRadarView: View {
             Picker("Band", selection: $spotsClient.selectedBand) {
                 ForEach(Self.bands, id: \.self) { Text($0).tag($0) }
             }
-            .frame(width: 95)
+            .frame(width: 110)
 
             // Mode Picker
             Picker("Mode", selection: $spotsClient.selectedMode) {
                 ForEach(Self.modes, id: \.self) { Text($0).tag($0) }
             }
-            .frame(width: 90)
+            .frame(width: 110)
 
             // Search Field
             HStack(spacing: 4) {
@@ -105,7 +121,7 @@ public struct FieldSpotsRadarView: View {
                     Image(systemName: "antenna.radiowaves.left.and.right.slash")
                         .font(.system(size: 32))
                         .foregroundStyle(.secondary)
-                    Text("No POTA spots found matching your filter.")
+                    Text(spotsClient.potaError == nil ? "No POTA spots found matching your filter." : "POTA spots are unavailable. Retry refresh when the connection is restored.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
@@ -207,6 +223,8 @@ public struct FieldSpotsRadarView: View {
                 .font(.system(size: 10.5, weight: .bold))
             }
             .buttonStyle(.bordered)
+            .disabled(spotsClient.selectedIsStale)
+            .help(spotsClient.selectedIsStale ? "Refresh this source successfully before tuning" : "Request tuning through CAT; verify on the radio")
         }
         .padding(.vertical, 3)
     }
@@ -220,7 +238,7 @@ public struct FieldSpotsRadarView: View {
                     Image(systemName: "mountain.2.slash")
                         .font(.system(size: 32))
                         .foregroundStyle(.secondary)
-                    Text("No SOTA spots found matching your filter.")
+                    Text(spotsClient.sotaError == nil ? "No SOTA spots found matching your filter." : "SOTA spots are unavailable. Retry refresh when the connection is restored.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
@@ -301,6 +319,8 @@ public struct FieldSpotsRadarView: View {
                 .font(.system(size: 10.5, weight: .bold))
             }
             .buttonStyle(.bordered)
+            .disabled(spotsClient.selectedIsStale)
+            .help(spotsClient.selectedIsStale ? "Refresh this source successfully before tuning" : "Request tuning through CAT; verify on the radio")
         }
         .padding(.vertical, 3)
     }

@@ -126,7 +126,7 @@ struct CATChunkStopRegression {
         let stopIndex = log.lastIndex(where: isStop)
         let after = stopIndex.map { log.suffix(from: log.index(after: $0)) } ?? log[...]
         check("\(radio.name): after STOP (KY ;RX;) nothing more of the message is written (\(String(format: "%.1f", window)) s)",
-              log.contains(where: isStop) && after.isEmpty, show(log))
+              log.contains(where: isStop) && after.allSatisfy { $0.text == "PT;" }, show(log))
     }
 
     static func newMessageCancelsTheRest(_ radio: Radio, _ window: Double) {

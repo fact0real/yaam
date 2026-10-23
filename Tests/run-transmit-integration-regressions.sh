@@ -13,7 +13,7 @@ swiftc -parse-as-library -emit-library -emit-module -module-name FT8808Engine \
     Tests/Support/FT8808EngineStandIn.swift -o "$out/libFT8808Engine.dylib" -emit-module-path "$out/FT8808Engine.swiftmodule"
 swiftc "${flags[@]}" -I "$out" -L "$out" -lFT8808Engine -Xlinker -rpath -Xlinker "$out" \
     Tests/TransmitShutdownRegression.swift Tests/Support/CATDriverStandIns.swift \
-    YAAM/RigControlEngine.swift YAAM/TCIClient.swift YAAM/FlrigXMLRPC.swift \
+    YAAM/RigControlEngine.swift YAAM/RigctldReplyStream.swift YAAM/FrequencyBounds.swift YAAM/TCIClient.swift YAAM/FlrigXMLRPC.swift \
     YAAM/Lab599TX500Driver.swift YAAM/FX4CRDriver.swift YAAM/IcomUSBRadioDriver.swift YAAM/Xiegu6100Driver.swift \
     YAAM/Lab599TX500SMeter.swift YAAM/MorseTiming.swift YAAM/TXLimits.swift YAAM/TransmitShutdown.swift YAAM/TransmitNotices.swift \
     -o "$out/shutdown"
@@ -44,7 +44,7 @@ swiftc "${flags[@]}" Tests/TransmitShutdownRegistryRegression.swift YAAM/Transmi
 "$out/registry"
 swiftc "${flags[@]}" -I "$out" -L "$out" -lFT8808Engine -Xlinker -rpath -Xlinker "$out" \
     Tests/RigControlReleaseDestinationRegression.swift Tests/Support/CATDriverStandIns.swift \
-    YAAM/RigControlEngine.swift YAAM/FlrigXMLRPC.swift YAAM/Lab599TX500Driver.swift YAAM/FX4CRDriver.swift \
+    YAAM/RigControlEngine.swift YAAM/RigctldReplyStream.swift YAAM/FrequencyBounds.swift YAAM/FlrigXMLRPC.swift YAAM/Lab599TX500Driver.swift YAAM/FX4CRDriver.swift \
     YAAM/IcomUSBRadioDriver.swift YAAM/Xiegu6100Driver.swift YAAM/Lab599TX500SMeter.swift YAAM/MorseTiming.swift \
     YAAM/TXLimits.swift YAAM/TransmitShutdown.swift YAAM/TransmitNotices.swift -o "$out/rig-destination"
 "$out/rig-destination"
@@ -59,7 +59,7 @@ Path(sys.argv[1], "RigControlEngine.swift").write_text(source.replace(clock, "tr
 PYFIXTURE
 swiftc "${flags[@]}" -I "$out" -L "$out" -lFT8808Engine -Xlinker -rpath -Xlinker "$out" \
     Tests/RigControlReleaseDestinationRegression.swift Tests/Support/CATDriverStandIns.swift \
-    "$out/RigControlEngine.swift" YAAM/FlrigXMLRPC.swift YAAM/Lab599TX500Driver.swift YAAM/FX4CRDriver.swift \
+    "$out/RigControlEngine.swift" YAAM/RigctldReplyStream.swift YAAM/FrequencyBounds.swift YAAM/FlrigXMLRPC.swift YAAM/Lab599TX500Driver.swift YAAM/FX4CRDriver.swift \
     YAAM/IcomUSBRadioDriver.swift YAAM/Xiegu6100Driver.swift YAAM/Lab599TX500SMeter.swift YAAM/MorseTiming.swift \
     YAAM/TXLimits.swift YAAM/TransmitShutdown.swift YAAM/TransmitNotices.swift -o "$out/rig-watchdog"
 "$out/rig-watchdog" --watchdog-only
@@ -70,6 +70,12 @@ swiftc "${flags[@]}" -I "$out" -L "$out" -lFT8808Engine -Xlinker -rpath -Xlinker
     YAAM/Lab599TX500Driver.swift YAAM/FX4CRDriver.swift YAAM/Lab599TX500SMeter.swift YAAM/MorseTiming.swift \
     YAAM/TXLimits.swift YAAM/TransmitShutdown.swift YAAM/TransmitNotices.swift -o "$out/tx500-verified"
 "$out/tx500-verified"
-swiftc "${flags[@]}" Tests/RigctldReleaseFailureRegression.swift YAAM/RigControlClient.swift YAAM/MorseTiming.swift \
+swiftc "${flags[@]}" Tests/RigctldReleaseFailureRegression.swift YAAM/RigControlClient.swift YAAM/RigctldReplyStream.swift YAAM/MorseTiming.swift \
     YAAM/TXLimits.swift YAAM/TransmitShutdown.swift YAAM/TransmitNotices.swift -o "$out/rigctld-release-failure"
 "$out/rigctld-release-failure"
+swiftc "${flags[@]}" -I "$out" -L "$out" -lFT8808Engine -Xlinker -rpath -Xlinker "$out" \
+    Tests/SerialRefusalRegression.swift Tests/Support/CATDriverStandIns.swift \
+    YAAM/Lab599TX500Driver.swift YAAM/FX4CRDriver.swift YAAM/IcomUSBRadioDriver.swift \
+    YAAM/Lab599TX500SMeter.swift YAAM/MorseTiming.swift YAAM/TXLimits.swift YAAM/TransmitShutdown.swift YAAM/TransmitNotices.swift \
+    -o "$out/serial-refusal"
+"$out/serial-refusal"

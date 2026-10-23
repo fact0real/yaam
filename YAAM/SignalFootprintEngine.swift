@@ -413,7 +413,8 @@ public final class SignalFootprintEngine: ObservableObject {
             let receiverGrid = attrs["receiverLocator"] ?? ""
             let mode = attrs["mode"] ?? "FT8"
             let snr = Int(attrs["sNR"] ?? "")
-            let flowSeconds = Double(attrs["flowStartSeconds"] ?? "") ?? Date().timeIntervalSince1970
+            guard let flowSeconds = Double(attrs["flowStartSeconds"] ?? ""),
+                  let reportSeconds = ReportTimeBounds.seconds(flowSeconds) else { continue }
             let spotTime = Date(timeIntervalSince1970: flowSeconds)
 
             var dist: Double? = nil
@@ -430,7 +431,7 @@ public final class SignalFootprintEngine: ObservableObject {
                 compass = GeodesicMath.compassCardinal(for: az)
             }
 
-            let spotId = "\(sender)-\(receiver)-\(freq)-\(Int(flowSeconds))"
+            let spotId = "\(sender)-\(receiver)-\(freq)-\(reportSeconds)"
 
             parsed.append(SignalFootprintSpot(
                 id: spotId,

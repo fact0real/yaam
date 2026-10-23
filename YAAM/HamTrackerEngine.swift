@@ -788,7 +788,8 @@ public final class HamTrackerEngine: ObservableObject {
             return
         }
 
-        let freqHz = json["f"] as? Int ?? 0
+        guard let freqHz = json["f"] as? Int,
+              FrequencyBounds.isUsable(kHz: Double(freqHz) / 1000) else { return }
         let mode = json["md"] as? String ?? "FT8"
         let band = json["b"] as? String ?? ""
         let snr = json["rp"] as? Int ?? 0
@@ -796,7 +797,8 @@ public final class HamTrackerEngine: ObservableObject {
         let rxGrid = json["rl"] as? String ?? ""
         let txGrid = json["sl"] as? String ?? ""
         let txCall = (json["sc"] as? String ?? "").uppercased()
-        let t_tx = json["t_tx"] as? Double ?? Date().timeIntervalSince1970
+        guard let t_tx = json["t_tx"] as? Double,
+              let reportSeconds = ReportTimeBounds.seconds(t_tx) else { return }
         let timestamp = Date(timeIntervalSince1970: t_tx)
 
         Task { @MainActor in
@@ -804,11 +806,11 @@ public final class HamTrackerEngine: ObservableObject {
 
             if txCall == activeCall {
                 // 1. TARGET TRANSMISSION DETECTED
-                let spotKey = "\(txCall)-\(rxStation)-\(freqHz)-\(Int(t_tx))"
+                let spotKey = "\(txCall)-\(rxStation)-\(freqHz)-\(reportSeconds)"
                 guard !self.seenSpotKeys.contains(spotKey) else { return }
                 self.seenSpotKeys.insert(spotKey)
 
-                let cycleSec = Int(t_tx) % 60
+                let cycleSec = reportSeconds % 60
                 let isEven = [0, 1, 29, 30, 59].contains(cycleSec)
                 let cycleType: String
                 if [14, 15, 44, 45].contains(cycleSec) {
@@ -929,9 +931,11 @@ public final class HamTrackerEngine: ObservableObject {
         band: String,
         mode: String
     ) {
-        guard partnerDetectionEnabled else { return }
+        guard partnerDetectionEnabled,
+              FrequencyBounds.isUsable(kHz: Double(freqHz) / 1000),
+              let reportSeconds = ReportTimeBounds.seconds(t_tx) else { return }
         let now = Date()
-        let sec = Int(t_tx) % 60
+        let sec = reportSeconds % 60
         let isEven = [0, 1, 29, 30, 59].contains(sec)
         let isOdd = [14, 15, 44, 45].contains(sec)
         guard isEven || isOdd else { return }
@@ -1102,15 +1106,17 @@ public final class HamTrackerEngine: ObservableObject {
             guard let sender = attrs["senderCallsign"],
                   let receiver = attrs["receiverCallsign"] else { continue }
 
-            let freq = Int(attrs["frequency"] ?? "0") ?? 0
+            guard let freq = Int(attrs["frequency"] ?? ""),
+                  FrequencyBounds.isUsable(kHz: Double(freq) / 1000) else { continue }
             let senderGrid = attrs["senderLocator"] ?? ""
             let receiverGrid = attrs["receiverLocator"] ?? ""
             let mode = attrs["mode"] ?? "FT8"
             let snr = Int(attrs["sNR"] ?? "") ?? 0
-            let flowSeconds = Double(attrs["flowStartSeconds"] ?? "") ?? Date().timeIntervalSince1970
+            guard let flowSeconds = Double(attrs["flowStartSeconds"] ?? ""),
+                  let reportSeconds = ReportTimeBounds.seconds(flowSeconds) else { continue }
             let spotTime = Date(timeIntervalSince1970: flowSeconds)
 
-            let cycleSec = Int(flowSeconds) % 60
+            let cycleSec = reportSeconds % 60
             let cycleType: String
             if [14, 15, 44, 45].contains(cycleSec) {
                 cycleType = "Odd (:15 / :45)"
@@ -1141,7 +1147,7 @@ public final class HamTrackerEngine: ObservableObject {
                 compass = GeodesicMath.compassCardinal(for: az)
             }
 
-            let spotId = "\(sender)-\(receiver)-\(freq)-\(Int(flowSeconds))"
+            let spotId = "\(sender)-\(receiver)-\(freq)-\(reportSeconds)"
 
             let resolvedBand: String
             if freq > 0 {

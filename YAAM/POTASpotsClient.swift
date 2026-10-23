@@ -19,6 +19,10 @@ public final class POTASpotsClient: ObservableObject {
     @Published public private(set) var sotaSpots: [SOTASpotItem] = []
     @Published public var isLoading: Bool = false
     @Published public var lastUpdated: Date? = nil
+    @Published public private(set) var potaUpdated: Date?
+    @Published public private(set) var sotaUpdated: Date?
+    @Published public private(set) var potaError: String?
+    @Published public private(set) var sotaError: String?
     @Published public var errorMessage: String? = nil
     @Published public var tuneErrorMessage: String? = nil
 
@@ -32,8 +36,20 @@ public final class POTASpotsClient: ObservableObject {
     private var autoRefreshTimer: Timer?
     private var cancellables = Set<AnyCancellable>()
 
-    private init() {
-        startAutoRefresh()
+    private let session: URLSession
+    init(session: URLSession = .shared, autoRefresh: Bool = true) {
+        self.session = session
+        if autoRefresh { startAutoRefresh() }
+    }
+
+    public var selectedUpdated: Date? { selectedProgram == .pota ? potaUpdated : sotaUpdated }
+    public var selectedError: String? { selectedProgram == .pota ? potaError : sotaError }
+    public var selectedIsStale: Bool { selectedError != nil }
+
+    public var freshnessMessage: String {
+        let program = selectedProgram == .pota ? "POTA" : "SOTA"
+        guard let date = selectedUpdated else { return "\(program): no successful fetch yet." }
+        return "\(program): \(selectedIsStale ? "stale list" : "last successful fetch") · \(TXLimits.utc(date))"
     }
 
     deinit {
@@ -70,12 +86,18 @@ public final class POTASpotsClient: ObservableObject {
 
         if let pSpots = potaResult {
             self.potaSpots = pSpots
+            self.potaUpdated = Date()
+            self.potaError = nil
         }
         if let sSpots = sotaResult {
             self.sotaSpots = sSpots
+            self.sotaUpdated = Date()
+            self.sotaError = nil
         }
 
-        self.lastUpdated = Date()
+        if potaResult != nil || sotaResult != nil { self.lastUpdated = Date() }
+        self.errorMessage = [potaError, sotaError].compactMap { $0 }.joined(separator: "\n")
+        if self.errorMessage?.isEmpty == true { self.errorMessage = nil }
         self.isLoading = false
     }
 
@@ -87,16 +109,18 @@ public final class POTASpotsClient: ObservableObject {
             request.timeoutInterval = 10.0
             request.setValue("YAAM-macOS-FieldOps/1.0", forHTTPHeaderField: "User-Agent")
 
-            let (data, response) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await session.data(for: request)
             guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-                return fallbackPOTASpots()
+                potaError = "POTA fetch failed at \(TXLimits.utc()): HTTP \((response as? HTTPURLResponse)?.statusCode ?? 0). Retained spots are stale. Retry refresh."
+                return nil
             }
 
             let decoder = JSONDecoder()
             let decoded = try decoder.decode([POTASpotItem].self, from: data)
             return decoded
         } catch {
-            return fallbackPOTASpots()
+            potaError = "POTA fetch failed at \(TXLimits.utc()): \(error.localizedDescription). Retained spots are stale. Retry refresh."
+            return nil
         }
     }
 
@@ -108,16 +132,18 @@ public final class POTASpotsClient: ObservableObject {
             request.timeoutInterval = 10.0
             request.setValue("YAAM-macOS-FieldOps/1.0", forHTTPHeaderField: "User-Agent")
 
-            let (data, response) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await session.data(for: request)
             guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-                return fallbackSOTASpots()
+                sotaError = "SOTA fetch failed at \(TXLimits.utc()): HTTP \((response as? HTTPURLResponse)?.statusCode ?? 0). Retained spots are stale. Retry refresh."
+                return nil
             }
 
             let decoder = JSONDecoder()
             let decoded = try decoder.decode([SOTASpotItem].self, from: data)
             return decoded
         } catch {
-            return fallbackSOTASpots()
+            sotaError = "SOTA fetch failed at \(TXLimits.utc()): \(error.localizedDescription). Retained spots are stale. Retry refresh."
+            return nil
         }
     }
 
@@ -179,6 +205,10 @@ public final class POTASpotsClient: ObservableObject {
             NSLog("%@", message)
             return
         }
+        guard !selectedIsStale else {
+            tuneErrorMessage = "POTA/SOTA: the list is stale; the radio was not tuned at \(TXLimits.utc()). Refresh successfully or tune by hand."
+            return
+        }
         let hz = UInt64(frequencyKHz * 1000.0)
         let normalizedMode: String
         let upper = mode.uppercased()
@@ -193,30 +223,20 @@ public final class POTASpotsClient: ObservableObject {
         }
 
         // 1. Direct RigControlEngine (tunes rigctld, FLRig, TX-500, Icom USB, FX-4CR, Xiegu)
-        RigControlEngine.shared.tune(frequencyHz: hz, mode: normalizedMode)
+        let rig = RigControlEngine.shared
+        let tciConnected = TCIClient.shared.isConnected
+        if rig.driverType != .disabled || !tciConnected {
+            if let reason = rig.tune(frequencyHz: hz, mode: normalizedMode) {
+                tuneErrorMessage = "POTA/SOTA: \(reason) at \(TXLimits.utc()). Check CAT settings or tune by hand."
+                return
+            }
+        }
 
+        tuneErrorMessage = nil
         // 2. Also forward to TCI if active
         if TCIClient.shared.isConnected {
             TCIClient.shared.setFrequency(hz: hz)
         }
     }
 
-    // MARK: - Mock / Offline Fallbacks
-    private func fallbackPOTASpots() -> [POTASpotItem] {
-        [
-            POTASpotItem(spotId: 101, activator: "W1AW/P", frequency: 14074.0, mode: "FT8", reference: "K-0001", name: "Acadia National Park", locationDesc: "ME", grid: "FN54", spotTime: "2m ago", spotter: "N1MM", comments: "Loud into EU"),
-            POTASpotItem(spotId: 102, activator: "EP2LMA", frequency: 14285.0, mode: "SSB", reference: "EP-0005", name: "Lar National Park", locationDesc: "Mazandaran", grid: "LM35", spotTime: "5m ago", spotter: "EP2C", comments: "QRP 5W TX-500"),
-            POTASpotItem(spotId: 103, activator: "K7ATN", frequency: 7032.0, mode: "CW", reference: "K-0020", name: "Grand Canyon National Park", locationDesc: "AZ", grid: "DM36", spotTime: "7m ago", spotter: "W7W", comments: "P2P welcome!"),
-            POTASpotItem(spotId: 104, activator: "DL2MDU/P", frequency: 14060.0, mode: "CW", reference: "DL-0001", name: "Bavarian Forest", locationDesc: "Bavaria", grid: "JN68", spotTime: "11m ago", spotter: "DL1BUG", comments: "CQ POTA up 1"),
-            POTASpotItem(spotId: 105, activator: "VA3NMA", frequency: 21074.0, mode: "FT8", reference: "VE-0001", name: "Banff National Park", locationDesc: "AB", grid: "DO31", spotTime: "14m ago", spotter: "VE6SAR", comments: "Calling CQ POTA")
-        ]
-    }
-
-    private func fallbackSOTASpots() -> [SOTASpotItem] {
-        [
-            SOTASpotItem(idNumber: 201, timeStamp: "4m ago", summitCode: "W6/NC-423", summitDetails: "Mount Diablo (1173m)", associationCode: "W6", regionCode: "NC", activatorCallsign: "N6JRL", frequency: "14.062", mode: "CW", comments: "KX2 5W, dipole"),
-            SOTASpotItem(idNumber: 202, timeStamp: "8m ago", summitCode: "EP/TE-002", summitDetails: "Tochal Summit (3964m)", associationCode: "EP", regionCode: "TE", activatorCallsign: "EP2XXX/P", frequency: "7.030", mode: "CW", comments: "Cold wind! S2S please"),
-            SOTASpotItem(idNumber: 203, timeStamp: "15m ago", summitCode: "G/LD-001", summitDetails: "Scafell Pike (978m)", associationCode: "G", regionCode: "LD", activatorCallsign: "M0WML/P", frequency: "14.285", mode: "SSB", comments: "CQ SOTA 14.285")
-        ]
-    }
 }

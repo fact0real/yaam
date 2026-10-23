@@ -272,7 +272,7 @@ public struct SOTASpotItem: Identifiable, Codable, Hashable, Sendable {
     }
 
     public var frequencyMHz: Double {
-        Double(frequency.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 14.060
+        Double(frequency.trimmingCharacters(in: .whitespacesAndNewlines)) ?? .nan
     }
 
     public var frequencyKHz: Double {

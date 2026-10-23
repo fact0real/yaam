@@ -114,7 +114,7 @@ public final class RigControlEngine: ObservableObject {
     private var rigctldPTTWatchdog: Task<Void, Never>?
     private let noticeSource = TransmitNotices.Source(name: "Radio Control")
     private let releaseNoticeSource = TransmitNotices.Source(name: "Radio Control rigctld release")
-    private var rigctldReleasePending = false
+    private var rigctldReplies: RigctldReplyStream?
     private var flrigPTTWatchdog: Task<Void, Never>?
 
     private init() {
@@ -192,6 +192,7 @@ public final class RigControlEngine: ObservableObject {
         rigctldPTTWatchdog?.cancel()
         rigctldPTTWatchdog = nil
         tcpConnection = nil
+        rigctldReplies = nil
         tx500Cancellables.removeAll()
         icomUSBCancellables.removeAll()
         fx4crCancellables.removeAll()
@@ -224,56 +225,65 @@ public final class RigControlEngine: ObservableObject {
     }
 
     // MARK: - VFO Tuning & Commands
-    public func tune(frequencyHz: UInt64, mode: String? = nil) {
-        self.frequencyHz = frequencyHz
-        if let mode = mode, !mode.isEmpty {
-            self.mode = mode
+    @discardableResult
+    public func tune(frequencyHz: UInt64, mode: String? = nil) -> String? {
+        guard FrequencyBounds.isUsable(kHz: Double(frequencyHz) / 1000) else {
+            lastError = "Radio was not tuned: invalid frequency."
+            return lastError
         }
+        guard driverType != .disabled, isConnected else {
+            lastError = driverType == .disabled ? "Radio control is disabled; no tuning command was sent." : "CAT is offline; no tuning command was sent."
+            return lastError
+        }
+        lastError = nil
+        // Displayed frequency/mode come from telemetry, not an optimistic local assignment.
 
         if driverType == .flrig {
             // Queued here, not inside the Task below: flrig gets the commands in the order they were issued.
             flrigEnqueue(.setVFO(hz: Double(frequencyHz)))
             if let mode = mode, !mode.isEmpty { flrigEnqueue(.setMode(mode)) }
-            return
+            return nil
         }
 
-        Task {
-            switch driverType {
-            case .flrig:
-                break   // queued above
-            case .rigctld:
-                sendRigctldCommand("F \(frequencyHz)\n")
-                if let mode = mode, !mode.isEmpty {
-                    sendRigctldCommand("M \(mode) 2400\n")
-                }
-            case .tx500:
-                Lab599TX500Driver.shared.setFrequencyHz(frequencyHz)
-                if let mode = mode, !mode.isEmpty {
-                    Lab599TX500Driver.shared.setMode(mode)
-                }
-            case .icomUSB:
-                IcomUSBRadioDriver.shared.setFrequencyHz(frequencyHz)
-                if let mode = mode, !mode.isEmpty {
-                    IcomUSBRadioDriver.shared.setMode(mode)
-                }
-            case .fx4cr:
-                FX4CRDriver.shared.setFrequencyHz(frequencyHz)
-                if let mode = mode, !mode.isEmpty {
-                    FX4CRDriver.shared.setMode(mode)
-                }
-            case .xiegu6100:
-                Xiegu6100Driver.shared.setFrequencyHz(frequencyHz)
-                if let mode = mode, !mode.isEmpty {
-                    Xiegu6100Driver.shared.setMode(mode)
-                }
-            case .disabled:
-                break
+        switch driverType {
+        case .flrig:
+            break   // queued above
+        case .rigctld:
+            sendRigctldCommand("F \(frequencyHz)\n")
+            if let mode = mode, !mode.isEmpty {
+                sendRigctldCommand("M \(mode) 2400\n")
             }
+        case .tx500:
+            Lab599TX500Driver.shared.setFrequencyHz(frequencyHz)
+            if let mode = mode, !mode.isEmpty {
+                Lab599TX500Driver.shared.setMode(mode)
+            }
+        case .icomUSB:
+            IcomUSBRadioDriver.shared.setFrequencyHz(frequencyHz)
+            if let mode = mode, !mode.isEmpty {
+                IcomUSBRadioDriver.shared.setMode(mode)
+            }
+        case .fx4cr:
+            FX4CRDriver.shared.setFrequencyHz(frequencyHz)
+            if let mode = mode, !mode.isEmpty {
+                FX4CRDriver.shared.setMode(mode)
+            }
+        case .xiegu6100:
+            Xiegu6100Driver.shared.setFrequencyHz(frequencyHz)
+            if let mode = mode, !mode.isEmpty {
+                Xiegu6100Driver.shared.setMode(mode)
+            }
+        case .disabled:
+            break
         }
+        return nil
     }
 
     public func tune(frequencyMHz: Double, mode: String? = nil) {
-        let hz = UInt64(frequencyMHz * 1_000_000.0)
+        guard let hz = FrequencyBounds.hertz(kHz: frequencyMHz * 1000) else {
+            lastError = "Radio was not tuned: invalid frequency."
+            return
+        }
         tune(frequencyHz: hz, mode: mode)
     }
 
@@ -412,9 +422,10 @@ public final class RigControlEngine: ObservableObject {
             }
         case .rigctld:
             let keyedConnection = tcpConnection
+            let keyedReplies = rigctldReplies
             let endpoint = "\(host):\(port)"
             return { [weak self] in
-                self?.releaseRigctld(keyedConnection, endpoint: endpoint)
+                self?.releaseRigctld(keyedConnection, endpoint: endpoint, replies: keyedReplies)
                 if let self, self.driverType == .rigctld, self.tcpConnection === keyedConnection {
                     self.rigctldPTTWatchdog?.cancel()
                     self.rigctldPTTWatchdog = nil
@@ -432,27 +443,24 @@ public final class RigControlEngine: ObservableObject {
         TransmitNotices.shared.post(releaseNoticeSource, text: text)
     }
 
-    private func releaseRigctld(_ connection: NWConnection?, endpoint: String, close: Bool = false) {
-        rigctldReleasePending = true
-        guard let connection else {
+    private func releaseRigctld(_ connection: NWConnection?, endpoint: String, close: Bool = false, replies: RigctldReplyStream? = nil) {
+        guard let connection, let reader = replies ?? rigctldReplies, reader.connection === connection else {
             rigctldUncertain("T 0 could not be sent because the connection is missing", endpoint: endpoint)
             return
         }
-        connection.send(content: Data("T 0\n".utf8), completion: .contentProcessed { [weak self] error in
-            if let error {
-                Task { @MainActor [weak self] in
-                    self?.rigctldUncertain("T 0 write failed: \(error.localizedDescription)", endpoint: endpoint)
-                }
-            }
-            if close { connection.cancel() }
-        })
-        if close { Task { try? await Task.sleep(for: .seconds(2)); connection.cancel() } }
+        reader.send("T 0\n", closeAfterRelease: close)
     }
 
     private func startTX500Integration() {
         let driver = Lab599TX500Driver.shared
         self.rigModel = "Lab599 TX-500"
         tx500Cancellables.removeAll()
+        driver.$catError
+            .receive(on: RunLoop.main)
+            .sink { [weak self] error in
+                if let error { self?.lastError = error }
+            }
+            .store(in: &tx500Cancellables)
 
         driver.$isConnected
             .receive(on: RunLoop.main)
@@ -505,6 +513,12 @@ public final class RigControlEngine: ObservableObject {
         let driver = IcomUSBRadioDriver.shared
         self.rigModel = driver.model == .auto ? "Icom (Auto CI-V)" : driver.model.rawValue
         icomUSBCancellables.removeAll()
+        driver.$catError
+            .receive(on: RunLoop.main)
+            .sink { [weak self] error in
+                if let error { self?.lastError = error }
+            }
+            .store(in: &icomUSBCancellables)
 
         driver.$isConnected
             .receive(on: RunLoop.main)
@@ -562,8 +576,15 @@ public final class RigControlEngine: ObservableObject {
     }
 
     private func startFX4CRIntegration() {
-        fx4crCancellables.removeAll()
         let driver = FX4CRDriver.shared
+        fx4crCancellables.removeAll()
+        driver.$catError
+            .receive(on: RunLoop.main)
+            .sink { [weak self] error in
+                if let error { self?.lastError = error }
+            }
+            .store(in: &fx4crCancellables)
+
         self.rigModel = "FX-4CR (\(driver.connectionType.rawValue))"
 
         driver.$isConnected
@@ -756,10 +777,10 @@ public final class RigControlEngine: ObservableObject {
 
         // 1. Frequency
         if let vfoStr = try await flrigText(.getVFO) {
-            if let hz = UInt64(vfoStr) {
+            if let value = Double(vfoStr), let hz = FrequencyBounds.hertz(kHz: value / 1000) {
                 self.frequencyHz = hz
-            } else if let dbl = Double(vfoStr) {
-                self.frequencyHz = UInt64(dbl)
+            } else {
+                flrigRefused(.getVFO, "Invalid VFO frequency from flrig")
             }
         }
 
@@ -859,6 +880,23 @@ public final class RigControlEngine: ObservableObject {
 
         let conn = NWConnection(host: endpointHost, port: endpointPort, using: .tcp)
         self.tcpConnection = conn
+        let endpoint = "\(host):\(port)"
+        let reader = RigctldReplyStream(conn)
+        rigctldReplies = reader
+        reader.onError = { [weak self, weak conn] reason, safety in
+            if safety {
+                // A retired connection still owns its release warning.
+                let text = "Radio Control rigctld (\(endpoint)): \(reason) at \(TXLimits.utc()). Receive is unconfirmed. Release PTT locally and check the original radio."
+                TransmitNotices.shared.post(self?.releaseNoticeSource ?? TransmitNotices.Source(name: endpoint), text: text)
+            }
+            if let self, self.tcpConnection === conn { self.lastError = reason }
+        }
+        reader.onReply = { [weak self, weak conn] reply in
+            guard let self, self.tcpConnection === conn, reply.result == 0 else { return }
+            if let value = reply.fields["Frequency"].flatMap(UInt64.init), value > 0 { self.frequencyHz = value }
+            if let mode = reply.fields["Mode"] { self.mode = mode }
+            self.lastResponseTime = Date()
+        }
 
         conn.stateUpdateHandler = { [weak self, weak conn] state in
             Task { @MainActor [weak self, weak conn] in
@@ -868,11 +906,10 @@ public final class RigControlEngine: ObservableObject {
                     self.isConnected = true
                     self.isConnecting = false
                     self.rigModel = "Hamlib Radio"
+                    self.rigctldReplies?.start()
                     self.startRigctldPolling()
                 case .failed(let err):
-                    if self.rigctldKeyed || self.rigctldReleasePending {
-                        self.rigctldUncertain("the connection failed during TX or release: \(err.localizedDescription)", endpoint: "\(self.host):\(self.port)")
-                    }
+                    self.rigctldReplies?.fail("the connection failed during TX or release: \(err.localizedDescription)")
                     self.isConnected = false
                     self.isConnecting = false
                     self.lastError = err.localizedDescription
@@ -902,52 +939,10 @@ public final class RigControlEngine: ObservableObject {
     }
 
     private func sendRigctldCommand(_ command: String) {
-        guard let conn = tcpConnection, isConnected else {
-            if command == "T 0\n" { rigctldUncertain("T 0 was not sent; no working connection", endpoint: "\(host):\(port)") }
+        guard isConnected, let reader = rigctldReplies else {
+            lastError = "CAT command was not sent; no working rigctld connection."
             return
         }
-        let endpoint = "\(host):\(port)"
-        let data = command.data(using: .utf8) ?? Data()
-        conn.send(content: data, completion: .contentProcessed { [weak self] error in
-            Task { @MainActor [weak self] in
-                guard let self, self.tcpConnection === conn else { return }
-                if let error {
-                    self.lastError = error.localizedDescription
-                    if self.rigctldKeyed || command.hasPrefix("T ") {
-                        self.rigctldUncertain("CAT write failed: \(error.localizedDescription)", endpoint: endpoint)
-                    }
-                } else { self.readRigctldResponse() }
-            }
-        })
-    }
-
-    private func readRigctldResponse() {
-        guard let connection = tcpConnection else { return }
-        connection.receive(minimumIncompleteLength: 1, maximumLength: 1024) { [weak self] data, _, complete, error in
-            Task { @MainActor [weak self] in
-                guard let self, self.tcpConnection === connection else { return }
-                if (error != nil || complete), self.rigctldKeyed || self.rigctldReleasePending {
-                    self.rigctldUncertain("the reply connection was lost", endpoint: "\(self.host):\(self.port)")
-                }
-            }
-            guard let self = self, let data = data, let text = String(data: data, encoding: .utf8) else { return }
-
-            Task { @MainActor in
-                guard self.tcpConnection === connection else { return }
-                let lines = text.components(separatedBy: "\n").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
-                for line in lines {
-                    if line.hasPrefix("RPRT "), let result = Int(line.dropFirst(5)), result != 0,
-                       self.rigctldKeyed || self.rigctldReleasePending {
-                        self.rigctldUncertain("rigctld refused a CAT command (\(line))", endpoint: "\(self.host):\(self.port)")
-                    }
-                    if let hz = UInt64(line), hz > 100000 {
-                        self.frequencyHz = hz
-                    } else if ["USB", "LSB", "CW", "CWR", "AM", "FM", "PKTUSB", "PKTLSB"].contains(line.uppercased()) {
-                        self.mode = line
-                    }
-                }
-                self.lastResponseTime = Date()
-            }
-        }
+        reader.send(command)
     }
 }

@@ -53,9 +53,9 @@ struct DriverSafetyTimerMessageRegression {
         }
 
         // The message is also kept as a notice (TransmitNotices) that the next status does not replace: it stays until
-        // that radio is keyed again or the operator dismisses it.
+        // the operator dismisses it, including when a separate RX readback warning is posted.
         let notices = TransmitNotices.shared
-        check("each radio left a notice", Set(notices.notices.map(\.source.name)) == ["TX-500", "FX-4CR", "Icom USB", "Xiegu X6100"],
+        check("each radio left a notice", Set(["TX-500", "FX-4CR", "Icom USB", "Xiegu X6100"]).isSubset(of: Set(notices.notices.map(\.source.name))),
               notices.notices.map(\.source.name).joined(separator: ", "))
         tx500.lastMessage = "TX-500 Receive (PTT Released)"           // the next status, as FT8 sets when its slot ends
         check("the next status does not remove the notice",

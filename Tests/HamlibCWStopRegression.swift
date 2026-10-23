@@ -93,6 +93,7 @@ nonisolated final class NWConnection: @unchecked Sendable {
     var stateUpdateHandler: (@Sendable (_ state: State) -> Void)?
     private let lock = NSLock()
     private var pendingReceive: Receive?
+    private var queuedReply = ""
     private var queue: DispatchQueue?
 
     init(host: NWEndpoint.Host, port: NWEndpoint.Port, using: NWParameters) {
@@ -108,6 +109,14 @@ nonisolated final class NWConnection: @unchecked Sendable {
 
     func receive(minimumIncompleteLength: Int, maximumLength: Int, completion: @escaping Receive) {
         lock.lock(); pendingReceive = completion; lock.unlock()
+        deliver()
+    }
+    private func deliver() {
+        lock.lock()
+        let read = pendingReceive, text = queuedReply
+        if read != nil && !text.isEmpty { pendingReceive = nil; queuedReply = "" }
+        lock.unlock()
+        if let read, !text.isEmpty { queue?.async { read(Data(text.utf8), nil, false, nil) } }
     }
 
     func send(content: Data?, completion: SendCompletion) {
@@ -116,11 +125,11 @@ nonisolated final class NWConnection: @unchecked Sendable {
         if case .contentProcessed(let done) = completion { queue?.async { done(nil) } }
         var reply = ""
         for line in text.components(separatedBy: "\n") {
-            if line == "\\stop_morse" { reply += "RPRT -11\n" } else if line.hasPrefix("b ") { reply += "RPRT 0\n" }
+            if line == "+\\stop_morse" { reply += "stop_morse:\nRPRT -11\n" } else if line.hasPrefix("+b ") { reply += "send_morse: CQ TEST\nRPRT 0\n" }
         }
         guard !reply.isEmpty else { return }
-        lock.lock(); let receive = pendingReceive; pendingReceive = nil; lock.unlock()
-        if let receive { queue?.async { receive(Data(reply.utf8), nil, false, nil) } }
+        lock.lock(); queuedReply += reply; lock.unlock()
+        deliver()
     }
 }
 
@@ -155,7 +164,7 @@ struct HamlibCWStopRegression {
 
     /// The lines that concern CW: send_morse ("b …" or "b") and stop_morse. The client's 1 s polls (+f, +m) are left out.
     static func cwLines(_ lines: [String]) -> [String] {
-        lines.filter { $0 == "b" || $0.hasPrefix("b ") || $0.contains("morse") }
+        lines.filter { $0 == "b" || $0.hasPrefix("+b ") || $0.contains("morse") }
     }
 
     static func stopWhileOfflineSendsNothing(_ rig: RigControlClient) {
@@ -170,10 +179,11 @@ struct HamlibCWStopRegression {
         RunLoop.main.run(until: Date().addingTimeInterval(0.3))
         let cw = cwLines(Rigctld.drain())
 
-        check("the message goes out as one send_morse line (unchanged)", cw.first == "b \(text)", "\(cw)")
+        check("the message goes out as one send_morse line (unchanged)", cw.first == "+b \(text)", "\(cw)")
         check("STOP sends stop_morse after the message",
-              cw.count == 2 && cw.last == "\\stop_morse", "\(cw)")
+              cw.count == 2 && cw.last == "+\\stop_morse", "\(cw)")
         check("STOP sends no send_morse without a text (it stops nothing)", !cw.contains("b"), "\(cw)")
         check("an error answer to stop_morse leaves the connection up", rig.state.isConnected, rig.state.title)
+        check("a refused stop posts a persistent transmit warning", TransmitNotices.shared.notices.contains { $0.text.contains("stop_morse") && $0.text.contains("RPRT -11") })
     }
 }

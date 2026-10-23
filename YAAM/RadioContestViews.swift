@@ -332,8 +332,12 @@ struct RadioBridgePanel: View {
                     Spacer()
 
                     Button {
+                        guard let hz = FrequencyBounds.hertz(kHz: flrig.frequencyHz / 1000) else {
+                            actionStatus = "FLRig returned an invalid frequency; Quick Log was not changed."
+                            return
+                        }
                         let snapshot = RigSnapshot(
-                            frequencyHz: UInt64(max(0, flrig.frequencyHz)),
+                            frequencyHz: hz,
                             mode: flrig.mode,
                             passbandHz: nil,
                             updatedAt: Date()

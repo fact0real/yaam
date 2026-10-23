@@ -26,7 +26,13 @@ struct RigControlReleaseDestinationRegression {
         UserDefaults.standard.set(false, forKey: "rigAutoConnect")
         UserDefaults.standard.set(RigDriverType.disabled.rawValue, forKey: "rigDriverType")
         let rig = RigControlEngine.shared
+        let previousFrequency = rig.frequencyHz, previousMode = rig.mode
+        precondition(rig.tune(frequencyHz: 7_030_000, mode: "CW")?.contains("disabled") == true)
+        precondition(rig.frequencyHz == previousFrequency && rig.mode == previousMode)
         rig.driverType = .rigctld
+        precondition(rig.tune(frequencyHz: 7_030_000, mode: "CW")?.contains("offline") == true)
+        precondition(rig.frequencyHz == previousFrequency && rig.mode == previousMode)
+        print("PASS disabled/offline Tune explains refusal and preserves displayed radio telemetry")
         rig.host = "fixture.invalid"; rig.port = 4532
         rig.connect(); pump()
         precondition(rig.isConnected)
@@ -35,7 +41,7 @@ struct RigControlReleaseDestinationRegression {
             rig.setPTT(true)
             rig.driverType = .disabled // settings changed without a transport disconnect
             RunLoop.main.run(until: Date().addingTimeInterval(0.2))
-            precondition(keyed.sent.contains("T 0\n"), "The timer must release its original connection even after the driver selection changes")
+            precondition(keyed.sent.contains("+T 0\n"), "The timer must release its original connection even after the driver selection changes")
             precondition(TransmitShutdown.transmitting.isEmpty, "A completed safety timer must leave no stale transmit owner")
             print("PASS Radio Control watchdog retains original destination across settings changes (accelerated fixture clock)")
             return
@@ -44,14 +50,14 @@ struct RigControlReleaseDestinationRegression {
         rig.setPTT(true)
         let release = rig.capturePTTRelease()
         rig.disconnect()
-        precondition(first.sent.contains("T 0\n") && first.cancelled)
+        precondition(first.sent.contains("+T 0\n") && !first.cancelled, "Retain the original transport for its acknowledgement")
         rig.connect(); pump()
         let second = NWConnection.instances.last!
         precondition(first !== second && rig.isConnected)
         rig.setPTT(true)
         release()
         first.stateUpdateHandler?(.cancelled); pump()
-        precondition(!second.sent.contains("T 0\n") && rig.isPTT && rig.isConnected,
+        precondition(!second.sent.contains("+T 0\n") && rig.isPTT && rig.isConnected,
                      "An old release/callback must not stop or disconnect a replacement radio")
         second.writeError = .posix(.EPIPE)
         rig.capturePTTRelease()(); pump()
@@ -63,7 +69,7 @@ struct RigControlReleaseDestinationRegression {
         precondition(TransmitNotices.shared.notices.contains { $0.text.contains("connection failed during TX") })
         second.writeError = nil
         _ = TransmitShutdown.releaseAll()
-        precondition(second.sent.contains("T 0\n") && !rig.isPTT)
+        precondition(second.sent.contains("+T 0\n") && !rig.isPTT)
         rig.disconnect()
         let radio = Lab599TX500Driver.shared
         radio.isConnected = true

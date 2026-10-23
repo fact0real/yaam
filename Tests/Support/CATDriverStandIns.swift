@@ -37,6 +37,7 @@ nonisolated public final class SerialPortService: @unchecked Sendable {
     nonisolated(unsafe) static var allowsOpen = false
     nonisolated(unsafe) static var rtsResult = true
     nonisolated(unsafe) static var writeReply: (@Sendable (String) -> String?)?
+    nonisolated(unsafe) static var writeDataReply: (@Sendable (Data) -> Data?)?
     private var onReceive: (@Sendable (Data) -> Void)?
 
     public init() {}
@@ -63,6 +64,7 @@ nonisolated public final class SerialPortService: @unchecked Sendable {
         SerialLog.add(text)
         CATRadio.receive(text, at: Date())
         if let reply = Self.writeReply?(text) { onReceive?(Data(reply.utf8)) }
+        if let reply = Self.writeDataReply?(data) { onReceive?(reply) }
         return true
     }
 }

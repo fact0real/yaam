@@ -193,7 +193,7 @@ extension AppState {
     func currentRadioFrequencyHz() -> UInt64? {
         RadioFrequency.firstConnected([
             .init(isConnected: TCIClient.shared.isConnected, frequencyHz: TCIClient.shared.vfoAFrequencyHz),
-            .init(isConnected: FLRigClient.shared.isConnected, frequencyHz: UInt64(max(0, FLRigClient.shared.frequencyHz.rounded()))),
+            .init(isConnected: FLRigClient.shared.isConnected, frequencyHz: FrequencyBounds.hertz(kHz: FLRigClient.shared.frequencyHz.rounded() / 1000) ?? 0),
             .init(isConnected: rigControlClient.state.isConnected, frequencyHz: rigControlClient.snapshot?.frequencyHz ?? 0),
             .init(isConnected: icomNetworkRadio.state.isConnected, frequencyHz: icomNetworkRadio.snapshot?.frequencyHz ?? 0),
             .init(isConnected: Lab599TX500Driver.shared.isConnected, frequencyHz: Lab599TX500Driver.shared.frequencyHz),

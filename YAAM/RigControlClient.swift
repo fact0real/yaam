@@ -54,7 +54,7 @@ final class RigControlClient: ObservableObject {
     private let queue = DispatchQueue(label: "app.yaam.rig-control", qos: .userInitiated)
     private var connection: NWConnection?
     private var pollTimer: DispatchSourceTimer?
-    private var receiveBuffer = ""
+    private var replies: RigctldReplyStream?
     private var connectionID = UUID()
     private var pendingFrequency: UInt64?
     private var pendingMode = ""
@@ -72,7 +72,7 @@ final class RigControlClient: ObservableObject {
     }
 
     init() {
-        TransmitShutdown.register("rigctld", isTransmitting: { [weak self] in self?.isTransmitting ?? false },
+        TransmitShutdown.register("rigctld", isTransmitting: { [weak self] in (self?.isTransmitting ?? false) || (self?.replies?.hasTransmitRisk ?? false) },
                                   owner: self, release: { [weak self] in self?.setPTT(false) })
     }
 
@@ -91,11 +91,36 @@ final class RigControlClient: ObservableObject {
         }
 
         disconnect()
+        pendingFrequency = nil
+        pendingMode = ""
+        pendingPassband = nil
+        snapshot = nil
         noticeSource.name = "rigctld (\(host):\(rawPort))"
         let id = UUID()
         connectionID = id
         let connection = NWConnection(host: NWEndpoint.Host(host), port: port, using: .tcp)
         self.connection = connection
+        let reader = RigctldReplyStream(connection)
+        replies = reader
+        let source = releaseNoticeSource, sourceName = noticeSource.name
+        reader.onError = { [weak self] reason, safety in
+            if safety {
+                let text = "\(sourceName): \(reason) at \(TXLimits.utc()). Receive is unconfirmed. Release PTT locally and check the original radio."
+                TransmitNotices.shared.post(source, text: text)
+            }
+            guard let self, self.connectionID == id else { return }
+            self.lastMessage = reason
+        }
+        reader.onReply = { [weak self] reply in
+            guard let self, self.connectionID == id, reply.result == 0,
+                  reply.command == "get_freq" || reply.command == "get_mode" else { return }
+            if let value = reply.fields["Frequency"].flatMap(UInt64.init) { self.pendingFrequency = value }
+            if let mode = reply.fields["Mode"] { self.pendingMode = mode }
+            if let band = reply.fields["Passband"].flatMap(Int.init) { self.pendingPassband = band }
+            guard let frequency = self.pendingFrequency else { return }
+            self.snapshot = RigSnapshot(frequencyHz: frequency, mode: self.pendingMode,
+                passbandHz: self.pendingPassband, updatedAt: Date())
+        }
         DispatchQueue.main.async {
             self.state = .connecting
             self.lastMessage = "Opening \(host):\(rawPort)..."
@@ -113,7 +138,7 @@ final class RigControlClient: ObservableObject {
 
     func disconnect() {
         let old = connection
-        let wasTransmitting = isTransmitting
+        let wasTransmitting = isTransmitting || (replies?.hasTransmitRisk ?? false)
         pttGeneration = UUID()
         pttWatchdog?.cancel()
         pttWatchdog = nil
@@ -123,24 +148,10 @@ final class RigControlClient: ObservableObject {
         pollTimer = nil
         old?.stateUpdateHandler = nil
         connection = nil
-        if wasTransmitting, let old {
-            // Keep the old transport until its release write completes; never route that release to a replacement.
-            let sourceName = noticeSource.name, warningSource = releaseNoticeSource
-            old.send(content: Data("T 0\n".utf8), completion: .contentProcessed { [weak self] error in
-                if let error {
-                    Task { @MainActor [weak self] in
-                        let text = "\(sourceName): T 0 write failed at \(TXLimits.utc()): \(error.localizedDescription). Receive is unconfirmed. Other YAAM tools remain available. Release PTT locally and check the original radio is on receive."
-                        self?.lastMessage = text
-                        TransmitNotices.shared.post(warningSource, text: text)
-                    }
-                }
-                old.cancel()
-            })
-            Task { try? await Task.sleep(for: .seconds(2)); old.cancel() }
-        } else {
-            old?.cancel()
-        }
-        receiveBuffer = ""
+        if wasTransmitting, let reader = replies {
+            reader.send("\\stop_morse\nT 0\n", closeAfterRelease: true)
+        } else { old?.cancel() }
+        replies = nil
         state = .disconnected
         lastMessage = "Rig Control disconnected"
     }
@@ -236,8 +247,11 @@ final class RigControlClient: ObservableObject {
                 self.state = .connected
                 self.lastMessage = "Connected to rigctld at \(host):\(port)"
             }
-            receiveNext(connectionID: connectionID)
-            startPolling()
+            DispatchQueue.main.async {
+                guard self.connectionID == connectionID else { return }
+                self.replies?.start()
+                self.startPolling()
+            }
             refresh()
         case .waiting(let error):
             publishFailure("Waiting for rigctld: \(error.localizedDescription)", connectionID: connectionID)
@@ -256,8 +270,8 @@ final class RigControlClient: ObservableObject {
         DispatchQueue.main.async {
             guard self.connectionID == connectionID else { return }
             self.state = .failed(message)
-            if self.isTransmitting { self.releaseUncertain("the link failed during TX: \(message)") }
-            else { self.lastMessage = message }
+            self.replies?.fail("the link failed during TX or release: \(message)")
+            self.lastMessage = message
         }
     }
 
@@ -270,75 +284,7 @@ final class RigControlClient: ObservableObject {
         pollTimer = timer
     }
 
-    private func receiveNext(connectionID: UUID) {
-        connection?.receive(minimumIncompleteLength: 1, maximumLength: 16 * 1_024) { [weak self] data, _, isComplete, error in
-            guard let self else { return }
-            self.queue.async {
-                guard self.connectionID == connectionID else { return }
-                if let data, !data.isEmpty { self.consume(data) }
-                if let error {
-                    self.publishFailure(error.localizedDescription, connectionID: connectionID)
-                } else if isComplete {
-                    self.publishFailure("rigctld closed the connection", connectionID: connectionID)
-                } else {
-                    self.receiveNext(connectionID: connectionID)
-                }
-            }
-        }
-    }
-
-    private func consume(_ data: Data) {
-        guard let chunk = String(data: data, encoding: .utf8) else { return }
-        receiveBuffer.append(chunk.replacingOccurrences(of: "\r\n", with: "\n"))
-        let lines = receiveBuffer.components(separatedBy: "\n")
-        guard lines.count > 1 else { return }
-        receiveBuffer = lines.last ?? ""
-
-        for rawLine in lines.dropLast() {
-            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !line.isEmpty else { continue }
-            consume(line: line)
-        }
-    }
-
-    private func consume(line: String) {
-        if line.hasPrefix("Frequency:"), let value = UInt64(line.dropFirst("Frequency:".count).trimmingCharacters(in: .whitespaces)) {
-            pendingFrequency = value
-        } else if line.hasPrefix("Mode:") {
-            pendingMode = String(line.dropFirst("Mode:".count)).trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        } else if line.hasPrefix("Passband:") {
-            pendingPassband = Int(line.dropFirst("Passband:".count).trimmingCharacters(in: .whitespaces))
-        } else if let frequency = UInt64(line), frequency > 0 {
-            pendingFrequency = frequency
-        }
-
-        guard let frequency = pendingFrequency else { return }
-        let mode = pendingMode.isEmpty ? (snapshot?.mode ?? "") : pendingMode
-        let next = RigSnapshot(
-            frequencyHz: frequency,
-            mode: mode,
-            passbandHz: pendingPassband,
-            updatedAt: Date()
-        )
-        DispatchQueue.main.async {
-            self.snapshot = next
-            self.lastMessage = [next.band, next.frequencyMHz + " MHz", next.mode]
-                .filter { !$0.isEmpty }
-                .joined(separator: " · ")
-        }
-    }
-
     private func send(_ command: String) {
-        guard let data = command.data(using: .utf8) else { return }
-        guard let connection else { return }
-        let id = connectionID, sourceName = noticeSource.name
-        connection.send(content: data, completion: .contentProcessed { [weak self] error in
-            guard let error else { return }
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                if command == "T 0\n" { self.releaseUncertain("T 0 write failed: \(error.localizedDescription)", sourceName: sourceName) }
-                self.queue.async { self.publishFailure(error.localizedDescription, connectionID: id) }
-            }
-        })
+        replies?.send(command)
     }
 }

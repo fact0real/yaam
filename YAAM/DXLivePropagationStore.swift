@@ -166,7 +166,9 @@ struct DXIonosonde: Identifiable {
                     }
                 }
                 guard let frequency = attrs["frequency"].flatMap(Double.init),
-                      let seconds = attrs["flowstartseconds"].flatMap(Double.init) else { return nil }
+                      let seconds = attrs["flowstartseconds"].flatMap(Double.init),
+                      let reportSeconds = ReportTimeBounds.seconds(seconds),
+                      let frequencyHz = FrequencyBounds.hertz(kHz: frequency / 1000) else { return nil }
                 let date = Date(timeIntervalSince1970: seconds)
                 guard now.timeIntervalSince(date) <= 7200, date.timeIntervalSince(now) <= 300 else { return nil }
                 let grid = attrs["receiverlocator"] ?? ""
@@ -176,7 +178,7 @@ struct DXIonosonde: Identifiable {
                 let band = Self.bandName(frequencyMHz: frequency / 1_000_000)
                 let receiver = attrs["receivercallsign"] ?? "?"
                 return DXReception(
-                    id: "\(attrs["receivercallsign"] ?? "?")-\(Int(seconds))-\(Int(frequency))",
+                    id: "\(attrs["receivercallsign"] ?? "?")-\(reportSeconds)-\(frequencyHz)",
                     receiver: receiver, country: DXCCDatabase.resolve(callsign: receiver).entityName,
                     grid: grid, band: band,
                     mode: attrs["mode"] ?? "?", snr: attrs["snr"].flatMap(Int.init),

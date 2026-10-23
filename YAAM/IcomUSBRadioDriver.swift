@@ -177,6 +177,27 @@ public final class IcomUSBRadioDriver: ObservableObject {
     private var pttWatchdog: DispatchWorkItem?
     private var pttGeneration = UUID()
     private let noticeSource = TransmitNotices.Source(name: "Icom USB")
+    @Published public private(set) var catError: String?
+    private let refusalSource = TransmitNotices.Source(name: "Icom USB CAT refusal / release")
+    private var receiveCheck: UUID?
+    private var catSession = UUID()
+    private var recentCWUntil = Date.distantPast
+
+    private func verifyReceive() {
+        let id = UUID()
+        receiveCheck = id
+        sendCIV(command: [0x1C, 0x00])
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(0.5))
+            guard let self, self.receiveCheck == id else { return }
+            self.receiveCheck = nil
+            let text = "Icom USB: RX/stop requested at \(TXLimits.utc()), but fresh receive status was not confirmed. Release PTT locally and check the radio before sending again."
+            self.lastMessage = text
+            self.catError = text
+            TransmitNotices.shared.post(self.refusalSource, text: text)
+        }
+    }
+
     private var pollCycle: Int = 0
     private let serialQueue = DispatchQueue(label: "com.yaam.icom.usb.driver", qos: .userInitiated)
 
@@ -279,6 +300,10 @@ public final class IcomUSBRadioDriver: ObservableObject {
             return
         }
 
+        catSession = UUID()
+        receiveCheck = nil
+        recentCWUntil = .distantPast
+        let session = catSession
         isConnecting = true
         lastMessage = "Connecting to Icom on \(selectedPort)..."
 
@@ -299,7 +324,8 @@ public final class IcomUSBRadioDriver: ObservableObject {
             stopBits: 1
         ) { [weak self] data in
             Task { @MainActor [weak self] in
-                self?.handleIncomingSerialData(data)
+                guard let self, self.catSession == session else { return }
+                self.handleIncomingSerialData(data)
             }
         }
 
@@ -329,6 +355,12 @@ public final class IcomUSBRadioDriver: ObservableObject {
         if isTransmitting {
             setPTT(false)
         }
+        if receiveCheck != nil {
+            TransmitNotices.shared.post(refusalSource, text: "Icom USB: the link closed at \(TXLimits.utc()) before RX was confirmed. Check the original radio locally.")
+        }
+        receiveCheck = nil
+        recentCWUntil = .distantPast
+        catSession = UUID()
         serialPort.closePort()
         isConnected = false
         isConnecting = false
@@ -374,6 +406,7 @@ public final class IcomUSBRadioDriver: ObservableObject {
 
         // Low priority: Frequency and mode check every 1 second (4 cycles)
         if pollCycle % 4 == 0 {
+            sendCIV(command: [0x1C, 0x00]) // Read actual PTT status
             sendCIV(command: [0x03]) // Read Operating Frequency
             sendCIV(command: [0x04]) // Read Operating Mode
             sendCIV(command: [0x1A, 0x06]) // Read Data Mode
@@ -477,6 +510,7 @@ public final class IcomUSBRadioDriver: ObservableObject {
         pttWatchdog = nil
 
         isTransmitting = active
+        if active { receiveCheck = nil }
 
         if active {
             // Hardware RTS PTT (if enabled)
@@ -491,7 +525,7 @@ public final class IcomUSBRadioDriver: ObservableObject {
             let keyedAt = Date()
             let started = ProcessInfo.processInfo.systemUptime
             let watchdog = DispatchWorkItem { [weak self] in
-                guard let self, self.pttGeneration == generation, self.isTransmitting else { return }
+                guard let self, self.pttGeneration == generation else { return }
                 self.setPTT(false)
                 self.lastMessage = TXLimits.safetyTimerMessage(radio: "Icom USB", keyedAt: keyedAt, limit: limit,
                     elapsed: ProcessInfo.processInfo.systemUptime - started)
@@ -508,9 +542,7 @@ public final class IcomUSBRadioDriver: ObservableObject {
                 serialPort.setRTS(active: false)
             }
 
-            self.rfPowerWatts = 0.0
-            self.swr = 1.0
-            self.alcLevel = 0.0
+            verifyReceive()
         }
     }
 
@@ -527,12 +559,15 @@ public final class IcomUSBRadioDriver: ObservableObject {
         for byte in clean.utf8 {
             cmd.append(byte)
         }
+        recentCWUntil = Date().addingTimeInterval(2)
         sendCIV(command: cmd)
     }
 
     /// Aborts active CW transmission on the Icom transceiver (CI-V Command 17 FF)
     public func stopMorse() {
+        recentCWUntil = Date().addingTimeInterval(2)
         sendCIV(command: [0x17, 0xFF])
+        verifyReceive()
         if enableHardwareDTRCW {
             serialPort.setDTR(active: false)
         }
@@ -558,7 +593,14 @@ public final class IcomUSBRadioDriver: ObservableObject {
         var frame = Data([0xFE, 0xFE, address, 0xE0])
         frame.append(contentsOf: command)
         frame.append(0xFD)
-        _ = serialPort.writeData(frame)
+        if !serialPort.writeData(frame) {
+            let text = "Icom USB: CAT write failed at \(TXLimits.utc())."
+            lastMessage = text
+            catError = text
+            if isTransmitting || receiveCheck != nil || recentCWUntil > Date() || command.first == 0x1C || command.first == 0x17 {
+                TransmitNotices.shared.post(refusalSource, text: text + " Receive is unconfirmed. Release locally and check the radio.")
+            }
+        }
     }
 
     private func handleIncomingSerialData(_ data: Data) {
@@ -613,13 +655,16 @@ public final class IcomUSBRadioDriver: ObservableObject {
         let cmd = packet[4]
         let payload = packet.count > 6 ? Array(packet[5..<(packet.count - 1)]) : []
 
+        let session = catSession
         DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
+            guard let self = self, self.catSession == session else { return }
             self.processCIVCommand(cmd: cmd, payload: payload, fromAddr: fromAddr)
         }
     }
 
     private func processCIVCommand(cmd: UInt8, payload: [UInt8], fromAddr: UInt8) {
+        // Replies from another radio on a CI-V bus cannot acknowledge this radio's release.
+        guard fromAddr == activeCivAddress || activeCivAddress == 0 else { return }
         switch cmd {
         case 0x00, 0x03: // Frequency response or transceive broadcast
             if payload.count >= 5 {
@@ -686,8 +731,13 @@ public final class IcomUSBRadioDriver: ObservableObject {
             }
 
         case 0x1C: // Transmit PTT status
-            if let pttByte = payload.first {
-                self.isTransmitting = (pttByte == 0x01)
+            if payload.count >= 2, payload[0] == 0, payload[1] <= 1 {
+                self.isTransmitting = (payload[1] == 0x01)
+                if receiveCheck != nil, payload[1] == 0 {
+                    receiveCheck = nil
+                    recentCWUntil = .distantPast
+                    lastMessage = "Icom USB: fresh CI-V status reports receive at \(TXLimits.utc())."
+                }
             }
 
         case 0x19: // Model ID response (cmd 19 00)
@@ -703,8 +753,15 @@ public final class IcomUSBRadioDriver: ObservableObject {
         case 0xFB: // ACK
             break
 
-        case 0xFA: // NAK
-            break
+        case 0xFA: // NAK is untagged: describe the context without claiming command attribution.
+            let safety = isTransmitting || receiveCheck != nil || recentCWUntil > Date()
+            let text = "Icom USB: radio refused a CAT command (CI-V NAK) at \(TXLimits.utc())."
+            lastMessage = text
+            catError = text
+            if safety {
+                receiveCheck = nil
+                TransmitNotices.shared.post(refusalSource, text: text + " A transmit/stop operation was pending; receive is unconfirmed. Release locally and check the radio.")
+            }
 
         default:
             break
