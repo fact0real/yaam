@@ -52,10 +52,11 @@ run RigctldNoticePerClientRegression YAAM/RigControlClient.swift YAAM/MorseTimin
 run TransmitNoticesShownRegression YAAM/TransmitNotices.swift YAAM/TransmitNoticesView.swift
 run TXLimitsRegression YAAM/TXLimits.swift
 run TransmitIdentityRegression YAAM/TransmitIdentity.swift YAAM/GridLocator.swift
-for name in BandAdvisorDecodeCountRegression BandAdvisorClusterRegression
+for name in BandAdvisorDecodeCountRegression BandAdvisorClusterRegression DXSpotHugeFrequencyRegression
 do
     run "$name" YAAM/TacticalBandAdvisor.swift YAAM/OperatorModels.swift YAAM/AmateurBandSettings.swift \
-        YAAM/PortableActivity.swift YAAM/DXCCDatabase.swift YAAM/CountryFlagEngine.swift YAAM/CountryNameNormalizer.swift
+        YAAM/PortableActivity.swift YAAM/DXCCDatabase.swift YAAM/CountryFlagEngine.swift YAAM/CountryNameNormalizer.swift \
+        YAAM/FrequencyBounds.swift
 done
 fi
 swiftc -parse-as-library -emit-library -emit-module -module-name FT8808Engine \
@@ -73,4 +74,8 @@ for name in DriverNotConnectedMessageRegression DriverSafetyTimerMessageRegressi
 do
     run "$name" -I "$out" -L "$out" -lFT8808Engine -Xlinker -rpath -Xlinker "$out" "${drivers[@]}"
 done
+run FrequencyBoundsRegression YAAM/FrequencyBounds.swift
+run QSXCommentBoundsRegression YAAM/PileupSniperEngine.swift YAAM/OperatorModels.swift YAAM/AmateurBandSettings.swift \
+    YAAM/PortableActivity.swift YAAM/DXCCDatabase.swift YAAM/CountryFlagEngine.swift YAAM/CountryNameNormalizer.swift \
+    YAAM/FrequencyBounds.swift
 echo "Requested CW safety regressions passed. Results built in $out"

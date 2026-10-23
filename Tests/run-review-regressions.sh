@@ -14,7 +14,7 @@ swiftc "${flags[@]}" Tests/DigitalReceiveReviewRegression.swift Tests/Support/Tr
     YAAM/OliviaMFSKEngine.swift YAAM/TransmitShutdown.swift YAAM/AudioOnlyTransmit.swift YAAM/TXLimits.swift YAAM/TransmitIdentity.swift YAAM/GridLocator.swift -o "$out/digital"
 "$out/digital"
 swiftc "${flags[@]}" Tests/CWConnectionLossRegression.swift Tests/Support/TransmitGateStubs.swift \
-    Tests/Support/TransmitGateDXCCStub.swift YAAM/CWKeyerService.swift YAAM/MorseTiming.swift \
+    Tests/Support/TransmitGateDXCCStub.swift YAAM/CWKeyerService.swift YAAM/MorseTiming.swift YAAM/TXLimits.swift \
     YAAM/TransmitIdentity.swift YAAM/GridLocator.swift -o "$out/cw"
 "$out/cw"
 derived=${YAAM_DERIVED_DATA:-build/DerivedData}

@@ -345,14 +345,14 @@ struct RigConfigPopoverView: View {
                             Text("9600 8N2")
                                 .font(.system(size: 11, weight: .bold, design: .monospaced))
                                 .foregroundStyle(.secondary)
-                            Text("Menu 34: TS2000")
+                            Text("CAT: LAB599 for FT8")
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                         }
                     }
 
                     HStack {
-                        Toggle("Preserve DIG Mode (Menu 34=TS2000)", isOn: Binding(get: { tx500.preserveDIGMode }, set: { tx500.preserveDIGMode = $0 }))
+                        Toggle("Preserve radio DIG mode", isOn: Binding(get: { tx500.preserveDIGMode }, set: { tx500.preserveDIGMode = $0 }))
                             .font(.caption)
                             .help("Prevents TX-500 from dropping to USB voice mode on transmit (Firmware Bug #1 fix)")
 

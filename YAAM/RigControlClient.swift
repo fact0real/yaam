@@ -63,6 +63,14 @@ final class RigControlClient: ObservableObject {
     private var pttGeneration = UUID()
     private var noticeSource = TransmitNotices.Source(name: "rigctld") // this radio's own safety notices
 
+    private let releaseNoticeSource = TransmitNotices.Source(name: "rigctld connection / release")
+
+    private func releaseUncertain(_ reason: String, sourceName: String? = nil) {
+        let text = "\(sourceName ?? noticeSource.name): \(reason) at \(TXLimits.utc()). Receive is unconfirmed. Other YAAM tools remain available. Release PTT locally and check the radio is on receive."
+        lastMessage = text
+        TransmitNotices.shared.post(releaseNoticeSource, text: text)
+    }
+
     init() {
         TransmitShutdown.register("rigctld", isTransmitting: { [weak self] in self?.isTransmitting ?? false },
                                   owner: self, release: { [weak self] in self?.setPTT(false) })
@@ -117,7 +125,17 @@ final class RigControlClient: ObservableObject {
         connection = nil
         if wasTransmitting, let old {
             // Keep the old transport until its release write completes; never route that release to a replacement.
-            old.send(content: Data("T 0\n".utf8), completion: .contentProcessed { _ in old.cancel() })
+            let sourceName = noticeSource.name, warningSource = releaseNoticeSource
+            old.send(content: Data("T 0\n".utf8), completion: .contentProcessed { [weak self] error in
+                if let error {
+                    Task { @MainActor [weak self] in
+                        let text = "\(sourceName): T 0 write failed at \(TXLimits.utc()): \(error.localizedDescription). Receive is unconfirmed. Other YAAM tools remain available. Release PTT locally and check the original radio is on receive."
+                        self?.lastMessage = text
+                        TransmitNotices.shared.post(warningSource, text: text)
+                    }
+                }
+                old.cancel()
+            })
             Task { try? await Task.sleep(for: .seconds(2)); old.cancel() }
         } else {
             old?.cancel()
@@ -140,7 +158,7 @@ final class RigControlClient: ObservableObject {
 
     func setMode(_ mode: String, passbandHz: Int = 0) {
         let cleanMode = mode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        guard state.isConnected, !cleanMode.isEmpty else { return }
+        guard state.isConnected, !cleanMode.isEmpty, cleanMode.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-") }) else { return }
         send("M \(cleanMode) \(passbandHz)\n")
         queue.asyncAfter(deadline: .now() + 0.15) { [weak self] in self?.refresh() }
     }
@@ -160,6 +178,7 @@ final class RigControlClient: ObservableObject {
         let generation = pttGeneration
         pttWatchdog?.cancel()
         pttWatchdog = nil
+        if !enabled, isTransmitting, !state.isConnected { releaseUncertain("PTT release requested without a working link") }
         send(enabled ? "T 1\n" : "T 0\n")
         isTransmitting = enabled
         lastMessage = enabled ? "PTT active" : "PTT release requested; verify receive on the radio"
@@ -237,7 +256,8 @@ final class RigControlClient: ObservableObject {
         DispatchQueue.main.async {
             guard self.connectionID == connectionID else { return }
             self.state = .failed(message)
-            self.lastMessage = message
+            if self.isTransmitting { self.releaseUncertain("the link failed during TX: \(message)") }
+            else { self.lastMessage = message }
         }
     }
 
@@ -310,10 +330,14 @@ final class RigControlClient: ObservableObject {
 
     private func send(_ command: String) {
         guard let data = command.data(using: .utf8) else { return }
-        connection?.send(content: data, completion: .contentProcessed { [weak self] error in
-            guard let error, let self else { return }
-            self.queue.async {
-                self.publishFailure(error.localizedDescription, connectionID: self.connectionID)
+        guard let connection else { return }
+        let id = connectionID, sourceName = noticeSource.name
+        connection.send(content: data, completion: .contentProcessed { [weak self] error in
+            guard let error else { return }
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if command == "T 0\n" { self.releaseUncertain("T 0 write failed: \(error.localizedDescription)", sourceName: sourceName) }
+                self.queue.async { self.publishFailure(error.localizedDescription, connectionID: id) }
             }
         })
     }

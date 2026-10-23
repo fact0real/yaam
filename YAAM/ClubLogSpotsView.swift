@@ -552,9 +552,8 @@ struct ClubLogSpotsView: View {
                                 }
                                 .buttonStyle(.borderless)
 
-                                if let freqDouble = Double(spot.frequency) {
+                                if let freqDouble = Double(spot.frequency), let freqHz = FrequencyBounds.hertz(kHz: freqDouble * 1000) {
                                     Button {
-                                        let freqHz = UInt64(freqDouble * 1_000_000)
                                         appState.rigControlClient.setFrequencyHz(freqHz)
                                         if !spot.mode.isEmpty {
                                             appState.rigControlClient.setMode(spot.mode)

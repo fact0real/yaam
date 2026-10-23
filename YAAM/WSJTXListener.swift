@@ -731,7 +731,9 @@ final public class WSJTXListener: ObservableObject {
             let dialHz = lastStatus?.dialFrequencyHz ?? 0
             let targetCall = !decode.callerCallsign.isEmpty ? decode.callerCallsign : (!decode.targetCallsign.isEmpty ? decode.targetCallsign : "")
             if dialHz > 0 && !targetCall.isEmpty {
-                let exactKHz = Double(dialHz + UInt64(decode.deltaFrequencyHz)) / 1000.0
+                // The dial comes in a status packet from the network: added as whole numbers, a huge one would stop YAAM
+                // here, before addSpot can drop it (FrequencyBounds). As Double it cannot overflow.
+                let exactKHz = (Double(dialHz) + Double(decode.deltaFrequencyHz)) / 1000.0
                 let resolvedBand = lastStatus?.band ?? AmateurBandPlan.band(forMHz: exactKHz / 1000.0) ?? "20M"
                 BandmapEngine.shared.addSpot(
                     callsign: targetCall,

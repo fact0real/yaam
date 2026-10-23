@@ -329,16 +329,25 @@ public struct TCIControlView: View {
     }
 
     private func streamSpotsToWaterfall() {
-        let spots = BandmapEngine.shared.spots
-        for spot in spots.prefix(20) {
-            let hz = UInt64(spot.frequencyKHz * 1000.0)
-            tci.postSpot(
+        guard tci.isConnected else {
+            actionStatus = "TCI is not connected: no spots sent to the SDR waterfall. Connect, then send them again."
+            return
+        }
+        let spots = Array(BandmapEngine.shared.spots.prefix(20))
+        var sent = 0
+        for spot in spots {
+            guard let hz = FrequencyBounds.hertz(kHz: spot.frequencyKHz) else { continue }
+            let posted = tci.postSpot(
                 callsign: spot.callsign,
                 mode: spot.mode,
                 frequencyHz: hz,
                 text: spot.comment
             )
+            if posted { sent += 1 }
         }
-        actionStatus = "Streamed \(min(20, spots.count)) spots to SDR waterfall"
+        let skipped = spots.count - sent
+        actionStatus = "Sent \(sent) spots to the SDR waterfall"
+            + (skipped == 0 ? "" : "; \(skipped) stay on the bandmap only: their callsign or mode is empty or has \":\", "
+                + "\",\" or \";\", which TCI cannot carry")
     }
 }

@@ -34,6 +34,10 @@ nonisolated enum SerialLog {
 
 nonisolated public final class SerialPortService: @unchecked Sendable {
     public static let shared = SerialPortService()
+    nonisolated(unsafe) static var allowsOpen = false
+    nonisolated(unsafe) static var rtsResult = true
+    nonisolated(unsafe) static var writeReply: (@Sendable (String) -> String?)?
+    private var onReceive: (@Sendable (Data) -> Void)?
 
     public init() {}
 
@@ -43,17 +47,22 @@ nonisolated public final class SerialPortService: @unchecked Sendable {
 
     /// Always fails, so a stray connect() never starts the drivers' polling.
     public func openPort(path: String, baudRate: Int = 1200, stopBits: Int = 1,
-                         onReceive: (@Sendable (Data) -> Void)? = nil) -> Bool { false }
+                         onReceive: (@Sendable (Data) -> Void)? = nil) -> Bool {
+        self.onReceive = onReceive
+        SerialLog.add("OPEN")
+        return Self.allowsOpen
+    }
     public func closePort() {}
 
-    @discardableResult public func setDTR(active: Bool) -> Bool { true }
-    @discardableResult public func setRTS(active: Bool) -> Bool { true }
+    @discardableResult public func setDTR(active: Bool) -> Bool { SerialLog.add("DTR \(active)"); return true }
+    @discardableResult public func setRTS(active: Bool) -> Bool { SerialLog.add("RTS \(active)"); return Self.rtsResult }
 
     @discardableResult
     public func writeData(_ data: Data) -> Bool {
         let text = String(decoding: data, as: UTF8.self)
         SerialLog.add(text)
         CATRadio.receive(text, at: Date())
+        if let reply = Self.writeReply?(text) { onReceive?(Data(reply.utf8)) }
         return true
     }
 }

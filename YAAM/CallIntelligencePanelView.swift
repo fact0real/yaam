@@ -427,7 +427,7 @@ struct CallIntelligencePanelView: View {
             // Tune rig button if recent spot available
             if let spot = report.liveClusterSpots.first {
                 Button {
-                    let hz = UInt64(spot.frequencyKHz * 1000.0)
+                    guard let hz = FrequencyBounds.hertz(kHz: spot.frequencyKHz) else { return }
                     appState.rigControlClient.setFrequencyHz(hz)
                 } label: {
                     HStack(spacing: 3) {
@@ -445,7 +445,7 @@ struct CallIntelligencePanelView: View {
                 .help("Tune connected transceiver to spotted frequency \(String(format: "%.3f", spot.frequencyKHz / 1000.0)) MHz")
             } else if let arch = report.recentArchivedSpots.first {
                 Button {
-                    let hz = UInt64(arch.frequencyKHz * 1000.0)
+                    guard let hz = FrequencyBounds.hertz(kHz: arch.frequencyKHz) else { return }
                     appState.rigControlClient.setFrequencyHz(hz)
                 } label: {
                     HStack(spacing: 3) {
@@ -880,7 +880,7 @@ struct CallIntelligencePanelView: View {
                     // Quick Arm Button
                     Button {
                         BandmapEngine.shared.applySniperSolution(sniper)
-                        let hz = UInt64(sniper.recommendedTxKHz * 1000.0)
+                        guard let hz = FrequencyBounds.hertz(kHz: sniper.recommendedTxKHz) else { return }
                         appState.rigControlClient.setFrequencyHz(hz)
                     } label: {
                         HStack(spacing: 4) {
@@ -1214,7 +1214,7 @@ struct CallIntelligencePanelView: View {
                             }
 
                             Button {
-                                let hz = UInt64(spot.frequencyKHz * 1000.0)
+                                guard let hz = FrequencyBounds.hertz(kHz: spot.frequencyKHz) else { return }
                                 appState.rigControlClient.setFrequencyHz(hz)
                             } label: {
                                 Image(systemName: "play.circle.fill")

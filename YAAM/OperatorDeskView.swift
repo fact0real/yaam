@@ -893,7 +893,7 @@ private struct QuickLogPanel: View {
                 if let sniper = CallIntelligenceEngine.shared.activeReport?.pileupSniper, sniper.isSplit {
                     Button {
                         BandmapEngine.shared.applySniperSolution(sniper)
-                        let hz = UInt64(sniper.recommendedTxKHz * 1000.0)
+                        guard let hz = FrequencyBounds.hertz(kHz: sniper.recommendedTxKHz) else { return }
                         appState.rigControlClient.setFrequencyHz(hz)
                     } label: {
                         HStack(spacing: 4) {

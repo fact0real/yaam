@@ -300,7 +300,7 @@ public actor TQSLCoordinator {
 
                 // Watchdog timer to kill process if it hangs
                 let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .background))
-                timer.schedule(deadline: .now() + timeout)
+                timer.schedule(deadline: .distantFuture)
                 timer.setEventHandler {
                     lock.lock()
                     defer { lock.unlock() }
@@ -318,13 +318,19 @@ public actor TQSLCoordinator {
 
                 do {
                     try process.run()
+                    // Arm only after launch: a short deadline firing while Process is not running
+                    // would otherwise be consumed without terminating the child or recording a timeout.
+                    let boundedTimeout = timeout.isFinite && timeout > 0 ? timeout : 45
+                    let started = ProcessInfo.processInfo.systemUptime
+                    timer.schedule(deadline: .now() + boundedTimeout)
                     // Drain while the child runs so verbose TQSL output cannot fill the pipe and deadlock it.
                     let data = pipe.fileHandleForReading.readDataToEndOfFile()
                     process.waitUntilExit()
 
                     lock.lock()
                     isCompleted = true
-                    let didTimeOut = timedOut
+                    // A delayed timer must not turn an over-deadline exit into confirmed acceptance.
+                    let didTimeOut = timedOut || ProcessInfo.processInfo.systemUptime - started >= boundedTimeout
                     timer.cancel()
                     lock.unlock()
 

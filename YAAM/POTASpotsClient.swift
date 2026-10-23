@@ -20,6 +20,7 @@ public final class POTASpotsClient: ObservableObject {
     @Published public var isLoading: Bool = false
     @Published public var lastUpdated: Date? = nil
     @Published public var errorMessage: String? = nil
+    @Published public var tuneErrorMessage: String? = nil
 
     // Filters
     @Published public var selectedProgram: FieldProgramType = .pota
@@ -168,6 +169,16 @@ public final class POTASpotsClient: ObservableObject {
 
     // MARK: - CAT QSY Tune Rig
     public func tuneRig(frequencyKHz: Double, mode: String) {
+        // The spot's frequency comes from the POTA or SOTA service: one that is not a usable frequency would stop YAAM
+        // in UInt64(kHz * 1000), so the radio is not tuned and the reason is kept (FrequencyBounds).
+        guard FrequencyBounds.isUsable(kHz: frequencyKHz) else {
+            let message = "POTA/SOTA: the spot's frequency (\(frequencyKHz) kHz) is not a usable radio frequency, so at "
+                + "\(TXLimits.utc()) the radio was not tuned. Tune it by hand. The rest of YAAM is not affected."
+            errorMessage = message
+            tuneErrorMessage = message
+            NSLog("%@", message)
+            return
+        }
         let hz = UInt64(frequencyKHz * 1000.0)
         let normalizedMode: String
         let upper = mode.uppercased()

@@ -18,5 +18,5 @@ swiftc -parse-as-library -swift-version 5 -default-isolation MainActor \
     -enable-upcoming-feature InferSendableFromCaptures -enable-upcoming-feature MemberImportVisibility \
     Tests/WorkspaceSaveAndContestReviewRegression.swift "$out/AppStateMethods.swift" YAAM/ADIFParser.swift \
     YAAM/QSOMetadataFormatter.swift YAAM/OperatorModels.swift YAAM/AmateurBandSettings.swift YAAM/PortableActivity.swift \
-    YAAM/DXCCDatabase.swift YAAM/CountryFlagEngine.swift YAAM/CountryNameNormalizer.swift -o "$out/workspace"
+    YAAM/DXCCDatabase.swift YAAM/CountryFlagEngine.swift YAAM/CountryNameNormalizer.swift YAAM/FrequencyBounds.swift -o "$out/workspace"
 "$out/workspace"

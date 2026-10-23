@@ -4,7 +4,7 @@
 //
 //  Dedicated Hardware Driver & CAT Controller for Lab599 Discovery TX-500
 //  Engineered specifically for macOS over USB-C (AD-514/AD-502 CAT & AD-508/AD-509 Audio)
-//  Implements Kenwood TS-2000 emulation (Radio Menu 34: TS2000, Menu 35: 9600, Menu 09: 30)
+//  Kenwood-style CAT framing; verified FT8 uses LAB599 protocol MD/PT readback at 9600 baud.
 //  Includes full mitigation for Firmware Bug #1 (DIG -> USB mode jump prevention)
 //  and provides direct Morse keying (Kenwood KY / DTR-RTS) and digital mode audio integration.
 //
@@ -95,6 +95,11 @@ public final class Lab599TX500Driver: ObservableObject {
     // MARK: - Internal Transport & Polling
     nonisolated private let serialPort = SerialPortService()
     private var receiveBuffer = ""
+    private var connectionGeneration = UUID()
+    private var catReplies: [String: (sequence: UInt64, value: String)] = [:]
+    private var replySequence: UInt64 = 0
+    private var verifyingFT8 = false
+
     private var pollingTimer: DispatchSourceTimer?
     private var pttWatchdog: DispatchWorkItem?
     private var pttGeneration = UUID()
@@ -170,6 +175,10 @@ public final class Lab599TX500Driver: ObservableObject {
             return
         }
 
+        connectionGeneration = UUID()
+        let connectionID = connectionGeneration
+        catReplies.removeAll()
+        receiveBuffer = ""
         isConnecting = true
         lastMessage = "Connecting to TX-500 on \(selectedPort)..."
 
@@ -184,6 +193,7 @@ public final class Lab599TX500Driver: ObservableObject {
             stopBits: stopBits
         ) { [weak self] data in
             Task { @MainActor [weak self] in
+                guard self?.connectionGeneration == connectionID else { return }
                 self?.handleIncomingSerialData(data)
             }
         }
@@ -207,6 +217,8 @@ public final class Lab599TX500Driver: ObservableObject {
     }
 
     public func disconnect() {
+        connectionGeneration = UUID()
+        catReplies.removeAll()
         cancelPendingMorseChunks()
         if isConnected { stopMorse() }
         if isTransmitting {
@@ -332,6 +344,78 @@ public final class Lab599TX500Driver: ObservableObject {
         }
     }
 
+    enum FT8VerificationError: LocalizedError {
+        case refused(String)
+        var errorDescription: String? { if case .refused(let text) = self { return text }; return nil }
+    }
+
+    private func freshCATReply(_ prefix: String, session: UUID, before deadline: Date) async throws -> String {
+        try Task.checkCancellation()
+        guard isConnected, connectionGeneration == session else { throw FT8VerificationError.refused("CAT disconnected") }
+        let baseline = replySequence
+        guard sendRaw(prefix + ";") else { throw FT8VerificationError.refused("CAT write failed") }
+        let start = ContinuousClock.now
+        while ContinuousClock.now - start < .milliseconds(400), Date() < deadline {
+            try Task.checkCancellation()
+            guard isConnected, connectionGeneration == session else { throw FT8VerificationError.refused("CAT connection changed") }
+            if let reply = catReplies[prefix], reply.sequence > baseline { return reply.value }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        throw FT8VerificationError.refused("No fresh \(prefix) reply; select LAB599 CAT protocol and check the cable")
+    }
+
+    /// No audio may start until fresh documented MD6 and PT1 readbacks arrive in this slot.
+    /// Reads never infer TX from the host's optimistic isTransmitting flag or the DIG preference.
+    func keyFT8Verified(maximumDuration: TimeInterval, before deadline: Date) async throws {
+        guard !verifyingFT8, !isTransmitting, isConnected, !TransmitShutdown.isShuttingDown else {
+            throw FT8VerificationError.refused("TX-500 is unavailable or already in use")
+        }
+        verifyingFT8 = true
+        let session = connectionGeneration
+        defer { verifyingFT8 = false }
+        do {
+            guard try await freshCATReply("MD", session: session, before: deadline) == "MD6" else {
+                throw FT8VerificationError.refused("The radio must report DIG (MD6); select DIG on the radio")
+            }
+            guard try await freshCATReply("PT", session: session, before: deadline) == "PT0" else {
+                throw FT8VerificationError.refused("The radio did not confirm receive before TX")
+            }
+            try Task.checkCancellation()
+            guard Date() < deadline, !isTransmitting else { throw FT8VerificationError.refused("The slot deadline passed or another transmission started") }
+            setPTT(true, maximumDuration: maximumDuration)
+            guard isTransmitting,
+                  try await freshCATReply("PT", session: session, before: deadline) == "PT1", Date() < deadline else {
+                throw FT8VerificationError.refused("The radio did not confirm TX in time for this slot")
+            }
+        } catch {
+            // Keep cleanup at the acquired serial session; never release a replacement connection.
+            if connectionGeneration == session { setPTT(false) }
+            let text = "TX-500: FT8 audio was blocked at \(TXLimits.utc()): \(error.localizedDescription). RX was requested; physical receive is unconfirmed. Other YAAM tools remain available. Check the radio is on receive, select DIG and LAB599 CAT protocol, then retry the next slot."
+            lastMessage = text
+            TransmitNotices.shared.post(noticeSource, text: text)
+            throw error
+        }
+    }
+
+    /// Runs independently of the cancelled FT8 task after its synchronous RX request.
+    /// A newer key-down or serial session invalidates this readback, so it cannot affect another transmission.
+    func checkFT8Receive() {
+        let session = connectionGeneration, generation = pttGeneration
+        Task { @MainActor [weak self] in
+            guard let self, self.connectionGeneration == session, self.pttGeneration == generation else { return }
+            do {
+                let reply = try await self.freshCATReply("PT", session: session, before: Date().addingTimeInterval(0.4))
+                guard self.connectionGeneration == session, self.pttGeneration == generation else { return }
+                if reply == "PT0" { return }
+            } catch {
+                guard self.connectionGeneration == session, self.pttGeneration == generation else { return }
+            }
+            let text = "TX-500: FT8 ended and RX was requested at \(TXLimits.utc()), but fresh PT0 receive was NOT confirmed. Other YAAM tools remain available. Release PTT locally and check the radio is on receive before sending again."
+            self.lastMessage = text
+            TransmitNotices.shared.post(self.noticeSource, text: text)
+        }
+    }
+
     // MARK: - Morse Code (CW) Operations
 
     /// Transmits text directly via Kenwood CAT Morse `KY <text>;` to TX-500's internal keyer
@@ -422,6 +506,10 @@ public final class Lab599TX500Driver: ObservableObject {
     }
 
     private func parseKenwoodResponse(_ response: String) {
+        if response.hasPrefix("MD") || response.hasPrefix("PT") {
+            replySequence &+= 1
+            catReplies[String(response.prefix(2))] = (replySequence, response)
+        }
         // VFO-A Frequency: FA00014074000
         if response.hasPrefix("FA") {
             let numStr = response.dropFirst(2).trimmingCharacters(in: .whitespaces)
@@ -432,13 +520,8 @@ public final class Lab599TX500Driver: ObservableObject {
         } else if response.hasPrefix("MD") {
             let modeCodeStr = response.dropFirst(2).trimmingCharacters(in: .whitespaces)
             if let code = Int(modeCodeStr) {
-                let txMode = TX500Mode.from(kenwoodCode: code)
-                // If preserveDIGMode is active and radio indicates DIG or USB, keep as DIG
-                if preserveDIGMode && (txMode == .dig || txMode == .digR) {
-                    self.mode = "DIG"
-                } else {
-                    self.mode = txMode.name
-                }
+                // Unknown firmware codes must never be presented as verified DIG.
+                self.mode = (1...7).contains(code) ? (TX500Mode(rawValue: code)?.name ?? "Unknown") : "Unknown (MD\(code))"
             }
         // S-Meter: SM + P1 (always 0) + P2 (0000 to 0030), e.g. SM00015 (Lab599 CAT guide rev.3, p.9)
         } else if response.hasPrefix("SM") {
@@ -471,7 +554,7 @@ public final class Lab599TX500Driver: ObservableObject {
         timer.schedule(deadline: .now() + 1.0, repeating: 1.0, leeway: .milliseconds(150))
         timer.setEventHandler { [weak self] in
             Task { @MainActor [weak self] in
-                guard let self = self, self.isConnected, !self.isTransmitting else { return }
+                guard let self = self, self.isConnected, !self.isTransmitting, !self.verifyingFT8 else { return }
                 // Poll frequency and S-meter
                 self.sendRaw("FA;\(Lab599TX500SMeter.readCommand)")
             }

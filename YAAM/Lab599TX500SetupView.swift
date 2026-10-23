@@ -128,7 +128,7 @@ public struct Lab599TX500SetupView: View {
                     }
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Protocol").font(.caption2).foregroundColor(.secondary)
-                        Text("Menu 34: TS2000")
+                        Text("CAT: LAB599 for FT8")
                             .font(.system(.caption, design: .monospaced).bold())
                     }
                 }
@@ -228,7 +228,7 @@ public struct Lab599TX500SetupView: View {
                 Toggle("Auto-Connect on YAAM Launch", isOn: $tx500.autoConnect)
                     .font(.caption)
 
-                Toggle("Preserve DIG Mode (Menu 34=TS2000)", isOn: $tx500.preserveDIGMode)
+                Toggle("Preserve radio DIG mode", isOn: $tx500.preserveDIGMode)
                     .font(.caption.bold())
                     .help("MANDATORY: Prevents Firmware Bug #1 by suppressing automated CAT mode strings that knock the TX-500 out of DIG mode into USB voice mode.")
 
@@ -378,7 +378,7 @@ public struct Lab599TX500SetupView: View {
             sectionHeader("Pre-Session Operational Checklist & Bug Mitigation", icon: "checklist")
 
             VStack(alignment: .leading, spacing: 8) {
-                checklistItem(title: "Radio Menu 34 (CAT Protocol)", detail: "Must be set to TS2000 (Kenwood TS-2000 emulation command set).")
+                checklistItem(title: "Radio CAT protocol", detail: "Select LAB599 for FT8: YAAM must read fresh DIG (MD6) and real PTT (PT) before playing transmit audio. Menu numbers vary by firmware.")
                 checklistItem(title: "Radio Menu 35 (CAT Rate)", detail: "Set to 9600 (factory default). Matches YAAM baud rate setting.")
                 checklistItem(title: "Radio Menu 09 (Gain>DIG)", detail: "Baseline at 30 (range 20–40). Adjust until MIC meter reaches 3/4 scale on TX.")
                 checklistItem(title: "Front Panel Mode: DIG", detail: "Press front-panel MODE until screen indicates DIG. This isolates microphone and connects REM/DATA.")

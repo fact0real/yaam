@@ -330,7 +330,8 @@ public struct SpotArchiveView: View {
 
     private func tuneToSpot(_ spot: ArchivedSpotRecord) {
         if appState.rigControlClient.state.isConnected {
-            appState.rigControlClient.setFrequencyHz(UInt64(spot.frequencyKHz * 1000.0))
+            guard let hz = FrequencyBounds.hertz(kHz: spot.frequencyKHz) else { return }
+            appState.rigControlClient.setFrequencyHz(hz)
         }
     }
 

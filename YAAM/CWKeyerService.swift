@@ -623,7 +623,7 @@ public final class CWKeyerService: ObservableObject {
                 do { try await Task.sleep(for: .milliseconds(200)) } catch { return }
                 guard let self, self.isTransmitting, !Task.isCancelled else { return }
                 if let lost = self.disconnectedTransmissionDevice {
-                    self.transmitRefusal = "\(lost) disconnected during CW. Transmission stopped; check the radio before sending again."
+                    self.transmitRefusal = "\(lost) disconnected during CW at \(TXLimits.utc()). Local CW progress stopped; radio receive is unconfirmed. Other YAAM tools remain available. Release PTT locally and check the radio before sending again."
                     self.stop()
                     return
                 }

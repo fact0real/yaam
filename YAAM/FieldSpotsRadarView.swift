@@ -25,6 +25,9 @@ public struct FieldSpotsRadarView: View {
             filterHeaderBar
 
             Divider()
+            if let message = spotsClient.tuneErrorMessage {
+                RadioTuningNotice(message: message) { spotsClient.tuneErrorMessage = nil }
+            }
 
             // Spots Content Table
             if spotsClient.selectedProgram == .pota {

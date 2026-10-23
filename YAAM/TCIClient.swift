@@ -40,7 +40,27 @@ public final class TCIClient: ObservableObject {
     private var tuneReceivers = Set<Int>()
     private var transmitWatchdog: Task<Void, Never>?
     private let noticeSource = TransmitNotices.Source(name: "TCI")
-    var holdsTransmit: Bool { isPTTActive || isTuneActive || !pttReceivers.isEmpty || !tuneReceivers.isEmpty }
+    private var cwMacroActive = false
+    private var cwReceivers = Set<Int>()
+    private var cwSawTransmit = Set<Int>()
+    private var connectedEndpoint = ""
+    private var uncertainReceivers: [String: Set<Int>] = [:]
+    private var recoveryInFlight = false
+    private let linkNoticeSource = TransmitNotices.Source(name: "TCI connection / release")
+    var holdsTransmit: Bool { cwMacroActive || isPTTActive || isTuneActive || !pttReceivers.isEmpty || !tuneReceivers.isEmpty }
+
+    private func rememberUncertainRelease(_ reason: String) {
+        guard holdsTransmit else { return }
+        let endpoint = connectedEndpoint
+        uncertainReceivers[endpoint, default: []].formUnion(pttReceivers.union(tuneReceivers).union(cwReceivers).union([0]))
+        let text = "TCI (\(endpoint)): \(reason) at \(TXLimits.utc()). The radio may still be transmitting; receive cannot be confirmed. Other YAAM tools remain available. Check the original SDR is on receive locally; reconnect to that same SDR to retry the release."
+        lastError = text
+        TransmitNotices.shared.post(linkNoticeSource, text: text)
+    }
+
+    private static func releaseCommands(_ receivers: Set<Int>) -> String {
+        "cw_macros_stop;" + receivers.sorted().map { "trx:\($0),false;tune:\($0),false;" }.joined()
+    }
 
 
     public init() {
@@ -82,14 +102,14 @@ public final class TCIClient: ObservableObject {
 
         let session = URLSession(configuration: .default)
         let task = session.webSocketTask(with: url)
+        self.connectedEndpoint = url.absoluteString
         self.webSocketTask = task
         task.resume()
 
         listenForMessages()
         startPingTimer()
 
-        // Send ready handshake
-        sendCommand("ready;")
+        // TCI servers send initialization followed by ready; clients wait for the server state.
     }
 
     public func disconnect() {
@@ -100,18 +120,27 @@ public final class TCIClient: ObservableObject {
         transmitWatchdog = nil
         let task = webSocketTask
         webSocketTask = nil
+        recoveryInFlight = false
         if holdsTransmit, let task {
-            var commands = "cw_macros_stop;"
-            let receivers = pttReceivers.union(tuneReceivers).union([0])
-            for receiver in receivers.sorted() {
-                commands += "trx:\(receiver),false;tune:\(receiver),false;"
+            rememberUncertainRelease("the connection was closed during TX; a release was requested")
+            let endpoint = connectedEndpoint
+            let commands = Self.releaseCommands(pttReceivers.union(tuneReceivers).union(cwReceivers).union([0]))
+            // A completed WebSocket write is not confirmation of physical receive.
+            task.send(.string(commands)) { [weak self] error in
+                if let error {
+                    Task { @MainActor [weak self] in
+                        guard let self else { return }
+                        TransmitNotices.shared.post(self.linkNoticeSource, text: "TCI (\(endpoint)): release write failed at \(TXLimits.utc()): \(error.localizedDescription). Receive is unconfirmed. Other YAAM tools remain available; check the original SDR locally.")
+                    }
+                }
+                task.cancel(with: .goingAway, reason: nil)
             }
-            // Give release bytes time to leave before closing; this is not confirmation of physical receive.
-            task.send(.string(commands)) { _ in task.cancel(with: .goingAway, reason: nil) }
             Task { try? await Task.sleep(for: .seconds(2)); task.cancel(with: .goingAway, reason: nil) }
         } else {
             task?.cancel(with: .goingAway, reason: nil)
         }
+        cwMacroActive = false
+        cwReceivers.removeAll(); cwSawTransmit.removeAll()
         isConnected = false
         isPTTActive = false
         isTuneActive = false
@@ -128,6 +157,7 @@ public final class TCIClient: ObservableObject {
                 task.sendPing { [weak self] error in
                     if error != nil {
                         Task { @MainActor [weak self] in
+                            guard self?.webSocketTask === task else { return }
                             self?.handleDisconnect(reason: "Ping failed")
                         }
                     }
@@ -138,9 +168,14 @@ public final class TCIClient: ObservableObject {
 
     private func handleDisconnect(reason: String) {
         guard !isIntentionalDisconnect else { return }
+        rememberUncertainRelease("the link was lost (\(reason))")
         self.isConnected = false
-        self.statusMessage = "Connection lost: \(reason)"
-        self.lastError = reason
+        self.statusMessage = "Connection lost: \(reason); check the SDR is on receive"
+        if !holdsTransmit { self.lastError = reason }
+        pingTimer?.invalidate()
+        pingTimer = nil
+        webSocketTask?.cancel(with: .goingAway, reason: nil)
+        webSocketTask = nil // a queued success from the failed session cannot resurrect it
     }
 
     // MARK: - Message Processing Loop
@@ -174,9 +209,25 @@ public final class TCIClient: ObservableObject {
     }
 
     private func processIncomingCommands(_ raw: String) {
-        if !self.isConnected {
-            self.isConnected = true
-            self.statusMessage = "Connected (ws://\(host):\(port))"
+        if !isConnected, !recoveryInFlight, let task = webSocketTask {
+            if let receivers = uncertainReceivers[connectedEndpoint] {
+                recoveryInFlight = true
+                let endpoint = connectedEndpoint
+                // Recovery is scoped to the original destination. Never release an unrelated SDR.
+                task.send(.string(Self.releaseCommands(receivers))) { [weak self] error in
+                    Task { @MainActor [weak self] in
+                        guard let self, self.webSocketTask === task else { return }
+                        self.recoveryInFlight = false
+                        if let error { self.handleDisconnect(reason: "Recovery release failed: \(error.localizedDescription)"); return }
+                        self.uncertainReceivers.removeValue(forKey: endpoint)
+                        self.isConnected = true
+                        self.statusMessage = "Connected; release sent. Check the SDR is on receive."
+                    }
+                }
+            } else {
+                isConnected = true
+                statusMessage = "Connected (\(connectedEndpoint))"
+            }
         }
 
         // TCI commands are delimited by semicolon (;)
@@ -191,7 +242,7 @@ public final class TCIClient: ObservableObject {
     private func parseSingleCommand(_ cmd: String) {
         let parts = cmd.components(separatedBy: ":")
         guard parts.count >= 2 else {
-            if cmd.lowercased() == "ready" {
+            if cmd.lowercased() == "ready", !recoveryInFlight {
                 self.isConnected = true
                 self.statusMessage = "Connected to SDR"
             }
@@ -229,8 +280,15 @@ public final class TCIClient: ObservableObject {
                 let receiver = args.count > 1 ? (Int(args[0]) ?? 0) : 0
                 if last.lowercased() == "true" || last == "1" { pttReceivers.insert(receiver) }
                 else { pttReceivers.remove(receiver) }
+                if last.lowercased() == "true" || last == "1" {
+                    if cwReceivers.contains(receiver) { cwSawTransmit.insert(receiver) }
+                } else if cwSawTransmit.remove(receiver) != nil {
+                    // A real TX→RX notification closes CW ownership. The local Morse clock cannot do so.
+                    cwReceivers.remove(receiver)
+                    cwMacroActive = !cwReceivers.isEmpty
+                }
                 self.isPTTActive = !pttReceivers.isEmpty
-                if pttReceivers.isEmpty && tuneReceivers.isEmpty { transmitWatchdog?.cancel(); transmitWatchdog = nil }
+                if pttReceivers.isEmpty && tuneReceivers.isEmpty && !cwMacroActive { transmitWatchdog?.cancel(); transmitWatchdog = nil }
             }
 
         case "tune":
@@ -240,7 +298,7 @@ public final class TCIClient: ObservableObject {
                 if last.lowercased() == "true" || last == "1" { tuneReceivers.insert(receiver) }
                 else { tuneReceivers.remove(receiver) }
                 self.isTuneActive = !tuneReceivers.isEmpty
-                if pttReceivers.isEmpty && tuneReceivers.isEmpty { transmitWatchdog?.cancel(); transmitWatchdog = nil }
+                if pttReceivers.isEmpty && tuneReceivers.isEmpty && !cwMacroActive { transmitWatchdog?.cancel(); transmitWatchdog = nil }
             }
 
         case "drive":
@@ -277,12 +335,26 @@ public final class TCIClient: ObservableObject {
     // MARK: - Outgoing Control Commands
 
     public func sendCommand(_ command: String) {
-        guard let task = webSocketTask, isConnected else { return }
+        guard let task = webSocketTask, isConnected, !recoveryInFlight else { return }
         let msg = command.hasSuffix(";") ? command : "\(command);"
+        let endpoint = connectedEndpoint
+        let isRelease = command == "cw_macros_stop;" || command.hasSuffix(",false;")
+        var releaseReceivers = pttReceivers.union(tuneReceivers).union(cwReceivers).union([0])
+        if command.hasPrefix("trx:") || command.hasPrefix("tune:"),
+           let payload = command.split(separator: ":", maxSplits: 1).last,
+           let argument = payload.split(separator: ",").first, let receiver = Int(argument) {
+            releaseReceivers.insert(receiver)
+        }
+        let failedReleaseReceivers = releaseReceivers
         task.send(.string(msg)) { [weak self] error in
             if let err = error {
                 Task { @MainActor [weak self] in
-                    self?.lastError = err.localizedDescription
+                    guard let self, self.webSocketTask === task else { return }
+                    if isRelease {
+                        self.uncertainReceivers[endpoint, default: []].formUnion(failedReleaseReceivers)
+                        TransmitNotices.shared.post(self.linkNoticeSource, text: "TCI (\(endpoint)): release write failed at \(TXLimits.utc()): \(err.localizedDescription). Receive is unconfirmed. Other YAAM tools remain available; check the original SDR locally.")
+                    }
+                    self.handleDisconnect(reason: err.localizedDescription)
                 }
             }
         }
@@ -293,31 +365,58 @@ public final class TCIClient: ObservableObject {
         sendCommand("vfo:\(receiver),\(vfo),\(hz);")
     }
 
-    public func setMode(_ mode: String, receiver: Int = 0) {
-        let clean = mode.lowercased()
-        self.mode = mode.uppercased()
+    /// Sets the SDR's mode. The mode can come from outside (a DX cluster or WSJT-X spot, when tuning to it), and TCI
+    /// reserves ":", "," and ";" in any argument (TCI Protocol 2.1, 3.1): a ";" would end the command and let the rest be
+    /// read as another one (such as "trx:0,true;"). Such a mode, or an empty one, is not sent, and the operator is told.
+    @discardableResult
+    public func setMode(_ mode: String, receiver: Int = 0) -> Bool {
+        guard isConnected, !recoveryInFlight else { return false }
+        if let refusal = Self.modeRefusal(mode) {
+            lastError = refusal
+            return false
+        }
+        let clean = mode.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        self.mode = clean.uppercased()
         sendCommand("modulation:\(receiver),\(clean);")
+        return true
+    }
+
+    /// Why setMode would not send `mode` (B-018), or nil if it would.
+    static func modeRefusal(_ mode: String) -> String? {
+        let clean = mode.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard clean.isEmpty || hasReservedCharacter(clean) else { return nil }
+        // Shown in the log: a line break or control character in outside text must not start a line of its own there.
+        let printable = mode.prefix(16).map { $0.isNewline || $0.unicodeScalars.contains { $0.properties.generalCategory == .control } ? "?" : $0 }
+        let shown = String(printable) + (mode.count > 16 ? "…" : "")
+        return "TCI: mode \"\(shown)\" not sent to the SDR at \(TXLimits.utc()): it is empty or has \":\", \",\" or \";\", "
+            + "which TCI reserves. The SDR keeps its mode; choose the mode by hand. The rest of YAAM is not affected."
     }
 
     public func setPTT(_ active: Bool, receiver: Int = 0) {
         if active {
-            guard !TransmitShutdown.isShuttingDown, isConnected else { return }
+            guard !TransmitShutdown.isShuttingDown, isConnected, !recoveryInFlight else { return }
             pttReceivers.insert(receiver)
             startTransmitWatchdog()
-        } else { pttReceivers.remove(receiver) }
+        } else {
+            if !isConnected { rememberUncertainRelease("PTT release was requested without a working link") }
+            pttReceivers.remove(receiver)
+        }
         self.isPTTActive = !pttReceivers.isEmpty
-        if pttReceivers.isEmpty && tuneReceivers.isEmpty { transmitWatchdog?.cancel(); transmitWatchdog = nil }
+        if pttReceivers.isEmpty && tuneReceivers.isEmpty && !cwMacroActive { transmitWatchdog?.cancel(); transmitWatchdog = nil }
         sendCommand("trx:\(receiver),\(active ? "true" : "false");")
     }
 
     public func setTune(_ active: Bool, receiver: Int = 0) {
         if active {
-            guard !TransmitShutdown.isShuttingDown, isConnected else { return }
+            guard !TransmitShutdown.isShuttingDown, isConnected, !recoveryInFlight else { return }
             tuneReceivers.insert(receiver)
             startTransmitWatchdog()
-        } else { tuneReceivers.remove(receiver) }
+        } else {
+            if !isConnected { rememberUncertainRelease("Tune release was requested without a working link") }
+            tuneReceivers.remove(receiver)
+        }
         self.isTuneActive = !tuneReceivers.isEmpty
-        if pttReceivers.isEmpty && tuneReceivers.isEmpty { transmitWatchdog?.cancel(); transmitWatchdog = nil }
+        if pttReceivers.isEmpty && tuneReceivers.isEmpty && !cwMacroActive { transmitWatchdog?.cancel(); transmitWatchdog = nil }
         sendCommand("tune:\(receiver),\(active ? "true" : "false");")
     }
 
@@ -343,34 +442,70 @@ public final class TCIClient: ObservableObject {
     // MARK: - CW Transmission via SDR DSP
 
     public func sendCW(text: String, receiver: Int = 0, wpm: Int = 25) {
-        guard !TransmitShutdown.isShuttingDown else { return }
+        guard !TransmitShutdown.isShuttingDown, isConnected, !recoveryInFlight, !text.isEmpty else { return }
+        cwMacroActive = true
+        cwReceivers.insert(receiver)
+        startTransmitWatchdog()
+        let wpm = min(60, max(5, wpm))
         sendCommand("cw_macros_speed:\(wpm);")
-        sendCommand("cw_macro:\(receiver),\(text);")
+        // TCI Protocol 2.1 (Expert Electronics): "CW_MACROS:arg1,arg2;" (arg1 the transceiver, arg2 the text).
+        sendCommand("cw_macros:\(receiver),\(Self.macroText(text));")
+    }
+
+    /// The text of a CW macro as TCI Protocol 2.1 asks: ":", "," and ";" end a command or an argument, so they are sent
+    /// as "^", "~" and "*", and the TCI server turns them back. Otherwise "599, NAME" would end the macro at the comma.
+    nonisolated static func macroText(_ text: String) -> String {
+        text.replacingOccurrences(of: ":", with: "^")
+            .replacingOccurrences(of: ",", with: "~")
+            .replacingOccurrences(of: ";", with: "*")
     }
 
     public func stopCW() {
+        if !isConnected { rememberUncertainRelease("CW stop was requested without a working link") }
         sendCommand("cw_macros_stop;")
+        cwMacroActive = false
+        cwReceivers.removeAll(); cwSawTransmit.removeAll()
+        if pttReceivers.isEmpty && tuneReceivers.isEmpty { transmitWatchdog?.cancel(); transmitWatchdog = nil }
     }
 
     // MARK: - Spectrum Waterfall Spot Streaming
 
+    /// Sends a spot to the SDR panorama. Spots come from the DX cluster or WSJT-X, so every field is text from outside: TCI
+    /// reserves ":", "," and ";" in any argument (TCI Protocol 2.1, 3.1), and a ";" in it would end the command and
+    /// let the rest be read as another one (such as "trx:0,true;"). The comment is sent as the protocol sends CW text
+    /// (macroText); a spot whose callsign or mode has a reserved character is not sent. Returns whether it was sent.
+    @discardableResult
     public func postSpot(
         callsign: String,
         mode: String,
         frequencyHz: UInt64,
         argbColor: UInt32 = 4278255360, // Default vibrant green
         text: String = ""
-    ) {
+    ) -> Bool {
         let cleanCall = callsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        let cleanText = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !cleanCall.isEmpty else { return }
+        let cleanText = Self.macroText(text.trimmingCharacters(in: .whitespacesAndNewlines))
+        let cleanMode = mode.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        // An empty mode would be an empty argument, which TCI drops (Notes on the Command Format, 1): the fields shift.
+        guard !cleanCall.isEmpty, !cleanMode.isEmpty, !Self.hasReservedCharacter(cleanCall),
+              !Self.hasReservedCharacter(cleanMode) else {
+            return false
+        }
+        // sendCommand sends nothing without a connection; say so to the caller.
+        guard webSocketTask != nil, isConnected, !recoveryInFlight else { return false }
 
         // spot:<callsign>,<mode>,<frequency_hz>,<color_argb>,<text>;
-        sendCommand("spot:\(cleanCall),\(mode.lowercased()),\(frequencyHz),\(argbColor),\(cleanText);")
+        sendCommand("spot:\(cleanCall),\(cleanMode),\(frequencyHz),\(argbColor),\(cleanText);")
+        return true
     }
 
     public func deleteSpot(callsign: String) {
+        guard !Self.hasReservedCharacter(callsign) else { return }
         sendCommand("spot_delete:\(callsign.uppercased());")
+    }
+
+    /// Whether `text` has a character TCI reserves for its own syntax (":", "," or ";").
+    nonisolated static func hasReservedCharacter(_ text: String) -> Bool {
+        text.contains { $0 == ":" || $0 == "," || $0 == ";" } || text.unicodeScalars.contains { CharacterSet.controlCharacters.contains($0) }
     }
 
     public func clearAllSpots() {

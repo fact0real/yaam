@@ -17,20 +17,22 @@ struct TransmitNoticesRender {
             }
             let appearance = NSAppearance(named: dark ? .darkAqua : .aqua)!
             app.appearance = appearance
+            let height = max(360, count * 300 + 240)
             let root = VStack(alignment: .leading, spacing: 12) {
                 Text("Transmit safety").font(.headline)
                 TransmitNoticesView()
+                RadioTuningNotice(message: "POTA/SOTA: the spot’s frequency is invalid. The radio was not tuned. Refresh remains available; tune by hand or choose another spot.") {}
                 Label(count > 0 ? "Receive and logbook remain available" : "No transmit safety notices", systemImage: "antenna.radiowaves.left.and.right")
                     .font(.caption).foregroundStyle(.secondary)
                 Spacer()
             }
             .padding(12)
-            .frame(width: CGFloat(width), height: 360)
+            .frame(width: CGFloat(width), height: CGFloat(height))
             .background(Color(nsColor: .windowBackgroundColor))
             .environment(\.colorScheme, dark ? .dark : .light)
             let view = NSHostingView(rootView: root)
             view.appearance = appearance
-            let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: width, height: 360), styleMask: [.borderless], backing: .buffered, defer: false)
+            let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(height)), styleMask: [.borderless], backing: .buffered, defer: false)
             window.contentView = view
             window.makeKeyAndOrderFront(nil)
             RunLoop.current.run(until: Date().addingTimeInterval(0.3))

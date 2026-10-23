@@ -20,6 +20,8 @@ swiftc "${flags[@]}" -I "$out" -L "$out" -lFT8808Engine -Xlinker -rpath -Xlinker
 "$out/shutdown"
 swiftc "${flags[@]}" Tests/TCIReleaseIntegrationRegression.swift YAAM/TCIClient.swift YAAM/TXLimits.swift YAAM/TransmitShutdown.swift YAAM/TransmitNotices.swift -o "$out/tci"
 "$out/tci"
+swiftc "${flags[@]}" Tests/TCIOutsideTextRegression.swift YAAM/TCIClient.swift YAAM/TXLimits.swift YAAM/TransmitShutdown.swift YAAM/TransmitNotices.swift -o "$out/tci-outside-text"
+"$out/tci-outside-text"
 # Append only a fixture extension in a temporary copy; the PTT implementation is compiled verbatim.
 cat YAAM/IcomNetworkRadio.swift > "$out/IcomNetworkRadio.swift"
 cat >> "$out/IcomNetworkRadio.swift" <<'SWIFT'
@@ -62,3 +64,12 @@ swiftc "${flags[@]}" -I "$out" -L "$out" -lFT8808Engine -Xlinker -rpath -Xlinker
     YAAM/TXLimits.swift YAAM/TransmitShutdown.swift YAAM/TransmitNotices.swift -o "$out/rig-watchdog"
 "$out/rig-watchdog" --watchdog-only
 echo "Transmit integration regressions passed. Binaries: $out"
+
+swiftc "${flags[@]}" -I "$out" -L "$out" -lFT8808Engine -Xlinker -rpath -Xlinker "$out" \
+    Tests/TX500VerifiedPTTRegression.swift Tests/Support/CATDriverStandIns.swift \
+    YAAM/Lab599TX500Driver.swift YAAM/FX4CRDriver.swift YAAM/Lab599TX500SMeter.swift YAAM/MorseTiming.swift \
+    YAAM/TXLimits.swift YAAM/TransmitShutdown.swift YAAM/TransmitNotices.swift -o "$out/tx500-verified"
+"$out/tx500-verified"
+swiftc "${flags[@]}" Tests/RigctldReleaseFailureRegression.swift YAAM/RigControlClient.swift YAAM/MorseTiming.swift \
+    YAAM/TXLimits.swift YAAM/TransmitShutdown.swift YAAM/TransmitNotices.swift -o "$out/rigctld-release-failure"
+"$out/rigctld-release-failure"

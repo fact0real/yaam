@@ -309,6 +309,13 @@ public final class FX4CRDriver: ObservableObject {
             let portName = selectedPort.components(separatedBy: "/").last ?? selectedPort
             self.lastMessage = "Connected to FX-4CR (\(portName) via \(transportLabel) @ \(baudRate) 8N\(stopBits))"
 
+            let rtsReleased = serialPort.setRTS(active: false)
+            if !rtsReleased, connectionType == .usb {
+                let text = "FX-4CR: RTS could not be released on connect at \(TXLimits.utc()). CAT remains connected, but receive is unconfirmed. Check the radio is on receive locally before using PTT."
+                lastMessage = text
+                TransmitNotices.shared.post(noticeSource, text: text)
+            }
+
             // Start polling radio telemetry (VFO frequency, S-meter, power, mode)
             startPolling()
 

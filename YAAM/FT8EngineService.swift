@@ -1384,13 +1384,19 @@ final class FT8EngineService: ObservableObject {
                     let output = TxAudioOutput(player: player, sampleRate: 48_000, device: outputDevice)
                     txPlayer = player
                     txOutput = output
-                    tx500.setPTT(true, maximumDuration: slotSecs)
                     defer {
                         output.stop()
                         tx500.setPTT(false)
+                        tx500.checkFT8Receive()
                         txOutput = nil
                         txPlayer = nil
                     }
+                    try await tx500.keyFT8Verified(maximumDuration: slotSecs, before: slot)
+                    let untilSlot = slot.timeIntervalSinceNow
+                    if untilSlot > 0 { try await Task.sleep(for: .seconds(untilSlot)) }
+                    try Task.checkCancellation()
+                    // A stalled UI must skip the slot rather than play a partial, late frame.
+                    guard Date().timeIntervalSince(slot) < 0.10 else { throw FT8RunError.rigUnavailable }
                     try output.start()
                     while !output.isFinished {
                         try Task.checkCancellation()

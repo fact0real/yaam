@@ -2886,7 +2886,7 @@ public struct HamTrackerWorkspaceView: View {
     // MARK: - Helpers
 
     private func tuneTransceiver(freqMHz: Double) {
-        let hz = UInt64(freqMHz * 1_000_000.0)
+        guard let hz = FrequencyBounds.hertz(kHz: freqMHz * 1000) else { return }
         appState.rigControlClient.setFrequencyHz(hz)
     }
 

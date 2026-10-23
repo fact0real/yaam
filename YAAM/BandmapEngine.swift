@@ -248,7 +248,9 @@ public final class BandmapEngine: ObservableObject {
         logRecords: [QSORecordModel] = []
     ) {
         let cleanCall = callsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        guard !cleanCall.isEmpty, frequencyKHz > 100.0 else { return }
+        // The frequency is text from outside (cluster, WSJT-X): infinity or a huge value would stop YAAM where the spot
+        // is tuned (UInt64(kHz * 1000)), so such a spot is dropped here (FrequencyBounds).
+        guard !cleanCall.isEmpty, frequencyKHz > 100.0, FrequencyBounds.isUsable(kHz: frequencyKHz) else { return }
 
         let resolvedBand = band.isEmpty ? (AmateurBandPlan.band(forMHz: frequencyKHz / 1000.0) ?? "20M") : band
         let status = classifyStatus(callsign: cleanCall, band: resolvedBand, mode: mode, logRecords: logRecords)

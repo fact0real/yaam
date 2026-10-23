@@ -113,6 +113,8 @@ public final class RigControlEngine: ObservableObject {
     private var rigctldKeyed = false
     private var rigctldPTTWatchdog: Task<Void, Never>?
     private let noticeSource = TransmitNotices.Source(name: "Radio Control")
+    private let releaseNoticeSource = TransmitNotices.Source(name: "Radio Control rigctld release")
+    private var rigctldReleasePending = false
     private var flrigPTTWatchdog: Task<Void, Never>?
 
     private init() {
@@ -182,8 +184,7 @@ public final class RigControlEngine: ObservableObject {
         pollingTask?.cancel()
         pollingTask = nil
         if driverType == .rigctld, rigctldKeyed, let connection = tcpConnection {
-            connection.send(content: Data("T 0\n".utf8), completion: .contentProcessed { _ in connection.cancel() })
-            Task { try? await Task.sleep(for: .seconds(2)); connection.cancel() }
+            releaseRigctld(connection, endpoint: "\(host):\(port)", close: true)
         } else {
             tcpConnection?.cancel()
         }
@@ -362,8 +363,9 @@ public final class RigControlEngine: ObservableObject {
                 }
             }
         case .rigctld:
+            if transmit { sendRigctldCommand("T 1\n") }
+            else { releaseRigctld(tcpConnection, endpoint: "\(host):\(port)") }
             rigctldKeyed = transmit
-            sendRigctldCommand(transmit ? "T 1\n" : "T 0\n")
             rigctldPTTWatchdog?.cancel()
             rigctldPTTWatchdog = nil
             if transmit {
@@ -409,9 +411,10 @@ public final class RigControlEngine: ObservableObject {
                 }
             }
         case .rigctld:
-            guard let keyedConnection = tcpConnection else { return {} }
+            let keyedConnection = tcpConnection
+            let endpoint = "\(host):\(port)"
             return { [weak self] in
-                keyedConnection.send(content: Data("T 0\n".utf8), completion: .contentProcessed { _ in })
+                self?.releaseRigctld(keyedConnection, endpoint: endpoint)
                 if let self, self.driverType == .rigctld, self.tcpConnection === keyedConnection {
                     self.rigctldPTTWatchdog?.cancel()
                     self.rigctldPTTWatchdog = nil
@@ -421,6 +424,29 @@ public final class RigControlEngine: ObservableObject {
             }
         case .disabled: return {}
         }
+    }
+
+    private func rigctldUncertain(_ reason: String, endpoint: String) {
+        let text = "Radio Control rigctld (\(endpoint)): \(reason) at \(TXLimits.utc()). Receive is unconfirmed. Other YAAM tools remain available. Release PTT locally and check the radio is on receive before sending again."
+        lastError = text
+        TransmitNotices.shared.post(releaseNoticeSource, text: text)
+    }
+
+    private func releaseRigctld(_ connection: NWConnection?, endpoint: String, close: Bool = false) {
+        rigctldReleasePending = true
+        guard let connection else {
+            rigctldUncertain("T 0 could not be sent because the connection is missing", endpoint: endpoint)
+            return
+        }
+        connection.send(content: Data("T 0\n".utf8), completion: .contentProcessed { [weak self] error in
+            if let error {
+                Task { @MainActor [weak self] in
+                    self?.rigctldUncertain("T 0 write failed: \(error.localizedDescription)", endpoint: endpoint)
+                }
+            }
+            if close { connection.cancel() }
+        })
+        if close { Task { try? await Task.sleep(for: .seconds(2)); connection.cancel() } }
     }
 
     private func startTX500Integration() {
@@ -844,6 +870,9 @@ public final class RigControlEngine: ObservableObject {
                     self.rigModel = "Hamlib Radio"
                     self.startRigctldPolling()
                 case .failed(let err):
+                    if self.rigctldKeyed || self.rigctldReleasePending {
+                        self.rigctldUncertain("the connection failed during TX or release: \(err.localizedDescription)", endpoint: "\(self.host):\(self.port)")
+                    }
                     self.isConnected = false
                     self.isConnecting = false
                     self.lastError = err.localizedDescription
@@ -873,24 +902,44 @@ public final class RigControlEngine: ObservableObject {
     }
 
     private func sendRigctldCommand(_ command: String) {
-        guard let conn = tcpConnection, isConnected else { return }
+        guard let conn = tcpConnection, isConnected else {
+            if command == "T 0\n" { rigctldUncertain("T 0 was not sent; no working connection", endpoint: "\(host):\(port)") }
+            return
+        }
+        let endpoint = "\(host):\(port)"
         let data = command.data(using: .utf8) ?? Data()
         conn.send(content: data, completion: .contentProcessed { [weak self] error in
-            if error == nil {
-                Task { @MainActor [weak self] in
-                    self?.readRigctldResponse()
-                }
+            Task { @MainActor [weak self] in
+                guard let self, self.tcpConnection === conn else { return }
+                if let error {
+                    self.lastError = error.localizedDescription
+                    if self.rigctldKeyed || command.hasPrefix("T ") {
+                        self.rigctldUncertain("CAT write failed: \(error.localizedDescription)", endpoint: endpoint)
+                    }
+                } else { self.readRigctldResponse() }
             }
         })
     }
 
     private func readRigctldResponse() {
-        tcpConnection?.receive(minimumIncompleteLength: 1, maximumLength: 1024) { [weak self] data, _, _, _ in
+        guard let connection = tcpConnection else { return }
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 1024) { [weak self] data, _, complete, error in
+            Task { @MainActor [weak self] in
+                guard let self, self.tcpConnection === connection else { return }
+                if (error != nil || complete), self.rigctldKeyed || self.rigctldReleasePending {
+                    self.rigctldUncertain("the reply connection was lost", endpoint: "\(self.host):\(self.port)")
+                }
+            }
             guard let self = self, let data = data, let text = String(data: data, encoding: .utf8) else { return }
 
             Task { @MainActor in
+                guard self.tcpConnection === connection else { return }
                 let lines = text.components(separatedBy: "\n").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
                 for line in lines {
+                    if line.hasPrefix("RPRT "), let result = Int(line.dropFirst(5)), result != 0,
+                       self.rigctldKeyed || self.rigctldReleasePending {
+                        self.rigctldUncertain("rigctld refused a CAT command (\(line))", endpoint: "\(self.host):\(self.port)")
+                    }
                     if let hz = UInt64(line), hz > 100000 {
                         self.frequencyHz = hz
                     } else if ["USB", "LSB", "CW", "CWR", "AM", "FM", "PKTUSB", "PKTLSB"].contains(line.uppercased()) {

@@ -8,6 +8,7 @@ nonisolated final class NWConnection: @unchecked Sendable {
     var stateUpdateHandler: (@Sendable (State) -> Void)?
     var sent: [String] = []
     var cancelled = false
+    var writeError: NWError?
     init(host: NWEndpoint.Host, port: NWEndpoint.Port, using: NWParameters) { Self.instances.append(self) }
     final class ContentContext: Sendable {}
     func receive(minimumIncompleteLength: Int, maximumLength: Int, completion: @escaping @Sendable (Data?, ContentContext?, Bool, NWError?) -> Void) {}
@@ -15,7 +16,7 @@ nonisolated final class NWConnection: @unchecked Sendable {
     func cancel() { cancelled = true }
     func send(content: Data?, completion: SendCompletion) {
         sent.append(String(decoding: content ?? Data(), as: UTF8.self))
-        if case .contentProcessed(let done) = completion { done(nil) }
+        if case .contentProcessed(let done) = completion { done(writeError) }
     }
 }
 @main
@@ -52,6 +53,15 @@ struct RigControlReleaseDestinationRegression {
         first.stateUpdateHandler?(.cancelled); pump()
         precondition(!second.sent.contains("T 0\n") && rig.isPTT && rig.isConnected,
                      "An old release/callback must not stop or disconnect a replacement radio")
+        second.writeError = .posix(.EPIPE)
+        rig.capturePTTRelease()(); pump()
+        precondition(TransmitNotices.shared.notices.contains { $0.text.contains("T 0 write failed") })
+        rig.lastError = "poll overwritten"
+        precondition(TransmitNotices.shared.notices.contains { $0.text.contains("Receive is unconfirmed") })
+        rig.setPTT(true)
+        second.stateUpdateHandler?(.failed(.posix(.ECONNRESET))); pump()
+        precondition(TransmitNotices.shared.notices.contains { $0.text.contains("connection failed during TX") })
+        second.writeError = nil
         _ = TransmitShutdown.releaseAll()
         precondition(second.sent.contains("T 0\n") && !rig.isPTT)
         rig.disconnect()

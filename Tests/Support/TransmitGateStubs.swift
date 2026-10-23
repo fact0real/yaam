@@ -100,6 +100,11 @@ final class Lab599TX500Driver {
     var powerWatts = 0
     var sMeterValue: Double = 0
     var swrUpdatedAt: Date? = nil
+    func checkFT8Receive() {}
+    func keyFT8Verified(maximumDuration: TimeInterval, before deadline: Date) async throws {
+        setPTT(true, maximumDuration: maximumDuration)
+    }
+
 }
 
 final class Xiegu6100Driver {

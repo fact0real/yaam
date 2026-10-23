@@ -1994,8 +1994,8 @@ public struct BandmapView: View {
 
                         Button("A=B") {
                             bandmap.vfoBKHz = currentVFOAFrequencyKHz
-                            if tci.isConnected {
-                                tci.setFrequency(hz: UInt64(bandmap.vfoBKHz * 1000.0), receiver: 0, vfo: 1)
+                            if tci.isConnected, let hz = FrequencyBounds.hertz(kHz: bandmap.vfoBKHz) {
+                                tci.setFrequency(hz: hz, receiver: 0, vfo: 1)
                             }
                         }
                         .buttonStyle(.borderless)
@@ -2078,10 +2078,11 @@ public struct BandmapView: View {
     private func setSplitOffset(_ offsetKHz: Double) {
         let vfoA = currentVFOAFrequencyKHz
         let vfoB = vfoA + offsetKHz
+        guard let hz = FrequencyBounds.hertz(kHz: vfoB) else { return }
         bandmap.vfoBKHz = vfoB
         bandmap.isSplitActive = true
         if tci.isConnected {
-            tci.setFrequency(hz: UInt64(vfoB * 1000.0), receiver: 0, vfo: 1)
+            tci.setFrequency(hz: hz, receiver: 0, vfo: 1)
         }
     }
 
@@ -2137,13 +2138,25 @@ public struct BandmapView: View {
     }
 
     private func tuneToFrequency(khz: Double, mode: String? = nil, callsign: String? = nil) {
-        let hz = khz * 1000.0
+        guard let safeHz = FrequencyBounds.hertz(kHz: khz) else {
+            showToast("Frequency is invalid; the radio was not tuned")
+            return
+        }
+        let hz = Double(safeHz)
+        var modeNote = ""
 
         // 1. Hardware / Rig Control
         if tci.isConnected {
             tci.setFrequency(hz: UInt64(hz))
             if let mode = mode, !mode.isEmpty {
-                tci.setMode(mode)
+                // The spot's mode is text from outside (cluster or WSJT-X): one TCI would misread is not sent, and the
+                // operator is told here, where the spot was tuned (no screen shows TCIClient's lastError).
+                if let refusal = TCIClient.modeRefusal(mode) {
+                    appState.appendLog(refusal)
+                    modeNote = " · mode not set"
+                } else {
+                    tci.setMode(mode)
+                }
             }
         } else if flrig.isConnected {
             Task {
@@ -2167,10 +2180,12 @@ public struct BandmapView: View {
             if let mode = mode {
                 appState.quickLogDraft.mode = mode
             }
-            appState.appendLog("QSY to \(callsign) at \(String(format: "%.3f kHz", khz))" + (mode != nil ? " [\(mode!)]" : ""))
-            showToast("QSY: \(callsign) · \(String(format: "%.3f kHz", khz))")
+            // A refused mode is already in the log, shown safely (modeRefusal); it is not written here as it came.
+            let modeShown = !modeNote.isEmpty ? " [mode not set]" : (mode != nil ? " [\(mode!)]" : "")
+            appState.appendLog("QSY to \(callsign) at \(String(format: "%.3f kHz", khz))" + modeShown)
+            showToast("QSY: \(callsign) · \(String(format: "%.3f kHz", khz))" + modeNote)
         } else {
-            showToast("QSY: \(String(format: "%.3f kHz", khz))")
+            showToast("QSY: \(String(format: "%.3f kHz", khz))" + modeNote)
         }
     }
 

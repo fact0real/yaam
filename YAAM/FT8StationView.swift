@@ -993,7 +993,7 @@ struct FT8StationView: View {
                     Image(systemName: "checkmark.seal.fill")
                         .foregroundStyle(Color.green)
                         .font(.caption2)
-                    Text("Pre-Flight: Menu 34: TS2000 • Menu 35: 9600 • Menu 09: 30 • Mode: DIG • Audio: 48kHz 16-bit")
+                    Text("Pre-Flight: CAT protocol LAB599 • 9600 baud • Mode: DIG (MD6) • Audio: 48kHz 16-bit. Fresh PTT readback is required; a missed slot is skipped.")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }

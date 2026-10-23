@@ -230,7 +230,7 @@ struct UploadTransportPrivacyRegression {
         let cancelledResult = await cancelled.value
         precondition(!cancelledResult.success && cancelledResult.message.contains("cancelled before signing"))
         let timeoutResult = await coordinator.execute(adifContent: originalADIF, stationLocation: "LAB", customExecutablePath: executable.path, securityBookmark: Data(), timeoutSeconds: 0.03)
-        precondition(!timeoutResult.success && timeoutResult.message.contains("timed out"), "Even a zero exit after the watchdog fires must not succeed")
+        precondition(!timeoutResult.success && timeoutResult.message.contains("timed out"), "Even a zero exit after the watchdog fires must not succeed: \(timeoutResult)")
         let latin1 = folder.appendingPathComponent("legacy.adi")
         var legacyBytes = Data("<CALL:5>K0ABC<COMMENT:4>caf".utf8)
         legacyBytes.append(0xE9)

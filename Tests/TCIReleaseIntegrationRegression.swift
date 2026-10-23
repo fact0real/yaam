@@ -16,12 +16,13 @@ final class URLSessionWebSocketTask {
     var sent: [String] = []
     var cancelled = false
     var completeWrites = true
+    var writeError: Error?
     var completions: [(Error?) -> Void] = []
     var received: ((Result<Message, Error>) -> Void)?
     func resume() {}
     func send(_ message: Message, completionHandler: @escaping (Error?) -> Void) {
         if case .string(let text) = message { sent.append(text) }
-        if completeWrites { completionHandler(nil) } else { completions.append(completionHandler) }
+        if completeWrites { completionHandler(writeError) } else { completions.append(completionHandler) }
     }
     func receive(completionHandler: @escaping (Result<Message, Error>) -> Void) { received = completionHandler }
     func sendPing(pongReceiveHandler: @escaping (Error?) -> Void) { pongReceiveHandler(nil) }
@@ -55,13 +56,43 @@ struct TCIReleaseIntegrationRegression {
         current.deliver("ready;"); pump()
         old.deliver("trx:9,true;"); pump()
         precondition(!client.isPTTActive, "A retired connection must not publish state into its replacement")
+        client.sendCW(text: "TEST")
+        precondition(client.holdsTransmit, "CW macros participate in shutdown ownership without a trx event")
+        current.deliver("trx:0,true;"); pump()
+        current.deliver("trx:0,false;"); pump()
+        precondition(!client.holdsTransmit, "Server TX-to-RX ends macro ownership without trusting the local clock")
+        client.sendCW(text: "TEST")
+        current.received?(.failure(NSError(domain: "fixture", code: 1)))
+        pump()
+        precondition(!client.isConnected && current.cancelled)
+        precondition(TransmitNotices.shared.notices.contains { $0.text.contains("may still be transmitting") })
+        client.stopCW() // must not erase the persistent warning or the pending original endpoint
+        client.connect(host: "other.invalid", port: 40001)
+        let other = URLSession.tasks.last!
+        other.deliver("ready;"); pump()
+        precondition(other.sent.isEmpty, "Recovery must not stop an unrelated SDR")
+        client.connect(host: "fixture.invalid", port: 40001)
+        let recovered = URLSession.tasks.last!
+        recovered.completeWrites = false
+        recovered.deliver("ready;"); pump()
+        client.setPTT(true)
+        precondition(recovered.sent.count == 1 && recovered.sent[0].hasPrefix("cw_macros_stop;"), "Recovery release precedes every possible key-down")
+        recovered.completions.forEach { $0(nil) }; recovered.completeWrites = true; pump()
+        precondition(client.isConnected)
+        client.setPTT(true, receiver: 4)
+        recovered.writeError = NSError(domain: "fixture-write", code: 2)
+        client.setPTT(false, receiver: 4); pump()
+        precondition(!client.isConnected && TransmitNotices.shared.notices.contains { $0.text.contains("release write failed") })
+        client.connect(host: "fixture.invalid", port: 40001)
+        let final = URLSession.tasks.last!; final.deliver("ready;"); pump()
+        precondition(final.sent.first?.contains("trx:4,false;") == true, "Recovery retains the exact receiver whose release write failed")
         client.setPTT(true, receiver: 4)
         TransmitShutdown.beginShutdown()
         _ = TransmitShutdown.releaseAll()
-        precondition(current.sent.contains { $0.contains("trx:4,false;") })
-        let count = current.sent.count
+        precondition(final.sent.contains { $0.contains("trx:4,false;") })
+        let count = final.sent.count
         client.setPTT(true); client.setTune(true); client.sendCW(text: "TEST")
-        precondition(current.sent.count == count && !client.holdsTransmit, "Shutdown must refuse all new key-downs")
+        precondition(final.sent.count == count && !client.holdsTransmit, "Shutdown must refuse all new key-downs")
         print("PASS TCI multi-receiver release before close, stale callbacks and shutdown latch without sockets")
     }
 }

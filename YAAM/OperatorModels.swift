@@ -662,6 +662,10 @@ nonisolated enum DXSpotParser {
               let callRange = Range(match.range(at: 3), in: clean),
               let remainderRange = Range(match.range(at: 4), in: clean),
               let frequencyKHz = Double(clean[frequencyRange]) else { return nil }
+        // The line comes from the cluster, written by anyone: a frequency from about 9.2e17 kHz (18 digits) upwards,
+        // or one that reads as infinity, would stop YAAM in Int(bucketKHz * 10) below, on arrival. Such a line is no
+        // spot (FrequencyBounds).
+        guard FrequencyBounds.isUsable(kHz: frequencyKHz) else { return nil }
 
         let callsign = String(clean[callRange]).uppercased()
         guard callsign.count >= 3, callsign.contains(where: \.isLetter), callsign.contains(where: \.isNumber) else { return nil }

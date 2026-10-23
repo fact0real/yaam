@@ -112,7 +112,20 @@ public enum QSXCommentParser {
         public let isSimplex: Bool
     }
 
+    /// The split a spot's comment announces. The comment comes from the DX cluster, written by anyone: a number such as
+    /// "UP 99999999999999999999" would make a transmit frequency that stops YAAM where it is tuned (UInt64(kHz * 1000)).
+    /// A split whose frequencies are not usable radio frequencies (FrequencyBounds) is read as no split at all.
     public static func parse(comment rawComment: String, dxBaseFreqKHz: Double) -> ParsedComment {
+        let parsed = parseText(rawComment, dxBaseFreqKHz: dxBaseFreqKHz)
+        let frequencies = [parsed.lowOffsetKHz, parsed.highOffsetKHz].compactMap { $0.map { dxBaseFreqKHz + $0 } }
+            + [parsed.exactFrequencyKHz].compactMap { $0 }
+        guard frequencies.allSatisfy({ FrequencyBounds.isUsable(kHz: $0) }) else {
+            return ParsedComment(isSplit: false, lowOffsetKHz: nil, highOffsetKHz: nil, exactFrequencyKHz: nil, isRange: false, isSimplex: false)
+        }
+        return parsed
+    }
+
+    private static func parseText(_ rawComment: String, dxBaseFreqKHz: Double) -> ParsedComment {
         let clean = rawComment.uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
         if clean.isEmpty {
             return ParsedComment(isSplit: false, lowOffsetKHz: nil, highOffsetKHz: nil, exactFrequencyKHz: nil, isRange: false, isSimplex: false)
@@ -483,6 +496,10 @@ public final class PileupSniperEngine: ObservableObject {
         let splitRangeKHz = (dxRxFrequencyKHz + finalMin) ... (dxRxFrequencyKHz + finalMax)
 
         let summaryTag = "UP \(String(format: "%.0f", finalMin))–\(String(format: "%.0f", finalMax)) kHz · Sweet spot \(recommendedOffsetKHz >= 0 ? "+" : "")\(String(format: "%.1f", recommendedOffsetKHz))k"
+
+        // The steps above add to offsets read from cluster comments: three "DN" spots near the DX frequency can step
+        // below 0 kHz, and the panels tune recommendedTxKHz with UInt64(kHz * 1000), which stops YAAM. No solution then.
+        guard FrequencyBounds.isUsable(kHz: recommendedTxKHz) else { return nil }
 
         return PileupSniperSolution(
             dxCallsign: cleanDX,
