@@ -11,6 +11,27 @@ nonisolated struct SKEDCountryOption: Identifiable, Sendable {
     let regionID: String
     let serviceName: String
     var id: String { iso }
+    var displayName: String { SKEDCountryPresentation.name(iso: iso, fallback: serviceName) }
+    var menuTitle: String { "\(SKEDCountryDiscovery.flag(for: iso)) \(displayName)" }
+}
+
+/// Provider codes are identifiers, never country labels or unchecked flag scalars.
+nonisolated enum SKEDCountryPresentation {
+    static func canonicalISO(_ iso: String) -> String {
+        switch iso.lowercased() {
+        case "ze": return "gb" // Legacy QRZ 2E ranking bucket.
+        case "bq": return "bq1"
+        default: return iso.lowercased()
+        }
+    }
+    static func name(iso: String, fallback: String) -> String {
+        let code = canonicalISO(iso)
+        let special = ["bq1": "Bonaire", "x1": "Antarctic station (X1)", "x2": "Antarctic station (X2)", "xk": "Kosovo"]
+        if let name = special[code] { return name }
+        if Locale.Region.isoRegions.contains(where: { $0.identifier.lowercased() == code }),
+           let name = Locale(identifier: "en").localizedString(forRegionCode: code.uppercased()) { return name }
+        return fallback.count > 3 ? fallback : "Other radio entity (\(iso.uppercased()))"
+    }
 }
 
 nonisolated struct SKEDUSState: Identifiable, Sendable {
@@ -66,7 +87,7 @@ nonisolated enum SKEDGeographyContract {
             return SKEDRegion(id: id.lowercased(), name: name, icon: row["icon"] as? String ?? "🌐")
         }
         let validIDs = Set(regions.map(\.id))
-        let countryOptions = try rows(countries, key: "countries").compactMap { row -> SKEDCountryOption? in
+        let parsedCountries = try rows(countries, key: "countries").compactMap { row -> SKEDCountryOption? in
             guard let iso = (row["iso"] ?? row["country_iso"]) as? String,
                   let region = row["continent_id"] as? String,
                   validIDs.contains(region.lowercased()),
@@ -75,6 +96,13 @@ nonisolated enum SKEDGeographyContract {
             else { return nil }
             return SKEDCountryOption(iso: iso.lowercased(), regionID: region.lowercased(),
                                      serviceName: (row["country_name"] ?? row["name"]) as? String ?? iso.uppercased())
+        }
+        var seen = Set<String>()
+        let countryOptions = parsedCountries.compactMap { item -> SKEDCountryOption? in
+            let iso = SKEDCountryPresentation.canonicalISO(item.iso)
+            guard seen.insert(iso).inserted else { return nil }
+            return SKEDCountryOption(iso: iso, regionID: item.regionID,
+                                     serviceName: SKEDCountryPresentation.name(iso: iso, fallback: item.serviceName))
         }
         let stateOptions = try rows(states, key: "states").compactMap { row -> SKEDUSState? in
             guard let code = row["code"] as? String, code.count == 2,

@@ -28,6 +28,7 @@ struct SKEDDirectoryView: View {
     @State private var preparingDiscovery = false
     @State private var discoveryCountryHistory = SKEDCountryBandHistory()
     @State private var discoveryLogRevision = 0
+    @State private var discoverySnapshotRevision = 0
     @State private var discoveryUsesLocalCatalog = false
     @State private var discoveryGeography: SKEDGeographyCatalog?
     @State private var discoveryContacts: [SKEDDiscoveryContact] = []
@@ -91,11 +92,7 @@ struct SKEDDirectoryView: View {
     }
 
     private func fullCountryName(for iso: String, fallback: String) -> String {
-        if iso.caseInsensitiveCompare("bq1") == .orderedSame { return "Bonaire" }
-        if ["x1", "x2"].contains(iso.lowercased()) { return "Antarctic station \(iso.uppercased())" }
-        let code = iso.uppercased()
-        let localized = Locale(identifier: "en_US").localizedString(forRegionCode: code) ?? ""
-        return localized.isEmpty || localized.caseInsensitiveCompare(code) == .orderedSame ? fallback : localized
+        SKEDCountryPresentation.name(iso: iso, fallback: fallback)
     }
 
     private var countryChoices: [SKEDCountryChoice] {
@@ -103,10 +100,8 @@ struct SKEDDirectoryView: View {
             fullCountryName(for: $0.iso, fallback: $0.serviceName)
                 .localizedStandardCompare(fullCountryName(for: $1.iso, fallback: $1.serviceName)) == .orderedAscending
         }.map { country in
-            let prefix = country.iso == "bq1" ? "PJ4" : DXCCDatabase.representativePrefix(forISO: country.iso) ?? country.iso.uppercased()
-            let flag = flagForCountryIso(country.iso == "bq1" ? "bq" : country.iso)
             return SKEDCountryChoice(iso: country.iso,
-                                     title: "\(flag) \(fullCountryName(for: country.iso, fallback: country.serviceName)) · \(prefix)")
+                                     title: country.menuTitle)
         }
     }
 
@@ -234,6 +229,9 @@ struct SKEDDirectoryView: View {
 
     private var observedView: some View {
         selectionObservedView
+        .task(id: "discovery-\(showDiscovery)-\(appState.skedRecordsRevision)-\(appState.activeStationProfile?.normalizedCallsign ?? "")") {
+            if showDiscovery { await prepareDiscovery(refresh: true) }
+        }
         .task(id: geographyRefreshID) { await loadGeography() }
         .task(id: "\(destinationKey)-\(category)-\(refreshID)") { await load() }
         .task(id: "\(destinationKey)-\(appState.qsoRecordsRevision)-\(directory?.operators.map(\.callsign).joined(separator: ",") ?? "")") {
@@ -246,8 +244,8 @@ struct SKEDDirectoryView: View {
         .sheet(isPresented: $showDiscovery, onDismiss: {
             if let (contacts, bands) = pendingDiscovery {
                 pendingDiscovery = nil
-                guard appState.qsoRecordsRevision == discoveryLogRevision else {
-                    errorMessage = "Your log changed. Reopen Find contacts to refresh country history before preparing invitations."
+                guard appState.skedHistoryRevision == discoveryLogRevision else {
+                    errorMessage = "Your log changed. Search history was refreshed; select your contacts again before preparing invitations."
                     return
                 }
                 for contact in contacts { bandPlans[contact.id] = bands }
@@ -257,7 +255,8 @@ struct SKEDDirectoryView: View {
             }
         }) {
             SKEDContactDiscoveryView(geography: discoveryGeography, localContacts: discoveryContacts,
-                countryHistory: discoveryCountryHistory, usesLocalCatalog: discoveryUsesLocalCatalog, logChanged: appState.qsoRecordsRevision != discoveryLogRevision,
+                countryHistory: discoveryCountryHistory, usesLocalCatalog: discoveryUsesLocalCatalog, logChanged: appState.skedHistoryRevision != discoveryLogRevision,
+                logSnapshotRevision: discoverySnapshotRevision,
                 token: CredentialVault.value(for: .qrzRankAPIToken), userAgent: "YAAM-macOS/\(appState.currentVersion)",
                 stationCallsign: appState.activeStationProfile?.normalizedCallsign ?? "") {
                     pendingDiscovery = ($0, $1)
@@ -977,12 +976,13 @@ struct SKEDDirectoryView: View {
         }
     }
 
-    private func prepareDiscovery() async {
+    private func prepareDiscovery(refresh: Bool = false) async {
         preparingDiscovery = true
         let records = appState.qsoRecords
         let catalog = geography
         let stationID = appState.activeStationProfileID
-        let logRevision = appState.qsoRecordsRevision
+        let logRevision = appState.skedHistoryRevision
+        let snapshotRevision = appState.skedRecordsRevision
         let stationCall = appState.activeStationProfile?.normalizedCallsign ?? ""
         let result = await Task.detached(priority: .userInitiated) {
             let rows = records.map(\.fields)
@@ -999,13 +999,14 @@ struct SKEDDirectoryView: View {
             return (contacts.0, contacts.1, history)
         }.value
         preparingDiscovery = false
-        guard appState.activeStationProfileID == stationID, appState.qsoRecordsRevision == logRevision else { return }
+        guard !Task.isCancelled, appState.activeStationProfileID == stationID, appState.skedHistoryRevision == logRevision else { return }
         discoveryContacts = result.0
         discoveryCountryHistory = result.2
         discoveryLogRevision = logRevision
+        discoverySnapshotRevision = snapshotRevision
         discoveryUsesLocalCatalog = catalog == nil
         discoveryGeography = catalog ?? SKEDGeographyCatalog(regions: [], countries: result.1, states: [])
-        showDiscovery = true
+        if !refresh { showDiscovery = true }
     }
 
     private func load() async {
@@ -1016,7 +1017,7 @@ struct SKEDDirectoryView: View {
         do {
             let token = CredentialVault.value(for: .qrzRankAPIToken)
             let result = try await SKEDDirectoryService.shared.fetch(
-                countryISO: destinationKey, category: category, enrich: true,
+                countryISO: destinationKey, category: category, enrich: false,
                 token: token, userAgent: "YAAM-macOS/\(appState.currentVersion)"
             )
             guard !Task.isCancelled else { return }

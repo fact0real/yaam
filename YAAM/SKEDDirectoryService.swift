@@ -139,6 +139,44 @@ nonisolated enum SKEDDirectoryContract {
     }
 }
 
+nonisolated enum SKEDPreparedDirectoryContract {
+    static func request(countries: [String], token: String?, userAgent: String) throws -> URLRequest {
+        guard !countries.isEmpty, countries.count <= 64, Set(countries).count == countries.count else {
+            throw SKEDDirectoryError.invalidCountry
+        }
+        var request = try SKEDDirectoryContract.request(countryISO: countries[0], category: "qso",
+                                                         enrich: false, token: token, userAgent: userAgent)
+        for iso in countries {
+            guard (2...3).contains(iso.count), iso.utf8.allSatisfy({ (48...57).contains($0) || (97...122).contains($0) }) else {
+                throw SKEDDirectoryError.invalidCountry
+            }
+        }
+        var components = URLComponents(url: QRZRankAPIContract.baseURL, resolvingAgainstBaseURL: false)!
+        components.path = "/api/v1/sked-ready"
+        components.queryItems = [URLQueryItem(name: "countries", value: countries.joined(separator: ","))]
+        request.url = components.url
+        return request
+    }
+
+    static func decode(_ data: Data, countries: [String]) throws -> [String: [String: SKEDDirectory]] {
+        guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let directories = root["directories"] as? [String: [String: Any]] else { throw SKEDDirectoryError.badResponse }
+        var result: [String: [String: SKEDDirectory]] = [:]
+        for iso in countries {
+            for category in ["qso", "countries", "band"] {
+                guard let value = directories[iso]?[category] as? [String: Any],
+                      let returnedISO = value["country_iso"] as? String,
+                      SKEDCountryPresentation.canonicalISO(returnedISO) == SKEDCountryPresentation.canonicalISO(iso) else {
+                    throw SKEDDirectoryError.badResponse
+                }
+                result[iso, default: [:]][category] = try SKEDDirectoryContract.decode(
+                    JSONSerialization.data(withJSONObject: value), requestedISO: iso, category: category)
+            }
+        }
+        return result
+    }
+}
+
 actor SKEDDirectoryService {
     static let shared = SKEDDirectoryService()
     private let session: URLSession
@@ -147,6 +185,16 @@ actor SKEDDirectoryService {
         let config = URLSessionConfiguration.ephemeral
         config.httpShouldSetCookies = false
         session = URLSession(configuration: config)
+    }
+
+    func fetchPrepared(countries: [String], token: String?, userAgent: String) async throws -> [String: [String: SKEDDirectory]] {
+        let request = try SKEDPreparedDirectoryContract.request(countries: countries, token: token, userAgent: userAgent)
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw SKEDDirectoryError.badResponse }
+        guard (200..<300).contains(http.statusCode) else {
+            throw SKEDDirectoryError.server(http.statusCode, QRZRankAPIContract.decodeError(data)?.message ?? "")
+        }
+        return try SKEDPreparedDirectoryContract.decode(data, countries: countries)
     }
 
     func fetch(countryISO: String, category: String, enrich: Bool, token: String?, userAgent: String) async throws -> SKEDDirectory {

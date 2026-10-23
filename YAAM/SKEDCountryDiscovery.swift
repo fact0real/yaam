@@ -60,8 +60,10 @@ nonisolated struct SKEDCountrySuggestions: Identifiable, Sendable {
 
 nonisolated enum SKEDCountryDiscovery {
     static func flag(for iso: String) -> String {
-        let code = iso.lowercased() == "bq1" ? "BQ" : iso.uppercased()
-        guard code.utf8.count == 2, code.utf8.allSatisfy({ (65...90).contains($0) }) else { return "🌐" }
+        let canonical = SKEDCountryPresentation.canonicalISO(iso)
+        let code = canonical == "bq1" ? "BQ" : canonical.uppercased()
+        guard code == "XK" || Locale.Region.isoRegions.contains(where: { $0.identifier == code }),
+              code.utf8.count == 2, code.utf8.allSatisfy({ (65...90).contains($0) }) else { return "🌐" }
         return String(String.UnicodeScalarView(code.unicodeScalars.compactMap { UnicodeScalar(127397 + $0.value) }))
     }
 
@@ -95,6 +97,19 @@ nonisolated enum SKEDCountryDiscovery {
             let matching = matchesCountry ? all : SKEDContactDiscovery.filtered(all, bands: [], historyOnly: false, query: cleanQuery)
             guard matchesCountry || !matching.isEmpty else { return nil }
             return SKEDCountrySuggestions(country: country, contacts: Array(matching.prefix(max(0, limit))), availableCount: all.count)
+        }
+    }
+}
+
+nonisolated enum SKEDDiscoveryLogInput {
+    static let fields = ["CALL", "COUNTRY", "BAND", "FREQ", "NAME", "EMAIL", "QSO_DATE", "TIME_ON"]
+    static let historyFields = ["CALL", "COUNTRY", "BAND", "FREQ", "QSO_DATE", "TIME_ON"]
+    static func matches(_ lhs: [[String: String]], _ rhs: [[String: String]], historyOnly: Bool = false) -> Bool {
+        guard lhs.count == rhs.count else { return false }
+        let relevant = historyOnly ? historyFields : fields
+        return zip(lhs, rhs).allSatisfy { left, right in
+            if left == right { return true }
+            return relevant.allSatisfy { left[$0] == right[$0] }
         }
     }
 }

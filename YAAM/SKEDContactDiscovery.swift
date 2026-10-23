@@ -16,7 +16,11 @@ nonisolated enum SKEDContactDiscovery {
 
     static func continent(for country: SKEDCountryOption) -> String {
         // The provider splits the Middle East out of Asia.
-        country.regionID.lowercased() == "me" ? "AS" : country.regionID.uppercased()
+        switch country.regionID.lowercased() {
+        case "me": "AS"
+        case "sam": "SA"
+        default: country.regionID.uppercased()
+        }
     }
 
     static func loggedContacts(rows: [[String: String]], stationCallsign: String,
@@ -76,7 +80,7 @@ nonisolated enum SKEDContactDiscovery {
             let contact = SKEDDiscoveryContact(operatorInfo: SKEDOperator(rank: item.rank, callsign: key,
                 name: item.name, email: item.validEmail, score: item.score, confirmedQSOs: item.confirmedQSOs,
                 dxccCountries: item.dxccCountries, bandSlots: item.bandSlots, mailto: item.mailto),
-                countryISO: incoming.countryISO.lowercased(), countryName: incoming.countryName,
+                countryISO: SKEDCountryPresentation.canonicalISO(incoming.countryISO), countryName: SKEDCountryPresentation.name(iso: incoming.countryISO, fallback: incoming.countryName),
                 workedBands: Set(incoming.workedBands.map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }),
                 sources: incoming.sources)
             if var previous = result[key] {
@@ -112,6 +116,28 @@ nonisolated struct SKEDDiscoverySnapshot: Sendable {
 }
 
 nonisolated enum SKEDDiscoveryLoader {
+    /// Assemble one prepared batch off the UI actor, merging the contact pool only once.
+    static func prepared(countries: [SKEDCountryOption], directories: [String: [String: SKEDDirectory]],
+                         localContacts: [SKEDDiscoveryContact]) throws -> SKEDDiscoverySnapshot {
+        let allowed = Set(countries.map(\.iso))
+        var contacts = localContacts.filter { allowed.contains($0.countryISO) }
+        var history: [String: Set<String>] = [:]
+        for contact in localContacts { history[contact.id.uppercased(), default: []].formUnion(contact.workedBands) }
+        var statuses: [String: SKEDCountryLoadStatus] = [:]
+        for country in countries {
+            for category in ["qso", "countries", "band"] {
+                guard let directory = directories[country.iso]?[category] else { throw SKEDDirectoryError.badResponse }
+                contacts += directory.operators.map { item in
+                    SKEDDiscoveryContact(operatorInfo: item, countryISO: country.iso, countryName: country.displayName,
+                        workedBands: history[item.callsign.uppercased()] ?? [], sources: ["QRZ Rank"])
+                }
+            }
+            statuses[country.iso] = .complete
+        }
+        return SKEDDiscoverySnapshot(contacts: SKEDContactDiscovery.merge(contacts), failures: [], progress: "",
+                                     countryStatuses: statuses)
+    }
+
     /// Sequential requests keep continent searches cancellable without flooding the provider.
     static func load(countries: [SKEDCountryOption], localContacts: [SKEDDiscoveryContact],
                      targetEmailCount: Int? = nil, excludingCallsign: String = "",

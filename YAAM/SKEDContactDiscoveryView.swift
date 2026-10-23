@@ -7,6 +7,7 @@ struct SKEDContactDiscoveryView: View {
     var countryHistory = SKEDCountryBandHistory()
     var usesLocalCatalog = false
     var logChanged = false
+    var logSnapshotRevision = 0
     let token: String?
     let userAgent: String
     var stationCallsign: String = ""
@@ -15,6 +16,7 @@ struct SKEDContactDiscoveryView: View {
     @State private var country = ""
     @State private var bands: Set<String> = ["10m"]
     @State private var contacts: [SKEDDiscoveryContact] = []
+    @State private var latestLogContacts: [SKEDDiscoveryContact] = []
     @State private var selected: Set<String> = []
     @State private var unworkedOnly = true
     @State private var historyOnly = false
@@ -27,11 +29,12 @@ struct SKEDContactDiscoveryView: View {
     @State private var failures: [String] = []
     @State private var searched = false
     @State private var editingCriteria = false
+    @State private var searchGeneration = UUID()
     @State private var searchTask: Task<Void, Never>?
 
     private var countries: [SKEDCountryOption] {
         (geography?.countries ?? []).filter { SKEDContactDiscovery.continent(for: $0) == continent }
-            .sorted { $0.serviceName.localizedStandardCompare($1.serviceName) == .orderedAscending }
+            .sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
     }
     private var targets: [SKEDCountryOption] {
         countryHistory.targets(countries: countries.filter { country.isEmpty || $0.iso == country },
@@ -67,7 +70,7 @@ struct SKEDContactDiscoveryView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     if logChanged {
-                        Label("Your log has changed. Close and reopen contact search to refresh country history before preparing invitations.", systemImage: "arrow.clockwise.circle")
+                        Label("Updating country history from your latest log… Your search will be ready automatically.", systemImage: "arrow.clockwise.circle")
                             .foregroundStyle(.orange)
                     }
                     if searched {
@@ -101,17 +104,23 @@ struct SKEDContactDiscoveryView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("\(chosen.count) selected · \(selectedCountryCount) \(selectedCountryCount == 1 ? "country" : "countries") · \(SKEDMailTemplate.bandPhrase(bands))").font(.callout.bold())
-                    Text("Review each invitation before sending.").font(.caption).foregroundStyle(.secondary)
+                    Text(searched ? "Review each invitation before sending." : "Choose your destination and bands, then find contacts.").font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button { onPrepare(chosen, bands); dismiss() } label: {
-                    Label("Prepare invitations", systemImage: "square.and.pencil")
-                }.buttonStyle(.borderedProminent).disabled(chosen.isEmpty || bands.isEmpty || loading || logChanged)
+                if !searched || editingCriteria {
+                    Button { search() } label: { Label("Find contacts", systemImage: "magnifyingglass") }
+                        .buttonStyle(.borderedProminent).disabled(loading || targets.isEmpty || logChanged)
+                } else {
+                    Button { onPrepare(chosen, bands); dismiss() } label: {
+                        Label("Prepare invitations", systemImage: "square.and.pencil")
+                    }.buttonStyle(.borderedProminent).disabled(chosen.isEmpty || bands.isEmpty || logChanged)
+                }
             }.padding(16)
         }
         .frame(minWidth: 700, idealWidth: 880, minHeight: 440, idealHeight: 700)
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear {
+            latestLogContacts = localContacts
             if !countries.contains(where: { $0.iso == country }) { country = "" }
         }
         .onChange(of: continent) { _, _ in country = ""; reset() }
@@ -120,8 +129,17 @@ struct SKEDContactDiscoveryView: View {
         .onChange(of: unworkedOnly) { _, _ in historyOnly = false; reset() }
         .onChange(of: historyOnly) { _, _ in reconcileSelection() }
         .onChange(of: contactsPerCountry) { _, _ in reconcileSelection() }
+        .onChange(of: logSnapshotRevision) { _, _ in
+            latestLogContacts = localContacts
+            if searched {
+                let allowed = Set(targets.map(\.iso))
+                contacts = SKEDContactDiscovery.merge(localContacts.filter { allowed.contains($0.countryISO) }
+                    + contacts.filter { $0.sources.contains("QRZ Rank") && allowed.contains($0.countryISO) })
+                reconcileSelection()
+            }
+        }
         .onChange(of: logChanged) { _, changed in if changed { stop(); selected = [] } }
-        .onDisappear { searchTask?.cancel() }
+        .onDisappear { stop() }
     }
 
     private var searchControls: some View {
@@ -137,7 +155,7 @@ struct SKEDContactDiscoveryView: View {
                 }
                 Picker("Country", selection: $country) {
                     Text("All countries in continent").tag("")
-                    ForEach(countries) { Text($0.serviceName).tag($0.iso) }
+                    ForEach(countries) { Text($0.menuTitle).tag($0.iso) }
                 }
             }
             Label("2  Choose one or more bands", systemImage: "antenna.radiowaves.left.and.right").font(.headline)
@@ -170,7 +188,7 @@ struct SKEDContactDiscoveryView: View {
                 DisclosureGroup("Preview \(targets.count) countries") {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), alignment: .leading)], alignment: .leading, spacing: 8) {
                         ForEach(targets) { destination in
-                            Label(destination.serviceName, systemImage: "globe.europe.africa")
+                            Text(destination.menuTitle)
                                 .font(.caption).frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }.padding(.top, 8)
@@ -182,8 +200,6 @@ struct SKEDContactDiscoveryView: View {
             Text("Request these bands in your invitation. Band history is shown below; confirm current availability with the operator.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             HStack {
-                Button { search() } label: { Label("Find contacts", systemImage: "magnifyingglass") }
-                    .buttonStyle(.borderedProminent).disabled(loading || targets.isEmpty || logChanged)
                 if bands.isEmpty { Text("Choose at least one band.").font(.caption).foregroundStyle(.secondary) }
                 Spacer()
                 Text("Your log + QRZ Rank directory").font(.caption).foregroundStyle(.secondary)
@@ -205,7 +221,7 @@ struct SKEDContactDiscoveryView: View {
             if !unworkedOnly {
                 Toggle("Only operators previously worked on any selected band", isOn: $historyOnly).font(.callout).disabled(loading)
             }
-            Text("Up to \(contactsPerCountry) suggestions per country, drawn from your log and up to three top-19 directory rankings. Availability on \(SKEDMailTemplate.bandPhrase(bands)) still needs the operator’s agreement.")
+            Text("You can select and prepare available contacts while other countries load. Up to \(contactsPerCountry) suggestions per country, drawn from your log and up to three top-19 directory rankings. Availability on \(SKEDMailTemplate.bandPhrase(bands)) still needs the operator’s agreement.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             if countryHistory.unresolvedCount > 0 {
                 Label("\(countryHistory.unresolvedCount) log entries have an unresolved country and could not be checked.", systemImage: "questionmark.circle")
@@ -231,9 +247,9 @@ struct SKEDContactDiscoveryView: View {
     private var selectSuggestionsButton: some View {
         HStack {
             Button("Select up to \(contactsPerCountry) per country") { select(visible) }
-                .disabled(visible.isEmpty || loading || logChanged)
+                .disabled(visible.isEmpty || logChanged)
             Button("Clear (\(selected.count))") { selected = [] }
-                .disabled(selected.isEmpty || loading)
+                .disabled(selected.isEmpty)
         }
     }
 
@@ -243,7 +259,7 @@ struct SKEDContactDiscoveryView: View {
             HStack(alignment: .top) {
                 Text(SKEDCountryDiscovery.flag(for: group.id)).font(.title2).accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(group.country.serviceName).font(.headline)
+                    Text(group.country.displayName).font(.headline)
                     Label(unworkedOnly ? "No logged \(SKEDMailTemplate.bandPhrase(bands)) QSO" : "\(group.availableCount) contacts with email",
                           systemImage: unworkedOnly ? "sparkles" : "person.2")
                         .font(.caption).foregroundStyle(.secondary)
@@ -256,7 +272,7 @@ struct SKEDContactDiscoveryView: View {
                 }
                 if !group.contacts.isEmpty {
                     Button("Select \(group.contacts.count)") { select(group.contacts) }
-                        .controlSize(.small).disabled(loading || logChanged)
+                        .controlSize(.small).disabled(logChanged)
                 }
             }
             if let missing = countryHistory.missingBandCounts[group.id], missing > 0 {
@@ -281,7 +297,7 @@ struct SKEDContactDiscoveryView: View {
 
     private func emptyCountryMessage(_ status: SKEDCountryLoadStatus?) -> String {
         switch status {
-        case .complete: return "No email contacts were returned for this country. It remains on your target list."
+        case .complete: return "No public email is ready for this country yet. It remains on your target list; the server prepares directory profiles in the background."
         case .suggested: return "Suggestions have been loaded for this country."
         case .failed, .partial: return "The directory could not be fully checked. This does not mean no operators are available."
         case .loading: return "Looking for operators with email…"
@@ -294,7 +310,7 @@ struct SKEDContactDiscoveryView: View {
         HStack(alignment: .top, spacing: 12) {
             Toggle("Select \(contact.id)", isOn: Binding(get: { selected.contains(contact.id) }, set: {
                 if $0 { select([contact]) } else { selected.remove(contact.id) }
-            })).labelsHidden().disabled(loading || logChanged ||
+            })).labelsHidden().disabled(logChanged ||
                 (!selected.contains(contact.id) && chosen.filter { $0.countryISO == contact.countryISO }.count >= contactsPerCountry))
             VStack(alignment: .leading, spacing: 3) {
                 Text(contact.id).font(.callout.bold()).foregroundStyle(Color.accentColor)
@@ -317,6 +333,7 @@ struct SKEDContactDiscoveryView: View {
     }
     private func reconcileSelection() { select([]) }
     private func stop() {
+        searchGeneration = UUID()
         searchTask?.cancel()
         for (iso, status) in countryStatuses where status == .loading { countryStatuses[iso] = .stopped }
         loading = false
@@ -327,34 +344,35 @@ struct SKEDContactDiscoveryView: View {
     private func search() {
         stop()
         guard !logChanged, !targets.isEmpty else { return }
+        let generation = searchGeneration
         let destinations = targets
         countryStatuses = [:]
         expandedCountries = Set(destinations.prefix(1).map(\.iso))
         let allowed = Set(destinations.map(\.iso))
         contacts = SKEDContactDiscovery.merge(localContacts.filter { allowed.contains($0.countryISO) })
         selected = []; failures = []; loading = true; searched = true; editingCriteria = false
+        progress = "Loading prepared contacts for \(destinations.count) countries…"
         let searchToken = token
         let agent = userAgent
-        let requestedCount: Int? = historyOnly ? nil : contactsPerCountry
-        let ownCall = stationCallsign
+        let logContacts = latestLogContacts
         searchTask = Task { @MainActor in
             do {
-                try await SKEDDiscoveryLoader.load(countries: destinations, localContacts: localContacts,
-                    targetEmailCount: requestedCount, excludingCallsign: ownCall,
-                    fetch: { iso, category in
-                        try await SKEDDirectoryService.shared.fetch(countryISO: iso, category: category,
-                            enrich: true, token: searchToken, userAgent: agent)
-                    }, update: { snapshot in
-                        await MainActor.run {
-                            guard !Task.isCancelled else { return }
-                            contacts = snapshot.contacts
-                            failures = snapshot.failures
-                            progress = snapshot.progress
-                            countryStatuses = snapshot.countryStatuses
-                        }
-                    })
-            } catch { /* Cancellation preserves already loaded results. */ }
-            guard !Task.isCancelled else { return }
+                let prepared = try await SKEDDirectoryService.shared.fetchPrepared(countries: destinations.map(\.iso),
+                    token: searchToken, userAgent: agent)
+                try Task.checkCancellation()
+                let snapshot = try await Task.detached(priority: .userInitiated) {
+                    try SKEDDiscoveryLoader.prepared(countries: destinations, directories: prepared, localContacts: logContacts)
+                }.value
+                guard !Task.isCancelled, generation == searchGeneration else { return }
+                contacts = SKEDContactDiscovery.merge(latestLogContacts.filter { allowed.contains($0.countryISO) }
+                    + snapshot.contacts.filter { $0.sources.contains("QRZ Rank") })
+                failures = snapshot.failures
+                progress = snapshot.progress
+                countryStatuses = snapshot.countryStatuses
+            } catch {
+                if !Task.isCancelled, generation == searchGeneration { failures = [error.localizedDescription] }
+            }
+            guard !Task.isCancelled, generation == searchGeneration else { return }
             loading = false
             progress = ""
         }

@@ -14,6 +14,12 @@ struct SKEDGeographyContractRegression {
             ["iso": "x1", "continent_id": "an", "country_name": "X1"],
             ["iso": "x2", "continent_id": "an", "country_name": "X2"]
         ]
+        countries += [
+            ["iso": "li", "continent_id": "eu", "country_name": "LI"],
+            ["iso": "sm", "continent_id": "eu", "country_name": "SM"],
+            ["iso": "gb", "continent_id": "eu", "country_name": "GB"],
+            ["iso": "ze", "continent_id": "eu", "country_name": "ZE"]
+        ]
         for index in 0..<198 {
             let first = Character(UnicodeScalar(65 + index / 26)!)
             let second = Character(UnicodeScalar(65 + index % 26)!)
@@ -37,6 +43,10 @@ struct SKEDGeographyContractRegression {
         precondition(catalog.countries(in: "na").contains(where: { $0.iso == "bq1" }))
         precondition(catalog.countries(in: "an").map(\.iso) == ["x1", "x2"])
         precondition(catalog.states.count == 50)
+        precondition(catalog.countries.first(where: { $0.iso == "li" })?.menuTitle == "🇱🇮 Liechtenstein")
+        precondition(catalog.countries.first(where: { $0.iso == "sm" })?.serviceName == "San Marino")
+        precondition(catalog.countries.filter { $0.iso == "gb" }.count == 1)
+        precondition(!catalog.countries.contains { $0.iso == "ze" })
         let request = try SKEDGeographyContract.request(path: "/api/v1/us-states", token: "sample-token",
                                                         userAgent: "YAAM-Regression/1")
         precondition(request.url?.absoluteString == "https://qrz-rank.asis.sh/api/v1/us-states")

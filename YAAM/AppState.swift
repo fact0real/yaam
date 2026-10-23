@@ -2060,6 +2060,8 @@ class AppState: NSObject, ObservableObject {
     var syncStartedAt: [SyncSource: Date] = [:]
     
     @Published private(set) var qsoRecordsRevision = 0
+    @Published private(set) var skedRecordsRevision = 0
+    @Published private(set) var skedHistoryRevision = 0
     private var filteredRecordsCache: [QSORecordModel]?
     private var filteredChronologicalOrdinals: [UUID: Int] = [:]
     private var availableCountriesCache: [String]?
@@ -2088,6 +2090,14 @@ class AppState: NSObject, ObservableObject {
     @Published var tableHeaders: [String] = []
     @Published var qsoRecords: [QSORecordModel] = [] {
         didSet {
+            let oldSKEDRows = oldValue.map(\.fields)
+            let newSKEDRows = qsoRecords.map(\.fields)
+            if !SKEDDiscoveryLogInput.matches(oldSKEDRows, newSKEDRows) {
+                skedRecordsRevision &+= 1
+            }
+            if !SKEDDiscoveryLogInput.matches(oldSKEDRows, newSKEDRows, historyOnly: true) {
+                skedHistoryRevision &+= 1
+            }
             qsoRecordsRevision &+= 1
             filteredRecordsCache = nil
             filteredChronologicalOrdinals.removeAll(keepingCapacity: true)
