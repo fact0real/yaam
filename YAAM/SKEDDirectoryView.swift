@@ -22,9 +22,15 @@ private struct SKEDCountryChoice: Identifiable {
     var id: String { iso }
 }
 
+private struct SKEDMessagingSelection: Identifiable {
+    let id = UUID()
+    let callsign: String
+}
+
 struct SKEDDirectoryView: View {
     @EnvironmentObject private var appState: AppState
     @State private var showDiscovery = false
+    @State private var messagingSelection: SKEDMessagingSelection?
     @State private var preparingDiscovery = false
     @State private var discoveryCountryHistory = SKEDCountryBandHistory()
     @State private var discoveryLogRevision = 0
@@ -241,6 +247,13 @@ struct SKEDDirectoryView: View {
 
     private var presentedView: some View {
         observedView
+        .sheet(item: $messagingSelection) { selection in
+            SKEDMessagingView(recipient: selection.callsign, userAgent: "YAAM-macOS/\(appState.currentVersion)",
+                tokenProvider: { CredentialVault.value(for: .qrzRankAPIToken) },
+                credentialRevisionProvider: {
+                    "\(CredentialVault.changedAt(.qrzRankAPIToken)?.timeIntervalSince1970 ?? 0)-\(CredentialVault.hasStoredValueHint(for: .qrzRankAPIToken))"
+                })
+        }
         .sheet(isPresented: $showDiscovery, onDismiss: {
             if let (contacts, bands) = pendingDiscovery {
                 pendingDiscovery = nil
@@ -301,6 +314,9 @@ struct SKEDDirectoryView: View {
             }
             Spacer(minLength: 8)
             if isLoading { ProgressView().controlSize(.small) }
+            Button { messagingSelection = SKEDMessagingSelection(callsign: "") } label: {
+                Label("Messages", systemImage: "bubble.left.and.bubble.right")
+            }
             Button { Task { await prepareDiscovery() } } label: {
                 Label(preparingDiscovery ? "Reading contacts…" : "Find contacts", systemImage: "magnifyingglass")
             }.buttonStyle(.borderedProminent).disabled(preparingDiscovery)
@@ -621,6 +637,9 @@ struct SKEDDirectoryView: View {
                     Button("Email") { openComposer(for: [item]) }
                         .buttonStyle(.bordered)
                         .disabled(item.validEmail == nil)
+                    Button { messagingSelection = SKEDMessagingSelection(callsign: item.callsign) } label: {
+                        Image(systemName: "bubble.left.and.bubble.right")
+                    }.help("Message \(item.callsign)").accessibilityLabel("Message \(item.callsign)")
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 11)
