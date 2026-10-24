@@ -179,6 +179,23 @@ extension AppState {
         databaseStatus = "Saved \(records.count) QSOs"
     }
 
+    /// Commit the canonical local log and its upload intents together; a crash cannot split them.
+    func persistIncomingRecovery(jobs: [QSLQueueJob]) throws {
+        guard let database = logbookDatabase else { throw YAAMPersistenceError.databaseUnavailable }
+        guard let profileID = activeStationProfileID else { throw YAAMPersistenceError.noActiveStation }
+        guard loadedWorkspaceProfileID == profileID else { throw YAAMPersistenceError.workspaceNotLoaded }
+        let records = qsoRecords.map { PersistedQSO(id: $0.id, index: $0.index, fields: $0.fields) }
+        try workspaceSaveQueue.sync {
+            _ = try database.createBackup(reason: "Before verified Incoming recovery")
+            try database.saveWorkspace(
+                profileID: profileID, headers: tableHeaders, records: records,
+                replaceMissingRecords: false, pendingQSLJobs: jobs,
+                auditDetail: "Verified contact saved with \(jobs.count) upload intent(s)"
+            )
+        }
+        databaseStatus = "Saved \(records.count) QSOs"
+    }
+
     func saveStationProfile(_ proposedProfile: StationProfile, qrzAPIKey: String? = nil) throws {
         guard let database = logbookDatabase else { throw YAAMPersistenceError.databaseUnavailable }
         var profile = proposedProfile
@@ -236,6 +253,7 @@ extension AppState {
         try logbookDatabase?.recordAudit(action: "station-profile-activated", detail: profile.displayTitle, profileID: profile.id)
         loadMasterLogbook()
         loadQSLHubState()
+        loadQRZIncomingCache()
         updateMobileCompanionSnapshot()
         refreshDatabaseSafetyState()
     }
@@ -444,6 +462,7 @@ extension AppState {
             }
             loadMasterLogbook()
             loadQSLHubState()
+            loadQRZIncomingCache()
             updateMobileCompanionSnapshot()
             refreshDatabaseSafetyState()
             databaseStatus = "Restored \(snapshot.reason)"

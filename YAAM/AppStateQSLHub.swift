@@ -111,40 +111,12 @@ extension AppState {
         }
         let eligible = records.filter { UploadStationPolicy.matches($0.fields, stationCallsign: currentStationCallsign) }
         let skipped = records.count - eligible.count
-        var added = 0
-        var changedJobs: [QSLQueueJob] = []
-        var existingByKey: [String: QSLQueueJob] = [:]
-        for job in qslQueueJobs { existingByKey[QSLSyncAll.jobKey(job.qsoID, job.provider)] = job }
-        var jobStates = existingByKey.mapValues(\.state)
-        for key in unblockedKeys where jobStates[key] == .blocked { jobStates[key] = .retry }
-        let plan = QSLSyncAll.plannedUploads(
-            records: eligible.map { (id: $0.id, fields: $0.fields) },
-            providers: providers,
-            jobStates: jobStates,
-            retryStopped: retryStopped
+        let changedJobs = QSLSyncAll.queueChanges(
+            records: eligible.map { (id: $0.id, fields: $0.fields) }, profileID: profileID,
+            providers: providers, existingJobs: qslQueueJobs,
+            retryStopped: retryStopped, unblockedKeys: unblockedKeys
         )
-        let fieldsByID = Dictionary(records.map { ($0.id, $0.fields) }, uniquingKeysWith: { first, _ in first })
-        for provider in QSLProvider.allCases {
-            for qsoID in plan[provider] ?? [] {
-                guard let fields = fieldsByID[qsoID] else { continue }
-                let key = QSLSyncAll.jobKey(qsoID, provider)
-                let adif = QSLUploadStatus.uploadADIF(fields, for: provider)
-                var job = existingByKey[key] ?? QSLQueueJob(
-                    stationProfileID: profileID,
-                    qsoID: qsoID,
-                    provider: provider,
-                    adif: adif
-                )
-                job.adif = adif
-                job.state = .queued
-                job.nextAttemptAt = nil
-                job.message = "Waiting"
-                job.updatedAt = Date()
-                changedJobs.append(job)
-                existingByKey[key] = job
-                added += 1
-            }
-        }
+        let added = changedJobs.count
         do {
             try database.saveQSLJobs(changedJobs)
             qslQueueJobs = try database.loadQSLJobs(profileID: profileID)

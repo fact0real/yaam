@@ -11,6 +11,7 @@ nonisolated struct IncomingContactReview: Codable, Equatable, Sendable {
     var evidence = ""
     var verified = false
     var separateContact = false
+    var qrzAlreadyLogged: Bool? = nil
     init() {}
 
     static func clean(_ value: String) -> String {
@@ -21,6 +22,7 @@ nonisolated struct IncomingContactReview: Codable, Equatable, Sendable {
                       "BAND": Self.clean(band), "MODE": Self.clean(mode), "STATION_CALLSIGN": Self.clean(station)]
         let parents = ["FT4": "MFSK", "JS8": "MFSK", "USB": "SSB", "LSB": "SSB", "PSK31": "PSK"]
         if let parent = parents[Self.clean(mode)] { values["MODE"] = parent; values["SUBMODE"] = Self.clean(mode) }
+        if qrzAlreadyLogged == true { values["APP_YAAM_QRZ_VERIFIED_PRESENT"] = "Y" }
         return values
     }
     var problem: String? {
@@ -63,6 +65,18 @@ nonisolated struct IncomingContactReview: Codable, Equatable, Sendable {
         }
         return nil
     }
+    /// Reopened legacy records may spell a band/mode differently or include seconds. Compare canonical identity,
+    /// while still rejecting invalid edits, changed evidence and an unsaved QRZ-presence assertion.
+    func matchesSavedContact(_ saved: [String: String]) -> Bool {
+        var checked = self
+        checked.verified = true
+        guard checked.problem == nil else { return false }
+        return QSOIdentity.exactKey(fields: fields) == QSOIdentity.exactKey(fields: saved) &&
+            Self.clean(saved["STATION_CALLSIGN"] ?? "") == Self.clean(station) &&
+            saved["APP_YAAM_INCOMING_EVIDENCE"] == evidence &&
+            (qrzAlreadyLogged == true) == (saved["APP_YAAM_QRZ_VERIFIED_PRESENT"] == "Y")
+    }
+
     func detailsRequest(myCall: String) -> String {
         "Hello \(Self.clean(call)),\n\nI am reviewing your QRZ Incoming request for \(date.isEmpty ? "an unspecified date" : date). It may be missing from my log or have inconsistent details. Could you send the actual UTC date and time, band/frequency, mode and the callsign/location you worked? I will compare them with my own records before logging or submitting anything.\n\n73, \(myCall)"
     }

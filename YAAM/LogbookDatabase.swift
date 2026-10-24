@@ -416,7 +416,9 @@ nonisolated final class LogbookDatabase: @unchecked Sendable {
         headers: [String],
         records: [PersistedQSO],
         allowEmptyReplacement: Bool = false,
-        replaceMissingRecords: Bool = true
+        replaceMissingRecords: Bool = true,
+        pendingQSLJobs: [QSLQueueJob] = [],
+        auditDetail: String? = nil
     ) throws {
         try queue.sync {
             let stationCallsign = try profileCallsignInternal(profileID: profileID)
@@ -488,6 +490,19 @@ nonisolated final class LogbookDatabase: @unchecked Sendable {
                 let headerData = try JSONEncoder().encode(headers)
                 let headerValue = String(data: headerData, encoding: .utf8) ?? "[]"
                 try setMetadataValue(headerValue, for: "headers.\(profileID.uuidString.lowercased())")
+                if !pendingQSLJobs.isEmpty {
+                    let recordsByID = Dictionary(records.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+                    guard pendingQSLJobs.allSatisfy({ job in
+                        job.stationProfileID == profileID && recordsByID[job.qsoID].map {
+                            UploadStationPolicy.matches($0.fields, stationCallsign: stationCallsign) &&
+                            !SelfContactPolicy.isSelfContact(fields: $0.fields, profileCallsign: stationCallsign)
+                        } == true
+                    }) else { throw LogbookDatabaseError.unavailable("Upload jobs must belong to the saved station and contacts.") }
+                    try saveQSLJobsInternal(pendingQSLJobs)
+                }
+                if let auditDetail {
+                    try insertAudit(action: "incoming-recovery", detail: auditDetail, profileID: profileID)
+                }
                 try execute("COMMIT;")
             } catch {
                 try? execute("ROLLBACK;")
@@ -932,41 +947,47 @@ nonisolated final class LogbookDatabase: @unchecked Sendable {
         try queue.sync {
             try execute("BEGIN IMMEDIATE TRANSACTION;")
             do {
-                let statement = try prepare("""
-                    INSERT INTO qsl_jobs (
-                        id, station_profile_id, qso_id, provider, adif, state, attempts,
-                        next_attempt_at, message, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(station_profile_id, qso_id, provider) DO UPDATE SET
-                        adif = excluded.adif,
-                        state = excluded.state,
-                        attempts = excluded.attempts,
-                        next_attempt_at = excluded.next_attempt_at,
-                        message = excluded.message,
-                        updated_at = excluded.updated_at;
-                    """)
-                defer { sqlite3_finalize(statement) }
-                for job in jobs {
-                    sqlite3_reset(statement)
-                    sqlite3_clear_bindings(statement)
-                    bind(job.id.uuidString, to: 1, in: statement)
-                    bind(job.stationProfileID.uuidString, to: 2, in: statement)
-                    bind(job.qsoID.uuidString, to: 3, in: statement)
-                    bind(job.provider.rawValue, to: 4, in: statement)
-                    bind(job.adif, to: 5, in: statement)
-                    bind(job.state.rawValue, to: 6, in: statement)
-                    sqlite3_bind_int(statement, 7, Int32(job.attempts))
-                    bind(job.nextAttemptAt, to: 8, in: statement)
-                    bind(job.message, to: 9, in: statement)
-                    sqlite3_bind_double(statement, 10, job.createdAt.timeIntervalSince1970)
-                    sqlite3_bind_double(statement, 11, job.updatedAt.timeIntervalSince1970)
-                    try stepDone(statement)
-                }
+                try saveQSLJobsInternal(jobs)
                 try execute("COMMIT;")
             } catch {
                 try? execute("ROLLBACK;")
                 throw error
             }
+        }
+    }
+
+    /// Called only while the database queue owns an open transaction.
+    private func saveQSLJobsInternal(_ jobs: [QSLQueueJob]) throws {
+        guard !jobs.isEmpty else { return }
+        let statement = try prepare("""
+            INSERT INTO qsl_jobs (
+                id, station_profile_id, qso_id, provider, adif, state, attempts,
+                next_attempt_at, message, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(station_profile_id, qso_id, provider) DO UPDATE SET
+                adif = excluded.adif,
+                state = excluded.state,
+                attempts = excluded.attempts,
+                next_attempt_at = excluded.next_attempt_at,
+                message = excluded.message,
+                updated_at = excluded.updated_at;
+            """)
+        defer { sqlite3_finalize(statement) }
+        for job in jobs {
+            sqlite3_reset(statement)
+            sqlite3_clear_bindings(statement)
+            bind(job.id.uuidString, to: 1, in: statement)
+            bind(job.stationProfileID.uuidString, to: 2, in: statement)
+            bind(job.qsoID.uuidString, to: 3, in: statement)
+            bind(job.provider.rawValue, to: 4, in: statement)
+            bind(job.adif, to: 5, in: statement)
+            bind(job.state.rawValue, to: 6, in: statement)
+            sqlite3_bind_int(statement, 7, Int32(job.attempts))
+            bind(job.nextAttemptAt, to: 8, in: statement)
+            bind(job.message, to: 9, in: statement)
+            sqlite3_bind_double(statement, 10, job.createdAt.timeIntervalSince1970)
+            sqlite3_bind_double(statement, 11, job.updatedAt.timeIntervalSince1970)
+            try stepDone(statement)
         }
     }
 

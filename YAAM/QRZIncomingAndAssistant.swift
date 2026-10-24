@@ -8,38 +8,6 @@ import Foundation
 import SwiftUI
 import WebKit
 
-nonisolated struct QRZIncomingConfirmation: Identifiable, Hashable, Codable, Sendable {
-    let id: String
-    let callsign: String
-    let qsoDate: String
-    let requestedAt: String
-    let rawSummary: String
-    let qsoID: String
-
-    enum CodingKeys: String, CodingKey {
-        case id, callsign, qsoDate, requestedAt, rawSummary, qsoID
-    }
-
-    init(callsign: String, qsoDate: String, requestedAt: String, rawSummary: String, qsoID: String = "") {
-        self.callsign = callsign
-        self.qsoDate = qsoDate
-        self.requestedAt = requestedAt
-        self.rawSummary = rawSummary
-        self.qsoID = qsoID
-        id = "\(callsign)|\(qsoDate)|\(requestedAt)|\(rawSummary)"
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        callsign = try container.decode(String.self, forKey: .callsign)
-        qsoDate = try container.decode(String.self, forKey: .qsoDate)
-        requestedAt = try container.decode(String.self, forKey: .requestedAt)
-        rawSummary = try container.decode(String.self, forKey: .rawSummary)
-        qsoID = (try? container.decode(String.self, forKey: .qsoID)) ?? ""
-        id = (try? container.decode(String.self, forKey: .id)) ?? "\(callsign)|\(qsoDate)|\(requestedAt)|\(rawSummary)"
-    }
-}
-
 nonisolated struct QRZIncomingFetchResult: Sendable {
     let requests: [QRZIncomingConfirmation]
     let message: String
@@ -654,31 +622,58 @@ nonisolated struct ConfirmationReconciliationSnapshot: Codable, Equatable, Senda
 }
 
 extension AppState {
+    private var incomingArchiveCacheKey: String? {
+        activeStationProfileID.map { "qrzIncomingRecovery.v2." + $0.uuidString }
+    }
+
     func loadQRZIncomingCache() {
-        guard let data = UserDefaults.standard.data(forKey: qrzIncomingRequestsCacheKey),
-              let cached = try? JSONDecoder().decode([QRZIncomingConfirmation].self, from: data) else { return }
-        qrzIncomingRequests = cached
-        if !cached.isEmpty {
-            qrzIncomingStatus = "Showing \(cached.count) saved QRZ Incoming request(s). Refresh to check for changes."
+        qrzIncomingArchive = QRZIncomingRecoveryArchive()
+        if let key = incomingArchiveCacheKey, let data = UserDefaults.standard.data(forKey: key),
+           let cached = try? JSONDecoder().decode(QRZIncomingRecoveryArchive.self, from: data) {
+            qrzIncomingArchive = cached
+        } else if stationProfiles.count == 1,
+                  let data = UserDefaults.standard.data(forKey: qrzIncomingRequestsCacheKey),
+                  let legacy = try? JSONDecoder().decode([QRZIncomingConfirmation].self, from: data) {
+            // A legacy cache has no owner. Migrate only when there is exactly one station.
+            for request in legacy { qrzIncomingArchive.retain(request) }
+            saveQRZIncomingCache()
         }
+        qrzIncomingRequests = qrzIncomingArchive.requests
+        qrzIncomingStatus = "Showing \(qrzIncomingRequests.count) saved recovery case(s). Refresh to check QRZ."
     }
 
     private func saveQRZIncomingCache() {
-        guard let data = try? JSONEncoder().encode(qrzIncomingRequests) else { return }
-        UserDefaults.standard.set(data, forKey: qrzIncomingRequestsCacheKey)
+        guard let key = incomingArchiveCacheKey,
+              let data = try? JSONEncoder().encode(qrzIncomingArchive) else { return }
+        UserDefaults.standard.set(data, forKey: key)
+    }
+
+    func retainQRZIncomingRecovery(_ request: QRZIncomingConfirmation) {
+        qrzIncomingArchive.retain(request)
+        qrzIncomingRequests = qrzIncomingArchive.requests
+        saveQRZIncomingCache()
+    }
+
+    func archiveQRZIncomingRecovery(_ request: QRZIncomingConfirmation) {
+        qrzIncomingArchive.remove(request)
+        qrzIncomingRequests = qrzIncomingArchive.requests
+        saveQRZIncomingCache()
     }
 
     func fetchQRZIncomingRequests() {
         guard !isFetchingQRZIncoming else { return }
+        let fetchingProfileID = activeStationProfileID
         isFetchingQRZIncoming = true
         qrzIncomingStatus = "Opening QRZ Logbook Incoming..."
         Task { @MainActor in
             let result = await QRZIncomingScraper.shared.fetchIncoming()
             self.isFetchingQRZIncoming = false
+            guard self.activeStationProfileID == fetchingProfileID else { return }
             if result.succeeded {
-                self.qrzIncomingRequests = result.requests
+                self.qrzIncomingArchive.refresh(result.requests)
+                self.qrzIncomingRequests = self.qrzIncomingArchive.requests
                 self.saveQRZIncomingCache()
-                self.qrzIncomingStatus = result.message
+                self.qrzIncomingStatus = result.message + " Saved recovery cases remain available until archived locally."
             } else if self.qrzIncomingRequests.isEmpty {
                 self.qrzIncomingStatus = result.message
             } else {
@@ -695,6 +690,7 @@ extension AppState {
 
     func rejectQRZIncomingRequest(_ incoming: QRZIncomingConfirmation, reason: String, comments: String = "") {
         guard !isRejectingQRZIncoming else { return }
+        let rejectingProfileID = activeStationProfileID
         isRejectingQRZIncoming = true
         rejectingQRZIncomingID = incoming.id
         qrzIncomingStatus = "Rejecting request from \(incoming.callsign) on QRZ.com..."
@@ -708,9 +704,11 @@ extension AppState {
             )
             self.isRejectingQRZIncoming = false
             self.rejectingQRZIncomingID = nil
+            guard self.activeStationProfileID == rejectingProfileID else { return }
 
             if result.succeeded {
-                self.qrzIncomingRequests.removeAll { $0.id == incoming.id }
+                self.qrzIncomingArchive.remove(incoming)
+                self.qrzIncomingRequests = self.qrzIncomingArchive.requests
                 self.saveQRZIncomingCache()
                 self.qrzIncomingStatus = "Rejected confirmation request from \(incoming.callsign) on QRZ.com."
                 self.appendLog("QRZ Incoming: successfully rejected confirmation request from \(incoming.callsign) on QRZ.com.")
@@ -820,9 +818,11 @@ struct QRZIncomingRequestsView: View {
     @State private var selectedRequestIDs = Set<String>()
     @State private var bulkRequests: [QRZIncomingConfirmation] = []
     @State private var showBulkComposer = false
+    @State private var showPastRecovery = false
+    @State private var pastRecoveryCall = ""
 
     private var outstanding: [QRZIncomingConfirmation] {
-        appState.qrzIncomingRequests
+        appState.qrzIncomingRequests.filter { appState.incomingRecoveryRecord($0) == nil }
     }
 
     var body: some View {
@@ -846,7 +846,7 @@ struct QRZIncomingRequestsView: View {
             }
 
             HStack(spacing: 10) {
-                incomingSummary(title: "Returned", value: appState.qrzIncomingRequests.count, color: .blue, icon: "tray.full.fill")
+                incomingSummary(title: "Saved cases", value: appState.qrzIncomingRequests.count, color: .blue, icon: "tray.full.fill")
                 incomingSummary(title: "To review", value: outstanding.count, color: .orange, icon: "envelope.badge.fill")
                 incomingSummary(
                     title: "Local candidates",
@@ -857,15 +857,15 @@ struct QRZIncomingRequestsView: View {
             }
 
             HStack(spacing: 10) {
-                Button(selectedRequestIDs.count == outstanding.count && !outstanding.isEmpty
+                Button(selectedRequestIDs.count == appState.qrzIncomingRequests.count && !appState.qrzIncomingRequests.isEmpty
                        ? "Clear selection" : "Select all requests") {
-                    if selectedRequestIDs.count == outstanding.count {
+                    if selectedRequestIDs.count == appState.qrzIncomingRequests.count {
                         selectedRequestIDs.removeAll()
                     } else {
-                        selectedRequestIDs = Set(outstanding.map(\.id))
+                        selectedRequestIDs = Set(appState.qrzIncomingRequests.map(\.id))
                     }
                 }
-                .disabled(outstanding.isEmpty || appState.isFetchingQRZIncoming)
+                .disabled(appState.qrzIncomingRequests.isEmpty || appState.isFetchingQRZIncoming)
                 Text("\(selectedRequestIDs.count) selected · one personalized email per callsign")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -877,7 +877,7 @@ struct QRZIncomingRequestsView: View {
                     Label("Email selected", systemImage: "envelope.stack.fill")
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(selectedRequestIDs.isEmpty || appState.isFetchingQRZIncoming || appState.isRejectingQRZIncoming)
+                .disabled(!outstanding.contains { selectedRequestIDs.contains($0.id) } || appState.isFetchingQRZIncoming || appState.isRejectingQRZIncoming)
             }
 
             if appState.isRejectingQRZIncoming {
@@ -919,7 +919,11 @@ struct QRZIncomingRequestsView: View {
                             Text("QSO \(request.qsoDate.isEmpty ? "date not reported" : request.qsoDate) · requested \(request.requestedAt.isEmpty ? "unknown" : request.requestedAt)")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
-                            Text(appState.hasIncomingCandidate(for: request) ? "Local call/date candidate — details still need review." : "No call/date candidate. Obtain actual details before adding anything.")
+                            if !appState.qrzIncomingArchive.lastReturnedKeys.contains(request.recoveryKey) {
+                                Text("Saved recovery case · no current QRZ request shown").font(.caption).foregroundStyle(.secondary)
+                            }
+                            Text(appState.incomingRecoveryRecord(request) != nil ? "Saved locally · open Review for LoTW / QRZ / Club Log progress." :
+                                 (appState.hasIncomingCandidate(for: request) ? "Local call/date candidate — details still need review." : "No call/date candidate. Obtain actual details before adding anything."))
                                 .font(.caption)
                                 .foregroundStyle(Color.orange)
                         }
@@ -955,6 +959,7 @@ struct QRZIncomingRequestsView: View {
                         .buttonStyle(.bordered)
                         .tint(.red)
                         .disabled(appState.isRejectingQRZIncoming || appState.isFetchingQRZIncoming)
+                        .disabled(!appState.qrzIncomingArchive.lastReturnedKeys.contains(request.recoveryKey))
                         .help("Reject confirmation request from \(request.callsign) on QRZ.com")
 
                         Button {
@@ -976,6 +981,15 @@ struct QRZIncomingRequestsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
+                Menu("Recovery cases") {
+                    Button("Recover a contact already handled on QRZ…") { showPastRecovery = true }
+                    Button("Archive selected cases locally") {
+                        for request in appState.qrzIncomingRequests where selectedRequestIDs.contains(request.id) {
+                            appState.archiveQRZIncomingRecovery(request)
+                        }
+                        selectedRequestIDs.removeAll()
+                    }.disabled(selectedRequestIDs.isEmpty)
+                }
                 Button("Done") { dismiss() }
             }
         }
@@ -989,14 +1003,29 @@ struct QRZIncomingRequestsView: View {
             maxHeight: .infinity
         )
         .resizablePresentation(minWidth: 760, minHeight: 500)
+        .alert("Recover a contact already handled on QRZ", isPresented: $showPastRecovery) {
+            TextField("Worked callsign", text: $pastRecoveryCall)
+            Button("Review actual details") {
+                let request = QRZIncomingConfirmation(
+                    callsign: IncomingContactReview.clean(pastRecoveryCall), qsoDate: "", requestedAt: "",
+                    rawSummary: "Manual recovery", qsoID: "manual:" + UUID().uuidString
+                )
+                appState.retainQRZIncomingRecovery(request)
+                requestToReview = request
+                pastRecoveryCall = ""
+            }.disabled(IncomingContactReview.clean(pastRecoveryCall).isEmpty)
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Enter the callsign, then compare the actual contact details from your notes, the operator's reply or your QRZ log. Nothing is imported or confirmed automatically.")
+        }
         .onAppear {
             if appState.qrzIncomingRequests.isEmpty { appState.fetchQRZIncomingRequests() }
         }
         .onChange(of: appState.qrzIncomingRequests) { _, _ in
-            selectedRequestIDs.formIntersection(Set(outstanding.map(\.id)))
+            selectedRequestIDs.formIntersection(Set(appState.qrzIncomingRequests.map(\.id)))
         }
         .onChange(of: appState.qsoRecordsRevision) { _, _ in
-            selectedRequestIDs.formIntersection(Set(outstanding.map(\.id)))
+            selectedRequestIDs.formIntersection(Set(appState.qrzIncomingRequests.map(\.id)))
         }
         .sheet(item: $requestToReview, onDismiss: {
             if let request = detailsAfterReview { detailsAfterReview = nil; appState.draftIncomingQRZDetailsEmail(for: request) }

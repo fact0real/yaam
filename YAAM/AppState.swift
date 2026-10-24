@@ -1935,6 +1935,7 @@ class AppState: NSObject, ObservableObject {
     @Published var selectedClubLogLeagueDate: ClubLogLeagueDate = .allTime
     @Published var clubLogLeagueSearchText: String = ""
     @Published var qrzIncomingRequests: [QRZIncomingConfirmation] = []
+    @Published var qrzIncomingArchive = QRZIncomingRecoveryArchive()
     @Published var isFetchingQRZIncoming = false
     @Published var isRejectingQRZIncoming = false
     @Published var rejectingQRZIncomingID: String? = nil

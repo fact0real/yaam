@@ -628,10 +628,19 @@ struct QSLSyncAllRegression {
         let loadState = slice(hub, from: "func loadQSLHubState() {", to: "func refreshAwardProgress()")
         let applyUpdates = slice(hub, from: "private func applyQSLJobUpdates(", to: "static func qslDateString(")
         let restoreMarks = slice(hub, from: "func restoreLostQSLMarks() {", to: "func addStandardClubLogStatus()")
-        check("the queue plans with QSLSyncAll.plannedUploads, builds the ADIF with uploadADIF, and lets new credentials unblock",
-              hub.contains("let plan = QSLSyncAll.plannedUploads(") && hub.contains("let adif = QSLUploadStatus.uploadADIF(fields, for: provider)") &&
-              hub.contains("for key in unblockedKeys where jobStates[key] == .blocked { jobStates[key] = .retry }") &&
-              !hub.contains("func qslADIFRecord"))
+        let queueUnblocked = QSLSyncAll.queueChanges(
+            records: [(id: blockedOld.qsoID, fields: fresh)], profileID: blockedOld.stationProfileID,
+            providers: [.qrz], existingJobs: [blockedOld], unblockedKeys: unblocked
+        )
+        let queueStillBlocked = QSLSyncAll.queueChanges(
+            records: [(id: blockedOld.qsoID, fields: fresh)], profileID: blockedOld.stationProfileID,
+            providers: [.qrz], existingJobs: [blockedOld]
+        )
+        check("the shared queue builder filters ADIF and only unblocks stopped jobs after changed credentials",
+              hub.contains("let changedJobs = QSLSyncAll.queueChanges(") && queueStillBlocked.isEmpty &&
+              queueUnblocked.count == 1 && queueUnblocked[0].id == blockedOld.id &&
+              queueUnblocked[0].adif == QSLUploadStatus.uploadADIF(fresh, for: .qrz) &&
+              queueUnblocked[0].state == .queued && !hub.contains("func qslADIFRecord"))
         check("Sync reads the Station Workspace switches under the key the page saves, and only a touched switch saves it",
               upload.contains("QSLSyncAll.switchedOn(stored: UserDefaults.standard.string(forKey: \"stationWorkspace.enabledProviders\"))") &&
               workspace.components(separatedBy: "\"stationWorkspace.enabledProviders\"").count == 3 &&

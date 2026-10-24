@@ -31,6 +31,7 @@ nonisolated enum QSLUploadStatus {
     /// - or, for QRZ, the QSO is known to be in the QRZ logbook without being confirmed: QRZCOM_QSO_DOWNLOAD_STATUS Y
     ///   (ADIF 3.1.7: "downloaded from the online service") or APP_QRZLOG_STATUS UPLOADED (Lab599 Utility's mark).
     ///   It is not uploaded again, and it is not a confirmation;
+    /// - or the operator explicitly verified this exact contact already exists in QRZ during Incoming recovery;
     /// - or YAAM added it from that service's own download (`cameFrom`).
     /// Any other value of the sent field (empty, N, R, Q, I or M) is pending.
     static func isSent(_ fields: [String: String], to provider: QSLProvider) -> Bool {
@@ -40,7 +41,8 @@ nonisolated enum QSLUploadStatus {
         case .lotw:
             return ["Y", "V"].contains(value(fields, "LOTW_QSL_RCVD"))
         case .qrz:
-            return value(fields, "QRZLOG_QSL_RCVD") == "Y" ||
+            return value(fields, "APP_YAAM_QRZ_VERIFIED_PRESENT") == "Y" ||
+                value(fields, "QRZLOG_QSL_RCVD") == "Y" ||
                 ["C", "CONFIRMED", "UPLOADED"].contains(value(fields, "APP_QRZLOG_STATUS")) ||
                 value(fields, "QRZCOM_QSO_DOWNLOAD_STATUS") == "Y"
         case .eqsl, .clubLog:
@@ -320,6 +322,8 @@ nonisolated enum UploadStationPolicy {
 }
 
 nonisolated enum QSLSyncAll {
+    static let incomingRecoveryProviders: Set<QSLProvider> = [.lotw, .qrz, .clubLog]
+
     /// The services whose upload credentials are set: the fields QSLHubClient checks before it uploads. LoTW also
     /// needs a station location and the TQSL program (`tqslFound`), as the Zero-Click daemon already asks.
     static func configuredProviders(_ credentials: QSLServiceCredentials, tqslFound: Bool) -> Set<QSLProvider> {
@@ -394,6 +398,43 @@ nonisolated enum QSLSyncAll {
             if !ids.isEmpty { plan[provider] = ids }
         }
         return plan
+    }
+
+    /// Build the same durable outbox entries for ordinary uploads and verified contact recovery.
+    @MainActor
+    static func queueChanges(
+        records: [(id: UUID, fields: [String: String])],
+        profileID: UUID,
+        providers: Set<QSLProvider>,
+        existingJobs: [QSLQueueJob],
+        retryStopped: Bool = false,
+        unblockedKeys: Set<String> = []
+    ) -> [QSLQueueJob] {
+        var existingByKey: [String: QSLQueueJob] = [:]
+        for job in existingJobs where job.stationProfileID == profileID {
+            existingByKey[jobKey(job.qsoID, job.provider)] = job
+        }
+        var states = existingByKey.mapValues(\.state)
+        for key in unblockedKeys where states[key] == .blocked { states[key] = .retry }
+        var seenIDs = Set<UUID>()
+        let uniqueRecords = records.filter { seenIDs.insert($0.id).inserted }
+        let plan = plannedUploads(records: uniqueRecords, providers: providers, jobStates: states, retryStopped: retryStopped)
+        let fieldsByID = Dictionary(uniqueRecords.map { ($0.id, $0.fields) }, uniquingKeysWith: { first, _ in first })
+        return QSLProvider.allCases.flatMap { provider in
+            (plan[provider] ?? []).compactMap { id in
+                guard let fields = fieldsByID[id] else { return nil }
+                let adif = QSLUploadStatus.uploadADIF(fields, for: provider)
+                var job = existingByKey[jobKey(id, provider)] ?? QSLQueueJob(
+                    stationProfileID: profileID, qsoID: id, provider: provider, adif: adif
+                )
+                job.adif = adif
+                job.state = .queued
+                job.nextAttemptAt = nil
+                job.message = "Waiting"
+                job.updatedAt = Date()
+                return job
+            }
+        }
     }
 
     /// The key the QSL Hub queue uses for one QSO and one service.

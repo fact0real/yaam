@@ -140,9 +140,12 @@ struct UploadFieldAllowlistRegression {
         let hamqth = source("YAAM/HamQTHUploadClient.swift")
         let daemon = source("YAAM/ZeroClickCloudUploadDaemon.swift")
         let safety = source("YAAM/DataSafetySettingsView.swift")
-        check("the QSL Hub builds each job's ADIF for its own service, when it queues and when it sends",
-              hub.contains("let adif = QSLUploadStatus.uploadADIF(fields, for: provider)") &&
-              syncAll.contains("return .send(adif: QSLUploadStatus.uploadADIF(fields, for: job.provider))"))
+        let queued = QSLSyncAll.queueChanges(records: [(id: UUID(), fields: record)], profileID: UUID(),
+                                             providers: Set(QSLProvider.allCases), existingJobs: [])
+        check("the QSL Hub queues and sends each service's own filtered ADIF",
+              hub.contains("let changedJobs = QSLSyncAll.queueChanges(") &&
+              queued.count == QSLProvider.allCases.count &&
+              queued.allSatisfy { $0.adif == sentADIF($0.provider, record) })
         check("Wavelog, one QSO: formatSingleADIF starts from uploadFields for .wavelog",
               wavelog.contains("var normalizedFields = QSLUploadStatus.uploadFields(record.fields, for: .wavelog)") &&
               !wavelog.contains("serviceFields("))
