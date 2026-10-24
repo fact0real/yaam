@@ -78,6 +78,15 @@ struct QSLGraylistRegression {
         store.schedule(records: old, profileID: profile)
         try await wait(store)
         precondition(store.index.entries.count == 1)
+        let stableIndex = store.index
+        var metadataOnly = old
+        metadataOnly[0].fields["EMAIL"] = "operator@example.org"
+        metadataOnly[0].fields["APP_YAAM_LAST_EMAIL"] = "Updated in background"
+        store.schedule(records: metadataOnly, profileID: profile)
+        precondition(!store.isLoading && store.index == stableIndex,
+                     "Email enrichment/history must not empty or rebuild the graylist")
+        store.schedule(records: old, profileID: profile)
+        precondition(!store.isLoading, "Identical evidence must not restart the worker")
         store.setWaitingDays(0)
         store.setReducesPriority(true)
         precondition(store.reducedCallsigns == ["DL1TEST"])
@@ -105,6 +114,8 @@ struct QSLGraylistRegression {
         // Invalidating evidence clears the old penalty immediately, before the worker completes.
         store.schedule(records: old + [qso(extra: ["QSL_RCVD": "Y"])], profileID: profile)
         precondition(store.reducedCallsigns.isEmpty)
+        precondition(store.index == stableIndex && store.isLoading,
+                     "Keep table rows stable during an update while suspending stale penalties")
         try await wait(store)
         precondition(store.index.entries.isEmpty)
         store.schedule(records: old, profileID: profile)
@@ -119,6 +130,35 @@ struct QSLGraylistRegression {
         store.schedule(records: [], profileID: profile)
         try await wait(store)
         precondition(store.index.entries.isEmpty, "Superseded worker must not republish old history")
+
+        // A background metadata change during a pending update must not supersede it.
+        store.schedule(records: old, profileID: profile)
+        store.schedule(records: metadataOnly, profileID: profile)
+        try await wait(store)
+        precondition(store.index == stableIndex)
+
+        // Email batches preserve visible scope, exact callsigns, profile ownership and
+        // all distinct QSOs even when only one duplicate contains an email address.
+        var emailCopy = old[0]
+        emailCopy.fields["EMAIL"] = "operator@example.org"
+        let mailRecords = old + [emailCopy] + history("DL1TEST/P") + foreign + history("OTHER1")
+        let mailIndex = index(mailRecords)
+        let visible = [mailIndex.entry(for: "DL1TEST")!, mailIndex.entry(for: "DL1TEST/P")!]
+        let recipients = QSLGraylistMail.recipients(entries: visible + visible, records: mailRecords, profileID: profile)
+        precondition(recipients.count == 2)
+        precondition(recipients[0].id == "DL1TEST" && recipients[0].records.count == 3)
+        precondition(recipients[0].email == "operator@example.org")
+        precondition(recipients[1].id == "DL1TEST/P" && recipients[1].email.isEmpty,
+                     "Missing email remains visible for lookup/manual entry")
+        precondition(recipients.allSatisfy { $0.records.allSatisfy { $0.fields["APP_YAAM_STATION_PROFILE_ID"] == nil } })
+        let confirmedMail = old.map { record in
+            var record = record; record.fields["QSL_RCVD"] = "Y"; return record
+        }
+        precondition(QSLGraylistMail.recipients(entries: visible, records: confirmedMail, profileID: profile).isEmpty)
+        precondition(QSLGraylistMail.isUsableEmail(" operator@example.org "))
+        for invalid in ["", "bad", "a@.org", "a@b.org\nBcc: hidden@example.org", "a@b.org,c@d.org", "-a@b.org"] {
+            precondition(!QSLGraylistMail.isUsableEmail(invalid))
+        }
 
         let app = AppState(defaults: defaults)
         app.activeStationProfileID = profile

@@ -4,7 +4,7 @@ import Combine
 
 // Only the AppState shell is inert; its graylist adapter below is the production source.
 struct FilterCriteria {}
-@MainActor final class AppState {
+@MainActor final class AppState: ObservableObject {
     let qslGraylist: QSLGraylistStore
     var activeStationProfileID: UUID?
     var isMasterMode = true
@@ -15,8 +15,22 @@ struct FilterCriteria {}
     var logSearchMode = LogSearchMode.quick
     var selectedRecordIDs = Set<UUID>()
     var selectedTab = 5
+    var currentStationCallsign = "MY1CALL"
+    var emailHistory: [EmailHistoryEntry] = []
+    var isSMTPConfigured = false
+    func resolveFirstName(for call: String, explicitName: String? = nil) -> String {
+        guard let explicitName, !explicitName.isEmpty else { return call }
+        return explicitName
+    }
+    func formattedEmailHistoryDate(_ date: Date) -> String { "2026-10-24" }
+    func fetchContactInfo(for call: String, allowQRZWebKitFallback: Bool, allowCredentialPrompt: Bool) async -> (email: String?, name: String?) { (nil, nil) }
+    func sendEmail(to: String, subject: String, body: String, callsign: String, historyKind: String,
+                   playSound: Bool, completion: @escaping (Bool, String) -> Void) {
+        fatalError("Visual fixtures must never send mail")
+    }
     init(defaults: UserDefaults) { qslGraylist = QSLGraylistStore(defaults: defaults) }
 }
+struct SKEDMailDetails: Codable, Equatable, Hashable {}
 
 nonisolated struct GeoCoordinate: Equatable, Sendable { var latitude = 0.0; var longitude = 0.0 }
 nonisolated enum MaidenheadGridEngine {

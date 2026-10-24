@@ -13,7 +13,7 @@ extension AppState {
     }
 
     func openQSLGraylistContacts(_ entry: QSLGraylistEntry) {
-        guard qslGraylist.hasWorkspace,
+        guard qslGraylist.hasWorkspace, !qslGraylist.isLoading,
               qslGraylist.index.entry(for: entry.callsign) == entry else { return }
         // Use the normal log table, with exact record selection for this callsign.
         filterCriteria = FilterCriteria()

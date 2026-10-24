@@ -18,6 +18,7 @@ import SwiftUI
                     "QSO_DATE": call == 1 ? "20261024" : "20260101", "TIME_ON": String(format: "12%02d00", qso),
                     "COUNTRY": call % 2 == 0 ? "Germany" : "United Kingdom",
                     "BAND": qso % 2 == 0 ? "20M" : "40M", "MODE": "FT8",
+                    "EMAIL": call % 2 == 0 && qso == 0 ? "operator\(call)@example.org" : "",
                     "QSL_SENT": qso % 3 == 0 ? "Y" : "N"])
             }
         }
@@ -42,8 +43,55 @@ import SwiftUI
                 try snapshot(content(store, evidence: "LoTW: Oct 24 · last run needs attention   •   QRZ: never · history incomplete"),
                              "empty-error-\(dark)-\(Int(width))", width: width, height: 380, dark: dark, out: out)
             }
+            let state = AppState(defaults: defaults)
+            state.activeStationProfileID = profile
+            state.loadedWorkspaceProfileID = profile
+            state.qsoRecords = records
+            state.qslGraylist.schedule(records: records, profileID: profile)
+            RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+            state.emailHistory = [.init(id: UUID(), date: Date(), callsign: "G14TEST", email: "g14@example.org",
+                                       subject: "Earlier confirmation request", status: "Sent")]
+            let recipients = QSLGraylistMail.recipients(entries: state.qslGraylist.index.entries,
+                                                       records: records, profileID: profile)
+            for width in [700.0, 1000.0] {
+                try snapshot(QSLGraylistEmailView(profileID: profile, recipients: recipients).environmentObject(state),
+                             "mail-\(dark)-\(Int(width))", width: width, height: width == 700 ? 460 : 680, dark: dark, out: out)
+            }
         }
-        print("Rendered actual QSL Graylist views: compact/normal, light/dark, loading, populated, empty/error, unavailable, details and badge at \(out.path)")
+        try selectionSurvivesUpdates(store, records: records, profile: profile)
+        print("Rendered actual QSL Graylist views and mail composer: compact/normal, light/dark, loading, populated, empty/error, unavailable, details and badge at \(out.path)")
+    }
+
+    @MainActor static func selectionSurvivesUpdates(_ store: QSLGraylistStore, records: [QSORecordModel], profile: UUID) throws {
+        store.schedule(records: records, profileID: profile)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        let host = NSHostingView(rootView: content(store))
+        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 760, height: 380),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentView = host
+        host.frame = CGRect(x: 0, y: 0, width: 760, height: 380)
+        window.makeKeyAndOrderFront(nil)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        host.layoutSubtreeIfNeeded()
+        window.display()
+        let table = nativeTable(in: host)!
+        precondition(table.numberOfRows == 15, "Wait for initial native table rows before testing selection")
+        table.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        precondition(table.selectedRow == 0, "Initial native selection must settle before updating evidence")
+        var updated = records
+        updated[0].fields["APP_YAAM_LAST_EMAIL"] = "Background email history update"
+        store.schedule(records: updated, profileID: profile)
+        precondition(!store.isLoading)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        precondition(table.selectedRow == 0 && table.numberOfRows == 15)
+        updated[0].fields["QSL_SENT"] = "Y"
+        store.schedule(records: updated, profileID: profile)
+        precondition(table.selectedRow == 0 && table.numberOfRows == 15)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        precondition(!store.isLoading && table.selectedRow == 0 && table.numberOfRows == 15)
+        window.orderOut(nil)
+        print("PASS native table selection survives metadata and real sent-evidence updates")
     }
 
     @MainActor static func content(_ store: QSLGraylistStore, evidence: String = "LoTW: Oct 24   •   QRZ Logbook: Oct 24") -> some View {

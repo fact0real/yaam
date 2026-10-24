@@ -14,8 +14,10 @@ nonisolated struct QSORecordModel: Identifiable, Equatable, Sendable {
  let id: UUID
  var fields: [String: String]
  init(id: UUID = UUID(), fields: [String: String]) { self.id = id; self.fields = fields }
+ subscript(_ key: String) -> String { fields[key] ?? "" }
 ''' + confirmed + sent_char + sent + '\n}\n'
-names = ['QSOIdentity', 'QSLGraylist', 'QSLGraylistStore', 'LatestSnapshotWorker', 'DigitalCallRosterEngine',
+messages = 'extension AppState {\n' + app[app.index('    func confirmationRequestMessage('):app.index('    private var emailHistoryURL:')] + '\n}\n'
+names = ['QSOIdentity', 'QSLGraylist', 'QSLGraylistMail', 'QSLGraylistStore', 'LatestSnapshotWorker', 'DigitalCallRosterEngine',
          'AppStateQSLGraylist', 'LogSearchEngine']
 flags = ['swiftc', '-parse-as-library', '-swift-version', '5', '-default-isolation', 'MainActor',
          '-enable-upcoming-feature', 'NonisolatedNonsendingByDefault',
@@ -23,7 +25,9 @@ flags = ['swiftc', '-parse-as-library', '-swift-version', '5', '-default-isolati
 with tempfile.TemporaryDirectory(prefix='yaam-graylist-') as temp:
     temp = Path(temp)
     (temp/'Model.swift').write_text(model)
+    (temp/'Messages.swift').write_text(messages)
     sources = [str(temp/'Model.swift'), str(root/'Tests/Support/QSLGraylistFixtures.swift'),
+               str(temp/'Messages.swift'), str(root/'YAAM/EmailHistoryEntry.swift'),
                *[str(root/'YAAM'/f'{name}.swift') for name in names]]
     subprocess.run(flags + sources + [str(root/'Tests/QSLGraylistRegression.swift'), '-o', str(temp/'regression')], check=True)
     subprocess.run([str(temp/'regression')], check=True)
@@ -34,5 +38,5 @@ with tempfile.TemporaryDirectory(prefix='yaam-graylist-') as temp:
         out.mkdir(parents=True, exist_ok=True)
         view = (root/'YAAM/QSLGraylistView.swift').read_text()
         (temp/'View.swift').write_text('import SwiftUI\n' + view[view.index('// Separate content'):])
-        subprocess.run(flags + sources + [str(temp/'View.swift'), str(root/'Tests/QSLGraylistVisualReview.swift'), '-o', str(temp/'render')], check=True)
+        subprocess.run(flags + sources + [str(temp/'View.swift'), str(root/'YAAM/QSLGraylistEmailView.swift'), str(root/'YAAM/ResizablePresentation.swift'), str(root/'Tests/QSLGraylistVisualReview.swift'), '-o', str(temp/'render')], check=True)
         subprocess.run([str(temp/'render'), str(out)], check=True)

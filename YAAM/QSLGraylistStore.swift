@@ -15,6 +15,7 @@ final class QSLGraylistStore: ObservableObject {
     private let defaults: UserDefaults
     private var generation: UInt64 = 0
     private var task: Task<Void, Never>?
+    private var scheduledRecords: [QSORecordModel]?
     private let worker = LatestSnapshotWorker<UInt64, Input, QSLGraylistIndex>()
     private var clock: AnyCancellable?
     private struct Input: Sendable {
@@ -31,9 +32,11 @@ final class QSLGraylistStore: ObservableObject {
     }
 
     func reset(profileID: UUID?) {
+        guard self.profileID != profileID || hasWorkspace || scheduledRecords != nil else { return }
         generation &+= 1
         task?.cancel()
         worker.invalidate()
+        scheduledRecords = nil
         self.profileID = profileID
         index = .empty
         isLoading = false
@@ -47,11 +50,15 @@ final class QSLGraylistStore: ObservableObject {
 
     func schedule(records: [QSORecordModel], profileID: UUID?) {
         if self.profileID != profileID { reset(profileID: profileID) }
+        // Email enrichment, history stamps and identical sync snapshots do not change
+        // graylist evidence. Do not cancel a pending calculation or rebuild the table.
+        if let scheduledRecords, Self.sameEvidence(scheduledRecords, records) { return }
+        scheduledRecords = records
         generation &+= 1
         let request = generation
         task?.cancel()
-        // Never keep a stale penalty after a late confirmation, edit, or profile change.
-        index = .empty
+        // Keep rows/selection visible while calculating; withdraw penalties immediately.
+        // Profile changes still clear everything in reset above.
         isLoading = true
         hasWorkspace = true
         publishPriority()
@@ -61,7 +68,7 @@ final class QSLGraylistStore: ObservableObject {
             guard let result = await worker.value(for: request, input: input, operation: {
                       QSLGraylistIndex(records: $0.records, profileID: $0.profileID)
                   }), !Task.isCancelled, generation == request, result.key == request else { return }
-            index = result.value
+            if index != result.value { index = result.value }
             isLoading = false
             now = Date()
             publishPriority()
@@ -88,7 +95,7 @@ final class QSLGraylistStore: ObservableObject {
     }
 
     func isReduced(_ entry: QSLGraylistEntry) -> Bool {
-        reducesPriority && !exceptions.contains(entry.callsign) && entry.isMature(waitingDays: waitingDays, now: now)
+        !isLoading && reducesPriority && !exceptions.contains(entry.callsign) && entry.isMature(waitingDays: waitingDays, now: now)
     }
 
     var reducedCallsigns: Set<String> {
@@ -97,6 +104,16 @@ final class QSLGraylistStore: ObservableObject {
 
     private func key(_ suffix: String) -> String {
         "qslGraylist.v1.\(profileID?.uuidString ?? "unscoped").\(suffix)"
+    }
+
+    private static func sameEvidence(_ lhs: [QSORecordModel], _ rhs: [QSORecordModel]) -> Bool {
+        guard lhs.count == rhs.count else { return false }
+        let fields = ["APP_YAAM_STATION_PROFILE_ID", "CALL", "COUNTRY", "QSO_DATE",
+                      "TIME_ON", "TIME_OFF", "BAND", "FREQ", "MODE", "SUBMODE"]
+        return zip(lhs, rhs).allSatisfy { a, b in
+            a.id == b.id && fields.allSatisfy { a.fields[$0] == b.fields[$0] } &&
+                a.isConfirmed == b.isConfirmed && a.isAnyQSLSent == b.isAnyQSLSent
+        }
     }
 
     private func publishPriority() {

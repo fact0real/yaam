@@ -2,12 +2,31 @@ import SwiftUI
 
 struct QSLGraylistView: View {
     @EnvironmentObject private var appState: AppState
+    @State private var mailBatch: GraylistMailBatch?
+
+    private struct GraylistMailBatch: Identifiable {
+        let id = UUID()
+        let profileID: UUID
+        let recipients: [QSLGraylistMailRecipient]
+    }
 
     var body: some View {
         QSLGraylistContent(store: appState.qslGraylist,
                            station: appState.activeStationProfile?.displayTitle ?? "No active station",
                            syncEvidence: syncEvidence,
-                           onOpenContacts: appState.openQSLGraylistContacts)
+                           onOpenContacts: appState.openQSLGraylistContacts,
+                           onRequestConfirmations: { entries in
+                               guard let profileID = appState.activeStationProfileID,
+                                     appState.loadedWorkspaceProfileID == profileID,
+                                     appState.isMasterMode, !appState.qslGraylist.isLoading else { return }
+                               mailBatch = GraylistMailBatch(profileID: profileID,
+                                   recipients: QSLGraylistMail.recipients(entries: entries,
+                                       records: appState.qsoRecords, profileID: profileID))
+                           })
+            .sheet(item: $mailBatch) { batch in
+                QSLGraylistEmailView(profileID: batch.profileID, recipients: batch.recipients)
+                    .environmentObject(appState)
+            }
     }
 
     private var syncEvidence: String {
@@ -33,6 +52,7 @@ struct QSLGraylistContent: View {
     let station: String
     let syncEvidence: String
     let onOpenContacts: (QSLGraylistEntry) -> Void
+    var onRequestConfirmations: ([QSLGraylistEntry]) -> Void = { _ in }
     @State private var query = ""
     @State private var selection: String?
     @State private var inspectedCall: String?
@@ -79,6 +99,17 @@ struct QSLGraylistContent: View {
                 TextField("Search callsign or country", text: $query)
                     .textFieldStyle(.roundedBorder)
                 if store.isLoading { ProgressView().controlSize(.small).help("Updating from the active station log") }
+            }
+
+            HStack {
+                Button {
+                    onRequestConfirmations(entries)
+                } label: {
+                    Label("Request confirmations (\(entries.count))…", systemImage: "envelope.stack")
+                }
+                .disabled(!store.hasWorkspace || store.isLoading || entries.isEmpty)
+                .help("Prepare one personalized email per operator in this list. Search narrows the recipient list.")
+                Spacer(minLength: 0)
             }
 
             Table(entries, selection: $selection) {
@@ -133,10 +164,10 @@ struct QSLGraylistContent: View {
                     .font(.caption2).foregroundStyle(.secondary)
                 Spacer()
                 Button("Details…") { if let selection { inspect(selection) } }
-                    .disabled(selection == nil)
+                    .disabled(selection == nil || store.isLoading)
                 Button("Open contacts") {
                     if let selection, let entry = store.index.entry(for: selection) { onOpenContacts(entry) }
-                }.disabled(selection == nil)
+                }.disabled(selection == nil || store.isLoading)
             }
         }
         .padding(14)
@@ -176,6 +207,7 @@ struct QSLGraylistContent: View {
     }
 
     private func priorityText(_ entry: QSLGraylistEntry) -> String {
+        if store.isLoading { return "Updating…" }
         if store.exceptions.contains(entry.callsign) { return "Exception" }
         if store.isReduced(entry) { return "Lower" }
         if entry.isMature(waitingDays: store.waitingDays, now: store.now) { return "Ready · off" }
@@ -237,6 +269,7 @@ struct QSLGraylistDetails: View {
                     }.frame(maxWidth: .infinity, alignment: .leading)
                 }
                 Button("Open contacts in log") { onOpenContacts(entry); dismiss() }
+                    .disabled(store.isLoading)
             } else {
                 Text(store.isLoading ? "Updating contact history…" : "This callsign no longer meets the graylist criteria.")
                 Spacer()
