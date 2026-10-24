@@ -16,16 +16,20 @@ public final class HamQTHUploadClient: ObservableObject {
 
     // MARK: - Published State
     @Published public var isUploading: Bool = false
-    @Published public var autoUploadEnabled: Bool = false
+    // Read the setting when a QSO is dispatched, including tasks queued before it was disabled.
+    public var autoUploadEnabled: Bool {
+        get { defaults.bool(forKey: "hamqthAutoUploadEnabled") }
+        set { defaults.set(newValue, forKey: "hamqthAutoUploadEnabled") }
+    }
     @Published public var lastUploadStatus: String = "Idle"
     @Published public var lastUploadDate: Date? = nil
     @Published public var lastError: String? = nil
 
     private let uploadEndpointURL = URL(string: "https://www.hamqth.com/adif_upload.php")!
 
-    public init() {
-        self.autoUploadEnabled = UserDefaults.standard.bool(forKey: "hamqthAutoUploadEnabled")
-    }
+    private let defaults: UserDefaults
+
+    public init(defaults: UserDefaults = .standard) { self.defaults = defaults }
 
     public var isConfigured: Bool {
         let user = UserDefaults.standard.string(forKey: "hamqthUsername") ?? ""
@@ -36,6 +40,7 @@ public final class HamQTHUploadClient: ObservableObject {
     // MARK: - Upload Single QSO
 
     func uploadSingleQSO(record: QSORecordModel) async -> Bool {
+        guard autoUploadEnabled else { return false }
         let adif = "<ADIF_VER:5>3.1.4\n<PROGRAMID:4>YAAM\n<EOH>\n" + record.toADIFRecordString(for: .hamqth) + "\n"
         return await uploadADIFString(adif)
     }

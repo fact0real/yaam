@@ -455,7 +455,7 @@ struct SKEDDirectoryView: View {
                 Label("Sync QRZ", systemImage: "arrow.triangle.2.circlepath")
             }
             .disabled(isLoading)
-            .help("Refresh rankings and look up missing contact details on QRZ")
+            .help("Refresh the QRZ Rank directory; optionally enrich missing contact details through the configured lookup services")
         }
     }
 

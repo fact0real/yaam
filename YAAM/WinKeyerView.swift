@@ -248,6 +248,7 @@ public struct WinKeyerView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.red)
+                .keyboardShortcut(.cancelAction)
             }
 
             // Real-time Echo HUD

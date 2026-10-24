@@ -48,7 +48,7 @@ nonisolated enum QSOIdentity {
     /// eQSL matches two logs when the QSO times are within one hour (eQSL FAQ, topic 1058).
     static let eqslTimeToleranceSeconds = 3_600
 
-    /// Index of the closest unclaimed candidate for `incoming`: same CALL and DATE, compatible band and mode,
+    /// Index of the closest unclaimed candidate for `incoming`: same CALL, compatible band and mode,
     /// TIME_ON within `toleranceSeconds` (nearest first, lowest index on ties). A missing time or band on either
     /// side still matches, as before, but only after every timed candidate. Without CALL and an 8-digit date
     /// nothing matches.
@@ -63,19 +63,22 @@ nonisolated enum QSOIdentity {
         guard !call.isEmpty, date.count == 8 else { return nil }
         let band = resolvedBand(incoming)
         let mode = effectiveMode(incoming)
-        let seconds = secondsFromMidnight(incoming)
+        let instant = utcInstant(incoming)
         var best: (index: Int, delta: Int)?
         for (index, candidate) in candidates.enumerated() where !claimed.contains(index) {
-            guard clean(candidate["CALL"] ?? "") == call,
-                  normalizedDate(candidate["QSO_DATE"] ?? "") == date else { continue }
+            guard clean(candidate["CALL"] ?? "") == call else { continue }
+            let candidateDate = normalizedDate(candidate["QSO_DATE"] ?? "")
             let candidateBand = resolvedBand(candidate)
             guard band.isEmpty || candidateBand.isEmpty || band == candidateBand,
                   areModesCompatible(mode, effectiveMode(candidate)) else { continue }
             let delta: Int
-            if let a = seconds, let b = secondsFromMidnight(candidate) {
-                delta = abs(a - b)
-                guard delta <= toleranceSeconds else { continue }
+            if let a = instant, let b = utcInstant(candidate) {
+                let elapsed = abs(a.timeIntervalSince(b))
+                guard elapsed <= Double(toleranceSeconds) else { continue }
+                delta = Int(elapsed)
             } else {
+                // Missing or invalid timestamps must never create a match across different dates.
+                guard candidateDate == date else { continue }
                 delta = Int.max
             }
             if best == nil || delta < best!.delta { best = (index, delta) }
@@ -109,7 +112,7 @@ nonisolated enum QSOIdentity {
 
         let date1 = normalizedDate(lhs["QSO_DATE"] ?? "")
         let date2 = normalizedDate(rhs["QSO_DATE"] ?? "")
-        guard date1 == date2, date1.count == 8 else { return false }
+        guard date1.count == 8, date2.count == 8 else { return false }
 
         let band1 = resolvedBand(lhs)
         let band2 = resolvedBand(rhs)
@@ -119,10 +122,8 @@ nonisolated enum QSOIdentity {
         let mode2 = effectiveMode(rhs)
         guard areModesCompatible(mode1, mode2) else { return false }
 
-        guard let sec1 = secondsFromMidnight(lhs), let sec2 = secondsFromMidnight(rhs) else {
-            return false
-        }
-        return abs(sec1 - sec2) <= timeToleranceSeconds
+        guard let first = utcInstant(lhs), let second = utcInstant(rhs) else { return false }
+        return abs(first.timeIntervalSince(second)) <= Double(timeToleranceSeconds)
     }
 
     /// Incoming records that are not already in `existing`: same CALL, DATE and BAND, compatible mode and
@@ -130,15 +131,22 @@ nonisolated enum QSOIdentity {
     /// Accepted records join the comparison set, so two different QSOs in one download are both kept.
     static func newRecords(_ incoming: [[String: String]], existing: [[String: String]], toleranceSeconds: Int) -> [[String: String]] {
         var buckets: [String: [[String: String]]] = [:]
-        for record in existing { buckets[callDateBandKey(fields: record), default: []].append(record) }
+        func bucket(_ fields: [String: String]) -> String {
+            let call = clean(fields["CALL"] ?? "")
+            guard !call.isEmpty, normalizedDate(fields["QSO_DATE"] ?? "").count == 8 else { return "" }
+            return "\(call)|\(resolvedBand(fields))"
+        }
+        for record in existing { buckets[bucket(record), default: []].append(record) }
         var result: [[String: String]] = []
         for record in incoming {
-            let key = callDateBandKey(fields: record)
+            let key = bucket(record)
             guard !key.isEmpty else { continue }
             let known = (buckets[key] ?? []).contains { other in
                 guard areModesCompatible(effectiveMode(record), effectiveMode(other)) else { return false }
-                guard let a = secondsFromMidnight(record), let b = secondsFromMidnight(other) else { return true }
-                return abs(a - b) <= toleranceSeconds
+                if let a = utcInstant(record), let b = utcInstant(other) {
+                    return abs(a.timeIntervalSince(b)) <= Double(toleranceSeconds)
+                }
+                return normalizedDate(record["QSO_DATE"] ?? "") == normalizedDate(other["QSO_DATE"] ?? "")
             }
             if !known {
                 buckets[key, default: []].append(record)
@@ -146,6 +154,26 @@ nonisolated enum QSOIdentity {
             }
         }
         return result
+    }
+
+    /// Validated UTC instant: comparing seconds-of-day alone loses contacts spanning midnight.
+    private static func utcInstant(_ fields: [String: String]) -> Date? {
+        var stamp = fields
+        if normalizedTime(fields["TIME_ON"] ?? "").isEmpty,
+           !normalizedTime(fields["TIME_OFF"] ?? "").isEmpty {
+            stamp["TIME_ON"] = fields["TIME_OFF"]
+            if let offDate = fields["QSO_DATE_OFF"], !offDate.isEmpty { stamp["QSO_DATE"] = offDate }
+        }
+        let day = normalizedDate(stamp["QSO_DATE"] ?? "")
+        guard day.count == 8, let seconds = secondsFromMidnight(stamp),
+              let year = Int(day.prefix(4)), let month = Int(day.dropFirst(4).prefix(2)),
+              let date = Int(day.suffix(2)) else { return nil }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let parts = DateComponents(year: year, month: month, day: date)
+        guard let midnight = calendar.date(from: parts),
+              calendar.dateComponents([.year, .month, .day], from: midnight) == parts else { return nil }
+        return midnight.addingTimeInterval(Double(seconds))
     }
 
     static func normalizedTime(_ value: String) -> String {

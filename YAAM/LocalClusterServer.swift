@@ -17,7 +17,7 @@ public final class LocalClusterServer: ObservableObject {
     @Published public private(set) var isRunning: Bool = false
     @Published public var port: Int = 7300 {
         didSet {
-            UserDefaults.standard.set(port, forKey: "localClusterServerPort")
+            defaults.set(port, forKey: "localClusterServerPort")
             if isRunning {
                 restart()
             }
@@ -26,38 +26,41 @@ public final class LocalClusterServer: ObservableObject {
     @Published public private(set) var clientCount: Int = 0
     @Published public private(set) var clientCallsigns: [String] = []
 
-    @Published public var udpEnabled: Bool = true {
+    @Published public var udpEnabled: Bool = false {
         didSet {
-            UserDefaults.standard.set(udpEnabled, forKey: "localClusterUDPEnabled")
+            defaults.set(udpEnabled, forKey: "localClusterUDPEnabled")
         }
     }
     @Published public var udpPort: Int = 12060 {
         didSet {
-            UserDefaults.standard.set(udpPort, forKey: "localClusterUDPPort")
+            defaults.set(udpPort, forKey: "localClusterUDPPort")
         }
     }
     @Published public private(set) var broadcastSpotCount: Int = 0
     @Published public private(set) var lastErrorMessage: String?
 
+    private var udpRequestID: UUID?
     private var listener: NWListener?
     private var clients: [UUID: LocalClientSession] = [:]
     private var recentSpots: [DXSpot] = []
     private let maxRecentSpots: Int = 100
+    private let defaults: UserDefaults
     private let queue = DispatchQueue(label: "app.yaam.local-cluster-server", qos: .userInitiated)
     private let lock = NSLock()
 
-    private init() {
-        if let savedPort = UserDefaults.standard.value(forKey: "localClusterServerPort") as? Int, savedPort > 0 {
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        if let savedPort = defaults.value(forKey: "localClusterServerPort") as? Int, (1...65535).contains(savedPort) {
             self.port = savedPort
         }
-        if let savedUDPPort = UserDefaults.standard.value(forKey: "localClusterUDPPort") as? Int, savedUDPPort > 0 {
+        if let savedUDPPort = defaults.value(forKey: "localClusterUDPPort") as? Int, (1...65535).contains(savedUDPPort) {
             self.udpPort = savedUDPPort
         }
-        if let savedUDPEnabled = UserDefaults.standard.value(forKey: "localClusterUDPEnabled") as? Bool {
+        if let savedUDPEnabled = defaults.value(forKey: "localClusterUDPEnabled") as? Bool {
             self.udpEnabled = savedUDPEnabled
         }
 
-        let autoStart = UserDefaults.standard.object(forKey: "localClusterAutoStart") as? Bool ?? true
+        let autoStart = defaults.object(forKey: "localClusterAutoStart") as? Bool ?? false
         if autoStart {
             start()
         }
@@ -68,10 +71,10 @@ public final class LocalClusterServer: ObservableObject {
     public func start() {
         queue.async { [weak self] in
             guard let self else { return }
-            guard !self.isRunning else { return }
+            guard self.listener == nil else { return }
 
             do {
-                guard let nwPort = NWEndpoint.Port(rawValue: UInt16(self.port)) else {
+                guard (1...65535).contains(self.port), let nwPort = NWEndpoint.Port(rawValue: UInt16(self.port)) else {
                     throw NSError(domain: "LocalClusterServer", code: 1, userInfo: [NSLocalizedDescriptionKey: "Invalid port \(self.port)"])
                 }
 
@@ -80,10 +83,12 @@ public final class LocalClusterServer: ObservableObject {
                 tcpOptions.keepaliveIdle = 30
                 let params = NWParameters(tls: nil, tcp: tcpOptions)
                 params.allowLocalEndpointReuse = true
+                params.requiredLocalEndpoint = .hostPort(host: .ipv4(.loopback), port: nwPort)
 
-                let listener = try NWListener(using: params, on: nwPort)
-                listener.stateUpdateHandler = { [weak self] state in
-                    guard let self else { return }
+                let listener = try NWListener(using: params)
+                listener.stateUpdateHandler = { [weak self, weak listener] state in
+                    guard let self, self.listener === listener else { return }
+                    if case .failed = state { self.listener = nil }
                     self.handleListenerState(state)
                 }
 
@@ -106,12 +111,13 @@ public final class LocalClusterServer: ObservableObject {
     public func stop() {
         queue.async { [weak self] in
             guard let self else { return }
+            self.listener?.stateUpdateHandler = nil
             self.listener?.cancel()
             self.listener = nil
 
             for (_, session) in self.clients {
                 session.send("73! YAAM Local Server shutting down.\r\n")
-                session.connection.cancel()
+                session.close()
             }
             self.clients.removeAll()
 
@@ -150,6 +156,7 @@ public final class LocalClusterServer: ObservableObject {
     }
 
     private func handleNewConnection(_ connection: NWConnection) {
+        guard clients.count < 8 else { connection.cancel(); return }
         let session = LocalClientSession(connection: connection)
         clients[session.id] = session
 
@@ -214,7 +221,7 @@ public final class LocalClusterServer: ObservableObject {
         } else if cmd == "QUIT" || cmd == "BYE" {
             reply("73 de YAAM Local Server!\r\n")
         } else {
-            reply("YAAM: Unknown command '\(rawCommand)'. Type HELP for commands.\r\nYAAM> ")
+            reply("YAAM: Unknown command '\(LocalClusterWirePolicy.line(rawCommand))'. Type HELP for commands.\r\nYAAM> ")
         }
     }
 
@@ -229,18 +236,17 @@ public final class LocalClusterServer: ObservableObject {
         lock.unlock()
 
         let telnetLine = formatTelnetSpot(spot)
-        let telnetData = telnetLine.data(using: .utf8) ?? Data()
 
         queue.async { [weak self] in
             guard let self else { return }
 
             // 1. Broadcast to all active Telnet clients
             for (_, session) in self.clients where session.isAuthenticated {
-                session.connection.send(content: telnetData, completion: .contentProcessed({ _ in }))
+                session.send(telnetLine)
             }
 
             // 2. Broadcast via UDP if enabled
-            if self.udpEnabled {
+            if self.udpEnabled && self.listener != nil {
                 self.sendUDPBroadcast(spot: spot, telnetLine: telnetLine)
             }
 
@@ -251,11 +257,11 @@ public final class LocalClusterServer: ObservableObject {
     }
 
     private func formatTelnetSpot(_ spot: DXSpot) -> String {
-        let spotterClean = spot.spotter.replacingOccurrences(of: ":", with: "")
+        let spotterClean = LocalClusterWirePolicy.line(spot.spotter).replacingOccurrences(of: ":", with: "")
         let spotterField = (spotterClean + ":").padding(toLength: 10, withPad: " ", startingAt: 0)
         let freqStr = String(format: "%8.1f", spot.frequencyKHz)
-        let callField = spot.callsign.padding(toLength: 12, withPad: " ", startingAt: 0)
-        let commentField = (spot.comment.isEmpty ? (spot.grid.isEmpty ? "" : spot.grid) : spot.comment)
+        let callField = LocalClusterWirePolicy.line(spot.callsign).padding(toLength: 12, withPad: " ", startingAt: 0)
+        let commentField = LocalClusterWirePolicy.line(spot.comment.isEmpty ? spot.grid : spot.comment)
             .prefix(30)
             .padding(toLength: 30, withPad: " ", startingAt: 0)
 
@@ -266,7 +272,10 @@ public final class LocalClusterServer: ObservableObject {
     }
 
     private func sendUDPBroadcast(spot: DXSpot, telnetLine: String) {
-        guard let port = NWEndpoint.Port(rawValue: UInt16(udpPort)) else { return }
+        guard (1...65535).contains(udpPort), spot.frequencyKHz.isFinite, udpRequestID == nil,
+              let port = NWEndpoint.Port(rawValue: UInt16(udpPort)) else { return }
+        let requestID = UUID()
+        udpRequestID = requestID
 
         // Standard N1MM XML Spot packet for logging software
         let isoFormatter = ISO8601DateFormatter()
@@ -275,13 +284,13 @@ public final class LocalClusterServer: ObservableObject {
         let xmlPacket = """
         <?xml version="1.0" encoding="utf-8"?>
         <spot>
-          <station>\(spot.callsign)</station>
+          <station>\(LocalClusterWirePolicy.xml(spot.callsign))</station>
           <frequency>\(spot.frequencyKHz * 1000.0)</frequency>
-          <mode>\(spot.mode)</mode>
-          <spotter>\(spot.spotter)</spotter>
-          <comment>\(spot.comment)</comment>
-          <grid>\(spot.grid)</grid>
-          <band>\(spot.band)</band>
+          <mode>\(LocalClusterWirePolicy.xml(spot.mode))</mode>
+          <spotter>\(LocalClusterWirePolicy.xml(spot.spotter))</spotter>
+          <comment>\(LocalClusterWirePolicy.xml(spot.comment))</comment>
+          <grid>\(LocalClusterWirePolicy.xml(spot.grid))</grid>
+          <band>\(LocalClusterWirePolicy.xml(spot.band))</band>
           <time>\(timeStr)</time>
         </spot>
         """
@@ -290,17 +299,24 @@ public final class LocalClusterServer: ObservableObject {
 
         let udpParams = NWParameters.udp
         udpParams.allowLocalEndpointReuse = true
-        let broadcastConn = NWConnection(to: .hostPort(host: .ipv4(.broadcast), port: port), using: udpParams)
-        broadcastConn.stateUpdateHandler = { state in
+        let broadcastConn = NWConnection(to: .hostPort(host: .ipv4(.loopback), port: port), using: udpParams)
+        broadcastConn.stateUpdateHandler = { [weak self] state in
             if case .ready = state {
                 broadcastConn.send(content: packetData, completion: .contentProcessed({ _ in
+                    if self?.udpRequestID == requestID { self?.udpRequestID = nil }
                     broadcastConn.cancel()
                 }))
             } else if case .failed = state {
-                broadcastConn.cancel()
+                if self?.udpRequestID == requestID { self?.udpRequestID = nil }
+                    broadcastConn.cancel()
             }
         }
         broadcastConn.start(queue: queue)
+        queue.asyncAfter(deadline: .now() + 2) { [weak self] in
+            broadcastConn.stateUpdateHandler = nil
+            broadcastConn.cancel()
+            if self?.udpRequestID == requestID { self?.udpRequestID = nil }
+        }
     }
 }
 
@@ -312,6 +328,10 @@ private final class LocalClientSession {
     var callsign: String?
     var isAuthenticated: Bool = false
     private var buffer = ""
+    private var closed = false
+    private var pendingBytes = 0
+    private var commandWindowStart = ProcessInfo.processInfo.systemUptime
+    private var commandsInWindow = 0
 
     var onDisconnect: ((UUID) -> Void)?
     var onCallsignSet: ((String) -> Void)?
@@ -329,7 +349,7 @@ private final class LocalClientSession {
                 self.sendWelcome()
                 self.receiveLoop()
             case .failed, .cancelled:
-                self.onDisconnect?(self.id)
+                self.close()
             default:
                 break
             }
@@ -337,9 +357,22 @@ private final class LocalClientSession {
         connection.start(queue: queue)
     }
 
+    func close() {
+        guard !closed else { return }
+        closed = true
+        connection.cancel()
+        onDisconnect?(id)
+    }
+
     func send(_ text: String) {
-        guard let data = text.data(using: .utf8) else { return }
-        connection.send(content: data, completion: .contentProcessed({ _ in }))
+        guard !closed, let data = text.data(using: .utf8) else { return }
+        guard pendingBytes + data.count <= 65536 else { close(); return }
+        pendingBytes += data.count
+        connection.send(content: data, completion: .contentProcessed({ [weak self] error in
+            guard let self else { return }
+            self.pendingBytes -= data.count
+            if error != nil { self.close() }
+        }))
     }
 
     private func sendWelcome() {
@@ -360,8 +393,7 @@ private final class LocalClientSession {
                 self.consume(chunk)
             }
             if isComplete || error != nil {
-                self.connection.cancel()
-                self.onDisconnect?(self.id)
+                self.close()
             } else {
                 self.receiveLoop()
             }
@@ -369,18 +401,26 @@ private final class LocalClientSession {
     }
 
     private func consume(_ chunk: String) {
+        guard !closed, buffer.utf8.count + chunk.utf8.count <= 8192 else { close(); return }
         buffer.append(chunk)
         buffer = buffer.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
         let lines = buffer.components(separatedBy: "\n")
         guard lines.count > 1 else { return }
         buffer = lines.last ?? ""
+        guard buffer.utf8.count <= 4096 else { close(); return }
 
         for rawLine in lines.dropLast() {
+            guard !closed, rawLine.utf8.count <= 4096 else { close(); return }
+            let uptime = ProcessInfo.processInfo.systemUptime
+            if uptime - commandWindowStart >= 1 { commandWindowStart = uptime; commandsInWindow = 0 }
+            commandsInWindow += 1
+            guard commandsInWindow <= 20 else { close(); return }
             let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !line.isEmpty else { continue }
 
             if !isAuthenticated {
-                let call = line.uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
+                let call = LocalClusterWirePolicy.line(line.uppercased())
+                guard call.count <= 20, call.range(of: #"^[A-Z0-9/]+$"#, options: .regularExpression) != nil else { close(); return }
                 self.callsign = call
                 self.isAuthenticated = true
                 self.onCallsignSet?(call)
@@ -393,8 +433,7 @@ private final class LocalClientSession {
             } else {
                 if line.uppercased() == "QUIT" || line.uppercased() == "BYE" {
                     send("73! Disconnecting.\r\n")
-                    connection.cancel()
-                    onDisconnect?(id)
+                    close()
                     return
                 }
                 onCommand?(line) { [weak self] reply in

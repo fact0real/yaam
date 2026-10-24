@@ -20,9 +20,11 @@ nonisolated enum AmateurBandPlan { static func band(forMHz: Double) -> String? {
 }
 nonisolated final class SpotsURLProtocol: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) static var phase = 0
+    nonisolated(unsafe) static var requestedHosts: [String] = []
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
+        Self.requestedHosts.append(request.url!.host!)
         let pota = request.url!.host == "api.pota.app"
         if Self.phase == 0 {
             client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet)); return
@@ -44,8 +46,12 @@ nonisolated final class SpotsURLProtocol: URLProtocol, @unchecked Sendable {
         app.setActivationPolicy(.accessory)
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [SpotsURLProtocol.self]
-        let client = POTASpotsClient(session: URLSession(configuration: config), autoRefresh: false)
+        let client = POTASpotsClient(session: URLSession(configuration: config))
+        try await Task.sleep(for: .milliseconds(50))
+        precondition(SpotsURLProtocol.requestedHosts.isEmpty, "Constructing a client must not start polling")
         await client.refreshSpots()
+        precondition(SpotsURLProtocol.requestedHosts == ["api.pota.app"], "POTA refresh must not contact SOTA")
+        client.selectedProgram = .sota; await client.refreshSpots(); client.selectedProgram = .pota
         precondition(client.potaSpots.isEmpty && client.sotaSpots.isEmpty && client.lastUpdated == nil)
         precondition(client.potaError != nil && client.sotaError != nil)
         print("PASS offline launch shows no fabricated spots or successful-fetch timestamp")
@@ -53,14 +59,16 @@ nonisolated final class SpotsURLProtocol: URLProtocol, @unchecked Sendable {
         try output.map { try FileManager.default.createDirectory(at: $0, withIntermediateDirectories: true) }
         if let output { try render(client, output, "offline") }
         SpotsURLProtocol.phase = 1; await client.refreshSpots()
+        client.selectedProgram = .sota; await client.refreshSpots(); client.selectedProgram = .pota
         precondition(client.potaSpots.count == 1 && client.sotaSpots.count == 1 && client.selectedError == nil)
         let good = client.potaUpdated
+        let sotaGood = client.sotaUpdated
         client.tuneRig(frequencyKHz: 14074, mode: "FT8")
         precondition(client.tuneErrorMessage?.contains("offline") == true)
         if let output { try render(client, output, "live-tune-error") }
         SpotsURLProtocol.phase = 2; await client.refreshSpots()
         precondition(client.potaUpdated == good && client.potaSpots.count == 1 && client.potaError!.contains("503"))
-        precondition(client.sotaError == nil && client.sotaUpdated! > good!)
+        precondition(client.sotaError == nil && client.sotaUpdated == sotaGood)
         let count = RigControlEngine.shared.tunes
         client.tuneRig(frequencyKHz: 14074, mode: "FT8")
         precondition(RigControlEngine.shared.tunes == count && client.tuneErrorMessage!.contains("stale"))
@@ -69,9 +77,11 @@ nonisolated final class SpotsURLProtocol: URLProtocol, @unchecked Sendable {
         precondition(!client.selectedIsStale)
         print("PASS partial failure retains and labels only that source's stale list; stale Tune cannot send CAT")
         SpotsURLProtocol.phase = 3; await client.refreshSpots()
+        client.selectedProgram = .pota; await client.refreshSpots(); client.selectedProgram = .sota
         precondition(client.potaSpots.isEmpty && client.sotaSpots.isEmpty && client.potaError == nil && client.sotaError == nil)
         print("PASS successful empty fetch clears old spots and recovers each source")
         SpotsURLProtocol.phase = 4; await client.refreshSpots()
+        client.selectedProgram = .pota; await client.refreshSpots()
         precondition(client.potaError != nil && client.sotaError != nil)
         client.tuneRig(frequencyKHz: .infinity, mode: "FT8")
         precondition(client.tuneErrorMessage!.contains("not a usable"))

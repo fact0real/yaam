@@ -1084,6 +1084,9 @@ struct ContestPanel: View {
                         .font(.system(size: 32, design: .rounded).weight(.heavy))
                         .foregroundStyle(.orange)
 
+                    if !summary.scoreNotice.isEmpty {
+                        Text(summary.scoreNotice).font(.caption2).foregroundStyle(.secondary)
+                    }
                     Text("\(summary.totalPoints.formatted()) pts × \(summary.totalMultipliers.formatted()) mults")
                         .font(.caption2.monospaced())
                         .foregroundStyle(.secondary)

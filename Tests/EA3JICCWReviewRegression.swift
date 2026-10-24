@@ -34,7 +34,8 @@ private enum Refused: LocalizedError { case cat; var errorDescription: String? {
         precondition(logged==0, "STOP must invalidate pending acceptance")
         esm.handleEnterPressed(callsign:&call,sentExchange:"002",rcvdExchange:&exchange) { logged += 1; return true }
         pump(0.3); precondition(logged==1)
-        keyer.stop(); pump(); flrig.stopMorseError=Refused.cat; keyer.stop(); pump()
+        keyer.stop(); pump(); precondition(!esm.isTransmitting && esm.activeOutgoingText.isEmpty, "ESM HUD must clear after keyer STOP")
+        flrig.stopMorseError=Refused.cat; keyer.stop(); pump()
         precondition(keyer.operationNotice.contains("CW stop was not confirmed"))
         flrig.stopMorseError=nil; keyer.send(text:"E",myCall:"EA3JIC"); pump(0.3)
         precondition(!keyer.operationNotice.isEmpty, "A later send must not erase the stop warning")

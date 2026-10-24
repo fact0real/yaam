@@ -542,6 +542,7 @@ final class FT8EngineService: ObservableObject {
     private var icomSource: IcomFT8AudioSource?
     private weak var activeIcom: IcomNetworkRadio?
     private weak var activeRig: RigControlClient?
+    private var activeInputDevice: String?
     private var activeOutputDevice: String?
     private var decodeTask: Task<Void, Never>?
     private var waterfallTask: Task<Void, Never>?
@@ -657,18 +658,25 @@ final class FT8EngineService: ObservableObject {
         applyDialAndMode()
 
         if state.isMonitoring {
+            refreshAudioDevices()
+            if audioPath != .icomLAN, let uid = activeInputDevice,
+               !inputDevices.contains(where: { $0.uid == uid }) {
+                stopMonitoring()
+                fail("The selected receive input is unavailable. Select it again before monitoring.")
+                return
+            }
             if audioPath == .icomLAN, let r = activeIcom {
                 startIcomMonitoring(radio: r)
             } else if audioPath == .coreAudio, let rig = activeRig {
-                startCoreAudioMonitoring(rig: rig, inputDevice: inputDevices.first?.uid, outputDevice: activeOutputDevice)
+                startCoreAudioMonitoring(rig: rig, inputDevice: activeInputDevice, outputDevice: activeOutputDevice)
             } else if audioPath == .icomUSB {
-                startIcomUSBMonitoring(inputDevice: inputDevices.first?.uid, outputDevice: activeOutputDevice)
+                startIcomUSBMonitoring(inputDevice: activeInputDevice, outputDevice: activeOutputDevice)
             } else if audioPath == .lab599TX500 {
-                startTX500Monitoring(inputDevice: inputDevices.first?.uid, outputDevice: activeOutputDevice)
+                startTX500Monitoring(inputDevice: activeInputDevice, outputDevice: activeOutputDevice)
             } else if audioPath == .fx4cr {
-                startFX4CRMonitoring(inputDevice: inputDevices.first?.uid, outputDevice: activeOutputDevice)
+                startFX4CRMonitoring(inputDevice: activeInputDevice, outputDevice: activeOutputDevice)
             } else if audioPath == .xiegu6100 {
-                startXiegu6100Monitoring(inputDevice: inputDevices.first?.uid, outputDevice: activeOutputDevice)
+                startXiegu6100Monitoring(inputDevice: activeInputDevice, outputDevice: activeOutputDevice)
             }
         }
         status = "Switched to \(proto == .ft4 ? "FT4 (7.5s slot)" : "FT8 (15s slot)") on \(formattedDial)"
@@ -724,6 +732,7 @@ final class FT8EngineService: ObservableObject {
         audioPath = .coreAudio
         activeRig = rig
         activeIcom = nil
+        activeInputDevice = cleanDevice(inputDevice: inputDevice)
         activeOutputDevice = cleanDevice(inputDevice: outputDevice)
 
         let source = LiveRadioSource(
@@ -749,6 +758,7 @@ final class FT8EngineService: ObservableObject {
         audioPath = .icomUSB
         activeRig = nil
         activeIcom = nil
+        activeInputDevice = cleanDevice(inputDevice: inputDevice)
         activeOutputDevice = cleanDevice(inputDevice: outputDevice)
 
         let source = LiveRadioSource(
@@ -775,6 +785,7 @@ final class FT8EngineService: ObservableObject {
         audioPath = .lab599TX500
         activeRig = nil
         activeIcom = nil
+        activeInputDevice = cleanDevice(inputDevice: inputDevice)
         activeOutputDevice = cleanDevice(inputDevice: outputDevice)
 
         let source = LiveRadioSource(
@@ -800,6 +811,7 @@ final class FT8EngineService: ObservableObject {
         audioPath = .fx4cr
         activeRig = nil
         activeIcom = nil
+        activeInputDevice = cleanDevice(inputDevice: inputDevice)
         activeOutputDevice = cleanDevice(inputDevice: outputDevice)
 
         let source = LiveRadioSource(
@@ -826,6 +838,7 @@ final class FT8EngineService: ObservableObject {
         audioPath = .xiegu6100
         activeRig = nil
         activeIcom = nil
+        activeInputDevice = cleanDevice(inputDevice: inputDevice)
         activeOutputDevice = cleanDevice(inputDevice: outputDevice)
 
         let source = LiveRadioSource(
@@ -1253,6 +1266,10 @@ final class FT8EngineService: ObservableObject {
         }
     }
 
+    private static func requireTimelySlot(_ slot: Date) throws {
+        guard FT8TransmissionTiming.canStart(slot: slot, now: Date()) else { throw FT8RunError.missedSlot }
+    }
+
     func scheduleTransmission() {
         guard !TransmitShutdown.isShuttingDown else { return }
         guard transmitTask == nil else { return }
@@ -1339,6 +1356,8 @@ final class FT8EngineService: ObservableObject {
                 if wait > 0 { try await Task.sleep(for: .seconds(wait)) }
                 try Task.checkCancellation()
 
+                try Self.requireTimelySlot(slot)
+
                 // Consult Multi-Rig Interlock Coordinator
                 if let checkInterlock = interlockWillTransmit, !checkInterlock(self) {
                     state = decodeTask == nil ? .idle : .monitoring
@@ -1364,6 +1383,7 @@ final class FT8EngineService: ObservableObject {
                 switch path {
                 case .icomLAN:
                     guard let icom else { throw IcomNetworkError.disconnected }
+                    try Self.requireTimelySlot(slot)
                     icom.setPTT(true, maximumDuration: slotSecs)
                     defer {
                         icom.setPTT(false)
@@ -1379,6 +1399,7 @@ final class FT8EngineService: ObservableObject {
                     let output = TxAudioOutput(player: player, sampleRate: 48_000, device: outputDevice)
                     txPlayer = player
                     txOutput = output
+                    try Self.requireTimelySlot(slot)
                     rig.setPTT(true, maximumDuration: slotSecs)
                     defer {
                         output.stop()
@@ -1386,6 +1407,7 @@ final class FT8EngineService: ObservableObject {
                         txOutput = nil
                         txPlayer = nil
                     }
+                    try Self.requireTimelySlot(slot)
                     try output.start()
                     while !output.isFinished {
                         try Task.checkCancellation()
@@ -1411,7 +1433,8 @@ final class FT8EngineService: ObservableObject {
                     if untilSlot > 0 { try await Task.sleep(for: .seconds(untilSlot)) }
                     try Task.checkCancellation()
                     // A stalled UI must skip the slot rather than play a partial, late frame.
-                    guard Date().timeIntervalSince(slot) < 0.10 else { throw FT8RunError.rigUnavailable }
+                    try Self.requireTimelySlot(slot)
+                    try Self.requireTimelySlot(slot)
                     try output.start()
                     while !output.isFinished {
                         try Task.checkCancellation()
@@ -1425,6 +1448,7 @@ final class FT8EngineService: ObservableObject {
                     let output = TxAudioOutput(player: player, sampleRate: 48_000, device: outputDevice)
                     txPlayer = player
                     txOutput = output
+                    try Self.requireTimelySlot(slot)
                     icom.setPTT(true, maximumDuration: slotSecs)
                     defer {
                         output.stop()
@@ -1432,6 +1456,7 @@ final class FT8EngineService: ObservableObject {
                         txOutput = nil
                         txPlayer = nil
                     }
+                    try Self.requireTimelySlot(slot)
                     try output.start()
                     while !output.isFinished {
                         try Task.checkCancellation()
@@ -1445,6 +1470,7 @@ final class FT8EngineService: ObservableObject {
                     let output = TxAudioOutput(player: player, sampleRate: 48_000, device: outputDevice)
                     txPlayer = player
                     txOutput = output
+                    try Self.requireTimelySlot(slot)
                     fx.setPTT(true, maximumDuration: slotSecs)
                     defer {
                         output.stop()
@@ -1452,6 +1478,7 @@ final class FT8EngineService: ObservableObject {
                         txOutput = nil
                         txPlayer = nil
                     }
+                    try Self.requireTimelySlot(slot)
                     try output.start()
                     while !output.isFinished {
                         try Task.checkCancellation()
@@ -1465,6 +1492,7 @@ final class FT8EngineService: ObservableObject {
                     let output = TxAudioOutput(player: player, sampleRate: 48_000, device: outputDevice)
                     txPlayer = player
                     txOutput = output
+                    try Self.requireTimelySlot(slot)
                     xiegu.setPTT(true, maximumDuration: slotSecs)
                     defer {
                         output.stop()
@@ -1472,6 +1500,7 @@ final class FT8EngineService: ObservableObject {
                         txOutput = nil
                         txPlayer = nil
                     }
+                    try Self.requireTimelySlot(slot)
                     try output.start()
                     while !output.isFinished {
                         try Task.checkCancellation()
@@ -2192,12 +2221,14 @@ final class FT8EngineService: ObservableObject {
 
 nonisolated private enum FT8RunError: LocalizedError, Sendable {
     case rigUnavailable
+    case missedSlot
     case civSelfTestFailed
     case codecSelfTestFailed
     case clockSelfTestFailed
 
     var errorDescription: String? {
         switch self {
+        case .missedSlot: return "The transmit slot was missed; no late frame was started. Queue the next slot."
         case .rigUnavailable: return "rigctld became unavailable during transmit."
         case .civSelfTestFailed: return "CI-V frequency encoding self-test failed."
         case .codecSelfTestFailed: return "FT8 codec self-test failed."

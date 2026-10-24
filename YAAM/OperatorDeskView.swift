@@ -2541,7 +2541,7 @@ private struct DXClusterPanel: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Local Redistribution Server")
                         .font(.headline)
-                    Text("Broadcast spots to N1MM, DX4WIN, and other local clients via Telnet/UDP")
+                    Text("Share spots with logging apps on this Mac via Telnet/UDP")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -2584,7 +2584,17 @@ private struct DXClusterPanel: View {
                     .multilineTextAlignment(.trailing)
             }
 
-            Text("Clients connect to 127.0.0.1:\(localServerPort). UDP spot broadcasts on port \(localServer.port + 1) (N1MM compatible).")
+            Toggle("Send UDP spots to apps on this Mac", isOn: $localServer.udpEnabled)
+                .font(.caption)
+            HStack {
+                Text("UDP Port").font(.system(size: 12))
+                Spacer()
+                TextField("12060", value: $localServer.udpPort, format: .number)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 80)
+                    .multilineTextAlignment(.trailing)
+            }
+            Text("Telnet: 127.0.0.1:\(localServer.isRunning ? localServer.port : localServerPort). UDP: 127.0.0.1:\(localServer.udpPort). Access is limited to this Mac; UDP is off by default.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 

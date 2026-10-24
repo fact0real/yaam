@@ -16,16 +16,20 @@ public final class HRDLogClient: ObservableObject {
 
     // MARK: - Published State
     @Published public var isUploading: Bool = false
-    @Published public var autoUploadEnabled: Bool = false
+    // Read the setting when a QSO is dispatched, including tasks queued before it was disabled.
+    public var autoUploadEnabled: Bool {
+        get { defaults.bool(forKey: "hrdlogAutoUploadEnabled") }
+        set { defaults.set(newValue, forKey: "hrdlogAutoUploadEnabled") }
+    }
     @Published public var lastUploadStatus: String = "Idle"
     @Published public var lastUploadDate: Date? = nil
     @Published public var lastError: String? = nil
 
     private let endpointURL = URL(string: "https://hrdlog.net/upload.aspx")!
 
-    public init() {
-        self.autoUploadEnabled = UserDefaults.standard.bool(forKey: "hrdlogAutoUploadEnabled")
-    }
+    private let defaults: UserDefaults
+
+    public init(defaults: UserDefaults = .standard) { self.defaults = defaults }
 
     public var isConfigured: Bool {
         let call = UserDefaults.standard.string(forKey: "hrdlogCallsign") ?? ""
@@ -36,6 +40,7 @@ public final class HRDLogClient: ObservableObject {
     // MARK: - Upload Single QSO
 
     func uploadSingleQSO(record: QSORecordModel, callsign: String? = nil) async -> Bool {
+        guard autoUploadEnabled else { return false }
         let adif = record.toADIFRecordString(for: .hrdlog)
         return await uploadADIFString(adif, callsign: callsign)
     }

@@ -34,7 +34,7 @@ enum QSLCardRenderer {
         } else {
             drawFallbackTemplate(in: rect, station: station)
         }
-        drawStationFlag(in: rect, station: station)
+        drawStationFlag(in: rect, station: station, personalLayout: page != nil)
         drawQSOFields(record: record, station: station, in: rect, personalLayout: page != nil)
         image.unlockFocus()
 
@@ -62,7 +62,7 @@ enum QSLCardRenderer {
         }
         let backImage = renderPDFPage(page: backPage, size: pageSize) { rect in
             if backPage == nil { drawFallbackTemplate(in: rect, station: station) }
-            drawStationFlag(in: rect, station: station)
+            drawStationFlag(in: rect, station: station, personalLayout: backPage != nil)
             drawQSOFields(record: record, station: station, in: rect, personalLayout: backPage != nil)
         }
 
@@ -120,8 +120,15 @@ enum QSLCardRenderer {
         draw(powerText, x: 0.480, y: 0.305, width: 0.150, height: 0.040, in: rect, size: infoFontSize, weight: .bold, alignment: .left)
     }
 
-    fileprivate static func drawStationFlag(in rect: CGRect, station: QSLCardStationInfo) {
-        draw(station.flag, x: 0.80, y: 0.78, width: 0.10, height: 0.10, in: rect, size: rect.height * 0.066)
+    fileprivate static func drawStationFlag(in rect: CGRect, station: QSLCardStationInfo, personalLayout: Bool = false) {
+        if personalLayout {
+            // The artwork's operator name ends at x=187.6 pt on its 780×482 pt back page.
+            // Keep the flag beside that name, clear of the country emblem in the top-right.
+            draw(station.flag, x: 0.25, y: 0.798, width: 0.045, height: 0.055, in: rect,
+                 size: rect.height * 0.046, alignment: .left)
+        } else {
+            draw(station.flag, x: 0.80, y: 0.78, width: 0.10, height: 0.10, in: rect, size: rect.height * 0.066)
+        }
     }
 
     private static func drawBackground(in rect: CGRect) {

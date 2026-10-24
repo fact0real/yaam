@@ -275,6 +275,7 @@ public struct ContestSummary: Equatable, Sendable {
     public var rateLast10Min: Double = 0.0
     public var rateLast60Min: Double = 0.0
     public var lastQSOAt: Date?
+    public var scoreNotice: String = ""
 
     public init(
         qsoCount: Int = 0,
@@ -321,10 +322,14 @@ public enum ContestWorkspaceLogic {
         .sorted { (qsoDate($0) ?? .distantPast) > (qsoDate($1) ?? .distantPast) }
     }
 
-    static func summary(in session: ContestSession, records: [QSORecordModel]) -> ContestSummary {
+    static func summary(in session: ContestSession, records: [QSORecordModel], stationCallsign: String? = nil) -> ContestSummary {
         let contestRecords = self.records(in: session, from: records)
         let template = ContestTemplate.find(id: session.contestID)
-        let homeContinent = "AS" // Default station continent (Asia / Iran)
+        let homeCall = (stationCallsign?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? stationCallsign! : session.operatorCallsign)
+        let homeContinent = DXCCDatabase.resolve(callsign: homeCall).continent
+        let requiresContinent = ![ContestPointSystem.arrldx, .onePointPerQSO].contains(template?.pointSystem ?? .cqww)
+        let knownContinents: Set<String> = ["AF", "AN", "AS", "EU", "NA", "OC", "SA"]
+        let homeKnown = knownContinents.contains(homeContinent)
 
         var seenKeys: Set<String> = []
         var validRecords: [QSORecordModel] = []
@@ -439,7 +444,7 @@ public enum ContestWorkspaceLogic {
         let rate10 = Double(last10MinCount) * 6.0
         let rate60 = Double(last60MinCount)
 
-        return ContestSummary(
+        var summary = ContestSummary(
             qsoCount: validRecords.count,
             uniqueCallsigns: Set(validRecords.map { $0["CALL"].uppercased() }.filter { !$0.isEmpty }).count,
             uniqueDXCC: Set(validRecords.map { $0["DXCC"] }.filter { !$0.isEmpty }).count,
@@ -453,6 +458,8 @@ public enum ContestWorkspaceLogic {
             rateLast60Min: rate60,
             lastQSOAt: contestRecords.compactMap { qsoDate($0) }.max()
         )
+        if requiresContinent && !homeKnown { summary.scoreNotice = "Home continent not set; continent-dependent points are unavailable." }
+        return summary
     }
 
     static func isDuplicate(callsign: String, band: String, mode: String, session: ContestSession, records: [QSORecordModel]) -> Bool {
@@ -519,7 +526,11 @@ public enum ContestWorkspaceLogic {
 
     private static func calculateQSOPoints(record: QSORecordModel, pointSystem: ContestPointSystem, homeContinent: String) -> Int {
         let contactCont = record["CONT"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        let isSameContinent = contactCont.isEmpty ? false : (contactCont == homeContinent)
+        if ![ContestPointSystem.arrldx, .onePointPerQSO].contains(pointSystem) {
+            let known: Set<String> = ["AF", "AN", "AS", "EU", "NA", "OC", "SA"]
+            guard known.contains(homeContinent), known.contains(contactCont) else { return 0 }
+        }
+        let isSameContinent = contactCont == homeContinent
         let band = record["BAND"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
 
         switch pointSystem {
@@ -671,7 +682,7 @@ public enum CabrilloExporter {
         createdBy: String
     ) -> String {
         let contestRecords = ContestWorkspaceLogic.records(in: session, from: records).reversed()
-        let summary = ContestWorkspaceLogic.summary(in: session, records: records)
+        let summary = ContestWorkspaceLogic.summary(in: session, records: records, stationCallsign: station?.normalizedCallsign)
         let callsign = station?.normalizedCallsign.isEmpty == false ? station!.normalizedCallsign : session.operatorCallsign
 
         var lines = [
@@ -704,6 +715,7 @@ public enum CabrilloExporter {
         if !session.soapbox.isEmpty {
             lines.append("SOAPBOX: \(session.soapbox)")
         }
+        if !summary.scoreNotice.isEmpty { lines.append("SOAPBOX: " + summary.scoreNotice) }
 
         for record in contestRecords {
             guard let date = ContestDateParser.date(record) else { continue }

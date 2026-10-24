@@ -8706,33 +8706,19 @@ class AppState: NSObject, ObservableObject {
                     return
                 }
                 
-                if let data = data,
-                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                   let latestTag = json["tag_name"] as? String {
-                    
-                    let cleanTag = latestTag.replacingOccurrences(of: "v", with: "")
-                    let htmlUrl = json["html_url"] as? String
-                    let downloadURL = htmlUrl != nil ? URL(string: htmlUrl!) : nil
-                    
-                    if cleanTag != self.currentVersion {
-                        self.appendLog("YAAM Update available: \(latestTag)")
-                        self.showNativeAlert(
-                            title: "YAAM Update Available! 🚀",
-                            message: "A new version (\(latestTag)) is available on GitHub!\nYour current version is v\(self.currentVersion).\n\nWould you like to open the release page?",
-                            actionURL: downloadURL
-                        )
-                    } else {
-                        self.appendLog("YAAM is up to date (v\(self.currentVersion)).")
-                        self.showNativeAlert(
-                            title: "Up to Date 🟢",
-                            message: "You are running the latest version of YAAM (v\(self.currentVersion))."
-                        )
-                    }
-                } else {
-                    self.showNativeAlert(
-                        title: "Up to Date 🟢",
-                        message: "You are running the latest version of YAAM (v\(self.currentVersion))."
-                    )
+                switch GitHubReleaseCheck.evaluate(data: data, response: response, currentVersion: self.currentVersion) {
+                case .available(let tag, let releaseURL):
+                    self.appendLog("YAAM update available: \(tag)")
+                    self.showNativeAlert(title: "YAAM Update Available",
+                        message: "Version \(tag) is available. Your version is \(self.currentVersion). Open the release page?",
+                        actionURL: releaseURL)
+                case .current:
+                    self.appendLog("Checked GitHub releases: v\(self.currentVersion) is at least as recent as the published release.")
+                    self.showNativeAlert(title: "Up to Date",
+                        message: "Your version (\(self.currentVersion)) is at least as recent as the latest published release.")
+                case .failed(let reason):
+                    self.appendLog("Update check failed: \(reason)")
+                    self.showNativeAlert(title: "Update Check Failed", message: reason)
                 }
             }
         }.resume()

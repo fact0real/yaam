@@ -90,6 +90,7 @@ public struct ContestESMControlView: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+                .keyboardShortcut(.cancelAction)
             }
 
             // Real-Time Transmit HUD (Visible during transmission)
