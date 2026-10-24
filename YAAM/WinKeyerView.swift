@@ -206,7 +206,11 @@ public struct WinKeyerView: View {
             return
         }
         testNotice = ""
-        wk.sendMorseText(testInput)
+        let keyer = CWKeyerService.shared
+        keyer.transmissionMode = .winkeyer
+        let call = TransmitIdentity.savedOperatorCallsign() ?? ""
+        keyer.send(text: "\(testInput) DE \(call)", myCall: call)
+        testNotice = keyer.transmitRefusal
     }
 
     // MARK: - Test Transmitter Card

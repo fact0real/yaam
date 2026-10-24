@@ -104,6 +104,25 @@ struct UploadTransportPrivacyRegression {
         let base = "https://log.example.invalid/subdirectory"
         let key = "INVENTED-KEY"
         UploadRecordingProtocol.responder = { request in
+            let body=payload(request)
+            precondition(request.httpMethod=="POST" && request.url!.path=="/subdirectory/api/radio")
+            precondition(body["power"]==nil && body["frequency"] as? Int==14_074_000)
+            return (200,json(["status":"success"]))
+        }
+        let unknownPower=try await client.broadcastRadio(baseURL:base,apiKey:key,radioName:"Fixture",frequencyHz:14_074_000,mode:"USB")
+        precondition(unknownPower)
+        UploadRecordingProtocol.responder = { request in
+            precondition(payload(request)["power"] as? Int==12)
+            return (200,json(["status":"success"]))
+        }
+        let knownPower=try await client.broadcastRadio(baseURL:base,apiKey:key,radioName:"Fixture",frequencyHz:14_074_000,mode:"USB",powerWatts:12)
+        precondition(knownPower)
+        UploadRecordingProtocol.responder = { _ in (200,json(["status":"failed","reason":"fixture rejection"])) }
+        do {
+            _=try await client.broadcastRadio(baseURL:base,apiKey:key,radioName:"Fixture",frequencyHz:14_074_000,mode:"USB")
+            preconditionFailure("A failed HTTP 200 radio update must not count as successful")
+        } catch WavelogError.serverRejected { }
+        UploadRecordingProtocol.responder = { request in
             precondition(request.httpMethod == "GET" && request.url!.path == "/subdirectory/api/check_auth/" + key)
             precondition(request.httpBody == nil)
             return (200, json(["status": "valid", "rights": "r"]))

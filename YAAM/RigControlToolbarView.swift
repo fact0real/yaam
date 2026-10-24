@@ -93,7 +93,7 @@ public struct RigControlToolbarView: View {
 
             // Animated LED S-Meter Bar
             HStack(spacing: 4) {
-                Text("S")
+                Text(rig.driverType == .flrig ? "%" : "S")
                     .font(.system(size: 9, weight: .bold, design: .monospaced))
                     .foregroundStyle(.secondary)
 
@@ -109,7 +109,7 @@ public struct RigControlToolbarView: View {
                 Text(rig.sMeterDescription)
                     .font(.system(size: 9, weight: .heavy, design: .monospaced))
                     .foregroundStyle(rig.sMeterValue > 9 ? Color.red : Color.green)
-                    .frame(width: 52, alignment: .leading)
+                    .frame(width: rig.driverType == .flrig ? 82 : 52, alignment: .leading)
             }
 
             // RF Power Pill

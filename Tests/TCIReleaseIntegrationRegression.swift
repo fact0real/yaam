@@ -13,6 +13,7 @@ final class URLSession {
 final class URLSessionWebSocketTask {
     enum Message { case string(String), data(Data) }
     enum CloseCode { case goingAway }
+    static var suppressPongs = false
     var sent: [String] = []
     var cancelled = false
     var completeWrites = true
@@ -25,7 +26,7 @@ final class URLSessionWebSocketTask {
         if completeWrites { completionHandler(writeError) } else { completions.append(completionHandler) }
     }
     func receive(completionHandler: @escaping (Result<Message, Error>) -> Void) { received = completionHandler }
-    func sendPing(pongReceiveHandler: @escaping (Error?) -> Void) { pongReceiveHandler(nil) }
+    func sendPing(pongReceiveHandler: @escaping (Error?) -> Void) { if !Self.suppressPongs { pongReceiveHandler(nil) } }
     func cancel(with: CloseCode, reason: Data?) { cancelled = true }
     func deliver(_ text: String) { received?(.success(.string(text))) }
 }
@@ -34,7 +35,7 @@ nonisolated enum AmateurBandPlan {
 }
 @main
 struct TCIReleaseIntegrationRegression {
-    static func pump() { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
+    static func pump(_ seconds: Double = 0.05) { RunLoop.main.run(until: Date().addingTimeInterval(seconds)) }
     static func main() {
         let client = TCIClient()
         client.connect(host: "fixture.invalid", port: 40001)
@@ -86,6 +87,13 @@ struct TCIReleaseIntegrationRegression {
         client.connect(host: "fixture.invalid", port: 40001)
         let final = URLSession.tasks.last!; final.deliver("ready;"); pump()
         precondition(final.sent.first?.contains("trx:4,false;") == true, "Recovery retains the exact receiver whose release write failed")
+        URLSessionWebSocketTask.suppressPongs = true
+        let silentClient=TCIClient(); silentClient.connect(host:"silent.invalid",port:40001)
+        let silent=URLSession.tasks.last!; silent.deliver("ready;"); pump()
+        silentClient.sendCW(text:"TEST"); pump(3.3)
+        precondition(!silentClient.isConnected && silent.cancelled)
+        precondition(TransmitNotices.shared.notices.contains{$0.text.contains("No WebSocket pong") && $0.text.contains("may still be transmitting")})
+        silentClient.disconnect(); URLSessionWebSocketTask.suppressPongs = false
         client.setPTT(true, receiver: 4)
         TransmitShutdown.beginShutdown()
         _ = TransmitShutdown.releaseAll()

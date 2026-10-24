@@ -68,5 +68,16 @@ nonisolated final class NWConnection: @unchecked Sendable {
         s.send("T 1\n"); s.fail("lost")
         precondition(lost == true)
         print("PASS lost TX connection is a safety event; no sockets or radio devices used")
+        let silent=NWConnection(), health=RigctldReplyStream(NWConnection())
+        let monitored=RigctldReplyStream(silent)
+        var timedOut=false
+        monitored.onFailure={ reason,risk in timedOut=reason.contains("stopped answering") && risk }
+        monitored.start(); monitored.send("T 1\n")
+        pump(3.3)
+        precondition(timedOut && silent.sent.contains("+T 0\n") && !silent.cancelled,"A silent link requests RX before its bounded retirement")
+        pump(1.6)
+        precondition(silent.cancelled)
+        health.finish()
+        print("PASS an open but silent CAT link expires its reply deadline and retains TX uncertainty")
     }
 }

@@ -277,9 +277,9 @@ final class CWESMEngine: ObservableObject {
     func executeAction(
         action: CWESMAction,
         appState: AppState,
-        focusExchange: () -> Void,
-        focusCallsign: () -> Void,
-        saveQSO: () -> Void
+        focusExchange: @escaping () -> Void,
+        focusCallsign: @escaping () -> Void,
+        saveQSO: @escaping () -> Void
     ) {
         let keyer = CWKeyerService.shared
         let myCall = appState.activeStationProfile?.normalizedCallsign ?? ""
@@ -308,7 +308,9 @@ final class CWESMEngine: ObservableObject {
             return false
         }
 
-        func transmit(_ template: String) {
+        func transmit(_ template: String, accepted: @escaping () -> Void) {
+            let draft = appState.quickLogDraft
+
             keyer.send(
                 text: template,
                 myCall: myCall,
@@ -319,53 +321,54 @@ final class CWESMEngine: ObservableObject {
                 serial: serial,
                 exch: exch,
                 band: band,
-                freq: freq
+                freq: freq,
+                onAccepted: { [weak self] success in
+                    guard let self else { return }
+                    guard success else {
+                        let reason = keyer.transmitRefusal.isEmpty ? "CW submission cancelled; QSO was not advanced." : keyer.transmitRefusal
+                        self.lastExecutedActionDescription = reason
+                        appState.quickLogStatus = reason
+                        return
+                    }
+                    guard appState.quickLogDraft.callsign == draft.callsign,
+                          appState.quickLogDraft.receivedExchange == draft.receivedExchange,
+                          appState.quickLogDraft.sentSerial == draft.sentSerial,
+                          appState.activeStationProfile?.normalizedCallsign == myCall else { return }
+                    accepted()
+                }
             )
         }
 
         switch action {
         case .sendCQ(let template):
             guard mayKey() else { return }
-            transmit(template)
-            lastExecutedActionDescription = "Sent CQ"
-            focusCallsign()
-
+            transmit(template) {
+                self.lastExecutedActionDescription = "Sent CQ"
+                focusCallsign()
+            }
         case .sendExchange(let call, let template):
             guard mayKey() else { return }
-            transmit(template)
-            hasSentExchangeInCurrentQSO = true
-            lastExecutedActionDescription = "Sent Exch to \(call)"
-            if autoAdvanceFocus {
-                focusExchange()
+            transmit(template) {
+                self.hasSentExchangeInCurrentQSO = true
+                self.lastExecutedActionDescription = "Sent Exch to \(call)"
+                if self.autoAdvanceFocus { focusExchange() }
             }
-
-        case .sendTUAndLog(let template):
+        case .sendTUAndLog(let template), .sendMyExchangeAndLog(let template):
             guard mayKey() else { return }
-            transmit(template)
-            lastExecutedActionDescription = "Sent TU & Logged"
-            hasSentExchangeInCurrentQSO = false
-            hasSentCallInCurrentQSO = false
-            saveQSO()
-            focusCallsign()
-
+            transmit(template) {
+                self.lastExecutedActionDescription = "CW accepted & logged"
+                self.hasSentExchangeInCurrentQSO = false
+                self.hasSentCallInCurrentQSO = false
+                saveQSO()
+                focusCallsign()
+            }
         case .sendMyCall(let template):
             guard mayKey() else { return }
-            transmit(template)
-            hasSentCallInCurrentQSO = true
-            lastExecutedActionDescription = "Sent My Call"
-            if autoAdvanceFocus {
-                focusExchange()
+            transmit(template) {
+                self.hasSentCallInCurrentQSO = true
+                self.lastExecutedActionDescription = "Sent My Call"
+                if self.autoAdvanceFocus { focusExchange() }
             }
-
-        case .sendMyExchangeAndLog(let template):
-            guard mayKey() else { return }
-            transmit(template)
-            lastExecutedActionDescription = "Sent Exch & Logged"
-            hasSentExchangeInCurrentQSO = false
-            hasSentCallInCurrentQSO = false
-            saveQSO()
-            focusCallsign()
-
         case .promptCallsign:
             appState.quickLogStatus = "Type Callsign first for S&P"
             focusCallsign()

@@ -1518,11 +1518,17 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
         guard generation == id, !isStopping else { return }
         let detailedMessage = "\(message) \(connectionDiagnostics())"
         isStopping = true
+        let wasKeyed = isTransmitActive
+        if wasKeyed { sendPTT(false) }
+        isTransmitActive = false
         releaseSessionIfNeeded()
         stopNetworkState()
         isStopping = false
         DispatchQueue.main.async {
             guard self.publishedGeneration == id else { return }
+            if wasKeyed {
+                TransmitNotices.shared.post(self.noticeSource, text: "Icom network: link lost during TX at \(TXLimits.utc()). PTT off was requested but may not have arrived. Receiving and logging remain available. Switch the original radio to RX locally before transmitting again.")
+            }
             self.pttWatchdog?.cancel()
             self.pttWatchdog = nil
             self.state = .failed(detailedMessage)

@@ -104,6 +104,12 @@ public struct CWHardwareSetupSheet: View {
             }
         }
         .frame(width: 680, height: 580)
+        .onExitCommand { keyer.stop() }
+        .safeAreaInset(edge: .bottom) {
+            if keyer.isTransmitting || keyer.isAutoCQActive {
+                Button("STOP CW (Esc)") { keyer.stop() }.padding(8)
+            }
+        }
         .background(Color(NSColor.windowBackgroundColor))
         .onAppear {
             icom.refreshPorts()
@@ -255,7 +261,7 @@ public struct CWHardwareSetupSheet: View {
                 settingsGroup("Hardware Test") {
                     HStack(spacing: 12) {
                         Button {
-                            wk.testKeyPulse()
+                            sendHardwareTest(mode: .winkeyer, text: "E")
                         } label: {
                             Label("Send Test Dit (E)", systemImage: "dot.radiowaves.left.and.right")
                         }
@@ -380,9 +386,9 @@ public struct CWHardwareSetupSheet: View {
                 settingsGroup("Hardware Test") {
                     HStack(spacing: 12) {
                         Button {
-                            sk.testKeyPulse()
+                            sendHardwareTest(mode: .serialDTR_RTS, text: "E")
                         } label: {
-                            Label("Send Test Pulse (70ms key-down)", systemImage: "bolt.fill")
+                            Label("Send identified test (E)", systemImage: "bolt.fill")
                         }
                         .buttonStyle(.bordered)
 
@@ -589,14 +595,14 @@ public struct CWHardwareSetupSheet: View {
                 settingsGroup("Hardware CW Transmission Test") {
                     HStack(spacing: 12) {
                         Button {
-                            tx500.sendMorse("E", wpm: keyer.wpm)
+                            sendHardwareTest(mode: .lab599TX500, text: "E")
                         } label: {
                             Label("Send Test Dit (E)", systemImage: "dot.radiowaves.left.and.right")
                         }
                         .buttonStyle(.bordered)
 
                         Button {
-                            sendIdentifiedTest { tx500.sendMorse($0, wpm: keyer.wpm) }
+                            sendHardwareTest(mode: .lab599TX500)
                         } label: {
                             Label("Send Test Text", systemImage: "paperplane.fill")
                         }
@@ -707,18 +713,14 @@ public struct CWHardwareSetupSheet: View {
                 settingsGroup("Hardware CW Transmission Test") {
                     HStack(spacing: 12) {
                         Button {
-                            xiegu.setKeyerSpeed(keyer.wpm)
-                            xiegu.sendMorse("E")
+                            sendHardwareTest(mode: .xiegu6100, text: "E")
                         } label: {
                             Label("Send Test Dit (E)", systemImage: "dot.radiowaves.left.and.right")
                         }
                         .buttonStyle(.bordered)
 
                         Button {
-                            sendIdentifiedTest {
-                                xiegu.setKeyerSpeed(keyer.wpm)
-                                xiegu.sendMorse($0)
-                            }
+                            sendHardwareTest(mode: .xiegu6100)
                         } label: {
                             Label("Send Test Text", systemImage: "paperplane.fill")
                         }
@@ -828,14 +830,14 @@ public struct CWHardwareSetupSheet: View {
                 settingsGroup("Hardware CW Transmission Test") {
                     HStack(spacing: 12) {
                         Button {
-                            fx4cr.sendMorse("E", wpm: keyer.wpm)
+                            sendHardwareTest(mode: .fx4cr, text: "E")
                         } label: {
                             Label("Send Test Dit (E)", systemImage: "dot.radiowaves.left.and.right")
                         }
                         .buttonStyle(.bordered)
 
                         Button {
-                            sendIdentifiedTest { fx4cr.sendMorse($0, wpm: keyer.wpm) }
+                            sendHardwareTest(mode: .fx4cr)
                         } label: {
                             Label("Send Test Text", systemImage: "paperplane.fill")
                         }
@@ -953,18 +955,14 @@ public struct CWHardwareSetupSheet: View {
                 settingsGroup("Hardware CW Transmission Test") {
                     HStack(spacing: 12) {
                         Button {
-                            icom.setKeyerSpeed(keyer.wpm)
-                            icom.sendMorse("E")
+                            sendHardwareTest(mode: .icomUSB, text: "E")
                         } label: {
                             Label("Send Test Dit (E)", systemImage: "dot.radiowaves.left.and.right")
                         }
                         .buttonStyle(.bordered)
 
                         Button {
-                            sendIdentifiedTest {
-                                icom.setKeyerSpeed(keyer.wpm)
-                                icom.sendMorse($0)
-                            }
+                            sendHardwareTest(mode: .icomUSB)
                         } label: {
                             Label("Send Test Text", systemImage: "paperplane.fill")
                         }
@@ -992,13 +990,15 @@ public struct CWHardwareSetupSheet: View {
     // MARK: - Helpers
 
     /// A test text identifies the station, so it is sent only with the operator's own saved callsign.
-    private func sendIdentifiedTest(_ transmit: (String) -> Void) {
+    private func sendHardwareTest(mode: CWTransmissionMode, text: String = "TEST") {
         guard let call = TransmitIdentity.savedOperatorCallsign() else {
             testNotice = TransmitIdentity.savedCallsignRefusal() ?? TransmitIdentity.callsignMissingMessage
             return
         }
         testNotice = ""
-        transmit("TEST DE \(call)")
+        keyer.transmissionMode = mode
+        keyer.send(text: "\(text) DE \(call)", myCall: call)
+        testNotice = keyer.transmitRefusal
     }
 
     private func settingsGroup<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {

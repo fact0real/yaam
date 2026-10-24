@@ -3,6 +3,34 @@ import AppKit
 @MainActor
 final class YAAMAppDelegate: NSObject, NSApplicationDelegate {
     private var waitingToQuit = false
+    private var sleepObserver: NSObjectProtocol?
+    private var wakeObserver: NSObjectProtocol?
+    private var sleepRelease = ""
+    private let sleepNotice = TransmitNotices.Source(name: "Mac sleep")
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        let center = NSWorkspace.shared.notificationCenter
+        sleepObserver = center.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.releaseBeforeSleep() }
+        }
+        wakeObserver = center.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, !self.sleepRelease.isEmpty else { return }
+                TransmitNotices.shared.post(self.sleepNotice, text: self.sleepRelease + " The Mac is awake; receiving and logging remain available. Check physical receive before arming TX again.")
+                self.sleepRelease = ""
+            }
+        }
+    }
+
+    func releaseBeforeSleep() {
+        let keyer = CWKeyerService.shared
+        let cw = keyer.isTransmitting || keyer.isAutoCQActive
+        if cw { keyer.stop() }
+        let paths = TransmitShutdown.releaseAll(reason: "Mac is going to sleep")
+        guard cw || !paths.isEmpty else { return }
+        sleepRelease = "YAAM requested transmit release before Mac sleep at \(TXLimits.utc()) (\((cw ? ["CW"] : []) + paths)). Delivery is best effort; receive is unconfirmed."
+        TransmitNotices.shared.post(sleepNotice, text: sleepRelease + " Check the radio locally.")
+    }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard !waitingToQuit else { return .terminateLater }

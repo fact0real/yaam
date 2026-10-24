@@ -23,6 +23,8 @@ enum TransmitShutdown {
 
     private(set) static var isShuttingDown = false
 
+    static private(set) var releaseReason = "YAAM is quitting"
+
     private static var entries: [Entry] = []
 
     /// Registers a path that can key a radio. Use weak references in the closures: a path that is gone reports false.
@@ -40,7 +42,8 @@ enum TransmitShutdown {
     /// queue (TCI closes after its switch-off is sent, up to 2 s; flrig and rigctld send asynchronously): a caller about
     /// to quit has to leave them time.
     @discardableResult
-    static func releaseAll() -> [String] {
+    static func releaseAll(reason: String = "YAAM is quitting") -> [String] {
+        releaseReason = reason
         let active = entries.filter { $0.isTransmitting() }
         active.filter(\.producer).forEach { $0.release() }
         active.filter { !$0.producer }.forEach { $0.release() }

@@ -688,7 +688,13 @@ struct FT8StationView: View {
                 .frame(width: 60, height: 28)
             }
             .buttonStyle(FT8RibbonButtonStyle(accent: engine.isCallingCQContinually ? .orange : .accentColor, prominent: true))
-            .help(engine.isCallingCQContinually ? "Stop Continuous CQ Loop" : "Start Continuous CQ (calls CQ indefinitely until answered)")
+            .help(engine.isCallingCQContinually ? "Stop Continuous CQ Loop" : "Start Continuous CQ (subject to the operator inactivity limit)")
+
+            Menu {
+                Stepper("TX idle limit: \(engine.automaticTXIdleMinutes) min", value: $engine.automaticTXIdleMinutes, in: 1...120)
+                Button("I am operating — reset idle timer") { engine.noteOperatorActivity() }
+            } label: { Image(systemName: "timer") }
+            .help("Automatic TX stops after this time without operator activity.")
 
             // Standard Message Selector (Tx 1 .. Tx 6)
             Menu {

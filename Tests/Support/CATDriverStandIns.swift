@@ -41,6 +41,7 @@ nonisolated public final class SerialPortService: @unchecked Sendable {
     private var onReceive: (@Sendable (Data) -> Void)?
 
     public init() {}
+    public var isOpen: Bool { Self.allowsOpen }
 
     public static func availablePorts(includeBluetooth: Bool = true) -> [String] { [] }
     public static func isBluetoothPort(_ path: String) -> Bool { path.lowercased().contains("bluetooth") }

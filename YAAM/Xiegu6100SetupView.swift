@@ -406,7 +406,8 @@ public struct Xiegu6100SetupView: View {
                         }
                         testCWNotice = ""
                         isTestingCW = true
-                        xiegu.sendMorse("TEST DE \(call)")
+                        cwKeyer.transmissionMode = .xiegu6100
+                        cwKeyer.send(text: "TEST DE \(call)", myCall: call)
                         DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
                             isTestingCW = false
                         }

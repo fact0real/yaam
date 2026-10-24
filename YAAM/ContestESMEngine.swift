@@ -127,7 +127,7 @@ public final class ContestESMEngine: ObservableObject {
         callsign: inout String,
         sentExchange: String,
         rcvdExchange: inout String,
-        onLogQSO: () -> Bool
+        onLogQSO: @escaping () -> Bool
     ) {
         guard isESMEnabled else {
             _ = onLogQSO()
@@ -136,58 +136,39 @@ public final class ContestESMEngine: ObservableObject {
 
         evaluateState(callsign: callsign, rcvdExchange: rcvdExchange)
 
-        // A branch that keys the transmitter stops, and changes nothing, when executeMacro refuses it (no
-        // callsign of the operator, or one that is not accepted). The "Ready to log" branch keys nothing and
-        // always logs.
-        switch currentState {
-        case .idleCQ:
-            // Send F1 CQ
-            guard executeMacro(f1CQ, call: callsign, sentExch: sentExchange, rcvdExch: rcvdExchange) else { return }
-            statusMessage = "Calling CQ..."
-
-        case .callEntered:
-            // Send F2 His Call + Exchange
-            guard executeMacro(f2Exch, call: callsign, sentExch: sentExchange, rcvdExch: rcvdExchange) else { return }
-            statusMessage = "Sent exchange to \(callsign). Awaiting report..."
-
-        case .exchEntered:
-            // Send F3 TU + Next CQ and Log QSO!
-            guard executeMacro(f3TU, call: callsign, sentExch: sentExchange, rcvdExch: rcvdExchange) else { return }
-            let logged = onLogQSO()
-            if logged {
-                initialCallRecorded = ""
-                currentState = .idleCQ
-                statusMessage = "Logged \(callsign). Ready for next CQ."
-            }
-
-        case .callCorrected:
-            // Send F5 Corrected Call + TU and Log QSO!
-            guard executeMacro(f5HisCallTU, call: callsign, sentExch: sentExchange, rcvdExch: rcvdExchange) else { return }
-            let logged = onLogQSO()
-            if logged {
-                initialCallRecorded = ""
-                currentState = .idleCQ
-                statusMessage = "Logged corrected call \(callsign)."
-            }
-
-        case .spCallStation:
-            // S&P: Send F4 My Callsign
-            guard executeMacro(f4MyCall, call: callsign, sentExch: sentExchange, rcvdExch: rcvdExchange) else { return }
-            statusMessage = "Called \(callsign). Listening for response..."
-
-        case .spSendExch:
-            // S&P: Send F2 My Exchange
-            let macro = "599 {EXCH}"
-            guard executeMacro(macro, call: callsign, sentExch: sentExchange, rcvdExch: rcvdExchange) else { return }
-            currentState = .spLogReady
-            statusMessage = "Sent exchange to \(callsign)."
-
+        let call = callsign
+        let state = currentState
+        let template: String
+        switch state {
+        case .idleCQ: template = f1CQ
+        case .callEntered: template = f2Exch
+        case .exchEntered: template = f3TU
+        case .callCorrected: template = f5HisCallTU
+        case .spCallStation: template = f4MyCall
+        case .spSendExch: template = "599 {EXCH}"
         case .spLogReady:
-            // S&P: Log QSO
-            let logged = onLogQSO()
-            if logged {
+            if onLogQSO() {
                 currentState = .spCallStation
-                statusMessage = "Logged \(callsign) in S&P."
+                statusMessage = "Logged \(call) in S&P."
+            }
+            return
+        }
+        executeMacro(template, call: call, sentExch: sentExchange, rcvdExch: rcvdExchange) { [weak self] accepted in
+            guard let self, accepted else { return }
+            switch state {
+            case .idleCQ: self.statusMessage = "Calling CQ..."
+            case .callEntered: self.statusMessage = "Sent exchange to \(call). Awaiting report..."
+            case .spCallStation: self.statusMessage = "Called \(call). Listening for response..."
+            case .spSendExch:
+                self.currentState = .spLogReady
+                self.statusMessage = "Sent exchange to \(call)."
+            case .exchEntered, .callCorrected:
+                if onLogQSO() {
+                    self.initialCallRecorded = ""
+                    self.currentState = .idleCQ
+                    self.statusMessage = "Logged \(call). Ready for next CQ."
+                }
+            case .spLogReady: break
             }
         }
     }
@@ -208,11 +189,12 @@ public final class ContestESMEngine: ObservableObject {
     /// Expands the macro and hands it to the CW keyer. Returns false, and sends nothing, when the operator's
     /// callsign is not set or not accepted (the reason is in `transmitRefusal`, which the ribbon shows).
     @discardableResult
-    public func executeMacro(_ template: String, call: String, sentExch: String, rcvdExch: String) -> Bool {
+    public func executeMacro(_ template: String, call: String, sentExch: String, rcvdExch: String, onAccepted: ((Bool) -> Void)? = nil) -> Bool {
         let myCall = TransmitIdentity.normalized(myCallsign)
         if let issue = CWKeyerService.shared.refusalReason(myCall: myCall) {
             transmitRefusal = issue
             statusMessage = issue
+            onAccepted?(false)
             return false
         }
         transmitRefusal = ""
@@ -226,14 +208,23 @@ public final class ContestESMEngine: ObservableObject {
             .replacingOccurrences(of: "{SERIAL}", with: serialStr)
 
         // Transmit via CW Keyer Service
-        CWKeyerService.shared.send(text: text, myCall: myCall)
+        CWKeyerService.shared.send(text: text, myCall: myCall) { [weak self] accepted in
+            guard let self else { onAccepted?(false); return }
+            if accepted {
+                self.activeOutgoingText = text
+                self.isTransmitting = true
+            } else {
+                self.transmitRefusal = CWKeyerService.shared.transmitRefusal.isEmpty ? "CW submission cancelled; QSO was not advanced." : CWKeyerService.shared.transmitRefusal
+                self.statusMessage = self.transmitRefusal
+                self.isTransmitting = false
+            }
+            onAccepted?(accepted)
+        }
         guard CWKeyerService.shared.transmitRefusal.isEmpty else {
             transmitRefusal = CWKeyerService.shared.transmitRefusal
             statusMessage = transmitRefusal
             return false
         }
-        self.activeOutgoingText = text
-        self.isTransmitting = true
         return true
     }
 

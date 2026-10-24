@@ -10,6 +10,8 @@ import Foundation
 
 nonisolated enum MorseTiming {
     static let maximumTextLength = 1024
+    static let keyerWPM = 5...60
+    static func clampedWPM(_ value: Int) -> Int { min(keyerWPM.upperBound, max(keyerWPM.lowerBound, value)) }
 
     static func normalizedText(_ text: String) -> (text: String, unsendable: String) {
         var result = ""

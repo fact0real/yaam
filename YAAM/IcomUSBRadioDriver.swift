@@ -171,6 +171,11 @@ public final class IcomUSBRadioDriver: ObservableObject {
 
     // MARK: - Internal Transport & Polling
     nonisolated private let serialPort = SerialPortService()
+    private var serialHealthTask: Task<Void, Never>?
+    private var serialRetryTask: Task<Void, Never>?
+    private var serialRetryAttempt = 0
+    private var lastSerialReply = ProcessInfo.processInfo.systemUptime
+
     private var rxBuffer = Data()
     private let rxBufferLock = NSLock()
     private var pollingTimer: DispatchSourceTimer?
@@ -293,7 +298,10 @@ public final class IcomUSBRadioDriver: ObservableObject {
 
     // MARK: - Connect & Disconnect
 
-    public func connect(port: String? = nil) {
+    public func connect(port: String? = nil, recovering: Bool = false) {
+        serialRetryTask?.cancel()
+        serialRetryTask = nil
+        if !recovering { serialRetryAttempt = 0 }
         if let p = port { self.selectedPort = p }
         guard !selectedPort.isEmpty else {
             lastMessage = "No USB serial port selected for Icom radio"
@@ -331,6 +339,13 @@ public final class IcomUSBRadioDriver: ObservableObject {
 
         if ok {
             self.isConnected = true
+            lastSerialReply = ProcessInfo.processInfo.systemUptime
+            startSerialHealthWatch()
+            if recovering {
+                // Clear producers and request receive on this same port before accepting another send.
+                stopMorse()
+                setPTT(false)
+            }
             self.isConnecting = false
             let portName = selectedPort.components(separatedBy: "/").last ?? selectedPort
             self.lastMessage = "Connected to \(model.rawValue) (\(portName) @ \(baudRate) 8N1)"
@@ -346,11 +361,49 @@ public final class IcomUSBRadioDriver: ObservableObject {
         } else {
             self.isConnected = false
             self.isConnecting = false
+            if recovering { scheduleSerialRecovery() }
             self.lastMessage = "Failed to open \(selectedPort). Check USB cable and permissions."
         }
     }
 
+    private func startSerialHealthWatch() {
+        serialHealthTask?.cancel()
+        serialHealthTask = Task { [weak self] in
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .seconds(1)) } catch { return }
+                guard let self, self.isConnected else { return }
+                guard !self.serialPort.isOpen || ProcessInfo.processInfo.systemUptime - self.lastSerialReply >= 6 else { continue }
+                self.stopMorse()
+                self.setPTT(false)
+                self.disconnect()
+                let warning = "Icom USB: CAT stopped answering at \(TXLimits.utc()). CW/PTT release was requested; receive is unconfirmed. Local progress is stopped. Check the radio locally; recovery will use this same serial port."
+                self.lastMessage = warning
+                TransmitNotices.shared.post(self.noticeSource, text: warning)
+                self.scheduleSerialRecovery()
+                return
+            }
+        }
+    }
+
+    private func scheduleSerialRecovery() {
+        guard serialRetryTask == nil, serialRetryAttempt < 5, !TransmitShutdown.isShuttingDown else { return }
+        let originalPort = selectedPort, originalBaud = baudRate
+        serialRetryAttempt += 1
+        let delay = min(30, 1 << serialRetryAttempt)
+        serialRetryTask = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(delay)) } catch { return }
+            guard let self, self.selectedPort == originalPort, self.baudRate == originalBaud, !Task.isCancelled else { return }
+            self.serialRetryTask = nil
+            self.connect(port: originalPort, recovering: true)
+        }
+    }
+
     public func disconnect() {
+        if isConnected { NotificationCenter.default.post(name: Notification.Name("YAAMRadioConnectionLost"), object: self) }
+        serialHealthTask?.cancel()
+        serialHealthTask = nil
+        serialRetryTask?.cancel()
+        serialRetryTask = nil
         stopPolling()
         if isTransmitting {
             setPTT(false)
@@ -576,10 +629,8 @@ public final class IcomUSBRadioDriver: ObservableObject {
     /// Sets the keyer speed on the transceiver (CI-V Command 14 0C)
     public func setKeyerSpeed(_ wpm: Int) {
         let clamped = max(6, min(45, wpm))
-        let bcdHigh = UInt8(clamped / 10)
-        let bcdLow = UInt8(clamped % 10)
-        let bcdByte = (bcdHigh << 4) | bcdLow
-        sendCIV(command: [0x14, 0x0C, bcdByte])
+        let level = Int((Double(clamped - 6) * 255.0 / 42.0).rounded())
+        sendCIV(command: [0x14, 0x0C, UInt8(level / 100), UInt8(((level / 10) % 10) << 4 | (level % 10))])
     }
 
     // MARK: - Low-Level CI-V Framing & I/O
@@ -670,6 +721,8 @@ public final class IcomUSBRadioDriver: ObservableObject {
             if payload.count >= 5 {
                 let hz = Self.frequencyFromBCD(Array(payload.prefix(5)))
                 if hz > 0 {
+                    self.lastSerialReply = ProcessInfo.processInfo.systemUptime
+                    self.serialRetryAttempt = 0
                     self.frequencyHz = hz
                 }
             }

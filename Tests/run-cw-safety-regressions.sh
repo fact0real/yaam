@@ -23,7 +23,7 @@ for name in DigitalModemResendRegression DigitalModemRadioControlRegression Tran
 do
     run "$name" "${keyer[@]}" YAAM/ContestESMEngine.swift YAAM/DigitalModemEngine.swift
 done
-run QuitReleasesTransmitRegression "${keyer[@]}" YAAM/YAAMAppDelegate.swift
+run QuitReleasesTransmitRegression "${keyer[@]}" YAAM/YAAMAppDelegate.swift YAAM/TransmitNotices.swift
 run AudioOnlyTransmitRegression "${keyer[@]}" YAAM/AudioOnlyTransmit.swift YAAM/OliviaMFSKEngine.swift YAAM/HellschreiberEngine.swift YAAM/JS8Engine.swift YAAM/SSTVEngine.swift
 }
 if [[ "${1:-}" == "--digital-only" ]]; then
@@ -32,6 +32,7 @@ if [[ "${1:-}" == "--digital-only" ]]; then
 fi
 if [[ "${1:-}" != "--cat-only" ]]; then
 run CWTextSecurityRegression YAAM/MorseTiming.swift
+run EA3JICCWReviewRegression "${keyer[@]}" YAAM/ContestESMEngine.swift
 for name in WinKeyerAutoCQRegression CATStopDestinationRegression CWStopOnQuitRegression CWConnectionLossRegression
 do
     run "$name" "${keyer[@]}"

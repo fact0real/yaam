@@ -251,7 +251,7 @@ nonisolated func parseADIF(content: String) -> (headers: [String], records: [[St
                 let valueEnd = adifValueEnd(in: body, from: valueStart, length: len)
                 
                 let value = String(body[valueStart..<valueEnd]).trimmingCharacters(in: .whitespacesAndNewlines)
-                currentRecord[fieldName] = value
+                currentRecord[fieldName == "APP_YAAM_QRZ_QSL_RCVD" ? "QRZLOG_QSL_RCVD" : fieldName] = value
                 allKeys.insert(fieldName)
                 
                 index = valueEnd
@@ -294,6 +294,7 @@ nonisolated func generateADIF(originalContent: String, records: [[String: String
     
     for record in records {
         var rec = record
+        if let legacy = rec.removeValue(forKey: "QRZLOG_QSL_RCVD"), rec["APP_YAAM_QRZ_QSL_RCVD"] == nil { rec["APP_YAAM_QRZ_QSL_RCVD"] = legacy }
         let currentMode = rec["MODE"] ?? ""
         let currentSubmode = rec["SUBMODE"] ?? ""
         let freq = Double(rec["FREQ"] ?? "")

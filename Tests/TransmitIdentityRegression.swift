@@ -366,7 +366,7 @@ struct TransmitIdentityRegression {
                 "if let issue = TransmitIdentity.callsignRefusal(myCall) { return issue }", "return keyerOfflineRefusal"])
         let issue = "if let issue = refusalReason(myCall: myCall) {"
         check("CWKeyerService.send: refuses with the reason and returns, before it stops or starts anything",
-              refusalBlock(issue, equals: ["transmitRefusal = issue", "return"], before: "stopTransmitOnly()",
+              refusalBlock(issue, equals: ["transmitRefusal = issue", "onAccepted?(false)", "return"], before: "stopTransmitOnly()",
                            in: functionBody("public func send(", in: keyer)))
         check("CWKeyerService.send: a send that goes out clears the refusal",
               functionBody("public func send(", in: keyer)?.contains("transmitRefusal = \"\"\n\n        stopTransmitOnly()") == true)
@@ -387,24 +387,18 @@ struct TransmitIdentityRegression {
         let esm = "YAAM/ContestESMEngine.swift"
         check("ContestESMEngine.executeMacro: asks the keyer, refuses with the reason and returns false, before it sends",
               refusalBlock("if let issue = CWKeyerService.shared.refusalReason(myCall: myCall) {",
-                           equals: ["transmitRefusal = issue", "statusMessage = issue", "return false"],
+                           equals: ["transmitRefusal = issue", "statusMessage = issue", "onAccepted?(false)", "return false"],
                            before: "CWKeyerService.shared.send(", in: functionBody("public func executeMacro(", in: esm)))
         check("ContestESMEngine.executeMacro: sends with the callsign it checked",
               functionBody("public func executeMacro(", in: esm)?.contains("CWKeyerService.shared.send(text: text, myCall: myCall)") == true
               && functionBody("public func executeMacro(", in: esm)?.contains("let myCall = TransmitIdentity.normalized(myCallsign)") == true)
         let enter = functionBody("public func handleEnterPressed(", in: esm) ?? ""
-        let macroCalls = enter.components(separatedBy: "executeMacro(").count - 1
-        let guarded = enter.components(separatedBy: "guard executeMacro(").count - 1
-        let stopped = enter.components(separatedBy: ") else { return }").count - 1
-        check("Enter: each of the six branches that key sits behind a guard that returns (\(guarded) of \(macroCalls))",
-              macroCalls == 6 && guarded == 6 && stopped == 6)
-        check("Enter: with ESM off it only logs, before any check; \"Ready to log\" has no guard",
-              before("guard isESMEnabled else {", "evaluateState(", in: enter) && enter.contains("_ = onLogQSO()\n            return")
-              && (enter.components(separatedBy: "case .spLogReady:").last.map { $0.contains("onLogQSO()") && !$0.contains("executeMacro") } == true))
-        check("Enter: a branch is stopped before it changes the state or logs",
-              enter.contains("guard executeMacro(f3TU, call: callsign, sentExch: sentExchange, rcvdExch: rcvdExchange) else { return }\n            let logged = onLogQSO()")
-              && enter.contains("guard executeMacro(f5HisCallTU, call: callsign, sentExch: sentExchange, rcvdExch: rcvdExchange) else { return }\n            let logged = onLogQSO()")
-              && enter.contains("else { return }\n            currentState = .spLogReady"))
+        check("Enter: all transmit branches share one submission and wait for acceptance before advancing",
+              enter.components(separatedBy: "executeMacro(").count - 1 == 1
+              && before("guard let self, accepted else { return }", "if onLogQSO()", in: enter.components(separatedBy: "executeMacro(").last))
+        check("Enter with ESM off logs directly; S&P ready remains a log-only branch",
+              before("guard isESMEnabled else {", "evaluateState(", in: enter)
+              && enter.contains("case .spLogReady:\n            if onLogQSO()"))
         check("the function keys reach the same function (executeMacro), whose result the buttons may ignore",
               sourceText("YAAM/ContestESMControlView.swift")?.contains("esm.executeMacro(macro, call: inputCall, sentExch: inputSentExchange, rcvdExch: inputRcvdExchange)") == true
               && sourceText(esm)?.contains("@discardableResult\n    public func executeMacro(") == true)
@@ -429,15 +423,13 @@ struct TransmitIdentityRegression {
               statements(functionBody("func mayKey(", in: cwesm)) == [
                 "guard let issue = keyer.refusalReason(myCall: myCall) else { return true }",
                 "lastExecutedActionDescription = issue", "appState.quickLogStatus = issue", "return false"])
-        var keyingCases = 0
-        for name in [".sendCQ(let template):", ".sendExchange(let call, let template):", ".sendTUAndLog(let template):",
-                     ".sendMyCall(let template):", ".sendMyExchangeAndLog(let template):"] {
-            if action.contains("case \(name)\n            guard mayKey() else { return }\n            transmit(template)\n") { keyingCases += 1 }
-        }
-        check("the quick-log ESM actions: each of the five that key asks mayKey before it sends (\(keyingCases) of 5)", keyingCases == 5)
-        check("the quick-log ESM actions: prompting for a callsign keys nothing and has no check",
-              action.contains("case .promptCallsign:\n            appState.quickLogStatus = \"Type Callsign first for S&P\"")
-              && action.components(separatedBy: "guard mayKey() else { return }").count - 1 == 5)
+        check("quick-log keying actions are preflighted and committed only after acceptance",
+              action.components(separatedBy: "guard mayKey() else { return }").count - 1 == 4
+              && action.contains("onAccepted: { [weak self] success in")
+              && before("guard success else {", "accepted()", in: action)
+              && action.contains("appState.quickLogDraft.callsign == draft.callsign"))
+        check("prompting for a callsign does not key",
+              action.contains("case .promptCallsign:\n            appState.quickLogStatus = \"Type Callsign first for S&P\""))
         check("the quick-log screen shows quickLogStatus",
               sourceText("YAAM/OperatorDeskView.swift")?.contains("Text(appState.quickLogStatus)") == true)
     }
@@ -535,23 +527,24 @@ struct TransmitIdentityRegression {
 
     static func testButtonsAndChat() {
         let sheet = sourceText("YAAM/CWHardwareSetupSheet.swift") ?? ""
-        check("the four hardware test texts go through sendIdentifiedTest",
-              sheet.components(separatedBy: "sendIdentifiedTest {").count - 1 == 4 && !sheet.contains("TEST YAAM DE") && !sheet.contains("\"EP2AES\""))
-        check("sendIdentifiedTest: refuses with the reason and returns, before it sends",
+        check("hardware tests use the shared stoppable keyer",
+              sheet.components(separatedBy: "sendHardwareTest(mode:").count - 1 == 11
+              && !sheet.contains(".sendMorse(") && !sheet.contains(".sendMorseText("))
+        check("hardware test helper requires the operator identity before handing over",
               refusalBlock("guard let call = TransmitIdentity.savedOperatorCallsign() else {",
                            equals: ["testNotice = TransmitIdentity.savedCallsignRefusal() ?? TransmitIdentity.callsignMissingMessage", "return"],
-                           before: "transmit(\"TEST DE \\(call)\")", in: functionBody("private func sendIdentifiedTest(", in: "YAAM/CWHardwareSetupSheet.swift")))
+                           before: "keyer.send(", in: functionBody("private func sendHardwareTest(", in: "YAAM/CWHardwareSetupSheet.swift")))
         check("TX-500 test: refuses with the reason and returns, before it sends",
               refusalBlock("guard let call = TransmitIdentity.savedOperatorCallsign() else {",
                            equals: ["testCWNotice = TransmitIdentity.savedCallsignRefusal() ?? TransmitIdentity.callsignMissingMessage", "return"],
-                           before: "tx500.sendMorse(", in: functionBody("private func testCWSend(", in: "YAAM/Lab599TX500SetupView.swift")))
+                           before: "cwKeyer.send(", in: functionBody("private func testCWSend(", in: "YAAM/Lab599TX500SetupView.swift")))
         check("X6100 test: refuses with the reason and returns, before it sends",
               refusalBlock("guard let call = TransmitIdentity.savedOperatorCallsign() else {",
                            equals: ["testCWNotice = TransmitIdentity.savedCallsignRefusal() ?? TransmitIdentity.callsignMissingMessage", "return"],
-                           before: "xiegu.sendMorse(", in: functionBody("// CW Test", in: "YAAM/Xiegu6100SetupView.swift")))
+                           before: "cwKeyer.send(", in: functionBody("// CW Test", in: "YAAM/Xiegu6100SetupView.swift")))
         check("WinKeyer test: refuses with the reason and returns, before it sends; the field starts empty",
               refusalBlock("if let issue = TransmitIdentity.savedCallsignRefusal() {", equals: ["testNotice = issue", "return"],
-                           before: "wk.sendMorseText(", in: functionBody("private func sendTest(", in: "YAAM/WinKeyerView.swift"))
+                           before: "keyer.send(", in: functionBody("private func sendTest(", in: "YAAM/WinKeyerView.swift"))
               && sourceText("YAAM/WinKeyerView.swift")?.contains("var testInput: String = \"\"") == true)
         for file in ["YAAM/CWHardwareSetupSheet.swift", "YAAM/Lab599TX500SetupView.swift", "YAAM/Xiegu6100SetupView.swift", "YAAM/WinKeyerView.swift"] {
             check("\(file) clears its test refusal when the profile changes",
@@ -592,8 +585,7 @@ struct TransmitIdentityRegression {
         let pttCarrierOnly = ["Lab599TX500SetupView.swift", "TCIControlView.swift", "Xiegu6100SetupView.swift"]
         check("PTT is keyed only in the known files \(ptt)", ptt == (pttGated + pttCarrierOnly).sorted())
         let morse = filesMatching("\\.(sendMorse|sendMorseText|sendCW)\\(")
-        let morseGated = ["CWHardwareSetupSheet.swift", "CWKeyerService.swift", "Lab599TX500SetupView.swift",
-                          "WinKeyerView.swift", "Xiegu6100SetupView.swift"]
+        let morseGated = ["CWKeyerService.swift"]
         check("Morse is sent only from the known files \(morse)", morse == morseGated.sorted())
     }
 

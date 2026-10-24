@@ -14,6 +14,9 @@ final class RigctldReplyStream {
     let connection: NWConnection
     var onReply: ((Reply) -> Void)?
     var onError: ((String, Bool) -> Void)?
+    var onFailure: ((String, Bool) -> Void)?
+    private var unanswered: [TimeInterval] = []
+    private var freshnessTask: Task<Void, Never>?
     private var pttActive = false
     private var cwActive = false
     private var transmitEpoch = 0
@@ -34,6 +37,16 @@ final class RigctldReplyStream {
     func start() {
         guard !reading, !finished else { return }
         reading = true
+        freshnessTask = Task { [weak self] in
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
+                guard let self, !self.finished else { return }
+                if let oldest = self.unanswered.first, ProcessInfo.processInfo.systemUptime - oldest >= 3 {
+                    self.fail("rigctld stopped answering commands (3 s reply deadline)")
+                    return
+                }
+            }
+        }
         receive()
     }
 
@@ -44,10 +57,16 @@ final class RigctldReplyStream {
             guard !line.isEmpty else { continue }
             let plain = line.hasPrefix("+") ? String(line.dropFirst()) : line
             let release: String? = plain == "T 0" ? "set_ptt" : (plain == "\\stop_morse" ? "stop_morse" : nil)
+            if closingCommand != nil && !closeAfterRelease && release == nil {
+                onError?("\(plain) was not sent; the original connection is retiring", transmitActive)
+                continue
+            }
             if finished {
                 onError?("\(plain) was not sent; the original connection is closed", release != nil || transmitActive)
                 continue
             }
+            guard unanswered.count < 256 else { fail("too many unanswered rigctld commands"); return }
+            unanswered.append(ProcessInfo.processInfo.systemUptime)
             if plain == "T 1" { pttActive = true; transmitEpoch &+= 1 }
             if plain.hasPrefix("b ") { cwActive = true; transmitEpoch &+= 1 }
             if let release {
@@ -98,15 +117,23 @@ final class RigctldReplyStream {
     }
 
     func fail(_ reason: String) {
-        guard !finished else { return }
-        onError?(reason, hasTransmitRisk)
-        pendingReleases.removeAll()
-        pttActive = false; cwActive = false
-        finish()
+        guard !finished, closingCommand == nil else { return }
+        let risk = hasTransmitRisk
+        onError?(reason, risk)
+        if risk {
+            // A silent reply stream may still accept writes. Release its original radio before retiring it;
+            // the existing release deadline bounds how long this session stays alive.
+            buffer.removeAll(); responseBytes = 0; command = ""; arguments = ""; fields = [:]
+            send("\\stop_morse\nT 0\n", closeAfterRelease: true)
+        } else { finish() }
+        onFailure?(reason, risk)
     }
 
     func finish() {
         finished = true
+        freshnessTask?.cancel()
+        freshnessTask = nil
+        unanswered.removeAll()
         pendingReleases.removeAll()
         connection.cancel()
     }
@@ -120,6 +147,7 @@ final class RigctldReplyStream {
             responseBytes += line.utf8.count + 1
             guard responseBytes <= 65_536 else { fail("oversized rigctld response"); return }
             if line.hasPrefix("RPRT "), let result = Int(line.dropFirst(5)) {
+                if !unanswered.isEmpty { unanswered.removeFirst() }
                 let reply = Reply(command: command, arguments: arguments, fields: fields, result: result)
                 let isRelease = (command == "set_ptt" && arguments == "0") || command == "stop_morse"
                 if isRelease {

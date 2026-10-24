@@ -244,14 +244,22 @@ public final class WavelogClient: Sendable {
     }
 
     public func broadcastRadio(baseURL: String, apiKey: String, radioName: String, frequencyHz: Double,
-                               mode: String, powerWatts: Double = 100) async throws -> Bool {
-        guard frequencyHz.isFinite, frequencyHz > 0, frequencyHz < Double(Int.max),
-              powerWatts.isFinite, powerWatts >= 0, powerWatts < Double(Int.max) else { return false }
-        let (_, status) = try await request(baseURL: baseURL, route: "radio", apiKey: apiKey, payload: [
-            "key": apiKey, "radio": radioName, "frequency": Int(frequencyHz), "mode": mode,
-            "power": Int(powerWatts), "prop_mode": ""
-        ])
+                               mode: String, powerWatts: Double? = nil) async throws -> Bool {
+        guard frequencyHz.isFinite, frequencyHz > 0, frequencyHz < Double(Int.max) else { return false }
+        var payload: [String: Any] = [
+            "key": apiKey, "radio": radioName, "frequency": Int(frequencyHz), "mode": mode, "prop_mode": ""
+        ]
+        // Unknown power is omitted: a guessed value would become station data on the server.
+        if let powerWatts {
+            guard powerWatts.isFinite, powerWatts >= 0, powerWatts < Double(Int.max) else { return false }
+            payload["power"] = Int(powerWatts)
+        }
+        let (data, status) = try await request(baseURL: baseURL, route: "radio", apiKey: apiKey, payload: payload)
         try requireHTTP(status, route: "radio")
+        guard let reply = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              (reply["status"] as? String)?.lowercased() == "success" else {
+            throw WavelogError.serverRejected(reason: "Wavelog did not confirm the radio update.")
+        }
         return true
     }
 

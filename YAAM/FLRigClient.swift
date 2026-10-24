@@ -33,7 +33,13 @@ public final class FLRigClient: ObservableObject {
     // MARK: - Published State
     /// What flrig says (see FlrigLink). `isConnected` is true only while flrig reports a radio name: a flrig with
     /// no radio selected answers every query with made-up values (14.070 MHz, USB).
-    @Published public private(set) var link: FlrigLink = .idle
+    @Published public private(set) var link: FlrigLink = .idle {
+        didSet {
+            if oldValue.isReporting && !link.isReporting {
+                NotificationCenter.default.post(name: Notification.Name("YAAMRadioConnectionLost"), object: self)
+            }
+        }
+    }
     public var isConnected: Bool { link.isReporting }
     /// True from connect() to disconnect(), also while flrig has no radio or cannot be reached.
     @Published public private(set) var isPolling: Bool = false
@@ -43,6 +49,7 @@ public final class FLRigClient: ObservableObject {
     @Published public var frequencyHz: Double = 14_074_000
     @Published public var mode: String = "USB"
     @Published public var isPTTActive: Bool = false
+    /// Raw flrig meter percentage (0...100); not calibrated S-units.
     @Published public var sMeter: Double = 0.0
     @Published public var powerWatts: Double = 100.0
     /// What is wrong, if anything: a command flrig refused (kept until flrig accepts a command or the link changes),
@@ -140,7 +147,7 @@ public final class FLRigClient: ObservableObject {
         // 2. VFO, 3. mode, 4. S-meter, 5. PTT. A fault or a missing answer leaves the old value; it is never read as data.
         if let freq = try await query(.getVFO, generation)?.text.flatMap({ Double($0) }), FrequencyBounds.isUsable(kHz: freq / 1000) { frequencyHz = freq }
         if let newMode = try await query(.getMode, generation)?.text, !newMode.isEmpty { mode = newMode }
-        if let sm = try await query(.getSmeter, generation)?.text.flatMap({ Double($0) }), sm.isFinite { sMeter = min(15, max(0, sm)) }
+        if let sm = try await query(.getSmeter, generation)?.text.flatMap({ Double($0) }), sm.isFinite { sMeter = min(100, max(0, sm)) }
         if let ptt = try await query(.getPTT, generation)?.text.flatMap({ Int($0) }) {
             isPTTActive = (ptt == 1)
             // flrig reporting PTT off ends a warning that the radio may be keyed (see pttWarning).

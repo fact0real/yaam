@@ -447,6 +447,7 @@ final class FT8EngineService: ObservableObject {
     @Published var myGrid = ""
     @Published var transmitArmed = false {
         didSet {
+            if transmitArmed && !oldValue { noteOperatorActivity() }
             if !transmitArmed { cancelTransmission(reason: "Transmit disarmed") }
         }
     }
@@ -498,6 +499,16 @@ final class FT8EngineService: ObservableObject {
     @Published var dxGrid = ""
     @Published var dxReport = "-10"
     @Published var lockTxRxFreq = false
+    @Published var automaticTXIdleMinutes = 30 {
+        didSet {
+            let bounded = min(120, max(1, automaticTXIdleMinutes))
+            if bounded != automaticTXIdleMinutes { automaticTXIdleMinutes = bounded }
+            UserDefaults.standard.set(bounded, forKey: "ft8AutomaticTXIdleMinutes")
+        }
+    }
+    private var lastOperatorActivity = ProcessInfo.processInfo.systemUptime
+    private let automaticTXNotice = TransmitNotices.Source(name: "FT8/FT4 automatic TX")
+    func noteOperatorActivity() { lastOperatorActivity = ProcessInfo.processInfo.systemUptime }
     @Published var isCallingCQContinually = false
     @Published var resumeCQAfterQSO = false
     @Published private(set) var qsoStreamItems: [FT8StreamItem] = []
@@ -546,6 +557,7 @@ final class FT8EngineService: ObservableObject {
     private var smoothedRange: Float = 25.0
 
     init() {
+        automaticTXIdleMinutes = min(120, max(1, UserDefaults.standard.object(forKey: "ft8AutomaticTXIdleMinutes") as? Int ?? 30))
         TransmitShutdown.register("FT8/FT4", isTransmitting: { [weak self] in
             guard let self else { return false }
             return self.transmitTask != nil || self.transmitArmed || self.isCallingCQContinually
@@ -555,7 +567,7 @@ final class FT8EngineService: ObservableObject {
             self.isCallingCQContinually = false
             self.autoSequenceEnabled = false
             self.autoHunterEnabled = false
-            self.cancelTransmission(reason: "YAAM is quitting; receive requested")
+            self.cancelTransmission(reason: "\(TransmitShutdown.releaseReason); receive requested")
         })
         refreshAudioDevices()
         startClock()
@@ -901,6 +913,7 @@ final class FT8EngineService: ObservableObject {
     }
 
     func setTxMessageIndex(_ index: Int) {
+        noteOperatorActivity()
         txText = generateStandardMessage(index: index)
     }
 
@@ -1085,8 +1098,9 @@ final class FT8EngineService: ObservableObject {
         }
     }
 
-    func startContinuousCQ() {
+    func startContinuousCQ(automatic: Bool = false) {
         guard validateIdentity() else { return }
+        if !automatic { noteOperatorActivity() }
         isCallingCQContinually = true
         beginCQ()
         autoSequenceEnabled = true
@@ -1103,8 +1117,9 @@ final class FT8EngineService: ObservableObject {
         }
     }
 
-    func answerCallsign(_ row: FT8DecodedRow) {
+    func answerCallsign(_ row: FT8DecodedRow, automatic: Bool = false) {
         guard validateIdentity() else { return }
+        if !automatic { noteOperatorActivity() }
         guard let caller = row.callerCall, !caller.isEmpty else { return }
 
         isCallingCQContinually = false
@@ -1820,7 +1835,7 @@ final class FT8EngineService: ObservableObject {
 
         guard let target = bestTarget, let targetCall = target.callerCall else { return }
         autoHunterStatus = "🎯 Auto-Hunter: Locked onto \(targetCall) (\(target.countryName), \(Int(target.distanceKm ?? 0)) km, \(Int(target.estimatedSNR)) dB) · Answering!"
-        answerCallsign(target)
+        answerCallsign(target, automatic: true)
     }
 
     private func observeContact(_ row: FT8DecodedRow) {
@@ -1879,7 +1894,7 @@ final class FT8EngineService: ObservableObject {
                     }
                 }
 
-                answerCallsign(bestCaller)
+                answerCallsign(bestCaller, automatic: true)
                 return
             } else if autoSequenceEnabled && transmitArmed && transmitTask == nil {
                 // Repeat CQ on the next matching parity slot
@@ -1951,7 +1966,7 @@ final class FT8EngineService: ObservableObject {
                             Task { @MainActor in
                                 try? await Task.sleep(for: .seconds(1))
                                 if self.resumeCQAfterQSO && self.transmitArmed {
-                                    self.startContinuousCQ()
+                                    self.startContinuousCQ(automatic: true)
                                 }
                             }
                         }
@@ -2002,7 +2017,7 @@ final class FT8EngineService: ObservableObject {
                         Task { @MainActor in
                             try? await Task.sleep(for: .seconds(2))
                             if self.resumeCQAfterQSO && self.transmitArmed {
-                                self.startContinuousCQ()
+                                self.startContinuousCQ(automatic: true)
                             }
                         }
                     }
@@ -2045,6 +2060,7 @@ final class FT8EngineService: ObservableObject {
         clockTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
+                self.checkAutomaticTXInactivity()
                 let now = Date().timeIntervalSince1970
                 let elapsedInSlot = now.truncatingRemainder(dividingBy: slotDuration)
                 let remaining = max(0, slotDuration - elapsedInSlot)
@@ -2141,7 +2157,26 @@ final class FT8EngineService: ObservableObject {
         return trimmed.isEmpty ? nil : trimmed
     }
 
+    func checkAutomaticTXInactivity(now: TimeInterval = ProcessInfo.processInfo.systemUptime) {
+        guard transmitArmed || isCallingCQContinually || autoHunterEnabled || autoSequenceEnabled else { return }
+        guard now - lastOperatorActivity >= Double(automaticTXIdleMinutes) * 60 else { return }
+        stopAutomaticTX(reason: "Automatic TX stopped after \(automaticTXIdleMinutes) minutes without operator activity at \(TXLimits.utc()). Check the radio before arming TX again.")
+    }
+
+    private func stopAutomaticTX(reason: String) {
+        isCallingCQContinually = false
+        autoSequenceEnabled = false
+        autoHunterEnabled = false
+        cancelTransmission(reason: reason)
+        transmitArmed = false
+        status = reason
+        TransmitNotices.shared.post(automaticTXNotice, text: reason)
+    }
+
     private func fail(_ message: String) {
+        if transmitArmed || isCallingCQContinually || autoSequenceEnabled || transmitTask != nil {
+            stopAutomaticTX(reason: "\(message) Automatic TX stopped at \(TXLimits.utc()); receive is unconfirmed. Check the radio locally.")
+        }
         state = .failed(message)
         status = message
     }

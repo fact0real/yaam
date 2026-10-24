@@ -151,6 +151,7 @@ final class FLRigClient {
     // The keyer calls sendMorse(text) at f83e099 and sendMorse(text, wpm:) once the flrig client of patch 32 is applied.
     // Tests/FlrigCWErrorRegression.swift sets sendMorseError to make it throw, as the real client does when flrig
     // refuses the text or does not answer (FLRigError), and sendMorseDelay for the time flrig takes to answer.
+    var stopMorseError: Error?
     var sendMorseError: Error?
     var sendMorseDelay: TimeInterval = 0
     func sendMorse(_ text: String, wpm: Int? = nil) async throws {
@@ -161,7 +162,7 @@ final class FLRigClient {
     }
     // Tests/CATStopDestinationRegression.swift checks where a CAT Morse STOP goes (the real stopMorse sends the stop
     // sequence to flrig whatever its last poll said).
-    func stopMorse() async throws { KeyLog.add("CW STOP via flrig") }
+    func stopMorse() async throws { KeyLog.add("CW STOP via flrig"); if let stopMorseError { throw stopMorseError } }
 }
 
 struct StubRigState { var isConnected = false }

@@ -27,6 +27,17 @@ public final class WavelogSyncEngine: ObservableObject {
 
     @Published public var serverURL: String = ""
     private var radioBroadcastTimer: Timer?
+    private var radioBroadcastInFlight = false
+    private var lastRadioPayload: RadioPayload?
+    private var nextRadioAttempt: TimeInterval = 0
+    private var radioFailureCount = 0
+    private var lastRadioSuccess: TimeInterval = -.infinity
+    private struct RadioPayload: Equatable {
+        let endpoint: String
+        let name: String
+        let frequency: Int
+        let mode: String
+    }
 
     public init() {
         reloadSettings()
@@ -248,25 +259,38 @@ public final class WavelogSyncEngine: ObservableObject {
     }
 
     public func broadcastActiveRadioTelemetry() {
-        guard isConfigured, isLiveRadioBroadcastEnabled else { return }
+        guard isConfigured, isLiveRadioBroadcastEnabled, !radioBroadcastInFlight else { return }
         let key = CredentialVault.value(for: .wavelogAPIKey)
         let url = serverURL
-
-        guard FLRigClient.shared.isConnected else { return }
-        let freqHz = FLRigClient.shared.frequencyHz
-        let mode = FLRigClient.shared.mode
-        let radioName = FLRigClient.shared.rigName
-
-        guard freqHz > 0 else { return }
-
+        let radio = FLRigClient.shared
+        guard radio.isConnected, radio.frequencyHz.isFinite, radio.frequencyHz > 0,
+              radio.frequencyHz < Double(Int.max) else { return }
+        let payload = RadioPayload(endpoint: url, name: radio.rigName, frequency: Int(radio.frequencyHz), mode: radio.mode)
+        let now = ProcessInfo.processInfo.systemUptime
+        guard now >= nextRadioAttempt, payload != lastRadioPayload || now - lastRadioSuccess >= 60 else { return }
+        radioBroadcastInFlight = true
         Task {
-            _ = try? await WavelogClient.shared.broadcastRadio(
-                baseURL: url,
-                apiKey: key,
-                radioName: radioName,
-                frequencyHz: freqHz,
-                mode: mode
-            )
+            defer { radioBroadcastInFlight = false }
+            do {
+                guard try await WavelogClient.shared.broadcastRadio(
+                    baseURL: url, apiKey: key, radioName: payload.name,
+                    frequencyHz: Double(payload.frequency), mode: payload.mode
+                ) else {
+                    lastError = "Wavelog radio update was not accepted; check the radio data."
+                    return
+                }
+                radioFailureCount = 0
+                nextRadioAttempt = 0
+                lastRadioPayload = payload
+                lastRadioSuccess = ProcessInfo.processInfo.systemUptime
+                lastStatusMessage = "Wavelog radio status updated."
+                if lastError?.hasPrefix("Wavelog radio update") == true { lastError = nil }
+            } catch {
+                radioFailureCount = min(5, radioFailureCount + 1)
+                nextRadioAttempt = ProcessInfo.processInfo.systemUptime + min(60, 3 * pow(2, Double(radioFailureCount)))
+                // Provider responses may echo credentials; keep the visible diagnostic local and fixed.
+                lastError = "Wavelog radio update failed. Check the connection and API permissions. It will retry."
+            }
         }
     }
 }

@@ -38,6 +38,12 @@ struct QuitReleasesTransmitRegression {
             path.released += 1
         })
 
+        let sleeping=YAAMAppDelegate()
+        path.transmitting=true
+        sleeping.releaseBeforeSleep()
+        check("Sleep releases active paths without entering permanent shutdown",path.released==1 && !path.transmitting && !TransmitShutdown.isShuttingDown)
+        check("Sleep leaves a persistent receive-uncertainty notice",TransmitNotices.shared.notices.contains{$0.text.contains("before Mac sleep")})
+        path.released=0
         let idle = YAAMAppDelegate()
         let reply = idle.applicationShouldTerminate(app)
         check("with nothing transmitting, YAAM quits at once", reply == .terminateNow, "\(reply.rawValue)")

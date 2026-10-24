@@ -11,6 +11,11 @@ enum AmateurBandPlan { static func effectiveADIFMode(mode: String, submode: Stri
 @main
 struct ADIFLengthRegression {
     static func main() {
+        let old = [["CALL":"EA3JIC", "QRZLOG_QSL_RCVD":"Y"]]
+        let qrz = generateADIF(originalContent:"",records:old)
+        precondition(qrz.contains("<APP_YAAM_QRZ_QSL_RCVD:1>Y") && !qrz.contains("<QRZLOG_QSL_RCVD:"))
+        precondition(records(qrz)==old)
+        precondition(records("<CALL:6>EA3JIC<QRZLOG_QSL_RCVD:1>Y<EOR>")==old)
         testWriterCountsUnicodeCharacters()
         testRoundTripNonASCII()
         testLegacyCharacterCountedFileStillLoads()

@@ -107,6 +107,17 @@ public final class CWKeyerService: ObservableObject {
     /// hardware of the selected mode is not connected), empty after a send that went out. It is cleared when the
     /// active station profile changes.
     @Published public var transmitRefusal: String = ""
+    /// Independent of the next send/profile change; only the operator dismisses this notice.
+    @Published public var operationNotice = ""
+    @Published public var maximumMessageSeconds = 120 {
+        didSet { let n = min(600, max(10, maximumMessageSeconds)); if n != maximumMessageSeconds { maximumMessageSeconds = n }; UserDefaults.standard.set(n, forKey: "cwMaximumMessageSeconds") }
+    }
+    @Published public var autoCQMaximumCalls = 20 {
+        didSet { let n = min(100, max(1, autoCQMaximumCalls)); if n != autoCQMaximumCalls { autoCQMaximumCalls = n }; UserDefaults.standard.set(n, forKey: "cwAutoCQMaximumCalls") }
+    }
+    @Published public var autoCQMaximumMinutes = 10 {
+        didSet { let n = min(30, max(1, autoCQMaximumMinutes)); if n != autoCQMaximumMinutes { autoCQMaximumMinutes = n }; UserDefaults.standard.set(n, forKey: "cwAutoCQMaximumMinutes") }
+    }
     @Published public var cwdaemonHost: String = "127.0.0.1"
     @Published public var cwdaemonPort: Int = 6789
 
@@ -142,6 +153,16 @@ public final class CWKeyerService: ObservableObject {
     private var autoCQIsSending = false
     private var activeTransmissionMode: CWTransmissionMode?
     private var catStopTask: Task<Void, Never>?
+    private var messageLimitTask: Task<Void, Never>?
+    private var pendingAcceptance: ((Bool) -> Void)?
+    private var autoCQLimitTask: Task<Void, Never>?
+    private var autoCQGeneration = UUID()
+
+    private func finishAcceptance(_ accepted: Bool) {
+        let completion = pendingAcceptance
+        pendingAcceptance = nil
+        completion?(accepted)
+    }
     private var isShuttingDown = false
     // Use the shared connection before any Operator Desk view has appeared. Tests may still inject a client.
     weak var rigControlClientRef: RigControlClient? = RigControlClient.shared
@@ -150,11 +171,16 @@ public final class CWKeyerService: ObservableObject {
     /// if the connection states have changed since. Nil until a text has gone to one.
     private enum CATMorsePath { case fx4cr, tx500, icomUSB, xiegu6100, rigctl, flrig }
     private var catMorsePath: CATMorsePath?
+    private var pendingCATTransport: AnyObject?
     /// Stops the keyer when the app quits (see init).
     private var terminationObserver: NSObjectProtocol?
+    private var connectionLossObserver: NSObjectProtocol?
 
     public init() {
-        self.wpm = UserDefaults.standard.integer(forKey: "cwKeyerWPM") > 0 ? UserDefaults.standard.integer(forKey: "cwKeyerWPM") : 24
+        self.wpm = MorseTiming.clampedWPM(UserDefaults.standard.object(forKey: "cwKeyerWPM") as? Int ?? 24)
+        self.maximumMessageSeconds = min(600, max(10, UserDefaults.standard.object(forKey: "cwMaximumMessageSeconds") as? Int ?? 120))
+        self.autoCQMaximumCalls = min(100, max(1, UserDefaults.standard.object(forKey: "cwAutoCQMaximumCalls") as? Int ?? 20))
+        self.autoCQMaximumMinutes = min(30, max(1, UserDefaults.standard.object(forKey: "cwAutoCQMaximumMinutes") as? Int ?? 10))
         self.sidetonePitchHz = UserDefaults.standard.double(forKey: "cwSidetonePitch") > 0 ? UserDefaults.standard.double(forKey: "cwSidetonePitch") : 650.0
         self.useCutNumbers = UserDefaults.standard.object(forKey: "cwUseCutNumbers") as? Bool ?? true
         let storedInterval = UserDefaults.standard.integer(forKey: "cwAutoCQInterval")
@@ -167,6 +193,11 @@ public final class CWKeyerService: ObservableObject {
         // Quitting the app stops what is being sent, as STOP does; otherwise the radio or the WinKeyer would finish
         // the text it holds after the app has gone. queue nil: the block runs at once, on the thread that posts the
         // notification (the main thread, at quit), before the app exits.
+        connectionLossObserver = NotificationCenter.default.addObserver(
+            forName: Notification.Name("YAAMRadioConnectionLost"), object: nil, queue: nil
+        ) { [weak self] notice in
+            MainActor.assumeIsolated { self?.stopForConnectionLoss(notice.object as AnyObject?) }
+        }
         terminationObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification, object: nil, queue: nil
         ) { [weak self] _ in
@@ -274,17 +305,17 @@ public final class CWKeyerService: ObservableObject {
     // MARK: - WPM Adjustment
 
     public func increaseWPM(_ delta: Int = 1) {
-        wpm = min(50, wpm + delta)
+        wpm = MorseTiming.clampedWPM(wpm.addingReportingOverflow(delta).overflow ? 60 : wpm + delta)
         UserDefaults.standard.set(wpm, forKey: "cwKeyerWPM")
     }
 
     public func decreaseWPM(_ delta: Int = 1) {
-        wpm = max(10, wpm - delta)
+        wpm = MorseTiming.clampedWPM(wpm.subtractingReportingOverflow(delta).overflow ? 5 : wpm - delta)
         UserDefaults.standard.set(wpm, forKey: "cwKeyerWPM")
     }
 
     public func setWPM(_ newWpm: Int) {
-        wpm = max(10, min(50, newWpm))
+        wpm = MorseTiming.clampedWPM(newWpm)
         UserDefaults.standard.set(wpm, forKey: "cwKeyerWPM")
     }
 
@@ -449,9 +480,10 @@ public final class CWKeyerService: ObservableObject {
         serial: Int = 1,
         exch: String = "",
         band: String = "",
-        freq: String = ""
+        freq: String = "",
+        onAccepted: ((Bool) -> Void)? = nil
     ) {
-        guard !isShuttingDown else { return }
+        guard !isShuttingDown else { onAccepted?(false); return }
         let typed = expandMacro(
             text,
             myCall: myCall,
@@ -465,21 +497,33 @@ public final class CWKeyerService: ObservableObject {
             freq: freq
         ).trimmingCharacters(in: .whitespacesAndNewlines)
 
-        guard !typed.isEmpty else { return }
+        guard !typed.isEmpty else { onAccepted?(false); return }
         guard typed.utf8.count <= MorseTiming.maximumTextLength else {
             transmitRefusal = "Nothing sent: CW messages are limited to \(MorseTiming.maximumTextLength) bytes."
+            onAccepted?(false)
             return
         }
 
         // Nothing is keyed unless the operator's own callsign is set; checked before an earlier send is stopped.
         if let issue = refusalReason(myCall: myCall) {
             transmitRefusal = issue
+            onAccepted?(false)
             return
         }
         // Accents are folded. A text with a character that has no Morse is refused here: nothing is stopped or sent.
         let (expanded, unsendable) = Self.morseText(typed)
         if !unsendable.isEmpty {
             transmitRefusal = "No Morse for \(unsendable): change the text before transmitting."
+            onAccepted?(false)
+            return
+        }
+        var speed = MorseTiming.clampedWPM(wpm)
+        if transmissionMode == .icomUSB || (transmissionMode == .catMorse && !FX4CRDriver.shared.isConnected && !Lab599TX500Driver.shared.isConnected && IcomUSBRadioDriver.shared.isConnected) { speed = min(45, max(6, speed)) }
+        if transmissionMode == .xiegu6100 || (transmissionMode == .catMorse && !FX4CRDriver.shared.isConnected && !Lab599TX500Driver.shared.isConnected && !IcomUSBRadioDriver.shared.isConnected && Xiegu6100Driver.shared.isConnected) { speed = min(50, speed) }
+        let duration = MorseTiming.duration(of: expanded, wpm: speed)
+        guard duration <= Double(maximumMessageSeconds) else {
+            transmitRefusal = "Nothing sent: this CW message needs \(Int(duration.rounded(.up))) s at \(speed) WPM; the limit is \(maximumMessageSeconds) s. Shorten it or adjust CW limits."
+            onAccepted?(false)
             return
         }
         // A message sent by hand (a macro, typed text, the contest keys) is the operator's answer: Auto-CQ ends, so
@@ -490,9 +534,11 @@ public final class CWKeyerService: ObservableObject {
         transmitRefusal = ""
 
         stopTransmitOnly()
-        wpm = max(5, min(60, wpm))
+        pendingAcceptance = onAccepted
+        wpm = speed
         let selectedMode = transmissionMode
         activeTransmissionMode = selectedMode
+        pendingCATTransport = selectedMode == .catMorse ? preferredCATTransport : nil
         self.isTransmitting = true
         self.activeBufferText = expanded
         self.currentlyTransmittingChar = ""
@@ -504,15 +550,30 @@ public final class CWKeyerService: ObservableObject {
             }
         }
 
+        let messageLimit = maximumMessageSeconds
+        messageLimitTask = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(messageLimit)) } catch { return }
+            guard let self, self.isTransmitting, !Task.isCancelled else { return }
+            self.stop()
+            self.operationNotice = "CW stopped at its \(messageLimit)-second limit at \(TXLimits.utc()). Receive was requested; verify receive on the radio before sending again."
+        }
         transmitTask = Task { [weak self] in
             guard let self, !Task.isCancelled else { return }
 
+            if selectedMode != .catMorse, let lost = self.disconnectedTransmissionDevice {
+                self.transmitRefusal = "Nothing sent: \(lost) disconnected before CW submission."
+                self.finishAcceptance(false)
+                self.isTransmitting = false
+                self.activeBufferText = ""
+                return
+            }
             self.watchActiveConnection()
             // 1. Hardware / Network backend execution
             switch selectedMode {
             case .winkeyer:
                 WinKeyerDriver.shared.setSpeed(self.wpm)
                 WinKeyerDriver.shared.sendMorseText(expanded)
+                self.finishAcceptance(true)
                 // Sidetone and progress handled by WinKeyer echo callbacks
                 return
             case .serialDTR_RTS:
@@ -526,6 +587,7 @@ public final class CWKeyerService: ObservableObject {
                         self?.currentlyTransmittingChar = ""
                     }
                 )
+                self.finishAcceptance(true)
                 // Progress driven by SerialKeyerDriver callbacks; also play sidetone
                 if self.sidetoneEnabled {
                     await self.playMorseSidetone(text: expanded)
@@ -535,7 +597,10 @@ public final class CWKeyerService: ObservableObject {
             case .catMorse:
                 // When no destination took the text (flrig refused it or did not answer), nothing is played: the
                 // screen goes idle at once and the refusal says why.
-                if await self.sendViaCAT(text: expanded) {
+                let accepted = await self.sendViaCAT(text: expanded)
+                guard !Task.isCancelled else { return }
+                self.finishAcceptance(accepted)
+                if accepted {
                     if self.sidetoneEnabled {
                         await self.playMorseSidetone(text: expanded)
                     } else {
@@ -553,6 +618,7 @@ public final class CWKeyerService: ObservableObject {
                     icom.setKeyerSpeed(self.wpm)
                     icom.sendMorse(expanded)
                 }
+                self.finishAcceptance(true)
                 if self.sidetoneEnabled {
                     await self.playMorseSidetone(text: expanded)
                 } else {
@@ -563,6 +629,7 @@ public final class CWKeyerService: ObservableObject {
                 if tx500.isConnected {
                     tx500.sendMorse(expanded, wpm: self.wpm)
                 }
+                self.finishAcceptance(true)
                 if self.sidetoneEnabled {
                     await self.playMorseSidetone(text: expanded)
                 } else {
@@ -573,6 +640,7 @@ public final class CWKeyerService: ObservableObject {
                 if fx4cr.isConnected {
                     fx4cr.sendMorse(expanded, wpm: self.wpm)
                 }
+                self.finishAcceptance(true)
                 if self.sidetoneEnabled {
                     await self.playMorseSidetone(text: expanded)
                 } else {
@@ -584,6 +652,7 @@ public final class CWKeyerService: ObservableObject {
                     xiegu.setKeyerSpeed(self.wpm)
                     xiegu.sendMorse(expanded)
                 }
+                self.finishAcceptance(true)
                 if self.sidetoneEnabled {
                     await self.playMorseSidetone(text: expanded)
                 } else {
@@ -591,15 +660,18 @@ public final class CWKeyerService: ObservableObject {
                 }
             case .tci:
                 TCIClient.shared.sendCW(text: expanded, wpm: self.wpm)
+                self.finishAcceptance(true)
                 await self.simulateTransmitProgress(text: expanded)
             case .cwdaemon:
                 self.sendViaCWDaemon(text: expanded)
+                self.finishAcceptance(true)
                 if self.sidetoneEnabled {
                     await self.playMorseSidetone(text: expanded)
                 } else {
                     await self.simulateTransmitProgress(text: expanded)
                 }
             case .audioOnly:
+                self.finishAcceptance(true)
                 if self.sidetoneEnabled {
                     await self.playMorseSidetone(text: expanded)
                 }
@@ -631,6 +703,48 @@ public final class CWKeyerService: ObservableObject {
         }
     }
 
+    private var preferredCATTransport: AnyObject? {
+        if FX4CRDriver.shared.isConnected { return FX4CRDriver.shared }
+        if Lab599TX500Driver.shared.isConnected { return Lab599TX500Driver.shared }
+        if IcomUSBRadioDriver.shared.isConnected { return IcomUSBRadioDriver.shared }
+        if Xiegu6100Driver.shared.isConnected { return Xiegu6100Driver.shared }
+        if rigControlClientRef?.state.isConnected == true { return rigControlClientRef }
+        if FLRigClient.shared.isConnected { return FLRigClient.shared }
+        return nil
+    }
+
+    private var activeTransportObject: AnyObject? {
+        switch activeTransmissionMode {
+        case .icomUSB?: return IcomUSBRadioDriver.shared
+        case .lab599TX500?: return Lab599TX500Driver.shared
+        case .fx4cr?: return FX4CRDriver.shared
+        case .xiegu6100?: return Xiegu6100Driver.shared
+        case .winkeyer?: return WinKeyerDriver.shared
+        case .serialDTR_RTS?: return SerialKeyerDriver.shared
+        case .tci?: return TCIClient.shared
+        case .catMorse?:
+            if let pendingCATTransport { return pendingCATTransport }
+            switch catMorsePath {
+            case .icomUSB?: return IcomUSBRadioDriver.shared
+            case .tx500?: return Lab599TX500Driver.shared
+            case .fx4cr?: return FX4CRDriver.shared
+            case .xiegu6100?: return Xiegu6100Driver.shared
+            case .rigctl?: return rigControlClientRef
+            case .flrig?: return FLRigClient.shared
+            case nil: return nil
+            }
+        default: return nil
+        }
+    }
+
+    private func stopForConnectionLoss(_ transport: AnyObject?) {
+        guard isTransmitting || isAutoCQActive, let transport, let activeTransportObject,
+              transport === activeTransportObject else { return }
+        transmitRefusal = "CW stopped after its radio connection changed at \(TXLimits.utc()). Auto-CQ is off. Receive was requested; verify the original radio before sending again."
+        operationNotice = transmitRefusal
+        stop()
+    }
+
     private var disconnectedTransmissionDevice: String? {
         func lost(_ connected: Bool, _ name: String) -> String? { connected ? nil : name }
         switch activeTransmissionMode {
@@ -656,6 +770,10 @@ public final class CWKeyerService: ObservableObject {
     }
 
     private func stopTransmitOnly() {
+        messageLimitTask?.cancel()
+        messageLimitTask = nil
+        pendingCATTransport = nil
+        finishAcceptance(false)
         transmitTask?.cancel()
         transmitTask = nil
         connectionWatchTask?.cancel()
@@ -682,7 +800,7 @@ public final class CWKeyerService: ObservableObject {
         case .tci:
             TCIClient.shared.stopCW()
         case .cwdaemon:
-            sendCWDaemonPacket(data: Data([0x1B]))
+            sendCWDaemonPacket(data: Data([0x1B, 0x34]))
         case .catMorse:
             stopCATMorse()
         case .audioOnly:
@@ -733,7 +851,10 @@ public final class CWKeyerService: ObservableObject {
         let previous = catStopTask
         catStopTask = Task {
             await previous?.value
-            try? await FLRigClient.shared.stopMorse()
+            do { try await FLRigClient.shared.stopMorse() }
+            catch {
+                self.operationNotice = "flrig: CW stop was not confirmed at \(TXLimits.utc()): \(error.localizedDescription). Queued CW may still be keyed. Receiving and other YAAM tools remain available. Stop CW in flrig or on the radio and verify receive."
+            }
         }
     }
 
@@ -801,11 +922,26 @@ public final class CWKeyerService: ObservableObject {
         transmitRefusal = ""
         stopAutoCQ()
         isAutoCQActive = true
+        autoCQGeneration = UUID()
+        let limitGeneration = autoCQGeneration
+        let minutes = autoCQMaximumMinutes
+        autoCQLimitTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(minutes * 60))
+            guard !Task.isCancelled, let self, self.isAutoCQActive, self.autoCQGeneration == limitGeneration else { return }
+            self.stop()
+            self.operationNotice = "CW Auto-CQ stopped after its \(minutes)-minute limit at \(TXLimits.utc()). Receiving and logging remain available. Start Auto-CQ again to resume."
+        }
 
         autoCQTask = Task { [weak self] in
             guard let self else { return }
 
+            var calls = 0
             while self.isAutoCQActive && !Task.isCancelled {
+                guard calls < self.autoCQMaximumCalls else {
+                    self.operationNotice = "CW Auto-CQ stopped after \(calls) calls at \(TXLimits.utc()). Receiving and logging remain available. Start Auto-CQ again to resume."
+                    break
+                }
+                calls += 1
                 // Send the CQ macro
                 self.autoCQIsSending = true
                 self.send(
@@ -853,6 +989,9 @@ public final class CWKeyerService: ObservableObject {
     }
 
     public func stopAutoCQ() {
+        autoCQGeneration = UUID()
+        autoCQLimitTask?.cancel()
+        autoCQLimitTask = nil
         isAutoCQActive = false
         autoCQCountdown = 0
         autoCQTask?.cancel()
@@ -867,6 +1006,7 @@ public final class CWKeyerService: ObservableObject {
     private func sendViaCAT(text: String) async -> Bool {
         await catStopTask?.value
         guard !Task.isCancelled else { return false }
+        pendingCATTransport = nil
         // Priority 0: Direct FX-4CR Kenwood CAT KY Morse
         if FX4CRDriver.shared.isConnected {
             catMorsePath = .fx4cr

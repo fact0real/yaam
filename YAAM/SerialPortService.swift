@@ -14,6 +14,13 @@ nonisolated public final class SerialPortService: @unchecked Sendable {
     public static let shared = SerialPortService()
 
     private var fileDescriptor: Int32 = -1
+    private let ioLock = NSRecursiveLock()
+    private static let ownershipLock = NSLock()
+    private static var ownedPorts = Set<String>()
+    private var ownedPath: String?
+    private var generation: UInt64 = 0
+    private var errorText: String?
+    public var lastError: String? { ioLock.lock(); defer { ioLock.unlock() }; return errorText }
     private var isReading: Bool = false
     private let readQueue = DispatchQueue(label: "com.yaam.serialport.read", qos: .userInitiated)
     private var readCallback: (@Sendable (Data) -> Void)?
@@ -52,7 +59,8 @@ nonisolated public final class SerialPortService: @unchecked Sendable {
     }
 
     public var isOpen: Bool {
-        fileDescriptor >= 0
+        ioLock.lock(); defer { ioLock.unlock() }
+        return fileDescriptor >= 0
     }
 
     // MARK: - Open & Configure Port
@@ -63,22 +71,38 @@ nonisolated public final class SerialPortService: @unchecked Sendable {
         stopBits: Int = 1,
         onReceive: (@Sendable (Data) -> Void)? = nil
     ) -> Bool {
+        ioLock.lock(); defer { ioLock.unlock() }
         closePort()
+        errorText = nil
 
         self.readCallback = onReceive
 
+        // cu/tty aliases for the same UART must not have two owners inside YAAM.
+        let identity = URL(fileURLWithPath: path).resolvingSymlinksInPath().path.replacingOccurrences(of: "/dev/tty.", with: "/dev/cu.")
+        Self.ownershipLock.lock()
+        let available = Self.ownedPorts.insert(identity).inserted
+        Self.ownershipLock.unlock()
+        guard available else { errorText = "This serial port is already in use by another YAAM tool."; return false }
+        ownedPath = identity
         // Open in non-blocking read-write mode
         let fd = open(path, O_RDWR | O_NOCTTY | O_NONBLOCK)
         guard fd >= 0 else {
+            errorText = "Unable to open serial port: \(String(cString: strerror(errno)))."
+            closePort()
             return false
         }
         self.fileDescriptor = fd
+        guard ioctl(fd, TIOCEXCL) == 0 else {
+            errorText = "Unable to obtain exclusive serial access."
+            closePort()
+            return false
+        }
 
         // Configure termios
         var settings = termios()
         guard tcgetattr(fd, &settings) == 0 else {
-            close(fd)
-            self.fileDescriptor = -1
+            errorText = "Unable to configure serial port."
+            closePort()
             return false
         }
 
@@ -115,8 +139,8 @@ nonisolated public final class SerialPortService: @unchecked Sendable {
         settings.c_cc.17 = 1 // VTIME (100ms timeout)
 
         guard tcsetattr(fd, TCSANOW, &settings) == 0 else {
-            close(fd)
-            self.fileDescriptor = -1
+            errorText = "Unable to configure serial port."
+            closePort()
             return false
         }
 
@@ -128,8 +152,23 @@ nonisolated public final class SerialPortService: @unchecked Sendable {
     }
 
     public func closePort() {
+        ioLock.lock(); defer { ioLock.unlock() }
+        generation &+= 1
         isReading = false
         if fileDescriptor >= 0 {
+            // Bounded drain of already accepted bytes; never block indefinitely in tcdrain.
+            let deadline = ProcessInfo.processInfo.systemUptime + 0.2
+            while ProcessInfo.processInfo.systemUptime < deadline {
+                var pending: Int32 = 0
+                let result = ioctl(fileDescriptor, TIOCOUTQ, &pending)
+                if result == 0 && pending == 0 { break }
+                if result < 0 && errno != EINTR { errorText = "Serial output drain could not be verified."; break }
+                usleep(1_000)
+            }
+            var pending: Int32 = 0
+            if ioctl(fileDescriptor, TIOCOUTQ, &pending) == 0 && pending > 0 {
+                errorText = "Serial output did not drain before disconnect; verify receive on the radio."
+            }
             // Drop modem lines safely on close
             var lines: Int32 = TIOCM_DTR | TIOCM_RTS
             _ = ioctl(fileDescriptor, TIOCMBIC, &lines)
@@ -137,12 +176,19 @@ nonisolated public final class SerialPortService: @unchecked Sendable {
             fileDescriptor = -1
         }
         readCallback = nil
+        if let ownedPath {
+            Self.ownershipLock.lock()
+            Self.ownedPorts.remove(ownedPath)
+            Self.ownershipLock.unlock()
+            self.ownedPath = nil
+        }
     }
 
     // MARK: - Hardware Modem Control Lines (DTR & RTS)
 
     @discardableResult
     public func setDTR(active: Bool) -> Bool {
+        ioLock.lock(); defer { ioLock.unlock() }
         guard fileDescriptor >= 0 else { return false }
         var bit: Int32 = TIOCM_DTR
         let res = active ? ioctl(fileDescriptor, TIOCMBIS, &bit) : ioctl(fileDescriptor, TIOCMBIC, &bit)
@@ -151,6 +197,7 @@ nonisolated public final class SerialPortService: @unchecked Sendable {
 
     @discardableResult
     public func setRTS(active: Bool) -> Bool {
+        ioLock.lock(); defer { ioLock.unlock() }
         guard fileDescriptor >= 0 else { return false }
         var bit: Int32 = TIOCM_RTS
         let res = active ? ioctl(fileDescriptor, TIOCMBIS, &bit) : ioctl(fileDescriptor, TIOCMBIC, &bit)
@@ -158,6 +205,7 @@ nonisolated public final class SerialPortService: @unchecked Sendable {
     }
 
     public func getControlLines() -> (dtr: Bool, rts: Bool, cts: Bool, dsr: Bool, dcd: Bool, ri: Bool)? {
+        ioLock.lock(); defer { ioLock.unlock() }
         guard fileDescriptor >= 0 else { return nil }
         var status: Int32 = 0
         guard ioctl(fileDescriptor, TIOCMGET, &status) == 0 else { return nil }
@@ -175,16 +223,31 @@ nonisolated public final class SerialPortService: @unchecked Sendable {
 
     @discardableResult
     public func writeData(_ data: Data) -> Bool {
+        ioLock.lock(); defer { ioLock.unlock() }
         guard fileDescriptor >= 0 else { return false }
+        if data.isEmpty { return true }
+        let deadline = ProcessInfo.processInfo.systemUptime + 0.25
         return data.withUnsafeBytes { rawBuffer in
             guard let ptr = rawBuffer.baseAddress else { return false }
             var totalWritten = 0
             while totalWritten < data.count {
-                let written = write(fileDescriptor, ptr.advanced(by: totalWritten), data.count - totalWritten)
-                if written <= 0 {
+                guard ProcessInfo.processInfo.systemUptime < deadline else {
+                    errorText = "Serial write timed out; command delivery is unconfirmed."
                     return false
                 }
-                totalWritten += written
+                let written = write(fileDescriptor, ptr.advanced(by: totalWritten), data.count - totalWritten)
+                if written > 0 { totalWritten += written; continue }
+                if written < 0 && errno == EINTR {
+                    if ProcessInfo.processInfo.systemUptime < deadline { continue }
+                } else if written == 0 || errno == EAGAIN || errno == EWOULDBLOCK {
+                    if ProcessInfo.processInfo.systemUptime < deadline {
+                        var item = pollfd(fd: fileDescriptor, events: Int16(POLLOUT), revents: 0)
+                        _ = poll(&item, 1, 5)
+                        continue
+                    }
+                }
+                errorText = "Serial write failed or timed out; command delivery is unconfirmed."
+                return false
             }
             return true
         }
@@ -195,16 +258,26 @@ nonisolated public final class SerialPortService: @unchecked Sendable {
     private func startReading() {
         guard readCallback != nil else { return }
         isReading = true
+        let session = generation
         readQueue.async { [weak self] in
             var buffer = [UInt8](repeating: 0, count: 256)
-            while let self = self, self.isReading, self.fileDescriptor >= 0 {
-                let bytesRead = read(self.fileDescriptor, &buffer, buffer.count)
-                if bytesRead > 0 {
-                    let data = Data(buffer[0..<bytesRead])
-                    self.readCallback?(data)
-                } else {
-                    usleep(10_000) // 10ms poll
+            while let self {
+                self.ioLock.lock()
+                guard self.isReading, self.generation == session, self.fileDescriptor >= 0 else {
+                    self.ioLock.unlock()
+                    return
                 }
+                let count = read(self.fileDescriptor, &buffer, buffer.count)
+                let callback = self.readCallback
+                if count < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR {
+                    self.errorText = "Serial input failed; reconnect the radio."
+                    self.closePort()
+                    self.ioLock.unlock()
+                    return
+                }
+                self.ioLock.unlock()
+                if count > 0 { callback?(Data(buffer[0..<count])) }
+                else { usleep(10_000) }
             }
         }
     }

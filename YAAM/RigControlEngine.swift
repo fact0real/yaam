@@ -97,6 +97,7 @@ public final class RigControlEngine: ObservableObject {
     }
 
     public var sMeterDescription: String {
+        if driverType == .flrig { return "\(Int((sMeterValue / 15 * 100).rounded()))% (flrig)" }
         if sMeterValue <= 9.0 {
             return "S\(Int(sMeterValue))"
         } else {
@@ -115,6 +116,11 @@ public final class RigControlEngine: ObservableObject {
     private let noticeSource = TransmitNotices.Source(name: "Radio Control")
     private let releaseNoticeSource = TransmitNotices.Source(name: "Radio Control rigctld release")
     private var rigctldReplies: RigctldReplyStream?
+    private var rigctldRetryTask: Task<Void, Never>?
+    private var rigctldRetryAttempt = 0
+    private var rigctldDesiredEndpoint: String?
+    private var rigctldUncertainEndpoints = Set<String>()
+    private var rigctldRecoveryReplies = Set<String>()
     private var flrigPTTWatchdog: Task<Void, Never>?
 
     private init() {
@@ -150,6 +156,9 @@ public final class RigControlEngine: ObservableObject {
 
     // MARK: - Connect & Disconnect
     public func connect() {
+        rigctldRetryTask?.cancel()
+        rigctldRetryTask = nil
+        rigctldRetryAttempt = 0
         guard driverType != .disabled else {
             disconnect()
             return
@@ -177,6 +186,11 @@ public final class RigControlEngine: ObservableObject {
     }
 
     public func disconnect() {
+        rigctldRetryTask?.cancel()
+        rigctldRetryTask = nil
+        if let endpoint = rigctldDesiredEndpoint, rigctldReplies?.hasTransmitRisk == true { rigctldUncertainEndpoints.insert(endpoint) }
+        rigctldDesiredEndpoint = nil
+        rigctldRecoveryReplies.removeAll()
         // A queued key-down must be followed by a release even if the operator disconnects immediately.
         if driverType == .flrig && isPTT { flrigEnqueue(.setPTT(false)) }
         flrigPTTWatchdog?.cancel()
@@ -325,7 +339,7 @@ public final class RigControlEngine: ObservableObject {
                 break   // queued above
             case .rigctld:
                 let fraction = Double(watts) / 100.0
-                sendRigctldCommand("l RFPOWER \(fraction)\n")
+                sendRigctldCommand("L RFPOWER \(fraction)\n")
             case .tx500:
                 Lab599TX500Driver.shared.setPowerWatts(watts)
             case .icomUSB:
@@ -792,7 +806,7 @@ public final class RigControlEngine: ObservableObject {
 
         // 4. S-Meter
         if let sStr = try await flrigText(.getSmeter), let val = Double(sStr) {
-            self.sMeterValue = min(15.0, max(0.0, val))
+            self.sMeterValue = val.isFinite ? min(100.0, max(0.0, val)) * 15 / 100 : self.sMeterValue
         }
 
         // 5. PTT, only while a warning that the radio may be keyed is shown: flrig reporting PTT off ends it.
@@ -873,26 +887,63 @@ public final class RigControlEngine: ObservableObject {
 
     // MARK: - Hamlib rigctld TCP Engine
     private func startRigctldTCP() {
-        tcpConnection?.cancel()
+        rigctldRecoveryReplies.removeAll()
+        if let old = rigctldReplies, old.hasTransmitRisk {
+            if let endpoint = rigctldDesiredEndpoint { rigctldUncertainEndpoints.insert(endpoint) }
+            old.send("\\stop_morse\nT 0\n", closeAfterRelease: true)
+        } else { tcpConnection?.cancel() }
 
         let endpointHost = NWEndpoint.Host(host)
-        let endpointPort = NWEndpoint.Port(rawValue: UInt16(port)) ?? 4532
+        guard (1...65_535).contains(port), let endpointPort = NWEndpoint.Port(rawValue: UInt16(port)), !host.isEmpty else {
+            isConnecting = false
+            lastError = "Enter a valid rigctld host and port."
+            return
+        }
 
         let conn = NWConnection(host: endpointHost, port: endpointPort, using: .tcp)
         self.tcpConnection = conn
         let endpoint = "\(host):\(port)"
+        rigctldDesiredEndpoint = endpoint
         let reader = RigctldReplyStream(conn)
         rigctldReplies = reader
         reader.onError = { [weak self, weak conn] reason, safety in
             if safety {
+                self?.rigctldUncertainEndpoints.insert(endpoint)
                 // A retired connection still owns its release warning.
                 let text = "Radio Control rigctld (\(endpoint)): \(reason) at \(TXLimits.utc()). Receive is unconfirmed. Release PTT locally and check the original radio."
                 TransmitNotices.shared.post(self?.releaseNoticeSource ?? TransmitNotices.Source(name: endpoint), text: text)
             }
             if let self, self.tcpConnection === conn { self.lastError = reason }
         }
+        reader.onFailure = { [weak self, weak conn] reason, risk in
+            guard let self, self.tcpConnection === conn else { return }
+            if risk { self.rigctldUncertainEndpoints.insert(endpoint) }
+            self.rigctldRecoveryReplies.removeAll()
+            self.isConnected = false
+            self.isConnecting = false
+            self.lastError = reason
+            self.pollingTask?.cancel()
+            self.scheduleRigctldReconnect(endpoint: endpoint)
+        }
         reader.onReply = { [weak self, weak conn] reply in
-            guard let self, self.tcpConnection === conn, reply.result == 0 else { return }
+            guard let self, self.tcpConnection === conn else { return }
+            if self.rigctldRecoveryReplies.contains(reply.command) {
+                guard reply.result == 0 else { self.rigctldReplies?.fail("Recovery release refused; TX remains disabled."); return }
+                self.rigctldRecoveryReplies.remove(reply.command)
+                if self.rigctldRecoveryReplies.isEmpty {
+                    self.rigctldUncertainEndpoints.remove(endpoint)
+                    self.rigctldKeyed = false
+                    self.isPTT = false
+                    self.rigctldPTTWatchdog?.cancel()
+                    self.rigctldPTTWatchdog = nil
+                    self.isConnected = true
+                    self.isConnecting = false
+                    self.lastError = nil
+                    self.startRigctldPolling()
+                }
+            }
+            guard reply.result == 0 else { return }
+            if reply.command == "get_freq" || reply.command == "get_mode" { self.rigctldRetryAttempt = 0 }
             if let value = reply.fields["Frequency"].flatMap(UInt64.init), value > 0 { self.frequencyHz = value }
             if let mode = reply.fields["Mode"] { self.mode = mode }
             self.lastResponseTime = Date()
@@ -903,16 +954,26 @@ public final class RigControlEngine: ObservableObject {
                 guard let self, let conn, self.tcpConnection === conn else { return }
                 switch state {
                 case .ready:
-                    self.isConnected = true
-                    self.isConnecting = false
                     self.rigModel = "Hamlib Radio"
                     self.rigctldReplies?.start()
-                    self.startRigctldPolling()
+                    if self.rigctldUncertainEndpoints.contains(endpoint) {
+                        self.rigctldRecoveryReplies = ["stop_morse", "set_ptt"]
+                        self.isConnected = false
+                        self.isConnecting = true
+                        self.rigctldReplies?.send("\\stop_morse\nT 0\n")
+                    } else {
+                        self.isConnected = true
+                        self.isConnecting = false
+                        self.startRigctldPolling()
+                    }
                 case .failed(let err):
                     self.rigctldReplies?.fail("the connection failed during TX or release: \(err.localizedDescription)")
                     self.isConnected = false
                     self.isConnecting = false
                     self.lastError = err.localizedDescription
+                    self.scheduleRigctldReconnect(endpoint: endpoint)
+                case .waiting(let err):
+                    self.rigctldReplies?.fail("rigctld is unavailable: \(err.localizedDescription)")
                 case .cancelled:
                     self.isConnected = false
                     self.isConnecting = false
@@ -923,6 +984,22 @@ public final class RigControlEngine: ObservableObject {
         }
 
         conn.start(queue: .global())
+    }
+
+    private func scheduleRigctldReconnect(endpoint: String) {
+        guard driverType == .rigctld, rigctldDesiredEndpoint == endpoint,
+              "\(host):\(port)" == endpoint, rigctldRetryTask == nil,
+              rigctldRetryAttempt < 5, !TransmitShutdown.isShuttingDown else { return }
+        rigctldRetryAttempt += 1
+        let delay = min(30, 1 << rigctldRetryAttempt)
+        rigctldRetryTask = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(delay)) } catch { return }
+            guard let self, self.rigctldDesiredEndpoint == endpoint,
+                  self.driverType == .rigctld, "\(self.host):\(self.port)" == endpoint,
+                  !Task.isCancelled else { return }
+            self.rigctldRetryTask = nil
+            self.startRigctldTCP()
+        }
     }
 
     private func startRigctldPolling() {

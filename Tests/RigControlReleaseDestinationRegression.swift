@@ -2,7 +2,7 @@ import Foundation
 import Network
 
 nonisolated final class NWConnection: @unchecked Sendable {
-    enum State { case ready, failed(NWError), cancelled, setup }
+    enum State { case ready, failed(NWError), waiting(NWError), cancelled, setup }
     enum SendCompletion { case contentProcessed(@Sendable (NWError?) -> Void) }
     nonisolated(unsafe) static var instances: [NWConnection] = []
     var stateUpdateHandler: (@Sendable (State) -> Void)?
@@ -11,7 +11,9 @@ nonisolated final class NWConnection: @unchecked Sendable {
     var writeError: NWError?
     init(host: NWEndpoint.Host, port: NWEndpoint.Port, using: NWParameters) { Self.instances.append(self) }
     final class ContentContext: Sendable {}
-    func receive(minimumIncompleteLength: Int, maximumLength: Int, completion: @escaping @Sendable (Data?, ContentContext?, Bool, NWError?) -> Void) {}
+    var pendingRead: (@Sendable (Data?, ContentContext?, Bool, NWError?) -> Void)?
+    func receive(minimumIncompleteLength: Int, maximumLength: Int, completion: @escaping @Sendable (Data?, ContentContext?, Bool, NWError?) -> Void) { pendingRead=completion }
+    func inject(_ text: String) { let read=pendingRead; pendingRead=nil; read?(Data(text.utf8),nil,false,nil) }
     func start(queue: DispatchQueue) { stateUpdateHandler?(.ready) }
     func cancel() { cancelled = true }
     func send(content: Data?, completion: SendCompletion) {
@@ -53,7 +55,10 @@ struct RigControlReleaseDestinationRegression {
         precondition(first.sent.contains("+T 0\n") && !first.cancelled, "Retain the original transport for its acknowledgement")
         rig.connect(); pump()
         let second = NWConnection.instances.last!
-        precondition(first !== second && rig.isConnected)
+        precondition(first !== second && !rig.isConnected, "Recovery must wait for receive acknowledgements")
+        second.inject("stop_morse:\nRPRT 0\nset_ptt: 0\nRPRT 0\n"); pump()
+        precondition(rig.isConnected)
+        second.sent.removeAll()
         rig.setPTT(true)
         release()
         first.stateUpdateHandler?(.cancelled); pump()
@@ -65,8 +70,10 @@ struct RigControlReleaseDestinationRegression {
         rig.lastError = "poll overwritten"
         precondition(TransmitNotices.shared.notices.contains { $0.text.contains("Receive is unconfirmed") })
         rig.setPTT(true)
+        let previousNotice = TransmitNotices.shared.notices.last?.id
         second.stateUpdateHandler?(.failed(.posix(.ECONNRESET))); pump()
-        precondition(TransmitNotices.shared.notices.contains { $0.text.contains("connection failed during TX") })
+        precondition(!rig.isConnected && TransmitNotices.shared.notices.last?.id != previousNotice)
+        precondition(TransmitNotices.shared.notices.last?.text.contains("Receive is unconfirmed") == true)
         second.writeError = nil
         _ = TransmitShutdown.releaseAll()
         precondition(second.sent.contains("+T 0\n") && !rig.isPTT)

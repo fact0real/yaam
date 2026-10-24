@@ -452,7 +452,8 @@ public struct Lab599TX500SetupView: View {
         }
         testCWNotice = ""
         isTestingCW = true
-        tx500.sendMorse("TEST DE \(call)", wpm: cwKeyer.wpm)
+        cwKeyer.transmissionMode = .lab599TX500
+        cwKeyer.send(text: "TEST DE \(call)", myCall: call)
         DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
             self.isTestingCW = false
         }

@@ -56,6 +56,12 @@ final class RigControlClient: ObservableObject {
     private var pollTimer: DispatchSourceTimer?
     private var replies: RigctldReplyStream?
     private var connectionID = UUID()
+    private var retryTask: Task<Void, Never>?
+    private var retryAttempt = 0
+    private var desiredEndpoint: String?
+    private var retryAddress: (String, Int)?
+    private var uncertainEndpoints = Set<String>()
+    private var recoveryReplies = Set<String>()
     private var pendingFrequency: UInt64?
     private var pendingMode = ""
     private var pendingPassband: Int?
@@ -82,7 +88,7 @@ final class RigControlClient: ObservableObject {
         connection?.cancel()
     }
 
-    func connect(host rawHost: String, port rawPort: Int) {
+    func connect(host rawHost: String, port rawPort: Int, recovering: Bool = false) {
         let host = rawHost.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !host.isEmpty, (1...65_535).contains(rawPort), let port = NWEndpoint.Port(rawValue: UInt16(rawPort)) else {
             state = .failed("Enter a valid rigctld host and port.")
@@ -90,7 +96,11 @@ final class RigControlClient: ObservableObject {
             return
         }
 
+        let endpoint = "\(host):\(rawPort)"
         disconnect()
+        desiredEndpoint = endpoint
+        retryAddress = (host, rawPort)
+        if !recovering { retryAttempt = 0 }
         pendingFrequency = nil
         pendingMode = ""
         pendingPassband = nil
@@ -105,15 +115,39 @@ final class RigControlClient: ObservableObject {
         let source = releaseNoticeSource, sourceName = noticeSource.name
         reader.onError = { [weak self] reason, safety in
             if safety {
+                self?.uncertainEndpoints.insert(endpoint)
                 let text = "\(sourceName): \(reason) at \(TXLimits.utc()). Receive is unconfirmed. Release PTT locally and check the original radio."
                 TransmitNotices.shared.post(source, text: text)
             }
             guard let self, self.connectionID == id else { return }
             self.lastMessage = reason
         }
+        reader.onFailure = { [weak self] reason, risk in
+            guard let self, self.connectionID == id else { return }
+            if risk { self.uncertainEndpoints.insert(endpoint) }
+            NotificationCenter.default.post(name: Notification.Name("YAAMRadioConnectionLost"), object: self)
+            self.recoveryReplies.removeAll()
+            self.state = .failed(reason)
+            self.lastMessage = reason
+            self.pollTimer?.cancel()
+            self.pollTimer = nil
+            self.scheduleReconnect(host: host, port: rawPort, endpoint: endpoint)
+        }
         reader.onReply = { [weak self] reply in
-            guard let self, self.connectionID == id, reply.result == 0,
-                  reply.command == "get_freq" || reply.command == "get_mode" else { return }
+            guard let self, self.connectionID == id else { return }
+            if self.recoveryReplies.contains(reply.command) {
+                guard reply.result == 0 else { self.replies?.fail("Recovery release was refused; TX remains disabled."); return }
+                self.recoveryReplies.remove(reply.command)
+                if self.recoveryReplies.isEmpty {
+                    self.uncertainEndpoints.remove(endpoint)
+                    self.state = .connected
+                    self.lastMessage = "Reconnected; CW/PTT release acknowledged. Check physical receive before sending."
+                    self.startPolling()
+                    self.refresh()
+                }
+            }
+            guard reply.result == 0, reply.command == "get_freq" || reply.command == "get_mode" else { return }
+            self.retryAttempt = 0
             if let value = reply.fields["Frequency"].flatMap(UInt64.init) { self.pendingFrequency = value }
             if let mode = reply.fields["Mode"] { self.pendingMode = mode }
             if let band = reply.fields["Passband"].flatMap(Int.init) { self.pendingPassband = band }
@@ -137,6 +171,13 @@ final class RigControlClient: ObservableObject {
     }
 
     func disconnect() {
+        if state.isConnected { NotificationCenter.default.post(name: Notification.Name("YAAMRadioConnectionLost"), object: self) }
+        retryTask?.cancel()
+        retryTask = nil
+        if let desiredEndpoint, isTransmitting || (replies?.hasTransmitRisk ?? false) { uncertainEndpoints.insert(desiredEndpoint) }
+        desiredEndpoint = nil
+        retryAddress = nil
+        recoveryReplies.removeAll()
         let old = connection
         let wasTransmitting = isTransmitting || (replies?.hasTransmitRisk ?? false)
         pttGeneration = UUID()
@@ -149,6 +190,7 @@ final class RigControlClient: ObservableObject {
         old?.stateUpdateHandler = nil
         connection = nil
         if wasTransmitting, let reader = replies {
+            // The reader retains release warnings for its original destination.
             reader.send("\\stop_morse\nT 0\n", closeAfterRelease: true)
         } else { old?.cancel() }
         replies = nil
@@ -244,15 +286,19 @@ final class RigControlClient: ObservableObject {
         case .ready:
             DispatchQueue.main.async {
                 guard self.connectionID == connectionID else { return }
-                self.state = .connected
-                self.lastMessage = "Connected to rigctld at \(host):\(port)"
-            }
-            DispatchQueue.main.async {
-                guard self.connectionID == connectionID else { return }
                 self.replies?.start()
-                self.startPolling()
+                if self.uncertainEndpoints.contains("\(host):\(port)") {
+                    self.recoveryReplies = ["stop_morse", "set_ptt"]
+                    self.state = .connecting
+                    self.lastMessage = "Reconnected; waiting for release acknowledgements before enabling TX."
+                    self.replies?.send("\\stop_morse\nT 0\n")
+                } else {
+                    self.state = .connected
+                    self.lastMessage = "Connected to rigctld at \(host):\(port)"
+                    self.startPolling()
+                    self.refresh()
+                }
             }
-            refresh()
         case .waiting(let error):
             publishFailure("Waiting for rigctld: \(error.localizedDescription)", connectionID: connectionID)
         case .failed(let error):
@@ -272,6 +318,21 @@ final class RigControlClient: ObservableObject {
             self.state = .failed(message)
             self.replies?.fail("the link failed during TX or release: \(message)")
             self.lastMessage = message
+            if let endpoint = self.desiredEndpoint, let (host, port) = self.retryAddress {
+                self.scheduleReconnect(host: host, port: port, endpoint: endpoint)
+            }
+        }
+    }
+
+    private func scheduleReconnect(host: String, port: Int, endpoint: String) {
+        guard desiredEndpoint == endpoint, retryTask == nil, retryAttempt < 5, !TransmitShutdown.isShuttingDown else { return }
+        retryAttempt += 1
+        let delay = min(30, 1 << retryAttempt)
+        retryTask = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(delay)) } catch { return }
+            guard let self, self.desiredEndpoint == endpoint, !Task.isCancelled else { return }
+            self.retryTask = nil
+            self.connect(host: host, port: port, recovering: true)
         }
     }
 

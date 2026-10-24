@@ -11,6 +11,14 @@ struct FT8TransmitShutdownRegression {
         engine.txText = "CQ EP2AES LL35"
         engine.audioPath = .lab599TX500
         Lab599TX500Driver.shared.isConnected = true
+        let savedLimit=UserDefaults.standard.object(forKey:"ft8AutomaticTXIdleMinutes")
+        defer { if let savedLimit { UserDefaults.standard.set(savedLimit,forKey:"ft8AutomaticTXIdleMinutes") } else { UserDefaults.standard.removeObject(forKey:"ft8AutomaticTXIdleMinutes") } }
+        engine.automaticTXIdleMinutes=1
+        engine.transmitArmed=true; engine.autoSequenceEnabled=true; engine.isCallingCQContinually=true
+        engine.scheduleTransmission()
+        engine.checkAutomaticTXInactivity(now:ProcessInfo.processInfo.systemUptime+61)
+        precondition(!engine.transmitArmed && !engine.isTransmitScheduled && !engine.isCallingCQContinually && !engine.autoSequenceEnabled)
+        precondition(TransmitNotices.shared.notices.contains{$0.text.contains("without operator activity")})
         engine.transmitArmed = true
         engine.autoSequenceEnabled = true
         engine.autoHunterEnabled = true

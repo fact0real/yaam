@@ -57,6 +57,9 @@ public struct CWKeyerView: View {
                 liveStatusHUD
                 flrigPTTWarningBanner
                 bankSelectorBar
+                if !keyer.operationNotice.isEmpty {
+                    RadioTuningNotice(message: keyer.operationNotice) { keyer.operationNotice = "" }
+                }
                 macroGrid
                 autoCQAndTokenBar
                 liveTypewriterBar
@@ -464,6 +467,12 @@ public struct CWKeyerView: View {
 
                 Stepper("\(keyer.autoCQIntervalSeconds)s", value: $keyer.autoCQIntervalSeconds, in: 2...15)
                     .font(.caption2.monospacedDigit())
+                Menu("Limits") {
+                    Stepper("Message: \(keyer.maximumMessageSeconds) s", value: $keyer.maximumMessageSeconds, in: 10...600, step: 10)
+                    Stepper("Auto-CQ: \(keyer.autoCQMaximumCalls) calls", value: $keyer.autoCQMaximumCalls, in: 1...100)
+                    Stepper("Auto-CQ: \(keyer.autoCQMaximumMinutes) min", value: $keyer.autoCQMaximumMinutes, in: 1...30)
+                }.font(.caption)
+
             }
 
             Spacer()

@@ -36,6 +36,11 @@ public final class TCIClient: ObservableObject {
     private var webSocketTask: URLSessionWebSocketTask?
     private var isIntentionalDisconnect: Bool = false
     private var pingTimer: Timer?
+    private var pingDeadlineTask: Task<Void, Never>?
+    private var pingID: UUID?
+    private var retryTask: Task<Void, Never>?
+    private var retryAttempt = 0
+    private var desiredEndpoint: String?
     private var pttReceivers = Set<Int>()
     private var tuneReceivers = Set<Int>()
     private var transmitWatchdog: Task<Void, Never>?
@@ -82,7 +87,7 @@ public final class TCIClient: ObservableObject {
 
     // MARK: - Connection Management
 
-    public func connect(host: String? = nil, port: Int? = nil) {
+    public func connect(host: String? = nil, port: Int? = nil, recovering: Bool = false) {
         if let h = host { self.host = h }
         if let p = port { self.port = p }
 
@@ -91,8 +96,9 @@ public final class TCIClient: ObservableObject {
 
         disconnect()
         isIntentionalDisconnect = false
+        if !recovering { retryAttempt = 0 }
 
-        guard let url = URL(string: "ws://\(self.host):\(self.port)") else {
+        guard (1...65_535).contains(self.port), let url = URL(string: "ws://\(self.host):\(self.port)") else {
             self.lastError = "Invalid WebSocket URL"
             self.statusMessage = "Invalid URL"
             return
@@ -103,6 +109,7 @@ public final class TCIClient: ObservableObject {
         let session = URLSession(configuration: .default)
         let task = session.webSocketTask(with: url)
         self.connectedEndpoint = url.absoluteString
+        self.desiredEndpoint = url.absoluteString
         self.webSocketTask = task
         task.resume()
 
@@ -113,6 +120,13 @@ public final class TCIClient: ObservableObject {
     }
 
     public func disconnect() {
+        if isConnected { NotificationCenter.default.post(name: Notification.Name("YAAMRadioConnectionLost"), object: self) }
+        retryTask?.cancel()
+        retryTask = nil
+        desiredEndpoint = nil
+        pingDeadlineTask?.cancel()
+        pingDeadlineTask = nil
+        pingID = nil
         isIntentionalDisconnect = true
         pingTimer?.invalidate()
         pingTimer = nil
@@ -152,16 +166,28 @@ public final class TCIClient: ObservableObject {
     private func startPingTimer() {
         pingTimer?.invalidate()
         pingTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.probeLink() }
+        }
+        probeLink()
+    }
+
+    private func probeLink() {
+        guard let task = webSocketTask, pingID == nil else { return }
+        let id = UUID()
+        pingID = id
+        pingDeadlineTask = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(3)) } catch { return }
+            guard let self, self.webSocketTask === task, self.pingID == id else { return }
+            self.handleDisconnect(reason: "No WebSocket pong within 3 s")
+        }
+        task.sendPing { [weak self] error in
             Task { @MainActor [weak self] in
-                guard let self = self, let task = self.webSocketTask, self.isConnected else { return }
-                task.sendPing { [weak self] error in
-                    if error != nil {
-                        Task { @MainActor [weak self] in
-                            guard self?.webSocketTask === task else { return }
-                            self?.handleDisconnect(reason: "Ping failed")
-                        }
-                    }
-                }
+                guard let self, self.webSocketTask === task, self.pingID == id else { return }
+                self.pingDeadlineTask?.cancel()
+                self.pingDeadlineTask = nil
+                self.pingID = nil
+                if error != nil { self.handleDisconnect(reason: "Ping failed") }
+                else { self.retryAttempt = 0 }
             }
         }
     }
@@ -169,6 +195,10 @@ public final class TCIClient: ObservableObject {
     private func handleDisconnect(reason: String) {
         guard !isIntentionalDisconnect else { return }
         rememberUncertainRelease("the link was lost (\(reason))")
+        NotificationCenter.default.post(name: Notification.Name("YAAMRadioConnectionLost"), object: self)
+        pingDeadlineTask?.cancel()
+        pingDeadlineTask = nil
+        pingID = nil
         self.isConnected = false
         self.statusMessage = "Connection lost: \(reason); check the SDR is on receive"
         if !holdsTransmit { self.lastError = reason }
@@ -176,6 +206,18 @@ public final class TCIClient: ObservableObject {
         pingTimer = nil
         webSocketTask?.cancel(with: .goingAway, reason: nil)
         webSocketTask = nil // a queued success from the failed session cannot resurrect it
+        guard let endpoint = desiredEndpoint, retryTask == nil, retryAttempt < 5,
+              !TransmitShutdown.isShuttingDown else { return }
+        let originalHost = host, originalPort = port
+        retryAttempt += 1
+        let delay = min(30, 1 << retryAttempt)
+        retryTask = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(delay)) } catch { return }
+            guard let self, self.desiredEndpoint == endpoint, !self.isIntentionalDisconnect,
+                  self.host == originalHost, self.port == originalPort, !Task.isCancelled else { return }
+            self.retryTask = nil
+            self.connect(host: originalHost, port: originalPort, recovering: true)
+        }
     }
 
     // MARK: - Message Processing Loop

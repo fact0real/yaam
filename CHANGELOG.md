@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.37.44 - 2026-10-24
+
+- Apply independently verified EA3JIC feedback across CW, radio link health, sleep handling, telemetry and ADIF export.
+- Wait for asynchronous CW acceptance before ESM logs or advances; keep stop failures visible.
+- Add configurable message and Auto-CQ limits, and an operator-inactivity limit for automatic FT8/FT4 transmission.
+- Detect silent CAT/TCI links, bound recovery to the same destination, and request receive before retiring an uncertain connection.
+- Make serial access exclusive, handle bounded write backpressure, and use the documented Icom keyer-speed encoding.
+- Route hardware CW tests through the shared stoppable keyer; correct cwdaemon abort to ESC4.
+- Show flrig meter percentages, correct rigctld power writes, send Wavelog changes with a heartbeat and omit unknown power.
+- Export QRZ confirmations through APP_YAAM_QRZ_QSL_RCVD while retaining legacy import compatibility.
+
+See `Reports/20261024-EA3JIC-email-batch-review.md` for scope, evidence, validation and hardware limitations.
+
 ## 1.37.37 - 2026-10-18
 
 - Integrate reviewed EA3JIC upload privacy and open items with positive allowlists and enhanced transport safeguards.

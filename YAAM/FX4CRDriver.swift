@@ -169,6 +169,11 @@ public final class FX4CRDriver: ObservableObject {
 
     // MARK: - Internal Transport & Polling
     nonisolated private let serialPort = SerialPortService()
+    private var serialHealthTask: Task<Void, Never>?
+    private var serialRetryTask: Task<Void, Never>?
+    private var serialRetryAttempt = 0
+    private var lastSerialReply = ProcessInfo.processInfo.systemUptime
+
     private var receiveBuffer = ""
     private var pollingTimer: DispatchSourceTimer?
     private var pttWatchdog: DispatchWorkItem?
@@ -291,8 +296,11 @@ public final class FX4CRDriver: ObservableObject {
 
     // MARK: - Connect & Disconnect
 
-    public func connect(port: String? = nil, type: FX4CRConnectionType? = nil) {
+    public func connect(port: String? = nil, type: FX4CRConnectionType? = nil, recovering: Bool = false) {
         if let t = type { self.connectionType = t }
+        serialRetryTask?.cancel()
+        serialRetryTask = nil
+        if !recovering { serialRetryAttempt = 0 }
         if let p = port { self.selectedPort = p }
 
         guard !selectedPort.isEmpty else {
@@ -320,6 +328,13 @@ public final class FX4CRDriver: ObservableObject {
 
         if ok {
             self.isConnected = true
+            lastSerialReply = ProcessInfo.processInfo.systemUptime
+            startSerialHealthWatch()
+            if recovering {
+                // Clear producers and request receive on this same port before accepting another send.
+                stopMorse()
+                setPTT(false)
+            }
             self.isConnecting = false
             let portName = selectedPort.components(separatedBy: "/").last ?? selectedPort
             self.lastMessage = "Connected to FX-4CR (\(portName) via \(transportLabel) @ \(baudRate) 8N\(stopBits))"
@@ -340,11 +355,49 @@ public final class FX4CRDriver: ObservableObject {
         } else {
             self.isConnected = false
             self.isConnecting = false
+            if recovering { scheduleSerialRecovery() }
             self.lastMessage = "Failed to open \(selectedPort). Check \(transportLabel) connection & permissions."
         }
     }
 
+    private func startSerialHealthWatch() {
+        serialHealthTask?.cancel()
+        serialHealthTask = Task { [weak self] in
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .seconds(1)) } catch { return }
+                guard let self, self.isConnected else { return }
+                guard !self.serialPort.isOpen || ProcessInfo.processInfo.systemUptime - self.lastSerialReply >= 6 else { continue }
+                self.stopMorse()
+                self.setPTT(false)
+                self.disconnect()
+                let warning = "FX-4CR: CAT stopped answering at \(TXLimits.utc()). CW/PTT release was requested; receive is unconfirmed. Local progress is stopped. Check the radio locally; recovery will use this same serial port."
+                self.lastMessage = warning
+                TransmitNotices.shared.post(self.noticeSource, text: warning)
+                self.scheduleSerialRecovery()
+                return
+            }
+        }
+    }
+
+    private func scheduleSerialRecovery() {
+        guard serialRetryTask == nil, serialRetryAttempt < 5, !TransmitShutdown.isShuttingDown else { return }
+        let originalPort = selectedPort, originalBaud = baudRate
+        serialRetryAttempt += 1
+        let delay = min(30, 1 << serialRetryAttempt)
+        serialRetryTask = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(delay)) } catch { return }
+            guard let self, self.selectedPort == originalPort, self.baudRate == originalBaud, !Task.isCancelled else { return }
+            self.serialRetryTask = nil
+            self.connect(port: originalPort, recovering: true)
+        }
+    }
+
     public func disconnect() {
+        if isConnected { NotificationCenter.default.post(name: Notification.Name("YAAMRadioConnectionLost"), object: self) }
+        serialHealthTask?.cancel()
+        serialHealthTask = nil
+        serialRetryTask?.cancel()
+        serialRetryTask = nil
         cancelPendingMorseChunks()
         if isConnected { stopMorse() }
         if isTransmitting {
@@ -594,6 +647,8 @@ public final class FX4CRDriver: ObservableObject {
         if response.hasPrefix("FA") {
             let numStr = response.dropFirst(2).trimmingCharacters(in: .whitespaces)
             if let freq = UInt64(numStr), freq > 0 {
+                lastSerialReply = ProcessInfo.processInfo.systemUptime
+                serialRetryAttempt = 0
                 self.frequencyHz = freq
             }
         // VFO-B Frequency: FB00014074000
@@ -629,6 +684,8 @@ public final class FX4CRDriver: ObservableObject {
             if response.count >= 13 {
                 let freqPart = String(response.dropFirst(2).prefix(11)).trimmingCharacters(in: .whitespaces)
                 if let freq = UInt64(freqPart), freq > 0 {
+                    lastSerialReply = ProcessInfo.processInfo.systemUptime
+                    serialRetryAttempt = 0
                     self.frequencyHz = freq
                 }
             }
@@ -643,7 +700,7 @@ public final class FX4CRDriver: ObservableObject {
         timer.schedule(deadline: .now() + 1.0, repeating: 1.0, leeway: .milliseconds(150))
         timer.setEventHandler { [weak self] in
             Task { @MainActor [weak self] in
-                guard let self = self, self.isConnected, !self.isTransmitting else { return }
+                guard let self = self, self.isConnected else { return }
                 // Poll frequency, S-meter, and meter readings
                 self.sendRaw("FA;SM;RM;")
             }

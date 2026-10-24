@@ -1019,11 +1019,17 @@ struct ContestPanel: View {
         syncESMStation()
         ContestESMEngine.shared.nextSerial = session.nextSerial
 
+        let submittedCall = inputCall
+        let submittedExchange = inputRcvdExchange
+        let submittedSent = inputSentExchange
         ContestESMEngine.shared.handleEnterPressed(
             callsign: &inputCall,
             sentExchange: inputSentExchange,
             rcvdExchange: &inputRcvdExchange
         ) {
+            guard inputCall == submittedCall, inputRcvdExchange == submittedExchange,
+                  inputSentExchange == submittedSent,
+                  appState.currentContestSession == session else { return false }
             submitFastQSO(session: session)
             return fastLogSuccess
         }
