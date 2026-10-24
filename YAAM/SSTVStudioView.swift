@@ -19,6 +19,8 @@ public struct SSTVStudioView: View {
 
     public var body: some View {
         VStack(spacing: 8) {
+            Text("Audio monitor and test simulation. Live SSTV image decoding is not available in this version.")
+                .font(.caption).foregroundStyle(.secondary)
             // 1. Top Control Bar
             topControlBar
                 .padding(.horizontal, 12)
@@ -85,7 +87,7 @@ public struct SSTVStudioView: View {
 
             // FM Subcarrier Frequency
             HStack(spacing: 4) {
-                Text("SUBCARRIER:")
+                Text("AVG PITCH:")
                     .font(.caption2.bold())
                     .foregroundColor(.secondary)
                 Text("\(Int(engine.detectedFrequencyHz)) Hz")
@@ -98,7 +100,7 @@ public struct SSTVStudioView: View {
             Circle()
                 .fill(engine.syncPulseDetected ? Color.yellow : Color.secondary.opacity(0.3))
                 .frame(width: 8, height: 8)
-                .help("1200 Hz Horizontal Sync Pulse Detected")
+                .help("Average pitch is near 1200 Hz; this does not confirm an SSTV sync pulse")
 
             Spacer()
 

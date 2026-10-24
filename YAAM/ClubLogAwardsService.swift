@@ -45,6 +45,9 @@ nonisolated struct ClubLogDXCCMatrix: Sendable {
     let callsign: String
     let fetchedAt: Date
     var statusMessage: String = ""
+    // The local log has per-QSO zones. Online country-only matrices may not contain that detail.
+    var localZonesWorked: Set<Int>? = nil
+    var localZonesConfirmed: Set<Int>? = nil
 
     static let hfBands        = ["160m", "80m", "40m", "20m", "15m", "10m"]
     static let warcBands       = ["30m", "17m", "12m"]
@@ -59,18 +62,18 @@ nonisolated struct ClubLogDXCCMatrix: Sendable {
 
     // Continent sets
     var continentsConfirmed: Set<String> {
-        Set(entities.filter { $0.isConfirmed }.map { $0.continent.uppercased() }.filter { !$0.isEmpty })
+        Set(entities.filter { $0.isConfirmed }.map { $0.continent.uppercased() }.filter { ["AF", "AS", "EU", "NA", "OC", "SA"].contains($0) })
     }
     var continentsWorked: Set<String> {
-        Set(entities.filter { $0.isWorked }.map { $0.continent.uppercased() }.filter { !$0.isEmpty })
+        Set(entities.filter { $0.isWorked }.map { $0.continent.uppercased() }.filter { ["AF", "AS", "EU", "NA", "OC", "SA"].contains($0) })
     }
 
     // CQ Zones (1..40)
     var cqZonesConfirmed: Set<Int> {
-        Set(entities.filter { $0.isConfirmed && $0.cqZone >= 1 && $0.cqZone <= 40 }.map { $0.cqZone })
+        localZonesConfirmed ?? Set(entities.filter { $0.isConfirmed && $0.cqZone >= 1 && $0.cqZone <= 40 }.map { $0.cqZone })
     }
     var cqZonesWorked: Set<Int> {
-        Set(entities.filter { $0.isWorked && $0.cqZone >= 1 && $0.cqZone <= 40 }.map { $0.cqZone })
+        localZonesWorked ?? Set(entities.filter { $0.isWorked && $0.cqZone >= 1 && $0.cqZone <= 40 }.map { $0.cqZone })
     }
 
     // DXCC Challenge Points (Total confirmed band-entities across 160m..6m)
@@ -122,7 +125,13 @@ nonisolated struct ClubLogDXCCMatrix: Sendable {
 
         var entityMap: [String: (id: Int, name: String, prefix: String, continent: String, cqZone: Int, bands: [String: ClubLogBandStatus])] = [:]
 
+        var zonesWorked: Set<Int> = [], zonesConfirmed: Set<Int> = []
         for r in records {
+            let zone = Int((r["CQZ"].isEmpty ? r["CQZONE"] : r["CQZ"]).trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
+            if (1...40).contains(zone) {
+                zonesWorked.insert(zone)
+                if r.isConfirmed { zonesConfirmed.insert(zone) }
+            }
             let dxccStr = r["DXCC"].trimmingCharacters(in: .whitespacesAndNewlines)
             guard !dxccStr.isEmpty, dxccStr != "0", dxccStr != "UNKNOWN" else { continue }
             let adif = Int(dxccStr) ?? 0
@@ -130,7 +139,7 @@ nonisolated struct ClubLogDXCCMatrix: Sendable {
             let cqzStr = r["CQZ"].isEmpty ? r["CQZONE"] : r["CQZ"]
             let cqz = Int(cqzStr.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
             let country = r["COUNTRY"].isEmpty ? "DXCC \(dxccStr)" : r["COUNTRY"]
-            let band = r["BAND"].trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            let band = QSOIdentity.resolvedBand(r.fields).lowercased()
             let isConf = r.isConfirmed
 
             var current = entityMap[dxccStr] ?? (id: adif, name: country, prefix: dxccStr, continent: cont, cqZone: cqz, bands: [:])
@@ -150,7 +159,7 @@ nonisolated struct ClubLogDXCCMatrix: Sendable {
             ClubLogDXCCEntity(id: $0.id, name: $0.name, prefix: $0.prefix, continent: $0.continent, cqZone: $0.cqZone, bands: $0.bands)
         }.sorted { $0.name < $1.name }
 
-        return ClubLogDXCCMatrix(entities: ents, callsign: callsign, fetchedAt: Date())
+        return ClubLogDXCCMatrix(entities: ents, callsign: callsign, fetchedAt: Date(), localZonesWorked: zonesWorked, localZonesConfirmed: zonesConfirmed)
     }
 
     // Convert to award summaries for display in QRZAwardsView
@@ -452,12 +461,14 @@ actor ClubLogAwardsService {
         guard let data   = UserDefaults.standard.data(forKey: cacheKey),
               let cached = try? JSONDecoder().decode(CachedMatrix.self, from: data),
               Date().timeIntervalSince(cached.fetchedAt) < 86400 else { return nil }
-        return cached.toMatrix()
+        let matrix = cached.toMatrix()
+        return matrix.entities.isEmpty ? nil : matrix
     }
 
     // MARK: Private
 
     private func cacheMatrix(_ matrix: ClubLogDXCCMatrix) {
+        guard !matrix.entities.isEmpty else { return }
         let cached = CachedMatrix(from: matrix)
         if let data = try? JSONEncoder().encode(cached) {
             UserDefaults.standard.set(data, forKey: cacheKey)

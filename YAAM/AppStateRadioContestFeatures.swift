@@ -389,7 +389,7 @@ extension AppState {
 
     func contestSummary() -> ContestSummary {
         guard let session = currentContestSession else { return ContestSummary() }
-        return ContestWorkspaceLogic.summary(in: session, records: qsoRecords)
+        return ContestWorkspaceLogic.summary(in: session, records: qsoRecords, stationCallsign: activeStationProfile?.normalizedCallsign)
     }
 
     func contestRecords() -> [QSORecordModel] {

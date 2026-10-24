@@ -876,7 +876,7 @@ public final class IcomUSBRadioDriver: ObservableObject {
         case 0x05: return "FM"
         case 0x07: return "CW-R"
         case 0x08: return "RTTY-R"
-        default: return "USB"
+        default: return "Unknown"
         }
     }
 }

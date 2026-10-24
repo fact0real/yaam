@@ -270,6 +270,7 @@ final class MultiRigSlot: ObservableObject, Identifiable {
     @Published var isMonitoring: Bool = false
     @Published var isConnected: Bool = false
     @Published var slotStatusMessage: String = "Ready"
+    var connectionRefusal: (() -> String?)?
 
     // Dedicated Independent Engines & Hardware Clients
     var engine: FT8EngineService
@@ -352,6 +353,10 @@ final class MultiRigSlot: ObservableObject, Identifiable {
 
     func connectAndStartMonitoring(appState: AppState?) {
         guard isEnabled else { return }
+        if let issue = connectionRefusal?() {
+            slotStatusMessage = issue
+            return
+        }
 
         // Configure callsign & grid identity
         if let call = appState?.currentStationCallsign, !call.isEmpty, call != "DEFAULT" {
@@ -593,6 +598,15 @@ final class MultiRigFT8Hub: ObservableObject {
 
     private func wireInterlock() {
         for slot in slots {
+            slot.connectionRefusal = { [weak self, weak slot] in
+                guard let self, let slot else { return "The radio slot is no longer available." }
+                let singletonBackends: Set<RadioDriverType> = [.lab599TX500, .icomUSB, .fx4cr, .xiegu6100]
+                guard singletonBackends.contains(slot.driverType) else { return nil }
+                if self.slots.contains(where: { $0.id != slot.id && $0.isEnabled && $0.driverType == slot.driverType }) {
+                    return "This serial driver can serve only one enabled slot. Disable the duplicate slot before connecting."
+                }
+                return nil
+            }
             let slotID = slot.id
             let slotName = slot.name
             let slotIndex = slot.slotIndex

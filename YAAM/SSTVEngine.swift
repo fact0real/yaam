@@ -3,8 +3,8 @@
 //  YAAM
 //
 //  Real-Time DSP Slow Scan Television (SSTV) Modem & Image Engine
-//  Supports Robot 36, Martin M1, Scottie S1, VIS header auto-detection,
-//  FM subcarrier demodulation (1200-2300 Hz), CRT scanline sweep, and picture test-card generator.
+//  Audio-level/pitch monitor and simulation/test-card generator.
+//  A live SSTV VIS/image decoder is not implemented in this engine.
 //
 
 import AppKit
@@ -354,7 +354,7 @@ public final class SSTVEngine: ObservableObject {
             return
         }
         guard audioEngine?.isRunning == true, playerNode?.isPlaying == true else {
-            transmitRefusal = "SSTV test-card audio transmission is unavailable. Nothing was sent."
+            transmitRefusal = "SSTV test-card audio is unavailable because the audio engine or player is not running. Start the audio monitor and try again. Nothing was sent."
             return
         }
         isTransmitting = true

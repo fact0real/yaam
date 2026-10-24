@@ -37,7 +37,7 @@ public final class POTASpotsClient: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
 
     private let session: URLSession
-    init(session: URLSession = .shared, autoRefresh: Bool = true) {
+    init(session: URLSession = .shared, autoRefresh: Bool = false) {
         self.session = session
         if autoRefresh { startAutoRefresh() }
     }
@@ -79,25 +79,19 @@ public final class POTASpotsClient: ObservableObject {
         isLoading = true
         errorMessage = nil
 
-        async let fetchedPOTA = fetchPOTASpots()
-        async let fetchedSOTA = fetchSOTASpots()
-
-        let (potaResult, sotaResult) = await (fetchedPOTA, fetchedSOTA)
-
-        if let pSpots = potaResult {
-            self.potaSpots = pSpots
-            self.potaUpdated = Date()
-            self.potaError = nil
+        // A refresh must not contact an unselected provider.
+        let program = selectedProgram
+        if program == .pota {
+            if let spots = await fetchPOTASpots() {
+                potaSpots = spots; potaUpdated = Date(); potaError = nil; lastUpdated = Date()
+            }
+            errorMessage = potaError
+        } else {
+            if let spots = await fetchSOTASpots() {
+                sotaSpots = spots; sotaUpdated = Date(); sotaError = nil; lastUpdated = Date()
+            }
+            errorMessage = sotaError
         }
-        if let sSpots = sotaResult {
-            self.sotaSpots = sSpots
-            self.sotaUpdated = Date()
-            self.sotaError = nil
-        }
-
-        if potaResult != nil || sotaResult != nil { self.lastUpdated = Date() }
-        self.errorMessage = [potaError, sotaError].compactMap { $0 }.joined(separator: "\n")
-        if self.errorMessage?.isEmpty == true { self.errorMessage = nil }
         self.isLoading = false
     }
 

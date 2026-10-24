@@ -50,6 +50,10 @@ extension AppState {
                     return
                 }
 
+                if let issue = ContestCalendarService.replacementIssue(candidate: entries, previous: self.contestCalendarEntries) {
+                    self.contestCalendarStatus = "Calendar format changed; keeping the last saved calendar. " + issue
+                    return
+                }
                 let now = Date()
                 self.contestCalendarEntries = entries
                 self.contestCalendarLastUpdated = now

@@ -34,6 +34,19 @@ nonisolated enum ContestCalendarService {
     static let weeklyURL = URL(string: "https://www.contestcalendar.com/weeklycont.php")!
     static let fiveWeekURL = URL(string: "https://www.contestcalendar.com/fivewkcal.php")!
 
+    static func replacementIssue(candidate: [ContestCalendarEntry], previous: [ContestCalendarEntry]) -> String? {
+        guard !candidate.isEmpty else { return "No contest entries were recognized." }
+        let valid = candidate.allSatisfy {
+            !$0.title.isEmpty && !$0.utcWindow.isEmpty && $0.modes != "Not specified" &&
+            $0.bands != "Not specified" && $0.geographicFocus != "Not specified"
+        }
+        guard valid else { return "Required calendar fields changed." }
+        guard previous.count < 4 || candidate.count * 2 >= previous.count else {
+            return "The refreshed calendar was much shorter than the saved list."
+        }
+        return nil
+    }
+
     static func parse(_ html: String) -> [ContestCalendarEntry] {
         let lines = normalizedLines(from: html)
         var entries: [ContestCalendarEntry] = []

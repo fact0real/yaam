@@ -86,9 +86,15 @@ public final class ContestESMEngine: ObservableObject {
     @Published public var f8AGN: String = "AGN?"
 
     private var initialCallRecorded: String = ""
+    private var keyerSubscription: AnyCancellable?
 
     public init() {
         self.isESMEnabled = UserDefaults.standard.object(forKey: "contestESMEnabled") as? Bool ?? true
+        keyerSubscription = CWKeyerService.shared.$isTransmitting.sink { [weak self] transmitting in
+            guard let self else { return }
+            self.isTransmitting = transmitting
+            if !transmitting { self.activeOutgoingText = ""; self.transmittedCharsCount = 0 }
+        }
     }
 
     // MARK: - Evaluate State Automatically from Inputs
@@ -212,7 +218,7 @@ public final class ContestESMEngine: ObservableObject {
             guard let self else { onAccepted?(false); return }
             if accepted {
                 self.activeOutgoingText = text
-                self.isTransmitting = true
+                self.isTransmitting = CWKeyerService.shared.isTransmitting
             } else {
                 self.transmitRefusal = CWKeyerService.shared.transmitRefusal.isEmpty ? "CW submission cancelled; QSO was not advanced." : CWKeyerService.shared.transmitRefusal
                 self.statusMessage = self.transmitRefusal
