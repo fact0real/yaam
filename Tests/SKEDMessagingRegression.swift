@@ -95,6 +95,11 @@ final class MessagingStubProtocol: URLProtocol, @unchecked Sendable {
         precondition(recordedIDs == [pending.clientID, pending.clientID])
         precondition(model.pending == nil && model.text.isEmpty && model.messages.count == 1)
 
+        model.prepareSelfTest()
+        precondition(model.recipient == "EP2AES" && !model.text.isEmpty)
+        await model.send()
+        precondition(model.pending == nil && model.messages.first?.sender == "EP2AES" && model.messages.first?.recipient == "EP2AES")
+
         // The server must never be able to splice another account's inbox into this UI.
         let foreign = SKEDPrivateMessage(id: "3", clientID: UUID().uuidString, sender: "EA3JIC", recipient: "K1ABC", body: "foreign",
                                          createdAt: "2026-10-24T10:00:00.000000Z")

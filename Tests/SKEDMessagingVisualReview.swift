@@ -10,7 +10,7 @@ import AppKit
         NSApplication.shared.setActivationPolicy(.accessory)
         for appearance in [NSAppearance.Name.aqua, .darkAqua] {
             for size in [CGSize(width: 760, height: 500), CGSize(width: 1100, height: 800)] {
-                for state in ["loading", "unavailable", "unverified", "disabled", "inbox", "retry"] {
+                for state in ["loading", "unavailable", "unverified", "disabled", "inbox", "retry", "self"] {
                     let model = SKEDMessagingModel(recipient: "G0JHC", userAgent: "visual-test", tokenProvider: { "" })
                     let enabled = SKEDMessagingStatus(available: true, verifiedCallsign: "EP2AES", enabled: true, retentionDays: 30)
                     let received = SKEDPrivateMessage(id: "42", clientID: UUID().uuidString.lowercased(), sender: "G0JHC", recipient: "EP2AES",
@@ -21,6 +21,7 @@ import AppKit
                     case "unavailable": model.preview(status: nil, error: SKEDMessagingError.unavailable.localizedDescription)
                     case "unverified": model.preview(status: .init(available: true, verifiedCallsign: nil, enabled: false, retentionDays: 30))
                     case "disabled": model.preview(status: .init(available: true, verifiedCallsign: "EP2AES", enabled: false, retentionDays: 30))
+                    case "self": model.preview(status: enabled, messages: [SKEDPrivateMessage(id: "43", clientID: UUID().uuidString.lowercased(), sender: "EP2AES", recipient: "EP2AES", body: "Test message to myself — checking SKED messaging.", createdAt: "2026-10-24T12:00:00.000000Z")])
                     case "retry": model.preview(status: enabled, messages: [received], error: SKEDMessagingError.transport.localizedDescription,
                         pending: try SKEDMessageDraft(recipient: "G0JHC", body: "14:00 UTC on 20m works for me, 73!"), blocks: ["K1ABC"])
                     default: model.preview(status: enabled, messages: [received])
@@ -44,6 +45,6 @@ import AppKit
                 }
             }
         }
-        print("Rendered 24 synthetic messaging states in light/dark at compact/normal sizes.")
+        print("Rendered 28 synthetic messaging states in light/dark at compact/normal sizes.")
     }
 }

@@ -771,6 +771,9 @@ Located under **Operator Desk → DX Activity → Digital Callsign Monitor** (or
 
 ## SKED Directory
 
+**Test with myself** addresses a draft to your server-verified callsign. Click **Send message**, then **Refresh** to verify real server storage and retrieval. Self messages appear once as **Note to self**; they use normal encryption, expiry, limits and opt-in. They cannot be blocked or reported as abuse. Nothing is sent merely by preparing the draft.
+
+
 **Messages** opens the private SKED inbox. The message icon beside a directory operator starts a draft addressed to that callsign, even when no email is listed. This requires a messaging-enabled qrz-rank deployment, an active personal API token, and a callsign independently verified by the service operator. Your saved YAAM station callsign and a qrz-rank username do not establish this identity. The window shows the server-verified sender; enabling messaging explicitly allows other verified, opted-in members to contact you.
 
 Use **Refresh** for new messages or **Load older messages** for earlier pages (up to 500 loaded messages). Write plain text of up to 2,000 Unicode characters and click **Send message**. Messages use HTTPS and server-side encryption; they are **not end-to-end encrypted**, and the server operator can access them. They expire after 30 days. YAAM holds drafts/messages in memory while the window is open and clears them on close or account change; it does not save a local message archive. No logbook, email address, radio command or transmission is sent with a message. Closing a window cannot retract a send already accepted by the server.

@@ -119,6 +119,8 @@ struct SKEDMessagingView: View {
     private var composer: some View {
         GroupBox("New message") {
             VStack(alignment: .leading, spacing: 10) {
+                Button("Test with myself") { model.prepareSelfTest() }
+                    .disabled(model.working || model.pending != nil)
                 TextField("Recipient callsign", text: $model.recipient)
                     .textFieldStyle(.roundedBorder).disabled(model.pending != nil || model.working)
                     .accessibilityLabel("Recipient callsign")
@@ -167,6 +169,7 @@ struct SKEDPrivateMessageCard: View {
     let block: (String, Bool) -> Void
     let report: (String) -> Void
     private var peer: String { message.sender == owner ? message.recipient : message.sender }
+    private var isSelfMessage: Bool { message.sender == owner && message.recipient == owner }
 
     var body: some View {
         GroupBox {
@@ -179,8 +182,10 @@ struct SKEDPrivateMessageCard: View {
                 Text(verbatim: message.body).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
                 HStack {
                     Button("Reply") { reply() }
-                    Button(isBlocked ? "Unblock \(peer)" : "Block \(peer)") { block(peer, !isBlocked) }
-                    if message.recipient == owner {
+                    if !isSelfMessage {
+                        Button(isBlocked ? "Unblock \(peer)" : "Block \(peer)") { block(peer, !isBlocked) }
+                    }
+                    if message.recipient == owner && !isSelfMessage {
                         Menu("Report") {
                             Button("Spam") { report("spam") }
                             Button("Abuse") { report("abuse") }
@@ -194,7 +199,7 @@ struct SKEDPrivateMessageCard: View {
     }
 
     private var identity: some View {
-        Label("\(message.sender) → \(message.recipient)", systemImage: message.sender == owner ? "arrow.up.right" : "arrow.down.left")
+        Label(isSelfMessage ? "\(owner) · Note to self" : "\(message.sender) → \(message.recipient)", systemImage: isSelfMessage ? "arrow.triangle.2.circlepath" : message.sender == owner ? "arrow.up.right" : "arrow.down.left")
             .font(.headline).monospaced()
     }
     private var timestamp: some View {

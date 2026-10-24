@@ -160,7 +160,6 @@ import Combine
                 throw SKEDMessagingError.conflict
             }
             let draft = try pending ?? SKEDMessageDraft(recipient: recipient, body: text)
-            guard draft.recipient != owner else { throw SKEDMessagingError.invalidInput }
             if pending == nil { pendingSince = .now }
             pending = draft
             let sent = try await service.send(draft, token: token, owner: owner)
@@ -176,6 +175,13 @@ import Combine
             guard current(id, token: token) else { return }
             fail(error)
         }
+    }
+
+    func prepareSelfTest() {
+        guard enabled, let owner, !working, pending == nil else { return }
+        recipient = owner
+        if text.isEmpty { text = "Test message to myself — checking SKED messaging." }
+        notice = "Addressed to your verified callsign. Click Send message to test real delivery and storage."
     }
 
     func editDraft() { pending = nil; pendingSince = nil; notice = nil; error = nil }

@@ -123,7 +123,7 @@ nonisolated enum SKEDMessagingContract {
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         guard validID(message.id), UUID(uuidString: message.clientID)?.version4 == true,
               validCallsign(message.sender), validCallsign(message.recipient), validBody(message.body),
-              message.sender != message.recipient, message.sender == owner || message.recipient == owner,
+              message.sender == owner || message.recipient == owner,
               formatter.date(from: message.createdAt) != nil else { throw SKEDMessagingError.invalidResponse }
     }
 }
