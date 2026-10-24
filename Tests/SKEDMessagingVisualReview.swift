@@ -1,4 +1,5 @@
-// Compile with -D MESSAGING_REGRESSION, SKEDMessaging{Service,Model,View}.swift.
+// Compile with -D MESSAGING_REGRESSION, SKEDMessaging{Service,Model,View}.swift,
+// LoTWProofSigner.swift and LoTWVerificationView.swift.
 // Uses synthetic data and never connects to a service or opens the real vault.
 import SwiftUI
 import AppKit

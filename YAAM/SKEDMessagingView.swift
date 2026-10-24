@@ -5,6 +5,9 @@ struct SKEDMessagingView: View {
     @StateObject private var model: SKEDMessagingModel
     @State private var confirmNewDraft = false
     @State private var credentialRevision = ""
+    @State private var showingLoTWVerification = false
+    private var proofService = SKEDMessagingService(userAgent: "YAAM")
+    private var proofTokenProvider: () -> String = { "" }
     private var autoConnect = true
     private var credentialRevisionProvider: () -> String = { "" }
 
@@ -12,6 +15,8 @@ struct SKEDMessagingView: View {
          credentialRevisionProvider: @escaping () -> String = { "" }) {
         _model = StateObject(wrappedValue: SKEDMessagingModel(recipient: recipient, userAgent: userAgent, tokenProvider: tokenProvider))
         self.credentialRevisionProvider = credentialRevisionProvider
+        proofService = SKEDMessagingService(userAgent: userAgent)
+        proofTokenProvider = tokenProvider
     }
 
     #if MESSAGING_REGRESSION
@@ -75,6 +80,10 @@ struct SKEDMessagingView: View {
                         } else {
                             Label(SKEDMessagingError.identityRequired.localizedDescription, systemImage: "person.crop.circle.badge.questionmark")
                                 .foregroundStyle(.secondary)
+                            if status.lotwVerificationAvailable == true {
+                                Button("Verify with a LoTW certificate…") { showingLoTWVerification = true }
+                                    .disabled(model.working)
+                            }
                         }
                     } else if !model.working && model.error == nil {
                         ContentUnavailableView("Connect to messaging", systemImage: "bubble.left.and.bubble.right",
@@ -94,7 +103,13 @@ struct SKEDMessagingView: View {
             let revision = credentialRevisionProvider()
             if autoConnect && revision != credentialRevision {
                 credentialRevision = revision
+                showingLoTWVerification = false
                 model.close()
+            }
+        }
+        .sheet(isPresented: $showingLoTWVerification) {
+            LoTWVerificationView(service: proofService, tokenProvider: proofTokenProvider) {
+                Task { await model.refresh() }
             }
         }
         .confirmationDialog("Start a new send request?", isPresented: $confirmNewDraft) {
