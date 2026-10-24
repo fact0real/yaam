@@ -41,9 +41,18 @@ nonisolated enum QRZAuthenticationPolicy {
       const challenge = inputs.some(e => e.autocomplete === 'one-time-code' || /^(otp|totp|mfa|authcode|verification_code)$/i.test(e.name)) ||
         Array.from(document.querySelectorAll('iframe')).filter(visible).some(e => /captcha|challenge/.test(e.src)) ||
         /verify you are human|checking your browser|complete the security check/i.test(document.body?.innerText || '');
+      // QRZ keeps authenticated actions inside a collapsed account menu.
+      // Accept its server-issued logout token only alongside the official Account action in the header.
+      const header = document.getElementById('qrztop');
+      const headerAccount = header && Array.from(header.querySelectorAll('a[href]')).some(e => {
+        try { const u = new URL(e.href, location.href);
+          return u.protocol === 'https:' && /^(www\.)?qrz\.com$/i.test(u.hostname) && /^\/manager(?:\/|$)/i.test(u.pathname);
+        } catch { return false; }
+      });
       const logout = Array.from(document.querySelectorAll('a[href],form[action]')).some(e => {
         try { const u = new URL(e.href || e.action, location.href);
-          return u.protocol === 'https:' && (u.hostname === 'qrz.com' || u.hostname.endsWith('.qrz.com')) && /^\/(logout|signout)(\/|$)/i.test(u.pathname) && visible(e);
+          return u.protocol === 'https:' && (u.hostname === 'qrz.com' || u.hostname.endsWith('.qrz.com')) && /^\/(logout|signout)(\/|$)/i.test(u.pathname) &&
+            (visible(e) || (headerAccount && header.contains(e) && /^\/logout\/[A-Za-z0-9]+\/?$/.test(u.pathname)));
         } catch { return false; }
       });
       return {logout, loginForm, challenge};

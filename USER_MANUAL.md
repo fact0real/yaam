@@ -822,6 +822,12 @@ The table shows the callsign/country, distinct contact count, latest contact in 
 
 Review the displayed LoTW/QRZ confirmation-sync evidence before enabling **Lower priority in Call Roster** (initially off). The option uses your local history; incomplete imports or delayed QSL downloads can affect the result. Qualified callsigns move below other Call Roster candidates and its Apex suggestion, with a visible reason. Award-opportunity labels remain visible, and calls directed to you keep their priority. Any station remains selectable and loggable. In Details, **Keep normal priority for this callsign** adds an exception; the **Exceptions** menu restores automatic behavior. The wait, option and exceptions are saved separately for each station profile.
 
+### Reject an Incoming request without a published QRZ email
+
+In **QRZ Incoming Requests**, sign in using **QRZ Login** in this window, then choose **Check QRZ email** on the request. An authenticated page and valid session cookie are required before an email can be classified as absent. The status refers to the official QRZ profile email field, independently of any saved local or HAMQTH address. **No published QRZ email** changes that row's action to **Reject · no email**. It opens the existing rejection form with **Other** selected and an editable comment explaining that contact details could not be requested without a published email. Review the note and choose **Reject on QRZ.com**; the request is rejected through your saved QRZ session without opening a website. Local QSOs are retained.
+
+An unavailable lookup (login, verification, network failure, missing profile or unrecognized markup) never counts as a missing email. Retry or use **QRZ Login** inside YAAM if needed. Nothing is rejected automatically. Only current QRZ requests can be rejected; retained recovery cases stay available for local review. Checks are cleared when the list is closed, refreshed or the active station changes.
+
 ### Review QRZ Incoming before upload
 
 Open **QRZ Incoming Requests**, then **Review…** on a request. Incoming can represent a missing contact or inconsistent data in an existing contact. The call/date candidates are leads for comparison, not confirmed matches. You can request actual details by email even when a candidate already exists.

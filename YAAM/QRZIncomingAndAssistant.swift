@@ -308,7 +308,7 @@ final class QRZIncomingScraper: NSObject, WKNavigationDelegate {
             } else {
                 self.finishReject(QRZRejectResult(
                     succeeded: false,
-                    message: "The request for \(target.callsign) is still showing in your QRZ Incoming list."
+                    message: payload["message"] as? String ?? "The request for \(target.callsign) is still showing in your QRZ Incoming list."
                 ))
             }
         }
@@ -472,53 +472,20 @@ final class QRZIncomingScraper: NSObject, WKNavigationDelegate {
         reason: String,
         comments: String
     ) -> String {
-        let safeQsoID = qsoID.replacingOccurrences(of: "\"", with: "\\\"")
-        let safeCall = callsign.uppercased().replacingOccurrences(of: "\"", with: "\\\"")
-        let safeDate = qsoDate.replacingOccurrences(of: "\"", with: "\\\"")
-        let safeReason = reason.replacingOccurrences(of: "\"", with: "\\\"")
-        let safeComments = comments
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-            .replacingOccurrences(of: "\n", with: "\\n")
-
+        let values = ["qsoID": qsoID, "call": callsign.uppercased(), "date": qsoDate,
+                      "reason": reason, "comments": comments]
+        guard let data = try? JSONSerialization.data(withJSONObject: values, options: [.sortedKeys]),
+              let literal = String(data: data, encoding: .utf8) else { return "({action: 'error'})" }
         return #"""
         (function() {
-            var targetQso = "\#(safeQsoID)";
-            var targetCall = "\#(safeCall)";
-            var targetDate = "\#(safeDate)";
-            var reasonVal = "\#(safeReason)";
-            var commentsVal = "\#(safeComments)";
-
-            // 1. Locate qsoId if not directly known
-            if (!targetQso) {
-                var rows = Array.from(document.querySelectorAll("table tr"));
-                for (var i = 0; i < rows.length; i++) {
-                    var tr = rows[i];
-                    var rcall = tr.querySelector("input[id^='rcall-']");
-                    var rdate = tr.querySelector("input[id^='rdate-']");
-                    var callVal = rcall ? rcall.value.toUpperCase().trim() : "";
-                    var dateVal = rdate ? rdate.value.trim() : "";
-                    var text = (tr.innerText || tr.textContent || "").toUpperCase();
-
-                    var matchCall = (callVal && callVal === targetCall) || text.indexOf(targetCall) >= 0;
-                    var matchDate = (!targetDate) || (dateVal && dateVal === targetDate) || text.indexOf(targetDate) >= 0;
-
-                    if (matchCall && matchDate) {
-                        if (rcall) {
-                            var m = (rcall.id || "").match(/rcall-(\d+)/);
-                            if (m) { targetQso = m[1]; break; }
-                        }
-                        var btn = tr.querySelector("button[onclick*='lb_reject'], a[onclick*='lb_reject'], input[onclick*='lb_reject']");
-                        if (btn) {
-                            var m2 = (btn.getAttribute("onclick") || "").match(/lb_reject\s*\(\s*['\"]?(\d+)['\"]?\s*\)/);
-                            if (m2) { targetQso = m2[1]; break; }
-                        }
-                    }
-                }
-            }
-
-            if (!targetQso) {
-                return { action: "not-found", message: "Could not locate confirmation request for " + targetCall + " on QRZ." };
+            var values = \#(literal);
+            var targetQso = values.qsoID;
+            var targetCall = values.call;
+            var targetDate = values.date;
+            var reasonVal = values.reason;
+            var commentsVal = values.comments;
+            if (location.protocol !== 'https:' || location.hostname !== 'logbook.qrz.com' || !/^\d+$/.test(targetQso)) {
+                return {action: 'error', message: 'A current QRZ request ID and trusted logbook page are required.'};
             }
 
             // 2. Select reason radio
@@ -582,14 +549,16 @@ final class QRZIncomingScraper: NSObject, WKNavigationDelegate {
     }
 
     private static func buildVerifyScript(qsoID: String, callsign: String) -> String {
-        let safeQso = qsoID.replacingOccurrences(of: "\"", with: "\\\"")
-        let safeCall = callsign.uppercased().replacingOccurrences(of: "\"", with: "\\\"")
-
+        let literal = String(data: (try? JSONSerialization.data(withJSONObject: [qsoID])) ?? Data("[]".utf8), encoding: .utf8) ?? "[]"
+        let ready = navigationScript(shouldOpenRequests: false)
         return #"""
         (function() {
-            var qso = "\#(safeQso)";
-            var call = "\#(safeCall)";
-
+            var qso = (\#(literal))[0];
+            var readiness = \#(ready)
+            if (location.protocol !== 'https:' || location.hostname !== 'logbook.qrz.com' ||
+                !qso || readiness.action !== 'incoming-ready') {
+                return {verified: false, message: 'The QRZ Incoming page is not available to verify rejection.'};
+            }
             if (qso) {
                 var el = document.getElementById('rcall-' + qso) || document.querySelector("button[onclick*='" + qso + "']");
                 if (el) {
@@ -689,7 +658,15 @@ extension AppState {
     }
 
     func rejectQRZIncomingRequest(_ incoming: QRZIncomingConfirmation, reason: String, comments: String = "") {
-        guard !isRejectingQRZIncoming else { return }
+        guard !isRejectingQRZIncoming, !isFetchingQRZIncoming,
+              qrzIncomingArchive.lastReturnedKeys.contains(incoming.recoveryKey) else {
+            qrzIncomingStatus = "Refresh Incoming before rejecting a request that is no longer current."
+            return
+        }
+        guard !incoming.qsoID.isEmpty, incoming.qsoID.allSatisfy({ $0.isASCII && $0.isNumber }) else {
+            qrzIncomingStatus = "This request has no current QRZ request ID. Refresh Incoming before rejecting it."
+            return
+        }
         let rejectingProfileID = activeStationProfileID
         isRejectingQRZIncoming = true
         rejectingQRZIncomingID = incoming.id
@@ -809,17 +786,28 @@ extension AppState {
 }
 
 struct QRZIncomingRequestsView: View {
+    private struct RejectionContext: Identifiable {
+        let id = UUID()
+        let request: QRZIncomingConfirmation
+        let profileID: UUID?
+        let missingEmail: Bool
+    }
     @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
     @State private var detailsAfterReview: QRZIncomingConfirmation?
     @State private var requestToReview: QRZIncomingConfirmation?
-    @State private var requestToReject: QRZIncomingConfirmation?
-    @State private var showRejectSheet = false
+    @State private var rejectionContext: RejectionContext?
+    @StateObject private var emailChecker: QRZIncomingEmailChecker
     @State private var selectedRequestIDs = Set<String>()
     @State private var bulkRequests: [QRZIncomingConfirmation] = []
     @State private var showBulkComposer = false
+    @State private var showEmailQRZLogin = false
     @State private var showPastRecovery = false
     @State private var pastRecoveryCall = ""
+
+    init(emailChecker: QRZIncomingEmailChecker? = nil) {
+        _emailChecker = StateObject(wrappedValue: emailChecker ?? QRZIncomingEmailChecker())
+    }
 
     private var outstanding: [QRZIncomingConfirmation] {
         appState.qrzIncomingRequests.filter { appState.incomingRecoveryRecord($0) == nil }
@@ -836,7 +824,10 @@ struct QRZIncomingRequestsView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
+                Button("QRZ Login", systemImage: "person.crop.circle.badge.key") { showEmailQRZLogin = true }
+                    .disabled(emailChecker.checkingCall != nil || appState.isRejectingQRZIncoming || appState.isFetchingQRZIncoming)
                 Button {
+                    emailChecker.reset()
                     appState.fetchQRZIncomingRequests()
                 } label: {
                     Label("Refresh", systemImage: "arrow.clockwise")
@@ -900,76 +891,95 @@ struct QRZIncomingRequestsView: View {
                     .frame(maxWidth: .infinity, minHeight: 260)
             } else {
                 List(appState.qrzIncomingRequests) { request in
-                    HStack(spacing: 12) {
-                        Group {
-                            Toggle("Select \(request.callsign)", isOn: Binding(
-                                get: { selectedRequestIDs.contains(request.id) },
-                                set: { selected in
-                                    if selected { selectedRequestIDs.insert(request.id) }
-                                    else { selectedRequestIDs.remove(request.id) }
-                                }
-                            ))
-                            .labelsHidden()
-                            .toggleStyle(.checkbox)
-                        }
-                        Image(systemName: "exclamationmark.circle.fill")
-                            .foregroundStyle(Color.orange)
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(request.callsign).font(.headline.monospaced())
-                            Text("QSO \(request.qsoDate.isEmpty ? "date not reported" : request.qsoDate) · requested \(request.requestedAt.isEmpty ? "unknown" : request.requestedAt)")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            if !appState.qrzIncomingArchive.lastReturnedKeys.contains(request.recoveryKey) {
-                                Text("Saved recovery case · no current QRZ request shown").font(.caption).foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 12) {
+                            Group {
+                                Toggle("Select \(request.callsign)", isOn: Binding(
+                                    get: { selectedRequestIDs.contains(request.id) },
+                                    set: { selected in
+                                        if selected { selectedRequestIDs.insert(request.id) }
+                                        else { selectedRequestIDs.remove(request.id) }
+                                    }
+                                ))
+                                .labelsHidden()
+                                .toggleStyle(.checkbox)
                             }
-                            Text(appState.incomingRecoveryRecord(request) != nil ? "Saved locally · open Review for LoTW / QRZ / Club Log progress." :
-                                 (appState.hasIncomingCandidate(for: request) ? "Local call/date candidate — details still need review." : "No call/date candidate. Obtain actual details before adding anything."))
-                                .font(.caption)
+                            Image(systemName: "exclamationmark.circle.fill")
                                 .foregroundStyle(Color.orange)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(request.callsign).font(.headline.monospaced())
+                                Text("QSO \(request.qsoDate.isEmpty ? "date not reported" : request.qsoDate) · requested \(request.requestedAt.isEmpty ? "unknown" : request.requestedAt)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                if !appState.qrzIncomingArchive.lastReturnedKeys.contains(request.recoveryKey) {
+                                    Text("Saved recovery case · no current QRZ request shown").font(.caption).foregroundStyle(.secondary)
+                                }
+                                Text(appState.incomingRecoveryRecord(request) != nil ? "Saved locally · open Review for LoTW / QRZ / Club Log progress." :
+                                     (appState.hasIncomingCandidate(for: request) ? "Local call/date candidate — details still need review." : "No call/date candidate. Obtain actual details before adding anything."))
+                                    .font(.caption)
+                                    .foregroundStyle(Color.orange)
+                                Text(emailChecker.status(for: request.callsign).title)
+                                    .font(.caption)
+                                    .foregroundStyle(emailChecker.status(for: request.callsign).permitsMissingEmailRejection ? Color.orange : Color.secondary)
+                            }
+                            Spacer()
                         }
-                        Spacer()
-                        Button("Review…") { requestToReview = request }
-                        Group {
+                        HStack(spacing: 8) {
+                            Button("Review…") { requestToReview = request }
                             Button {
-                                appState.draftIncomingQRZDetailsEmail(for: request)
+                                emailChecker.check(request.callsign)
                             } label: {
-                                if appState.incomingEmailLookupCallsign == request.callsign {
+                                if emailChecker.checkingCall == QRZIncomingEmailEvidence.normalizedCall(request.callsign) {
+                                    ProgressView().controlSize(.small)
+                                } else {
+                                    Label(emailChecker.status(for: request.callsign) == .unchecked ? "Check QRZ email" : "Recheck QRZ email", systemImage: "envelope.badge")
+                                }
+                            }
+                            .disabled(emailChecker.checkingCall != nil || appState.isFetchingQRZIncoming || appState.isRejectingQRZIncoming)
+                            .help("Check only this operator's published QRZ profile email. A login, network or parsing failure stays unknown.")
+                            Group {
+                                Button {
+                                    appState.draftIncomingQRZDetailsEmail(for: request)
+                                } label: {
+                                    if appState.incomingEmailLookupCallsign == request.callsign {
+                                        ProgressView()
+                                            .controlSize(.small)
+                                    } else {
+                                        Label("Compose Email", systemImage: "square.and.pencil")
+                                    }
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(appState.incomingEmailLookupCallsign != nil)
+                                .help("Prepare an editable email requesting the missing QSO details")
+                            }
+
+                            Button(role: .destructive) {
+                                rejectionContext = RejectionContext(request: request, profileID: appState.activeStationProfileID,
+                                    missingEmail: emailChecker.status(for: request.callsign).permitsMissingEmailRejection)
+                            } label: {
+                                if appState.rejectingQRZIncomingID == request.id {
                                     ProgressView()
                                         .controlSize(.small)
                                 } else {
-                                    Label("Compose Email", systemImage: "square.and.pencil")
+                                    Label(emailChecker.status(for: request.callsign).permitsMissingEmailRejection ? "Reject · no email" : "Reject", systemImage: "xmark.circle")
                                 }
                             }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(appState.incomingEmailLookupCallsign != nil)
-                            .help("Prepare an editable email requesting the missing QSO details")
-                        }
+                            .buttonStyle(.bordered)
+                            .tint(.red)
+                            .disabled(appState.isRejectingQRZIncoming || appState.isFetchingQRZIncoming)
+                            .disabled(!appState.qrzIncomingArchive.lastReturnedKeys.contains(request.recoveryKey))
+                            .help("Reject confirmation request from \(request.callsign) on QRZ.com")
 
-                        Button(role: .destructive) {
-                            requestToReject = request
-                            showRejectSheet = true
-                        } label: {
-                            if appState.rejectingQRZIncomingID == request.id {
-                                ProgressView()
-                                    .controlSize(.small)
-                            } else {
-                                Label("Reject", systemImage: "xmark.circle")
+                            Button {
+                                guard let url = URL(string: "https://www.qrz.com/db/\(request.callsign)") else { return }
+                                NSWorkspace.shared.open(url)
+                            } label: {
+                                Image(systemName: "safari")
                             }
+                            .buttonStyle(.bordered)
+                            .help("Open \(request.callsign) on QRZ.com")
+                            Spacer(minLength: 0)
                         }
-                        .buttonStyle(.bordered)
-                        .tint(.red)
-                        .disabled(appState.isRejectingQRZIncoming || appState.isFetchingQRZIncoming)
-                        .disabled(!appState.qrzIncomingArchive.lastReturnedKeys.contains(request.recoveryKey))
-                        .help("Reject confirmation request from \(request.callsign) on QRZ.com")
-
-                        Button {
-                            guard let url = URL(string: "https://www.qrz.com/db/\(request.callsign)") else { return }
-                            NSWorkspace.shared.open(url)
-                        } label: {
-                            Image(systemName: "safari")
-                        }
-                        .buttonStyle(.bordered)
-                        .help("Open \(request.callsign) on QRZ.com")
                     }
                     .padding(.vertical, 4)
                 }
@@ -1034,6 +1044,9 @@ struct QRZIncomingRequestsView: View {
                 detailsAfterReview = request; requestToReview = nil
             }).environmentObject(appState)
         }
+        .sheet(isPresented: $showEmailQRZLogin, onDismiss: { emailChecker.reset() }) {
+            QRZLoginView().environmentObject(appState)
+        }
         .sheet(isPresented: $appState.showIncomingEmailComposer) {
             EmailComposerView()
                 .environmentObject(appState)
@@ -1042,11 +1055,25 @@ struct QRZIncomingRequestsView: View {
             QRZIncomingBulkEmailView(requests: bulkRequests)
                 .environmentObject(appState)
         }
-        .sheet(isPresented: $showRejectSheet) {
-            if let req = requestToReject {
-                QRZRejectRequestSheet(request: req) { reason, comments in
-                    appState.rejectQRZIncomingRequest(req, reason: reason, comments: comments)
+        .onChange(of: appState.activeStationProfileID) { _, _ in
+            emailChecker.reset()
+            rejectionContext = nil
+            selectedRequestIDs.removeAll()
+        }
+        .onChange(of: appState.isFetchingQRZIncoming) { _, fetching in
+            if fetching { emailChecker.reset() }
+        }
+        .onDisappear { emailChecker.reset() }
+        .sheet(item: $rejectionContext) { context in
+            QRZRejectRequestSheet(request: context.request,
+                initialReason: context.missingEmail ? "Other" : "Not in my logbook",
+                initialComments: context.missingEmail ? QRZIncomingEmailEvidence.rejectionComment : "") { reason, comments in
+                guard appState.activeStationProfileID == context.profileID,
+                      !context.missingEmail || emailChecker.status(for: context.request.callsign).permitsMissingEmailRejection else {
+                    appState.qrzIncomingStatus = "QRZ email evidence changed. Check this request again before rejecting."
+                    return
                 }
+                appState.rejectQRZIncomingRequest(context.request, reason: reason, comments: comments)
             }
         }
     }
@@ -1072,6 +1099,8 @@ struct QRZIncomingRequestsView: View {
 
 struct QRZRejectRequestSheet: View {
     let request: QRZIncomingConfirmation
+    var initialReason = "Not in my logbook"
+    var initialComments = ""
     let onConfirm: (String, String) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var selectedReason = "Not in my logbook"
@@ -1145,6 +1174,7 @@ struct QRZRejectRequestSheet: View {
         }
         .padding(22)
         .frame(width: 480)
+        .onAppear { selectedReason = initialReason; comments = initialComments }
     }
 }
 
