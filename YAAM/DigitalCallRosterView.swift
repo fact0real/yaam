@@ -993,6 +993,11 @@ public struct DigitalCallRosterView: View {
                                 .clipShape(Capsule())
                         }
                     }
+                    if entry.isQSLPriorityReduced {
+                        Label("QSL Graylist · lower priority", systemImage: "arrow.down.circle")
+                            .font(.caption2).foregroundStyle(.orange)
+                            .help("3+ contacts, zero received QSLs, and the configured wait has passed. You can still call this station.")
+                    }
                     Text(entry.countryInfo.entityName)
                         .font(.caption2)
                         .foregroundColor(.secondary)

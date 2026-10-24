@@ -55,6 +55,8 @@ struct OperatorDeskView: View {
             return AnyView(ContestPanel())
         case .qslHub:
             return AnyView(QSLHubPanel())
+        case .qslGraylist:
+            return AnyView(QSLGraylistView())
         case .awards:
             return AnyView(AwardCenterPanel())
         case .portable:

@@ -812,6 +812,16 @@ Open **Log Table → Next Credit** for the active station's unconfirmed contacts
 
 Use **Email QSL Card** for a recorded QSO even before receiving confirmation. **Preview PDF** opens the exact attachment prepared for delivery. Missing QSO/card export failure blocks sending; a successful SMTP send marks the card sent without creating confirmation. Rank-congratulation messages include only available positive numeric ranks, acknowledge potentially older observations, and use an advice/QSL subject when no ranks are available.
 
+### QSL Graylist
+
+Open **Operator Desk → QSL & Data → QSL Graylist**, also available in the **Tools** menu. The active station's master log lists exact callsigns with **at least three distinct QSOs and zero received confirmations**. Duplicate imports count once. LoTW, QRZ, eQSL or paper/direct confirmations recognized by the logbook remove the automatic flag immediately. Callsign suffixes and station profiles stay separate. An external ADIF file is not used as the active station's complete history.
+
+The table shows the callsign/country, distinct contact count, latest contact in UTC and priority state. Search by callsign or country. Click a callsign or select **Details…** for bands, modes, contact dates, recorded sent/submission evidence and incomplete identities/dates. **Open contacts** opens an exact callsign search in the Log Table and selects its records. Graylist badges in the callsign inspector and Quick Log intelligence open this workspace.
+
+**QSL wait** defaults to 90 days; choose **No wait**, 30, 60, 90, 180 or 365 days. The table always uses the original 3+/0 criterion. Optional priority reduction requires at least three distinct contacts older than the selected wait; a newer fourth contact does not reset the older contacts. Invalid dates never satisfy the wait, and contacts without a usable identity cannot satisfy the three-contact threshold.
+
+Review the displayed LoTW/QRZ confirmation-sync evidence before enabling **Lower priority in Call Roster** (initially off). The option uses your local history; incomplete imports or delayed QSL downloads can affect the result. Qualified callsigns move below other Call Roster candidates and its Apex suggestion, with a visible reason. Award-opportunity labels remain visible, and calls directed to you keep their priority. Any station remains selectable and loggable. In Details, **Keep normal priority for this callsign** adds an exception; the **Exceptions** menu restores automatic behavior. The wait, option and exceptions are saved separately for each station profile.
+
 ### Review QRZ Incoming before upload
 
 Open **QRZ Incoming Requests**, then **Review…** on a request. Incoming can represent a missing contact or inconsistent data in an existing contact. The call/date candidates are leads for comparison, not confirmed matches. You can request actual details by email even when a candidate already exists.

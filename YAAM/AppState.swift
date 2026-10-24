@@ -1990,11 +1990,15 @@ class AppState: NSObject, ObservableObject {
     @Published var loadedFileURL: URL? = nil
     @Published var loadedFileName: String = ""
     var loadedFileOriginalContent: String? = nil
-    @Published var isMasterMode: Bool = true
+    @Published var isMasterMode: Bool = true {
+        didSet { if oldValue != isMasterMode { refreshQSLGraylist() } }
+    }
 
     var logbookDatabase: LogbookDatabase?
     @Published var stationProfiles: [StationProfile] = []
-    @Published var activeStationProfileID: UUID?
+    @Published var activeStationProfileID: UUID? {
+        didSet { if oldValue != activeStationProfileID { qslGraylist.reset(profileID: activeStationProfileID) } }
+    }
     @Published var backupSnapshots: [BackupSnapshot] = []
     @Published var recentDatabaseAuditEvents: [DatabaseAuditEvent] = []
     @Published var databaseStatus: String = "Preparing protected local logbook..."
@@ -2005,7 +2009,9 @@ class AppState: NSObject, ObservableObject {
     @Published var isAnalyzingDuplicates: Bool = false
     let workspaceSaveQueue = DispatchQueue(label: "app.yaam.workspace-save", qos: .utility)
     var lastDestructiveCheckpointDate: Date?
-    var loadedWorkspaceProfileID: UUID?
+    var loadedWorkspaceProfileID: UUID? {
+        didSet { refreshQSLGraylist() }
+    }
 
     // Operator Desk
     @Published var operatorDeskSection = OperatorDeskDestination.resolve(legacySection: UserDefaults.standard.integer(forKey: "operatorDeskSection")).legacySection {
@@ -2061,6 +2067,7 @@ class AppState: NSObject, ObservableObject {
     var syncStartedAt: [SyncSource: Date] = [:]
     
     @Published private(set) var qsoRecordsRevision = 0
+    let qslGraylist = QSLGraylistStore()
     @Published private(set) var skedRecordsRevision = 0
     @Published private(set) var skedHistoryRevision = 0
     private var filteredRecordsCache: [QSORecordModel]?
@@ -2108,6 +2115,7 @@ class AppState: NSObject, ObservableObject {
             cachedTodayConfirmedIDs = nil
             cachedAllNewlyConfirmedIDs = nil
             invalidateStatisticsCache()
+            refreshQSLGraylist()
         }
     }
     @Published var recentLogFiles: [URL] = []

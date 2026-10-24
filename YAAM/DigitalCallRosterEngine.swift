@@ -87,6 +87,10 @@ public struct DigitalRosterEntry: Identifiable, Equatable, Sendable {
     public var port: Int = 2237
     public var sliceLabel: String = "VFO A"
     public let tacticalScore: Int
+    public var isQSLPriorityReduced = false
+    public var priorityTier: Int {
+        QSLGraylistPriority.tier(isToMe: isToMe, isReduced: isQSLPriorityReduced)
+    }
 
     public var snrFormatted: String {
         snr >= 0 ? "+\(snr) dB" : "\(snr) dB"
@@ -127,6 +131,7 @@ public final class DigitalCallRosterEngine: ObservableObject {
     private var workedCallsigns = Set<String>()        // e.g. "JA1ABC_20M"
     private var confirmedCallsigns = Set<String>()
     private var lastRecordsRevision: Int = -1
+    private var qslReducedCallsigns = Set<String>()
 
     private var myCallsign: String = ""
     private var myGrid: String = ""
@@ -320,19 +325,11 @@ public final class DigitalCallRosterEngine: ObservableObject {
             existingMap[newEntry.callsign] = newEntry
         }
 
-        // Sort: Tactical Score descending, then SNR descending
-        let sorted = existingMap.values.sorted {
-            if $0.tacticalScore != $1.tacticalScore {
-                return $0.tacticalScore > $1.tacticalScore
-            }
-            return $0.snr > $1.snr
-        }
-
-        self.entries = Array(sorted.prefix(maxRetainedEntries))
+        self.entries = prioritized(Array(existingMap.values))
         self.totalDecodesCount = self.entries.count
         self.neededCount = self.entries.filter { $0.status.isNeeded }.count
         self.cqCount = self.entries.filter { $0.isCQ }.count
-        self.apexTarget = self.entries.first(where: { $0.isToMe || ($0.isCQ && $0.status.isNeeded) }) ?? self.entries.first(where: { $0.isCQ })
+        updateApexTarget()
         self.lastProcessedCycle = Date()
 
         // Forward to Tactical Band Advisor
@@ -341,8 +338,37 @@ public final class DigitalCallRosterEngine: ObservableObject {
 
     public func clearRoster() {
         entries.removeAll()
+        apexTarget = nil
         totalDecodesCount = 0
         neededCount = 0
         cqCount = 0
+    }
+
+    func updateQSLGraylist(_ callsigns: Set<String>) {
+        guard callsigns != qslReducedCallsigns else { return }
+        qslReducedCallsigns = callsigns
+        entries = prioritized(entries)
+        updateApexTarget()
+    }
+
+    private func prioritized(_ input: [DigitalRosterEntry]) -> [DigitalRosterEntry] {
+        let annotated = input.map { entry in
+            var entry = entry
+            entry.isQSLPriorityReduced = !entry.isToMe && qslReducedCallsigns.contains(entry.callsign)
+            return entry
+        }
+        return Array(annotated.sorted {
+            if $0.priorityTier != $1.priorityTier { return $0.priorityTier < $1.priorityTier }
+            if $0.tacticalScore != $1.tacticalScore { return $0.tacticalScore > $1.tacticalScore }
+            if $0.snr != $1.snr { return $0.snr > $1.snr }
+            return $0.callsign < $1.callsign
+        }.prefix(maxRetainedEntries))
+    }
+
+    private func updateApexTarget() {
+        let candidates = entries.filter { $0.isToMe || $0.isCQ }
+        guard let tier = candidates.first?.priorityTier else { apexTarget = nil; return }
+        apexTarget = candidates.first { $0.priorityTier == tier && $0.status.isNeeded }
+            ?? candidates.first
     }
 }

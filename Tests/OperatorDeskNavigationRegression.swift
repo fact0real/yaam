@@ -32,6 +32,9 @@ struct OperatorDeskNavigationRegression {
 
         // Corrupt, removed, or cross-group preferences must never land on an unrelated tool.
         precondition(OperatorDeskDestination.resolve(legacySection: 30) == .hamTracker)
+        precondition(OperatorDeskDestination.resolve(legacySection: 31) == .qslGraylist)
+        precondition(OperatorDeskDestination.qslGraylist.matches("greylist"))
+        precondition(OperatorDeskDestination.qslGraylist.matches("فهرست خاکستری"))
         precondition(OperatorDeskDestination.resolve(legacySection: 999) == .quickLog)
         precondition(OperatorDeskDestination.resolve(legacySection: -1) == .quickLog)
         precondition(OperatorDeskDestination.resolve(legacySection: 14, cwSection: 99) == .cwKeyer)

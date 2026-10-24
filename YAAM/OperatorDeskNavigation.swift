@@ -47,7 +47,7 @@ nonisolated enum OperatorDeskGroup: String, CaseIterable, Identifiable {
         case .radioDigital: [.radioBridge, .flrig, .tci, .rotator, .ft8, .multiRigFT8, .digitalSuite, .emulator]
         case .cw: [.cwKeyer, .cwAcademy, .cwReference, .cwDecoder, .cwPileup, .cwHardware]
         case .contests: [.contest, .calendar, .awards, .clubs]
-        case .qslData: [.qslHub, .qslLabels, .logSources, .cloudCompanion]
+        case .qslData: [.qslHub, .qslGraylist, .qslLabels, .logSources, .cloudCompanion]
         }
     }
 
@@ -66,7 +66,7 @@ nonisolated enum OperatorDeskDestination: String, CaseIterable, Identifiable {
     case radioBridge, flrig, tci, rotator, ft8, multiRigFT8, digitalSuite, emulator
     case cwKeyer, cwAcademy, cwReference, cwDecoder, cwPileup, cwHardware
     case contest, calendar, awards, clubs
-    case qslHub, qslLabels, logSources, cloudCompanion
+    case qslHub, qslGraylist, qslLabels, logSources, cloudCompanion
 
     var id: String { rawValue }
 
@@ -77,7 +77,7 @@ nonisolated enum OperatorDeskDestination: String, CaseIterable, Identifiable {
         case .radioBridge, .flrig, .tci, .rotator, .ft8, .multiRigFT8, .digitalSuite, .emulator: .radioDigital
         case .cwKeyer, .cwAcademy, .cwReference, .cwDecoder, .cwPileup, .cwHardware: .cw
         case .contest, .calendar, .awards, .clubs: .contests
-        case .qslHub, .qslLabels, .logSources, .cloudCompanion: .qslData
+        case .qslHub, .qslGraylist, .qslLabels, .logSources, .cloudCompanion: .qslData
         }
     }
 
@@ -115,6 +115,7 @@ nonisolated enum OperatorDeskDestination: String, CaseIterable, Identifiable {
         case .awards: "Awards"
         case .clubs: "Club Memberships"
         case .qslHub: "QSL Hub"
+        case .qslGraylist: "QSL Graylist"
         case .qslLabels: "Labels & Printing"
         case .logSources: "Log Sources & Automation"
         case .cloudCompanion: "Cloud & Companion"
@@ -155,6 +156,7 @@ nonisolated enum OperatorDeskDestination: String, CaseIterable, Identifiable {
         case .awards: "Track local worked, confirmed, credited, and granted award progress."
         case .clubs: "Look up memberships and exchange numbers."
         case .qslHub: "Sync online confirmations, match incoming cards, and manage paper QSLs."
+        case .qslGraylist: "Review callsigns with 3+ contacts and no received QSL; optionally lower their Call Roster priority."
         case .qslLabels: "Design, calibrate, print, and export adhesive QSL labels."
         case .logSources: "Import logger updates, sync Wavelog, and manage the automatic schedule."
         case .cloudCompanion: "Cloud folder packages, mobile web companion, and local REST API."
@@ -195,6 +197,7 @@ nonisolated enum OperatorDeskDestination: String, CaseIterable, Identifiable {
         case .awards: "medal"
         case .clubs: "person.3.sequence.fill"
         case .qslHub: "arrow.left.arrow.right.circle"
+        case .qslGraylist: "person.crop.circle.badge.clock"
         case .qslLabels: "printer.fill"
         case .logSources: "arrow.triangle.2.circlepath"
         case .cloudCompanion: "icloud"
@@ -234,6 +237,7 @@ nonisolated enum OperatorDeskDestination: String, CaseIterable, Identifiable {
         case .rotator: 28
         case .signalFootprint: 29
         case .hamTracker: 30
+        case .qslGraylist: 31
         }
     }
 
@@ -261,6 +265,7 @@ nonisolated enum OperatorDeskDestination: String, CaseIterable, Identifiable {
         case .cwHardware: "WinKeyer USB Serial DTR RTS CAT"
         case .emulator: "Network Transceiver Emulator IC-705"
         case .qslLabels: "QSL Label Designer Print Studio"
+        case .qslGraylist: "QSL Greylist Gray List Unconfirmed Low Priority فهرست خاکستری"
         case .sixMeter: "6m Band 6m Magic Band Watch"
         case .clubs: "Clubs Club Memberships"
         case .multiRigFT8: "Multi-Rig Cluster SO2R SO3R"

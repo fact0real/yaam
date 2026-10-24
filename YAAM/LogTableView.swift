@@ -3017,6 +3017,11 @@ struct CallsignInspectionCard: View {
 
             Divider()
 
+            QSLGraylistCallBadge(store: appState.qslGraylist, callsign: call) {
+                dismiss()
+                appState.openOperatorDesk(.qslGraylist)
+            }
+
             // Details Grid
             VStack(alignment: .leading, spacing: 8) {
                 // Name & QTH

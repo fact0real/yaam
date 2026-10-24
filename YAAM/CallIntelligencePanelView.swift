@@ -652,6 +652,10 @@ struct CallIntelligencePanelView: View {
                     }
                 }
 
+                QSLGraylistCallBadge(store: appState.qslGraylist, callsign: report.callsign) {
+                    appState.openOperatorDesk(.qslGraylist)
+                }
+
                 if let rate = report.historicalConfirmationRate {
                     Divider().opacity(0.4)
                     HStack {

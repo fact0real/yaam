@@ -1901,6 +1901,10 @@ struct HelpView: View {
                 HelpDefinition(icon: "clock.badge.exclamationmark", title: "QSO timing", text: "A clock or UTC-date discrepancy can prevent a safe match even when the callsign is correct.")
                 HelpDefinition(icon: "doc.on.doc", title: "Local duplicates and gaps", text: "Provider totals count their confirmations. YAAM's total counts confirmed local QSOs, so duplicates, missing imports, and unmatched contacts remain visible separately.")
             }
+            helpSection("QSL Graylist") {
+                HelpDefinition(icon: "person.crop.circle.badge.clock", title: "Repeated contacts without a QSL", text: "Open Operator Desk > QSL & Data > QSL Graylist. The active station's master log lists exact callsigns with at least three distinct contacts and zero received confirmations. Duplicate imports do not increase the count; any recognized received QSL removes the automatic flag.")
+                HelpDefinition(icon: "arrow.down.circle", title: "Optional Call Roster priority", text: "Review the displayed confirmation-sync history, then enable Lower priority in Call Roster if you want these callsigns below other candidates. At least three contacts must have passed the selected wait (90 days by default; No wait is available). Direct calls to you retain priority. Details lets you keep normal priority for an individual callsign. Settings and exceptions are saved per station.")
+            }
             helpCallout(icon: "checkmark.shield", title: "No silent guessing", text: "The reconciliation report shows downloaded, matched, and unmatched items per provider. Use Full History after changing credentials or station identity.", color: .green)
         }
     }
