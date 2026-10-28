@@ -519,7 +519,8 @@ struct StatisticsView: View {
                                             ForEach(bandStat.countries) { countryStat in
                                                 UnconfirmedCountryButton(
                                                     band: bandStat.band,
-                                                    countryStat: countryStat
+                                                    countryStat: countryStat,
+                                                    onOpenContact: showUnconfirmedContactInLog
                                                 ) {
                                                     showUnconfirmedQSOs(
                                                         band: bandStat.band,
@@ -788,6 +789,20 @@ struct StatisticsView: View {
         appState.selectedRecordIDs = [record.id]
         appState.selectedTab = 0
         appState.appendLog("Showing \(callsign.isEmpty ? "selected QSO" : callsign) in the Log Table from Statistics.")
+        selectedCountryBandDetails = nil
+        dismissWindow(id: YAAMWindowID.statistics)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func showUnconfirmedContactInLog(_ contact: UnconfirmedQSOContactPreview) {
+        var criteria = FilterCriteria()
+        criteria.useCallsign = !contact.callsign.isEmpty
+        criteria.callsign = contact.callsign
+        appState.filterCriteria = criteria
+        appState.searchText = ""
+        appState.selectedRecordIDs = [contact.id]
+        appState.selectedTab = 0
+        appState.appendLog("Showing \(contact.callsign.isEmpty ? "selected QSO" : contact.callsign) in the Log Table from Statistics.")
         selectedCountryBandDetails = nil
         dismissWindow(id: YAAMWindowID.statistics)
         NSApp.activate(ignoringOtherApps: true)
@@ -1744,9 +1759,11 @@ struct CountryBandCoverageTile: View {
 struct UnconfirmedCountryButton: View {
     let band: String
     let countryStat: UnconfirmedCountryStatModel
+    let onOpenContact: (UnconfirmedQSOContactPreview) -> Void
     let action: () -> Void
 
     @State private var isShowingHoverDetails = false
+    @State private var hoverShowTask: Task<Void, Never>?
     @State private var hoverDismissTask: Task<Void, Never>?
 
     // Age-based Chroma: Bright green (fresh) -> Amber -> Brown (oldest)
@@ -1778,6 +1795,7 @@ struct UnconfirmedCountryButton: View {
 
     var body: some View {
         Button {
+            hoverShowTask?.cancel()
             hoverDismissTask?.cancel()
             isShowingHoverDetails = false
             action()
@@ -1867,24 +1885,41 @@ struct UnconfirmedCountryButton: View {
         .buttonStyle(.plain)
         .accessibilityHint(tooltipText)
         .onHover(perform: updateHoverDetails)
+        .onDisappear {
+            hoverShowTask?.cancel()
+            hoverDismissTask?.cancel()
+        }
         .popover(isPresented: $isShowingHoverDetails, arrowEdge: .bottom) {
             UnconfirmedCountryHoverPreview(
                 band: band,
                 countryStat: countryStat,
-                onHover: updateHoverDetails
+                onHover: updateHoverDetails,
+                onOpenContact: { contact in
+                    hoverShowTask?.cancel()
+                    hoverDismissTask?.cancel()
+                    isShowingHoverDetails = false
+                    onOpenContact(contact)
+                }
             )
         }
     }
 
     private func updateHoverDetails(_ isHovering: Bool) {
+        hoverShowTask?.cancel()
         hoverDismissTask?.cancel()
         if isHovering {
-            isShowingHoverDetails = true
+            guard !isShowingHoverDetails else { return }
+            hoverShowTask = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                guard !Task.isCancelled else { return }
+                isShowingHoverDetails = true
+            }
             return
         }
 
+        guard isShowingHoverDetails else { return }
         hoverDismissTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 450_000_000)
+            try? await Task.sleep(nanoseconds: 350_000_000)
             guard !Task.isCancelled else { return }
             isShowingHoverDetails = false
         }
@@ -1912,6 +1947,7 @@ private struct UnconfirmedCountryHoverPreview: View {
     let band: String
     let countryStat: UnconfirmedCountryStatModel
     let onHover: (Bool) -> Void
+    let onOpenContact: (UnconfirmedQSOContactPreview) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
@@ -1956,8 +1992,15 @@ private struct UnconfirmedCountryHoverPreview: View {
     private func contactRow(_ contact: UnconfirmedQSOContactPreview) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(alignment: .firstTextBaseline) {
-                Text(contact.callsign.isEmpty ? "Unknown callsign" : contact.callsign)
-                    .font(.system(.body, design: .monospaced).weight(.bold))
+                Button {
+                    onOpenContact(contact)
+                } label: {
+                    Text(contact.callsign.isEmpty ? "Unknown callsign" : contact.callsign)
+                        .font(.system(.body, design: .monospaced).weight(.bold))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Color.accentColor)
+                .help("Open this QSO in the Log Table")
                 Spacer(minLength: 4)
                 if !contact.operatorCallsign.isEmpty {
                     Text("OP \(contact.operatorCallsign)")

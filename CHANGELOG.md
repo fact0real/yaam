@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.37.52 - 2026-10-28
+
+- Delay unconfirmed-country hover details by 500 ms and cancel them when the pointer leaves before they appear.
+- Make each callsign in the hover details open and select its exact QSO in the Log Table.
+
 ## 1.37.51 - 2026-10-28
 
 - Restore hover details for unconfirmed DXCC country cards, including callsign, operator, name, QTH, grid, date/time, band, mode, frequency, and reports.
