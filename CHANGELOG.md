@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.37.50 - 2026-10-28
+
+- Add the FX-4CR digital audio and FT8 workflow, including connection controls, QSO logging, and configurable successful-contact log storage.
+- Improve CW transmission safety, CAT connection recovery, FT8 timing and decoding, digital receive buffering, contest logging, QSO matching, and POTA/SOTA spot handling.
+- Add a locally signed LoTW callsign proof flow for QRZ Rank. It is shown only when the service advertises support; the private key remains in memory and no QSO is uploaded as proof.
+- Build version 200. See `Docs/Release/1.37.50-release-notes.md` for validation and known limitations.
+
 ## 1.37.44 - 2026-10-24
 
 - Apply independently verified EA3JIC feedback across CW, radio link health, sleep handling, telemetry and ADIF export.
