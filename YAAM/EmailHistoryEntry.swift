@@ -10,7 +10,7 @@ struct EmailHistoryEntry: Identifiable, Codable, Equatable, Hashable {
     var kind: String? = nil
     var sked: SKEDMailDetails? = nil
 
-    var countsAsQSL: Bool {
+    nonisolated var countsAsQSL: Bool {
         status == "Sent" && !["SKED", "QRZ_INCOMING_DETAILS"].contains(kind?.uppercased() ?? "")
     }
 }

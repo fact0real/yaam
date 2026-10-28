@@ -99,6 +99,8 @@ nonisolated struct UnconfirmedQSOContactPreview: Identifiable, Sendable {
     let frequency: String
     let rstSent: String
     let rstReceived: String
+    let emailAddress: String
+    let emailLookupChecked: Bool
     let emailHistory: [UnconfirmedEmailHistoryPreview]
 
     init(record: QSORecordModel, band: String, emailHistory: [UnconfirmedEmailHistoryPreview] = []) {
@@ -123,6 +125,8 @@ nonisolated struct UnconfirmedQSOContactPreview: Identifiable, Sendable {
         frequency = firstValue(["FREQ"])
         rstSent = firstValue(["RST_SENT"])
         rstReceived = firstValue(["RST_RCVD"])
+        emailAddress = firstValue(["EMAIL"])
+        emailLookupChecked = !firstValue(["APP_YAAM_EMAIL_CHECKED"]).isEmpty
         self.emailHistory = emailHistory
     }
 }
@@ -1888,6 +1892,7 @@ class AppState: NSObject, ObservableObject {
     private var qrzEmailBackfillTimer: Timer?
     private var qrzEmailBackfillBatchNumber = 0
     private var isQRZEmailBackfillRunning = false
+    @Published private(set) var qrzEmailBackfillCurrentCallsign = ""
     private var hamqthSessionID: String?
     
     @Published var showEmailComposer: Bool = false
@@ -5559,7 +5564,10 @@ class AppState: NSObject, ObservableObject {
             return
         }
         isQRZEmailBackfillRunning = true
-        defer { isQRZEmailBackfillRunning = false }
+        defer {
+            isQRZEmailBackfillRunning = false
+            qrzEmailBackfillCurrentCallsign = ""
+        }
 
         for header in ["NAME", "EMAIL", "QRZ_URL", "APP_YAAM_ENRICHED", "APP_YAAM_EMAIL_CHECKED"] where !tableHeaders.contains(header) {
             tableHeaders.append(header)
@@ -5593,6 +5601,7 @@ class AppState: NSObject, ObservableObject {
         for (offset, callsign) in callsigns.enumerated() {
             if Task.isCancelled { break }
 
+            qrzEmailBackfillCurrentCallsign = callsign
             detailLines.append("[\(offset + 1)/\(callsigns.count)] \(callsign): checking")
             let contact = await fetchContactInfo(
                 for: callsign,

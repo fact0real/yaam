@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.37.54 - 2026-10-28
+
+- Show the send-email icon only for contacts with a usable saved address; use a lookup icon for unchecked contacts and a progress indicator for a contact currently being checked.
+- Hide email actions after QRZ confirms that no email is published, and refresh the Unconfirmed DXCC preview after lookup results are saved.
+
 ## 1.37.53 - 2026-10-28
 
 - Show sent email history for each callsign in the Unconfirmed DXCC hover details and count only successful outgoing contact emails.

@@ -47,6 +47,20 @@ struct StatisticsView: View {
         return snapshot
     }
 
+    private var activeEmailLookupCallsign: String? {
+        if let emailLookupRecordID,
+           let record = appState.qsoRecords.first(where: { $0.id == emailLookupRecordID }) {
+            return record["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        }
+        if appState.isBulkQRZEnriching, !appState.bulkQRZCurrentCallsign.isEmpty {
+            return appState.bulkQRZCurrentCallsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        }
+        if !appState.qrzEmailBackfillCurrentCallsign.isEmpty {
+            return appState.qrzEmailBackfillCurrentCallsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        }
+        return nil
+    }
+
     private var unconfirmedBandOptions: [String] {
         ["All Bands"] + currentSnapshot.unconfirmedBandCountryStatistics.map(\.band)
     }
@@ -520,6 +534,7 @@ struct StatisticsView: View {
                                                 UnconfirmedCountryButton(
                                                     band: bandStat.band,
                                                     countryStat: countryStat,
+                                                    emailLookupCallsignInProgress: activeEmailLookupCallsign,
                                                     onOpenContact: showUnconfirmedContactInLog,
                                                     onComposeEmail: { contact in
                                                         guard let record = appState.qsoRecords.first(where: { $0.id == contact.id }) else { return }
@@ -843,8 +858,8 @@ struct StatisticsView: View {
             var enrichedRecord = record
             if !foundEmail.isEmpty {
                 enrichedRecord.fields["EMAIL"] = foundEmail
-                refreshSnapshot()
             }
+            refreshSnapshot(force: true)
             prepareEmail(for: enrichedRecord, qslDelivery: qslDelivery)
         }
     }
@@ -1763,6 +1778,7 @@ struct CountryBandCoverageTile: View {
 struct UnconfirmedCountryButton: View {
     let band: String
     let countryStat: UnconfirmedCountryStatModel
+    let emailLookupCallsignInProgress: String?
     let onOpenContact: (UnconfirmedQSOContactPreview) -> Void
     let onComposeEmail: (UnconfirmedQSOContactPreview) -> Void
     let action: () -> Void
@@ -1796,6 +1812,25 @@ struct UnconfirmedCountryButton: View {
             return "\(max(1, d/365))yr ago"
         }
         return countryStat.latestQSODateString
+    }
+
+    private var contactWithEmail: UnconfirmedQSOContactPreview? {
+        countryStat.contactPreviews.first { QRZIncomingBulkMail.isUsableEmail($0.emailAddress) }
+    }
+
+    private var contactNeedingEmailLookup: UnconfirmedQSOContactPreview? {
+        countryStat.contactPreviews.first {
+            !QRZIncomingBulkMail.isUsableEmail($0.emailAddress) && !$0.emailLookupChecked
+        }
+    }
+
+    private var emailActionContact: UnconfirmedQSOContactPreview? {
+        contactWithEmail ?? contactNeedingEmailLookup
+    }
+
+    private func isEmailLookupRunning(for contact: UnconfirmedQSOContactPreview) -> Bool {
+        guard let activeCallsign = emailLookupCallsignInProgress, !activeCallsign.isEmpty else { return false }
+        return contact.callsign.caseInsensitiveCompare(activeCallsign) == .orderedSame
     }
 
     var body: some View {
@@ -1889,23 +1924,31 @@ struct UnconfirmedCountryButton: View {
         )
         .buttonStyle(.plain)
         .overlay(alignment: .topTrailing) {
-            if let contact = countryStat.contactPreviews.first {
-                Button {
-                    hoverShowTask?.cancel()
-                    hoverDismissTask?.cancel()
-                    isShowingHoverDetails = false
-                    onComposeEmail(contact)
-                } label: {
-                    Image(systemName: "envelope.fill")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(Color(red: 0.22, green: 0.52, blue: 0.88))
+            if let contact = emailActionContact {
+                if !QRZIncomingBulkMail.isUsableEmail(contact.emailAddress) && isEmailLookupRunning(for: contact) {
+                    ProgressView()
+                        .controlSize(.small)
                         .frame(width: 23, height: 23)
-                        .background(.regularMaterial, in: Circle())
+                        .padding(4)
+                        .help("Looking up an email address for \(contact.callsign)")
+                } else {
+                    Button {
+                        hoverShowTask?.cancel()
+                        hoverDismissTask?.cancel()
+                        isShowingHoverDetails = false
+                        onComposeEmail(contact)
+                    } label: {
+                        Image(systemName: QRZIncomingBulkMail.isUsableEmail(contact.emailAddress) ? "envelope.fill" : "magnifyingglass")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(Color(red: 0.22, green: 0.52, blue: 0.88))
+                            .frame(width: 23, height: 23)
+                            .background(.regularMaterial, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(4)
+                    .help(QRZIncomingBulkMail.isUsableEmail(contact.emailAddress) ? "Compose an email to \(contact.callsign)" : "Check QRZ/HAMQTH for an email address for \(contact.callsign)")
+                    .accessibilityLabel(QRZIncomingBulkMail.isUsableEmail(contact.emailAddress) ? "Email \(contact.callsign)" : "Look up an email address for \(contact.callsign)")
                 }
-                .buttonStyle(.plain)
-                .padding(4)
-                .help("Compose an email to a contact in this country")
-                .accessibilityLabel("Email a contact in \(countryStat.country)")
             }
         }
         .accessibilityHint(tooltipText)
@@ -1918,6 +1961,7 @@ struct UnconfirmedCountryButton: View {
             UnconfirmedCountryHoverPreview(
                 band: band,
                 countryStat: countryStat,
+                emailLookupCallsignInProgress: emailLookupCallsignInProgress,
                 onHover: updateHoverDetails,
                 onComposeEmail: { contact in
                     hoverShowTask?.cancel()
@@ -1977,6 +2021,7 @@ struct UnconfirmedCountryButton: View {
 private struct UnconfirmedCountryHoverPreview: View {
     let band: String
     let countryStat: UnconfirmedCountryStatModel
+    let emailLookupCallsignInProgress: String?
     let onHover: (Bool) -> Void
     let onComposeEmail: (UnconfirmedQSOContactPreview) -> Void
     let onOpenContact: (UnconfirmedQSOContactPreview) -> Void
@@ -2035,15 +2080,37 @@ private struct UnconfirmedCountryHoverPreview: View {
                 .textSelection(.disabled)
                 .help("Open this QSO in the Log Table")
                 Spacer(minLength: 4)
-                Button {
-                    onComposeEmail(contact)
-                } label: {
-                    Image(systemName: "envelope")
-                        .font(.caption.weight(.semibold))
+                if QRZIncomingBulkMail.isUsableEmail(contact.emailAddress) {
+                    Button {
+                        onComposeEmail(contact)
+                    } label: {
+                        Image(systemName: "envelope")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Color.accentColor)
+                    .help("Compose an email to \(contact.callsign)")
+                } else if !contact.emailLookupChecked {
+                    if contact.callsign.caseInsensitiveCompare(emailLookupCallsignInProgress ?? "") == .orderedSame {
+                        ProgressView()
+                            .controlSize(.small)
+                            .help("Looking up an email address for \(contact.callsign)")
+                    } else {
+                        Button {
+                            onComposeEmail(contact)
+                        } label: {
+                            Image(systemName: "magnifyingglass")
+                                .font(.caption.weight(.semibold))
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                        .help("Check QRZ/HAMQTH for an email address for \(contact.callsign)")
+                    }
+                } else {
+                    Text("No email found")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(Color.accentColor)
-                .help("Compose an email to \(contact.callsign)")
                 if !contact.operatorCallsign.isEmpty {
                     Text("OP \(contact.operatorCallsign)")
                         .font(.caption2.monospaced())

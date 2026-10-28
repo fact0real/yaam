@@ -76,7 +76,7 @@ enum QRZIncomingBulkMail {
         text.range(of: #"\{[A-Za-z_][A-Za-z0-9_]*\}"#, options: .regularExpression) != nil
     }
 
-    static func isUsableEmail(_ email: String) -> Bool {
+    nonisolated static func isUsableEmail(_ email: String) -> Bool {
         let clean = email.trimmingCharacters(in: .whitespacesAndNewlines)
         let parts = clean.split(separator: "@", omittingEmptySubsequences: false)
         return parts.count == 2 && !parts[0].isEmpty &&
