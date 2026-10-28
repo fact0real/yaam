@@ -78,6 +78,25 @@ struct ConfirmationOpportunityRegression {
         precondition(workedKosovo.isConfirmed)
         precondition(workedKosovo.bands.first { $0.band == "20m" }?.state == .confirmed)
 
+        // Unknown country cards must remain filterable even when the ADIF country is blank,
+        // and band filtering must use the same frequency fallback as Statistics.
+        let unresolvedContact = QSORecordModel(fields: [
+            "CALL": "ZZ9ZZ",
+            "FREQ": "7.074",
+            "MODE": "FT8"
+        ])
+        precondition(ConfirmationOpportunityIndex.countryFilterLabel(for: unresolvedContact) == "Unknown")
+        precondition(ConfirmationOpportunityIndex.matchesCountryFilter(for: unresolvedContact, selectedCountries: ["Unknown"]))
+        precondition(ConfirmationOpportunityIndex.matchesBandFilter(for: unresolvedContact, selectedBand: "40M"))
+
+        let placeholderCountryWithKnownCall = QSORecordModel(fields: [
+            "CALL": "EA3JIC",
+            "COUNTRY": "Unknown",
+            "BAND": "20M"
+        ])
+        precondition(ConfirmationOpportunityIndex.countryFilterLabel(for: placeholderCountryWithKnownCall) != "Unknown")
+        precondition(!ConfirmationOpportunityIndex.matchesCountryFilter(for: placeholderCountryWithKnownCall, selectedCountries: ["Unknown"]))
+
         print("Confirmation opportunity regression tests passed.")
     }
 

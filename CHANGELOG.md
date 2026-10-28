@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.37.51 - 2026-10-28
+
+- Restore hover details for unconfirmed DXCC country cards, including callsign, operator, name, QTH, grid, date/time, band, mode, frequency, and reports.
+- Make unresolved or placeholder countries searchable and filterable as Unknown; resolve known callsigns even when the stored country is blank or marked Unknown.
+- Apply the same country and frequency-derived band normalization to Log Table filters and the statistics cards that open them.
+
 ## 1.37.50 - 2026-10-28
 
 - Add the FX-4CR digital audio and FT8 workflow, including connection controls, QSO logging, and configurable successful-contact log storage.

@@ -196,9 +196,13 @@ nonisolated struct ConfirmationOpportunityIndex: Sendable {
     static func normalizedBand(for record: QSORecordModel) -> String {
         let rawBand = record["BAND"].trimmingCharacters(in: .whitespacesAndNewlines)
         let band = rawBand.isEmpty ? AmateurBandPlan.band(for: record["FREQ"]) ?? "" : rawBand
-        guard !band.isEmpty else { return "" }
+        return normalizedBandValue(band)
+    }
 
-        let clean = band
+    static func normalizedBandValue(_ rawBand: String) -> String {
+        guard !rawBand.isEmpty else { return "" }
+
+        let clean = rawBand
             .lowercased()
             .replacingOccurrences(of: "meters", with: "m")
             .replacingOccurrences(of: "meter", with: "m")
@@ -220,7 +224,11 @@ nonisolated struct ConfirmationOpportunityIndex: Sendable {
     static func normalizedCountry(for record: QSORecordModel) -> String {
         let direct = canonicalCountryName(record["COUNTRY"])
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        if !direct.isEmpty { return direct }
+        let placeholder = direct.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "en_US_POSIX"))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if !direct.isEmpty && !["unknown", "n/a", "na", "not known", "not available", "unavailable"].contains(placeholder) {
+            return direct
+        }
         let call = record["CALL"].trimmingCharacters(in: .whitespacesAndNewlines)
         guard !call.isEmpty else { return "" }
         let resolved = DXCCDatabase.resolve(callsign: call).entityName
@@ -228,6 +236,23 @@ nonisolated struct ConfirmationOpportunityIndex: Sendable {
             return canonicalCountryName(resolved).trimmingCharacters(in: .whitespacesAndNewlines)
         }
         return ""
+    }
+
+    static func countryFilterLabel(for record: QSORecordModel) -> String {
+        let country = normalizedCountry(for: record)
+        return country.isEmpty ? "Unknown" : country
+    }
+
+    static func matchesCountryFilter(for record: QSORecordModel, selectedCountries: Set<String>) -> Bool {
+        guard !selectedCountries.isEmpty else { return true }
+        let recordKey = CountryNameNormalizer.canonicalKey(countryFilterLabel(for: record))
+        return selectedCountries.contains { CountryNameNormalizer.canonicalKey($0) == recordKey }
+    }
+
+    static func matchesBandFilter(for record: QSORecordModel, selectedBand: String) -> Bool {
+        let selected = normalizedBandValue(selectedBand)
+        guard !selected.isEmpty else { return false }
+        return normalizedBand(for: record) == selected
     }
 
     private static func orderedBandUniverse(observedBands: Set<String>) -> [String] {

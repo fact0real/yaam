@@ -56,6 +56,7 @@ nonisolated struct UnconfirmedCountryStatModel: Identifiable, Sendable {
     let latestQSODateString: String
     let daysAgo: Int?
     let callsigns: [String]
+    let contactPreviews: [UnconfirmedQSOContactPreview]
     let emailsSentCount: Int
     let lastEmailDate: Date?
 
@@ -67,6 +68,7 @@ nonisolated struct UnconfirmedCountryStatModel: Identifiable, Sendable {
         latestQSODateString: String = "",
         daysAgo: Int? = nil,
         callsigns: [String] = [],
+        contactPreviews: [UnconfirmedQSOContactPreview] = [],
         emailsSentCount: Int = 0,
         lastEmailDate: Date? = nil
     ) {
@@ -77,8 +79,49 @@ nonisolated struct UnconfirmedCountryStatModel: Identifiable, Sendable {
         self.latestQSODateString = latestQSODateString
         self.daysAgo = daysAgo
         self.callsigns = callsigns
+        self.contactPreviews = contactPreviews
         self.emailsSentCount = emailsSentCount
         self.lastEmailDate = lastEmailDate
+    }
+}
+
+nonisolated struct UnconfirmedQSOContactPreview: Identifiable, Sendable {
+    let id: UUID
+    let callsign: String
+    let operatorCallsign: String
+    let name: String
+    let qth: String
+    let grid: String
+    let date: String
+    let time: String
+    let band: String
+    let mode: String
+    let frequency: String
+    let rstSent: String
+    let rstReceived: String
+
+    init(record: QSORecordModel, band: String) {
+        func firstValue(_ keys: [String]) -> String {
+            for key in keys {
+                let value = record[key].trimmingCharacters(in: .whitespacesAndNewlines)
+                if !value.isEmpty { return value }
+            }
+            return ""
+        }
+
+        id = record.id
+        callsign = firstValue(["CALL"]).uppercased()
+        operatorCallsign = firstValue(["OPERATOR", "STATION_CALLSIGN"]).uppercased()
+        name = firstValue(["NAME"])
+        qth = firstValue(["QTH"])
+        grid = firstValue(["GRIDSQUARE", "GRID"])
+        date = firstValue(["QSO_DATE"])
+        time = firstValue(["TIME_ON"])
+        self.band = band
+        mode = firstValue(["SUBMODE", "MODE"]).uppercased()
+        frequency = firstValue(["FREQ"])
+        rstSent = firstValue(["RST_SENT"])
+        rstReceived = firstValue(["RST_RCVD"])
     }
 }
 
@@ -2255,11 +2298,8 @@ class AppState: NSObject, ObservableObject {
 
     var availableCountries: [String] {
         if let availableCountriesCache { return availableCountriesCache }
-        let countries = Set(qsoRecords.compactMap { record -> String? in
-            let c = ConfirmationOpportunityIndex.normalizedCountry(for: record)
-            return c.isEmpty ? nil : c
-        })
-        let result = Array(countries).sorted()
+        let countries = Set(qsoRecords.map { ConfirmationOpportunityIndex.countryFilterLabel(for: $0) })
+        let result = Array(countries).sorted { $0.localizedStandardCompare($1) == .orderedAscending }
         availableCountriesCache = result
         return result
     }
@@ -2439,7 +2479,7 @@ class AppState: NSObject, ObservableObject {
                     if qsoDate < startStr || qsoDate > endStr { return false }
                 }
                 if filterCriteria.useBand && filterCriteria.band != "All" {
-                    if record["BAND"].uppercased() != filterCriteria.band.uppercased() { return false }
+                    if !ConfirmationOpportunityIndex.matchesBandFilter(for: record, selectedBand: filterCriteria.band) { return false }
                 }
                 if filterCriteria.useMode && filterCriteria.mode != "All" {
                     let recMode = record["MODE"].uppercased()
@@ -2458,7 +2498,7 @@ class AppState: NSObject, ObservableObject {
                     if record["CQZ"] != filterCriteria.zone.trimmingCharacters(in: .whitespaces) { return false }
                 }
                 if filterCriteria.useCountry, !filterCriteria.selectedCountries.isEmpty {
-                    if !filterCriteria.selectedCountries.contains(record["COUNTRY"]) { return false }
+                    if !ConfirmationOpportunityIndex.matchesCountryFilter(for: record, selectedCountries: filterCriteria.selectedCountries) { return false }
                 }
                 if filterCriteria.useQSLSent {
                     let val = record["QSL_SENT"].uppercased()

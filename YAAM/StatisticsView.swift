@@ -1746,6 +1746,9 @@ struct UnconfirmedCountryButton: View {
     let countryStat: UnconfirmedCountryStatModel
     let action: () -> Void
 
+    @State private var isShowingHoverDetails = false
+    @State private var hoverDismissTask: Task<Void, Never>?
+
     // Age-based Chroma: Bright green (fresh) -> Amber -> Brown (oldest)
     private var ageColor: Color {
         guard let daysAgo = countryStat.daysAgo else {
@@ -1774,7 +1777,11 @@ struct UnconfirmedCountryButton: View {
     }
 
     var body: some View {
-        Button(action: action) {
+        Button {
+            hoverDismissTask?.cancel()
+            isShowingHoverDetails = false
+            action()
+        } label: {
             VStack(alignment: .leading, spacing: 5) {
 
                 // ── Row 1: Flag + Country Name ─────────────────────────
@@ -1858,7 +1865,29 @@ struct UnconfirmedCountryButton: View {
                 .stroke(ageColor.opacity(0.30), lineWidth: 1)
         )
         .buttonStyle(.plain)
-        .help(tooltipText)
+        .accessibilityHint(tooltipText)
+        .onHover(perform: updateHoverDetails)
+        .popover(isPresented: $isShowingHoverDetails, arrowEdge: .bottom) {
+            UnconfirmedCountryHoverPreview(
+                band: band,
+                countryStat: countryStat,
+                onHover: updateHoverDetails
+            )
+        }
+    }
+
+    private func updateHoverDetails(_ isHovering: Bool) {
+        hoverDismissTask?.cancel()
+        if isHovering {
+            isShowingHoverDetails = true
+            return
+        }
+
+        hoverDismissTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 450_000_000)
+            guard !Task.isCancelled else { return }
+            isShowingHoverDetails = false
+        }
     }
 
     private var tooltipText: String {
@@ -1876,6 +1905,107 @@ struct UnconfirmedCountryButton: View {
             lines.append("✉️ \(countryStat.emailsSentCount) email(s) sent")
         }
         return lines.joined(separator: "\n")
+    }
+}
+
+private struct UnconfirmedCountryHoverPreview: View {
+    let band: String
+    let countryStat: UnconfirmedCountryStatModel
+    let onHover: (Bool) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("\(countryToFlag(countryStat.country)) \(countryStat.country)")
+                    .font(.headline)
+                Spacer(minLength: 8)
+                Text(band.uppercased())
+                    .font(.system(.caption, design: .monospaced).bold())
+                    .foregroundStyle(.secondary)
+            }
+            Text("\(countryStat.qsoCount) unconfirmed QSO\(countryStat.qsoCount == 1 ? "" : "s") · \(countryStat.callsigns.count) operator call\(countryStat.callsigns.count == 1 ? "" : "s")")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Divider()
+
+            if countryStat.contactPreviews.isEmpty {
+                Text("No contact details are available.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 9) {
+                        ForEach(countryStat.contactPreviews) { contact in
+                            contactRow(contact)
+                            if contact.id != countryStat.contactPreviews.last?.id {
+                                Divider()
+                            }
+                        }
+                    }
+                }
+                .frame(maxHeight: 320)
+            }
+        }
+        .padding(12)
+        .frame(width: 360, alignment: .leading)
+        .onHover(perform: onHover)
+    }
+
+    @ViewBuilder
+    private func contactRow(_ contact: UnconfirmedQSOContactPreview) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(contact.callsign.isEmpty ? "Unknown callsign" : contact.callsign)
+                    .font(.system(.body, design: .monospaced).weight(.bold))
+                Spacer(minLength: 4)
+                if !contact.operatorCallsign.isEmpty {
+                    Text("OP \(contact.operatorCallsign)")
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.secondary)
+                }
+            }
+            if !contact.name.isEmpty {
+                Text(contact.name)
+                    .font(.caption.weight(.medium))
+            }
+
+            let place = [contact.qth, contact.grid.isEmpty ? "" : "Grid \(contact.grid)"]
+                .filter { !$0.isEmpty }
+                .joined(separator: " · ")
+            if !place.isEmpty {
+                Text(place)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            let dateTime = [formattedDate(contact.date), formattedTime(contact.time)]
+                .filter { !$0.isEmpty }
+                .joined(separator: " ")
+            let signal = [contact.rstSent.isEmpty ? "" : "Sent \(contact.rstSent)", contact.rstReceived.isEmpty ? "" : "Rcvd \(contact.rstReceived)"]
+                .filter { !$0.isEmpty }
+                .joined(separator: " · ")
+            let radio = [contact.band.uppercased(), contact.mode, contact.frequency.isEmpty ? "" : "\(contact.frequency) MHz", signal]
+                .filter { !$0.isEmpty }
+                .joined(separator: " · ")
+            Text([dateTime, radio].filter { !$0.isEmpty }.joined(separator: " · "))
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func formattedDate(_ rawValue: String) -> String {
+        let digits = rawValue.filter(\.isNumber)
+        guard digits.count == 8 else { return rawValue }
+        return "\(digits.prefix(4))-\(digits.dropFirst(4).prefix(2))-\(digits.suffix(2))"
+    }
+
+    private func formattedTime(_ rawValue: String) -> String {
+        let digits = rawValue.filter(\.isNumber)
+        guard digits.count >= 4 else { return rawValue }
+        let time = "\(digits.prefix(2)):\(digits.dropFirst(2).prefix(2))"
+        return digits.count >= 6 ? "\(time):\(digits.dropFirst(4).prefix(2)) UTC" : "\(time) UTC"
     }
 }
 
@@ -2177,7 +2307,7 @@ nonisolated struct StatisticsSnapshot: Sendable {
         records: [QSORecordModel],
         emailHistory: [EmailHistoryEntry] = []
     ) -> [UnconfirmedBandCountryStatModel] {
-        var values: [String: [String: (total: Int, confirmed: Int, dates: [Date], dateStrings: [String], callsigns: Set<String>)]] = [:]
+        var values: [String: [String: (total: Int, confirmed: Int, dates: [Date], dateStrings: [String], callsigns: Set<String>, contacts: [UnconfirmedQSOContactPreview])]] = [:]
 
         // Fast lookup map for sent email requests by callsign
         var emailCountsByCall: [String: (count: Int, lastDate: Date)] = [:]
@@ -2197,12 +2327,13 @@ nonisolated struct StatisticsSnapshot: Sendable {
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             let country = canonical.isEmpty ? "Unknown" : canonical
             var countryValues = values[band] ?? [:]
-            var value = countryValues[country] ?? (total: 0, confirmed: 0, dates: [], dateStrings: [], callsigns: Set<String>())
+            var value = countryValues[country] ?? (total: 0, confirmed: 0, dates: [], dateStrings: [], callsigns: Set<String>(), contacts: [])
             value.total += 1
             if record.isConfirmed { value.confirmed += 1 }
 
             let call = record["CALL"].uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
             if !call.isEmpty { value.callsigns.insert(call) }
+            value.contacts.append(UnconfirmedQSOContactPreview(record: record, band: band))
 
             let dateRaw = record["QSO_DATE"].filter(\.isNumber)
             if !dateRaw.isEmpty {
@@ -2268,6 +2399,10 @@ nonisolated struct StatisticsSnapshot: Sendable {
                     latestQSODateString: latestDateString,
                     daysAgo: daysAgo,
                     callsigns: Array(value.callsigns).sorted(),
+                    contactPreviews: value.contacts.sorted {
+                        if $0.date != $1.date { return $0.date > $1.date }
+                        return $0.time > $1.time
+                    },
                     emailsSentCount: sentEmails,
                     lastEmailDate: latestEmailDate
                 )
