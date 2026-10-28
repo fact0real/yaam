@@ -2,7 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 out=$(mktemp -d /tmp/yaam-upload-regressions.XXXXXX)
-sources=(YAAM/QSLSyncAll.swift YAAM/QSLHub.swift YAAM/ADIFParser.swift YAAM/FormURLEncoding.swift
+sources=(YAAM/QSLSyncAll.swift YAAM/QSLHub.swift YAAM/EQSLInboxDownload.swift YAAM/ADIFParser.swift YAAM/FormURLEncoding.swift
     YAAM/QSOMetadataFormatter.swift YAAM/OperatorModels.swift YAAM/AmateurBandSettings.swift
     YAAM/PortableActivity.swift YAAM/DXCCDatabase.swift YAAM/CountryFlagEngine.swift YAAM/CountryNameNormalizer.swift
     YAAM/FrequencyBounds.swift)

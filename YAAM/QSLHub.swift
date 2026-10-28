@@ -222,11 +222,13 @@ actor QSLHubClient {
         }
         FormURLEncoding.setQuery(items, on: &components)
         guard let url = components.url else { throw QSLHubError.invalidResponse("Unable to create the eQSL Inbox request.") }
-        let (data, response) = try await session.data(from: url)
-        let text = Self.responseText(data)
-        try Self.requireHTTP(response, body: text)
-        if Self.looksLikeAuthenticationFailure(text) {
-            throw QSLHubError.serviceRejected("eQSL rejected the username or password.", authenticationFailure: true)
+        let text: String
+        do { text = try await EQSLInboxDownload.download(session: session, url: url) }
+        catch {
+            if (error as NSError).code == 401 {
+                throw QSLHubError.serviceRejected(error.localizedDescription, authenticationFailure: true)
+            }
+            throw error
         }
         let parsed = parseADIF(content: text).records
         return parsed.map { record in

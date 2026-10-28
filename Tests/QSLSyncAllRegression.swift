@@ -359,6 +359,16 @@ struct QSLSyncAllRegression {
         let mixedAttempts = [QSLQueueJob(stationProfileID: UUID(), qsoID: UUID(), provider: .eqsl, adif: ""),
                              QSLQueueJob(stationProfileID: UUID(), qsoID: UUID(), provider: .eqsl, adif: ""),
                              QSLQueueJob(stationProfileID: UUID(), qsoID: UUID(), provider: .eqsl, adif: "", attempts: 1)]
+        let credentialRetries = ["Missing Club Log application password.",
+                                 "Not sent: Club Log stopped after the credentials were refused; it will be tried at the next Sync",
+                                 "Club Log rejected the credentials. Create and use an application password.",
+                                 "The request timed out."].map { message in
+            QSLQueueJob(stationProfileID: UUID(), qsoID: UUID(), provider: .clubLog,
+                        adif: "", state: .retry, attempts: 2, message: message)
+        }
+        check("Club Log credential and transport retries remain one batch, preserving attempt history",
+              QSLProviderPass.requests(credentialRetries, provider: .clubLog).map(\.count) == [4] &&
+              credentialRetries.allSatisfy { $0.attempts == 2 })
         check("requests: QRZ one QSO each, LoTW up to 200, eQSL.cc and Club Log up to 200 that never failed and the others one each",
               QSLProviderPass.requests(mixedAttempts, provider: .eqsl).map(\.count) == [2, 1] &&
               QSLProviderPass.requests(mixedAttempts.map { var j = $0; j.provider = .lotw; return j }, provider: .lotw).map(\.count) == [3] &&

@@ -630,6 +630,14 @@ Open **Settings -> Xiegu X6100** or the **Rig Control Toolbar** card to access t
 
 ---
 
+## FX-4CR Audio & FT8
+
+Open **Operator Desk → Radio & Digital → Audio & FT8**. Under **Radio & Audio Connection Setup**, select **FX-4CR (USB / Bluetooth)**, check the transport and serial port, then press **Connect**. Bluetooth must be off on the radio for USB; for Bluetooth, turn it on and pair the radio with macOS. Select the FX-4CR input and output devices from Core Audio, using **Refresh** if the list is stale.
+
+Confirm the station callsign and grid, choose a band and FT8 or FT4, then start **RX** to receive. Use the waterfall to set RX/TX audio frequencies and the decoded-message list to choose a reply. Transmission requires explicitly arming **TX** and choosing the transmit slot. Check the radio and PTT state before transmitting. A completed exchange is automatically saved in the active YAAM station log.
+
+To keep a separate copy, open **QSO Archive** and choose an ADIF file (`.adi` or `.adif`). Each successfully completed FT8/FT4 contact is appended after YAAM saves it. The archive starts with contacts completed after the file is selected. Turning off the archive does not affect the main YAAM log.
+
 ## 25. Multi-Rig FT8 Cluster: Multi-Transceiver Operation (SO2R / SO3R)
 
 The **Multi-Rig FT8 Cluster** is an advanced operational mode in YAAM designed for serious DXers and contest stations who want to operate **up to 4 independent transceivers simultaneously** across different amateur bands.
@@ -867,3 +875,7 @@ FT8/FT4 and Multi-Rig logging retain the observed exchange start, completion tim
 Upload notices distinguish accepted services, waiting work and failures that need review. Provider acceptance must be explicit; an empty QRZ HTTP success response does not mark a QSO sent. Retries use structured transport/service outcomes rather than English message text. Uncertain submissions need manual review. For iCloud logs, use the downloaded file rather than a `.icloud` placeholder; YAAM requests a missing download and asks you to retry once available, then reads a coordinated private signing copy.
 
 QRZ Login stays open during password entry, MFA and browser verification. **Verify & Save** requires a trusted HTTPS QRZ page with an authenticated account action, no pending login/challenge, and a current session cookie. A pre-authentication cookie is insufficient. **Retry** reloads sign-in; **Cancel** prevents later page callbacks from saving a session. If the credential vault cannot save the session, the window remains open with an actionable message.
+
+### Received QSL card archive
+
+Open **Operator Desk → QSL Hub Studio → Received Cards** to import email files, images or PDFs. Every visual attachment in an email is saved separately with an immutable filename. The archive keeps the original card, sender, received date, extracted contact details and any recorded reply receipt for the active station profile. Search by callsign, sender or subject; **Pending only** hides archived/rejected items. **Archive pending** and **Confirm & Attach** keep the original card and archive row after restarting YAAM. The gallery also includes cards without a matching QSO. An eQSL notification without a downloaded image is explicitly labelled as a notice. Import or archive errors are shown without replacing a damaged index.

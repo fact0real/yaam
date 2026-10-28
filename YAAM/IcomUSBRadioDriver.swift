@@ -170,7 +170,7 @@ public final class IcomUSBRadioDriver: ObservableObject {
     }
 
     // MARK: - Internal Transport & Polling
-    nonisolated private let serialPort = SerialPortService()
+    nonisolated private let serialPort = SerialPortService(modemLines: [.dtr, .rts])
     private var serialHealthTask: Task<Void, Never>?
     private var serialRetryTask: Task<Void, Never>?
     private var serialRetryAttempt = 0

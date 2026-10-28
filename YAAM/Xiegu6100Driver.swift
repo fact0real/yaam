@@ -118,7 +118,7 @@ public final class Xiegu6100Driver: ObservableObject {
     }
 
     // MARK: - Internal Transport & Polling
-    nonisolated private let serialPort = SerialPortService()
+    nonisolated private let serialPort = SerialPortService(modemLines: [.dtr, .rts])
     private var serialSession = UUID()
     private var serialHealthTask: Task<Void, Never>?
     private var serialRetryTask: Task<Void, Never>?
@@ -560,9 +560,9 @@ public final class Xiegu6100Driver: ObservableObject {
     /// Pulse hardware DTR/RTS lines for Morse keying (zero-latency pin keying over USB-C)
     public func setKeyPin(active: Bool, pin: SerialControlPin) {
         guard isConnected else { return }
-        if pin == .dtr {
+        if pin == .dtr, enableHardwareDTRCW {
             serialPort.setDTR(active: active)
-        } else if pin == .rts {
+        } else if pin == .rts, enableHardwareRTSPTT {
             serialPort.setRTS(active: active)
         }
     }

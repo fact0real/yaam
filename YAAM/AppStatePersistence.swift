@@ -368,29 +368,33 @@ extension AppState {
 
             var added = 0
             var updated = 0
+            // Prepare the entire import before publishing it. Mutating each element of
+            // qsoRecords triggers its observer, which compares the whole workspace.
+            var importedRecords = qsoRecords
             for item in selected {
                 switch item.kind {
                 case .newQSO, .potentialConflict:
                     let fields = stationTaggedFields(item.incomingFields)
                     guard !isSelfContact(fields) else { continue }
-                    qsoRecords.append(QSORecordModel(index: qsoRecords.count + 1, fields: fields))
+                    importedRecords.append(QSORecordModel(index: importedRecords.count + 1, fields: fields))
                     added += 1
                 case .confirmationUpdate:
                     guard let targetID = item.matchingRecordID,
-                          let index = qsoRecords.firstIndex(where: { $0.id == targetID }) else { continue }
+                          let index = importedRecords.firstIndex(where: { $0.id == targetID }) else { continue }
                     let mergedFields = ImportReviewAnalyzer.mergeUpdate(
                         incoming: item.incomingFields,
-                        into: qsoRecords[index].fields
+                        into: importedRecords[index].fields
                     )
                     guard !isSelfContact(mergedFields) else { continue }
-                    qsoRecords[index].fields = mergedFields
+                    importedRecords[index].fields = mergedFields
                     updated += 1
                 case .duplicate, .invalid:
                     continue
                 }
             }
 
-            for index in qsoRecords.indices { qsoRecords[index].index = index + 1 }
+            for index in importedRecords.indices { importedRecords[index].index = index + 1 }
+            qsoRecords = importedRecords
             let importedHeaders = review.headers + selected.flatMap { Array($0.incomingFields.keys) }
             for header in importedHeaders where !tableHeaders.contains(header) {
                 tableHeaders.append(header)

@@ -4,7 +4,7 @@ cd "$(dirname "$0")/.."
 regression_dir="$(mktemp -d /tmp/yaam-priority-regressions.XXXXXX)"
 trap 'rm -rf "$regression_dir"' EXIT
 operator_sources=(YAAM/OperatorModels.swift YAAM/AmateurBandSettings.swift YAAM/PortableActivity.swift YAAM/DXCCDatabase.swift YAAM/CountryFlagEngine.swift YAAM/CountryNameNormalizer.swift YAAM/FrequencyBounds.swift)
-qsl_sources=(YAAM/QSLSyncAll.swift YAAM/QSLHub.swift YAAM/ADIFParser.swift YAAM/FormURLEncoding.swift YAAM/QSOMetadataFormatter.swift "${operator_sources[@]}")
+qsl_sources=(YAAM/QSLSyncAll.swift YAAM/QSLHub.swift YAAM/EQSLInboxDownload.swift YAAM/ADIFParser.swift YAAM/FormURLEncoding.swift YAAM/QSOMetadataFormatter.swift "${operator_sources[@]}")
 run() {
     local suite="$1"
     shift

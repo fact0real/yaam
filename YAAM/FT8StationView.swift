@@ -3,6 +3,7 @@
 //  YAAM
 //
 
+import AppKit
 import SwiftUI
 import FT8Codec
 import FT8808Engine
@@ -71,6 +72,7 @@ struct FT8StationView: View {
     @ObservedObject var icomUSB: IcomUSBRadioDriver = IcomUSBRadioDriver.shared
     @ObservedObject var fx4cr: FX4CRDriver = FX4CRDriver.shared
     @ObservedObject var xiegu: Xiegu6100Driver = Xiegu6100Driver.shared
+    @ObservedObject private var digitalQSOArchive = DigitalQSOArchiveStore.shared
 
     @AppStorage("icomNetworkHost") private var icomHost = ""
     @AppStorage("icomNetworkControlPort") private var icomPort = 50_001
@@ -722,6 +724,36 @@ struct FT8StationView: View {
             .buttonStyle(FT8RibbonButtonStyle())
             .disabled(engine.dxCall.isEmpty)
             .help("Log current QSO to YAAM Log Table")
+
+            Menu {
+                Button("Choose ADIF file…", systemImage: "folder") {
+                    digitalQSOArchive.chooseArchiveFile()
+                }
+                if digitalQSOArchive.archiveURL != nil {
+                    Button("Turn off separate archive", systemImage: "xmark.circle", role: .destructive) {
+                        digitalQSOArchive.disableArchive()
+                    }
+                }
+            } label: {
+                Label("QSO Archive", systemImage: "doc.badge.plus")
+                    .font(.caption.weight(.semibold))
+                    .frame(height: 28)
+            }
+            .buttonStyle(FT8RibbonButtonStyle(accent: digitalQSOArchive.archiveURL == nil ? .secondary : .green))
+            .help("Automatically append successfully completed FT8/FT4 contacts to an ADIF file")
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(digitalQSOArchive.archiveURL?.lastPathComponent ?? "Archive off")
+                    .font(.caption2.monospaced())
+                    .foregroundColor(digitalQSOArchive.archiveURL == nil ? Color.secondary : Color.green)
+                    .lineLimit(1)
+                Text(digitalQSOArchive.lastStatus)
+                    .font(.system(size: 9))
+                    .foregroundColor(digitalQSOArchive.lastStatus.localizedCaseInsensitiveContains("could not")
+                                     ? Color.orange : Color.secondary)
+                    .lineLimit(2)
+            }
+            .frame(maxWidth: 220, alignment: .leading)
 
             if let quietHz = engine.suggestedTxAudioHz {
                 Button {

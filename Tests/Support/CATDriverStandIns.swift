@@ -33,14 +33,16 @@ nonisolated enum SerialLog {
 }
 
 nonisolated public final class SerialPortService: @unchecked Sendable {
+    public enum ModemLine: Sendable, Hashable { case dtr, rts }
     public static let shared = SerialPortService()
     nonisolated(unsafe) static var allowsOpen = false
     nonisolated(unsafe) static var rtsResult = true
     nonisolated(unsafe) static var writeReply: (@Sendable (String) -> String?)?
     nonisolated(unsafe) static var writeDataReply: (@Sendable (Data) -> Data?)?
     private var onReceive: (@Sendable (Data) -> Void)?
+    private let modemLines: Set<ModemLine>
 
-    public init() {}
+    public init(modemLines: Set<ModemLine> = []) { self.modemLines = modemLines }
     public var isOpen: Bool { Self.allowsOpen }
 
     public static func availablePorts(includeBluetooth: Bool = true) -> [String] { [] }
@@ -56,8 +58,14 @@ nonisolated public final class SerialPortService: @unchecked Sendable {
     }
     public func closePort() {}
 
-    @discardableResult public func setDTR(active: Bool) -> Bool { SerialLog.add("DTR \(active)"); return true }
-    @discardableResult public func setRTS(active: Bool) -> Bool { SerialLog.add("RTS \(active)"); return Self.rtsResult }
+    @discardableResult public func setDTR(active: Bool) -> Bool {
+        guard modemLines.contains(.dtr) else { return false }
+        SerialLog.add("DTR \(active)"); return true
+    }
+    @discardableResult public func setRTS(active: Bool) -> Bool {
+        guard modemLines.contains(.rts) else { return false }
+        SerialLog.add("RTS \(active)"); return Self.rtsResult
+    }
 
     @discardableResult
     public func writeData(_ data: Data) -> Bool {

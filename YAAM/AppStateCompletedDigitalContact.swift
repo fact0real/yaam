@@ -31,6 +31,7 @@ extension AppState {
             appendLog("Digital contact could not be saved: \(error.localizedDescription)")
             return false
         }
+        DigitalQSOArchiveStore.shared.appendSuccessfulContact(record.fields)
         enqueueAutomaticQSL(for: record)
         ZeroClickCloudUploadDaemon.shared.dispatch(record: record, stationID: activeStationProfileID?.uuidString,
             stationLocation: activeStationProfile?.lotwStationLocation, qrzKeyOverride: activeQRZAPIKey)

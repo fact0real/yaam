@@ -9,6 +9,7 @@
 
 import AppKit
 import Combine
+import CryptoKit
 import Foundation
 import PDFKit
 import SwiftUI
@@ -17,7 +18,7 @@ import UniformTypeIdentifiers
 
 // MARK: - Inbound Item Models
 
-public enum QSLInboundSource: String, Codable, Sendable {
+nonisolated public enum QSLInboundSource: String, Codable, Sendable {
     case email = "Email (.eml)"
     case image = "Card Image"
     case pdf = "PDF Document"
@@ -25,7 +26,7 @@ public enum QSLInboundSource: String, Codable, Sendable {
     case eqsl = "eQSL.cc Download"
 }
 
-public enum QSLInboundStatus: String, Codable, Sendable {
+nonisolated public enum QSLInboundStatus: String, Codable, Sendable {
     case pending = "Pending Match"
     case matched = "Matched"
     case conflict = "Conflict (Diffs Found)"
@@ -43,14 +44,14 @@ public enum QSLInboundStatus: String, Codable, Sendable {
     }
 }
 
-public struct QSLConflictDiff: Identifiable, Equatable, Sendable {
+nonisolated public struct QSLConflictDiff: Identifiable, Equatable, Codable, Sendable {
     public var id: String { fieldName }
     public let fieldName: String
     public let localValue: String
     public let inboundValue: String
 }
 
-public struct QSLInboundItem: Identifiable, Sendable {
+nonisolated public struct QSLInboundItem: Identifiable, Codable, Sendable {
     public let id: UUID
     public let source: QSLInboundSource
     public let filename: String
@@ -58,6 +59,11 @@ public struct QSLInboundItem: Identifiable, Sendable {
     public let subject: String
     public let rawBody: String
     public let receivedAt: Date
+
+    public var stationProfileID: UUID?
+    public var sourceMessageID: String?
+    public var replySentAt: Date?
+    public var replyMessageID: String?
 
     // Extracted QSO Metadata
     public var callsign: String
@@ -98,6 +104,10 @@ public struct QSLInboundItem: Identifiable, Sendable {
         matchedQSOID: UUID? = nil,
         conflictDiffs: [QSLConflictDiff] = []
     ) {
+        self.stationProfileID = nil
+        self.sourceMessageID = nil
+        self.replySentAt = nil
+        self.replyMessageID = nil
         self.id = id
         self.source = source
         self.filename = filename
@@ -126,23 +136,112 @@ public struct QSLInboundItem: Identifiable, Sendable {
 public final class QSLInboxEngine: ObservableObject {
     public static let shared = QSLInboxEngine()
 
-    @Published public var inboundItems: [QSLInboundItem] = []
+    @Published public private(set) var receivedCards: [QSLInboundItem] = []
+    @Published public private(set) var archiveError: String?
+    @Published public private(set) var activeProfileID: UUID?
+    public var inboundItems: [QSLInboundItem] {
+        receivedCards.filter { $0.status != .archived && $0.status != .rejected }
+    }
+    private let archive: QSLReceivedCardStore
+    private var revision: Int = -1
     @Published public var isProcessingDrop: Bool = false
     @Published public var lastMessage: String = "Drag and drop .eml, images, or PDFs to import QSLs"
     @Published public var selectedItemForResolution: QSLInboundItem? = nil
 
     private let fileManager = FileManager.default
 
-    public init() {
-        createMediaStorageDirectoryIfNeeded()
+    public init(archiveDirectory: URL? = nil) {
+        let root = archiveDirectory ?? LogbookDatabase.canonicalDataDirectory()
+            .deletingLastPathComponent().appendingPathComponent("QSL_Media", isDirectory: true)
+        archive = QSLReceivedCardStore(directory: root)
+        Task { await reloadArchive() }
+    }
+
+    public func activateProfile(_ id: UUID?) {
+        activeProfileID = id
+        receivedCards = []
+        revision = -1
+        Task { await reloadArchive() }
+    }
+
+    public func reloadArchive() async {
+        let store = archive
+        do { publish(try await Task.detached { try store.snapshot() }.value) }
+        catch { archiveError = "Could not read received cards: \(error.localizedDescription)" }
+    }
+
+    private func publish(_ snapshot: QSLReceivedCardStore.Snapshot) {
+        guard snapshot.revision >= revision else { return }
+        revision = snapshot.revision
+        receivedCards = snapshot.items.filter { $0.stationProfileID == activeProfileID && activeProfileID != nil }
+            .sorted { $0.receivedAt > $1.receivedAt }
+        archiveError = nil
+    }
+
+    public func retain(_ item: QSLInboundItem) async throws {
+        guard item.stationProfileID != nil else {
+            throw NSError(domain: "QSLInbox", code: 1,
+                          userInfo: [NSLocalizedDescriptionKey: "Select a station profile before importing cards."])
+        }
+        let store = archive
+        do { publish(try await Task.detached { try store.insert(item) }.value) }
+        catch {
+            archiveError = "Card could not be saved: \(error.localizedDescription)"
+            throw error
+        }
+    }
+
+    @discardableResult
+    public func setStatus(_ status: QSLInboundStatus, for id: UUID) async -> Bool {
+        guard let owner = activeProfileID else { return false }
+        let store = archive
+        do {
+            publish(try await Task.detached { try store.setStatus(status, id: id, profileID: owner) }.value)
+            return true
+        } catch {
+            archiveError = "Card status could not be saved: \(error.localizedDescription)"
+            return false
+        }
+    }
+
+    @discardableResult
+    public func receiveEQSLCard(record: [String: String], from url: URL, profileID: UUID?, matchedQSOID: UUID?) async throws -> URL {
+        guard let profileID else { throw EQSLInboxDownload.error("Select a station profile to save received cards.") }
+        let store = archive
+        let saved = try await Task.detached {
+            try store.saveMedia(data: Data(contentsOf: url), preferredName: url.lastPathComponent)
+        }.value
+        let matches = receivedCards.filter {
+            $0.stationProfileID == profileID && $0.source == .eqsl &&
+            $0.callsign.uppercased() == (record["CALL"] ?? "").uppercased() &&
+            $0.qsoDate == (record["QSO_DATE"] ?? "") &&
+            $0.band.uppercased() == (record["BAND"] ?? "").uppercased() &&
+            $0.qsoTime.prefix(4) == (record["TIME_ON"] ?? "").prefix(4)
+        }
+        if !matches.isEmpty {
+            let ids = Set(matches.map(\.id))
+            publish(try await Task.detached { try store.attachMedia(saved, ids: ids, profileID: profileID, mode: record["SUBMODE"] ?? record["MODE"] ?? "", matchedQSOID: matchedQSOID) }.value)
+        } else {
+            var item = QSLInboundItem(source: .eqsl, filename: url.lastPathComponent,
+                subject: "eQSL from " + (record["CALL"] ?? ""), callsign: record["CALL"] ?? "",
+                qsoDate: record["QSO_DATE"] ?? "", qsoTime: record["TIME_ON"] ?? "",
+                band: record["BAND"] ?? "", mode: record["SUBMODE"] ?? record["MODE"] ?? "",
+                mediaFileURL: saved, status: .archived, matchedQSOID: matchedQSOID)
+            item.stationProfileID = profileID
+            item.sourceMessageID = "eqsl:" + url.lastPathComponent
+            try await retain(item)
+        }
+        return saved
+    }
+
+    public func archivePendingItems() async {
+        for item in inboundItems { _ = await setStatus(.archived, for: item.id) }
     }
 
     // MARK: - Local Media Archive Directory
 
     public var mediaArchiveDirectoryURL: URL {
-        let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let yaamDir = appSupport.appendingPathComponent("YAAM", isDirectory: true)
-        return yaamDir.appendingPathComponent("QSL_Media", isDirectory: true)
+        archive.directory
     }
 
     public func createMediaStorageDirectoryIfNeeded() {
@@ -155,6 +254,10 @@ public final class QSLInboxEngine: ObservableObject {
     // MARK: - Ingestion Handlers (File Drop & URL Processing)
 
     func processDroppedFiles(_ urls: [URL], existingQSOs: [QSORecordModel]) async {
+        guard activeProfileID != nil else {
+            lastMessage = "Select a station profile before importing cards."
+            return
+        }
         isProcessingDrop = true
         lastMessage = "Processing \(urls.count) dropped file(s)..."
 
@@ -183,74 +286,53 @@ public final class QSLInboxEngine: ObservableObject {
     // MARK: - EML Email Parsing
 
     func processEMLFile(at url: URL, existingQSOs: [QSORecordModel]) async throws {
+        let owner = activeProfileID
         let data = try Data(contentsOf: url)
-        guard let content = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) else {
-            throw NSError(domain: "QSLInbox", code: 400, userInfo: [NSLocalizedDescriptionKey: "Unreadable email text"])
-        }
-
-        // 1. Extract Headers (From, Subject, Date)
-        var from = ""
-        var subject = ""
-        var emailDate = ""
-
-        content.enumerateLines { line, stop in
-            if line.lowercased().hasPrefix("from: ") && from.isEmpty {
-                from = String(line.dropFirst(6)).trimmingCharacters(in: .whitespaces)
-            } else if line.lowercased().hasPrefix("subject: ") && subject.isEmpty {
-                subject = String(line.dropFirst(9)).trimmingCharacters(in: .whitespaces)
-            } else if line.lowercased().hasPrefix("date: ") && emailDate.isEmpty {
-                emailDate = String(line.dropFirst(6)).trimmingCharacters(in: .whitespaces)
+        let message = QSLMailAttachmentParser.parse(data)
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "EEE, d MMM yyyy HH:mm:ss Z"
+        let received = formatter.date(from: message.date) ?? Date()
+        let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        let store = archive
+        let existing = try await Task.detached { try store.snapshot() }.value.items
+        let knownSources = Set(existing.filter { $0.stationProfileID == owner }.compactMap(\.sourceMessageID))
+        // Keep every visual attachment, including nested inline cards and repeated filenames.
+        let attachments: [QSLMailAttachmentParser.Attachment?] = message.attachments.isEmpty ? [nil] : message.attachments.map { Optional($0) }
+        for (offset, attachment) in attachments.enumerated() {
+            let sourceID = "eml:" + digest + ":\(offset)"
+            if knownSources.contains(sourceID) { continue }
+            let name = attachment?.filename ?? url.lastPathComponent
+            var text = message.body
+            if let attachment, !name.lowercased().hasSuffix(".pdf") {
+                text += "\n" + (await performVisionOCR(on: attachment.data))
             }
-            if !from.isEmpty && !subject.isEmpty && !emailDate.isEmpty {
-                stop = true
-            }
+            let metadata = extractQSOMetadata(fromText: "\(message.subject)\n\(text)\n\(message.from)", filename: name)
+            let mediaURL: URL?
+            if let attachment { mediaURL = try await saveMediaFile(data: attachment.data, preferredName: name) }
+            else { mediaURL = nil }
+            var inbound = QSLInboundItem(source: .email, filename: name, fromAddress: message.from,
+                subject: message.subject, rawBody: text, receivedAt: received,
+                callsign: metadata.callsign, qsoDate: metadata.date, qsoTime: metadata.time,
+                band: metadata.band, mode: metadata.mode, rst: metadata.rst, mediaFileURL: mediaURL)
+            inbound.stationProfileID = owner
+            // Stable import identity is independent of the user-visible filename.
+            inbound.sourceMessageID = sourceID
+            evaluateFuzzyMatch(item: &inbound, existingQSOs: existingQSOs)
+            try await retain(inbound)
         }
-
-        // 2. Extract embedded attachments & plain body
-        let (extractedBody, extractedAttachmentData, attachmentName) = parseMIME(content: content, rawData: data)
-
-        // 3. Extract Amateur Metadata from Subject + Body
-        let combinedText = "\(subject)\n\(extractedBody)\n\(from)"
-        let metadata = extractQSOMetadata(fromText: combinedText, filename: url.lastPathComponent)
-
-        // 4. Save attachment if present
-        var localMediaURL: URL? = nil
-        if let attData = extractedAttachmentData, !attData.isEmpty {
-            let filename = attachmentName.isEmpty ? "\(metadata.callsign.isEmpty ? "QSL" : metadata.callsign)_\(UUID().uuidString.prefix(6)).jpg" : attachmentName
-            localMediaURL = saveMediaFile(data: attData, preferredName: filename)
-        }
-
-        var inbound = QSLInboundItem(
-            source: .email,
-            filename: url.lastPathComponent,
-            fromAddress: from,
-            subject: subject,
-            rawBody: extractedBody,
-            callsign: metadata.callsign,
-            qsoDate: metadata.date,
-            qsoTime: metadata.time,
-            band: metadata.band,
-            mode: metadata.mode,
-            rst: metadata.rst,
-            mediaFileURL: localMediaURL,
-            mediaData: extractedAttachmentData
-        )
-
-        // 5. Fuzzy Match against Logbook
-        evaluateFuzzyMatch(item: &inbound, existingQSOs: existingQSOs)
-
-        inboundItems.insert(inbound, at: 0)
-        lastMessage = "Imported email: \(subject.isEmpty ? url.lastPathComponent : subject)"
+        lastMessage = "Saved \(attachments.count) received card(s) from \(message.subject)"
     }
 
     // MARK: - Direct Image Processing & Vision OCR
 
     func processImageFile(at url: URL, existingQSOs: [QSORecordModel]) async throws {
+        let owner = activeProfileID
         let data = try Data(contentsOf: url)
         let ocrText = await performVisionOCR(on: data)
         let metadata = extractQSOMetadata(fromText: ocrText, filename: url.lastPathComponent)
 
-        let savedURL = saveMediaFile(data: data, preferredName: url.lastPathComponent)
+        let savedURL = try await saveMediaFile(data: data, preferredName: url.lastPathComponent)
 
         var inbound = QSLInboundItem(
             source: .image,
@@ -267,13 +349,15 @@ public final class QSLInboxEngine: ObservableObject {
         )
 
         evaluateFuzzyMatch(item: &inbound, existingQSOs: existingQSOs)
-        inboundItems.insert(inbound, at: 0)
+        inbound.stationProfileID = owner
+        try await retain(inbound)
         lastMessage = "Imported card image: \(url.lastPathComponent)"
     }
 
     // MARK: - PDF Processing
 
     func processPDFFile(at url: URL, existingQSOs: [QSORecordModel]) async throws {
+        let owner = activeProfileID
         let data = try Data(contentsOf: url)
         var extractedText = ""
 
@@ -287,7 +371,7 @@ public final class QSLInboxEngine: ObservableObject {
         }
 
         let metadata = extractQSOMetadata(fromText: extractedText, filename: url.lastPathComponent)
-        let savedURL = saveMediaFile(data: data, preferredName: url.lastPathComponent)
+        let savedURL = try await saveMediaFile(data: data, preferredName: url.lastPathComponent)
 
         var inbound = QSLInboundItem(
             source: .pdf,
@@ -304,13 +388,15 @@ public final class QSLInboxEngine: ObservableObject {
         )
 
         evaluateFuzzyMatch(item: &inbound, existingQSOs: existingQSOs)
-        inboundItems.insert(inbound, at: 0)
+        inbound.stationProfileID = owner
+        try await retain(inbound)
         lastMessage = "Imported PDF QSL: \(url.lastPathComponent)"
     }
 
     // MARK: - ADIF File Processing
 
     func processADIFFile(at url: URL, existingQSOs: [QSORecordModel]) async throws {
+        let owner = activeProfileID
         let data = try Data(contentsOf: url)
         guard let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) else { return }
 
@@ -335,7 +421,8 @@ public final class QSLInboxEngine: ObservableObject {
             )
 
             evaluateFuzzyMatch(item: &inbound, existingQSOs: existingQSOs)
-            inboundItems.insert(inbound, at: 0)
+            inbound.stationProfileID = owner
+        try await retain(inbound)
         }
         lastMessage = "Imported \(records.count) record(s) from \(url.lastPathComponent)"
     }
@@ -618,70 +705,9 @@ public final class QSLInboxEngine: ObservableObject {
 
     // MARK: - Save Card Media File
 
-    public func saveMediaFile(data: Data, preferredName: String) -> URL {
-        createMediaStorageDirectoryIfNeeded()
-        let safeName = preferredName
-            .replacingOccurrences(of: "/", with: "-")
-            .replacingOccurrences(of: " ", with: "_")
-        let dest = mediaArchiveDirectoryURL.appendingPathComponent(safeName)
-        try? data.write(to: dest)
-        return dest
+    public func saveMediaFile(data: Data, preferredName: String) async throws -> URL {
+        let store = archive
+        return try await Task.detached { try store.saveMedia(data: data, preferredName: preferredName) }.value
     }
 
-    // MARK: - MIME Parser Helper
-
-    private func parseMIME(content: String, rawData: Data) -> (body: String, attachment: Data?, filename: String) {
-        var body = ""
-        var attachmentData: Data? = nil
-        var filename = ""
-
-        // Check if multipart with boundary
-        if let boundaryRange = content.range(of: "boundary=\"") ?? content.range(of: "boundary=") {
-            let rest = content[boundaryRange.upperBound...]
-            let boundary = rest.components(separatedBy: CharacterSet(charactersIn: "\"\r\n ;")).first ?? ""
-            if !boundary.isEmpty {
-                let parts = content.components(separatedBy: "--\(boundary)")
-                for part in parts {
-                    let lowerPart = part.lowercased()
-                    if lowerPart.contains("content-type: text/plain") {
-                        if let bodyStart = part.range(of: "\r\n\r\n") ?? part.range(of: "\n\n") {
-                            body = String(part[bodyStart.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
-                        }
-                    } else if lowerPart.contains("image/") || lowerPart.contains(".jpg") || lowerPart.contains(".png") || lowerPart.contains(".pdf") {
-                        // Extract filename
-                        if let nameRange = part.range(of: "filename=\"") {
-                            let nameRest = part[nameRange.upperBound...]
-                            filename = nameRest.components(separatedBy: "\"").first ?? ""
-                        }
-
-                        // Extract base64
-                        if let b64Start = part.range(of: "\r\n\r\n") ?? part.range(of: "\n\n") {
-                            var b64Str = String(part[b64Start.upperBound...])
-                                .replacingOccurrences(of: "\r", with: "")
-                                .replacingOccurrences(of: "\n", with: "")
-                                .trimmingCharacters(in: .whitespacesAndNewlines)
-                            while b64Str.hasSuffix("-") {
-                                b64Str.removeLast()
-                            }
-                            b64Str = b64Str.trimmingCharacters(in: .whitespacesAndNewlines)
-                            if let decoded = Data(base64Encoded: b64Str, options: [.ignoreUnknownCharacters]), decoded.count > 50 {
-                                attachmentData = decoded
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        if body.isEmpty {
-            // Fallback: take header-free text
-            if let headerEnd = content.range(of: "\r\n\r\n") ?? content.range(of: "\n\n") {
-                body = String(content[headerEnd.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
-            } else {
-                body = content
-            }
-        }
-
-        return (body, attachmentData, filename)
-    }
 }

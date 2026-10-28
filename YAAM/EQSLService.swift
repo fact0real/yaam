@@ -74,6 +74,9 @@ public final class EQSLService: ObservableObject {
 
     private var isCancelled: Bool = false
     private let fileManager = FileManager.default
+    private var storageDirectoryOverride: URL?
+    private var graphicRequestSpacing: TimeInterval = 11
+    private var nextGraphicRequest = Date.distantPast
     private let urlSession: URLSession
 
     public init() {
@@ -84,9 +87,17 @@ public final class EQSLService: ObservableObject {
         createStorageDirectoryIfNeeded()
     }
 
+    init(session: URLSession, storageDirectory: URL, graphicRequestSpacing: TimeInterval = 11) {
+        self.urlSession = session
+        self.storageDirectoryOverride = storageDirectory
+        self.graphicRequestSpacing = graphicRequestSpacing
+        createStorageDirectoryIfNeeded()
+    }
+
     // MARK: - Local Cache Directory
 
     public var cardsDirectoryURL: URL {
+        if let storageDirectoryOverride { return storageDirectoryOverride }
         let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         let yaamDir = appSupport.appendingPathComponent("YAAM", isDirectory: true)
         return yaamDir.appendingPathComponent("eQSL_Cards", isDirectory: true)
@@ -99,22 +110,24 @@ public final class EQSLService: ObservableObject {
         }
     }
 
-    public func localCardFilename(callsign: String, date: String, band: String, mode: String) -> String {
+    public func localCardFilename(callsign: String, date: String, band: String, mode: String, time: String? = nil) -> String {
         let cleanCall = callsign.uppercased().replacingOccurrences(of: "/", with: "-")
         let cleanDate = date.replacingOccurrences(of: "-", with: "")
         let cleanBand = band.uppercased()
         let cleanMode = mode.uppercased()
-        return "eQSL_\(cleanCall)_\(cleanDate)_\(cleanBand)_\(cleanMode).jpg"
+        let timestamp = time.map { "_" + $0.filter(\.isNumber) } ?? ""
+        return "eQSL_\(cleanCall)_\(cleanDate)_\(cleanBand)_\(cleanMode)\(timestamp).jpg"
     }
 
-    public func cachedCardURL(callsign: String, date: String, band: String, mode: String) -> URL? {
-        let filename = localCardFilename(callsign: callsign, date: date, band: band, mode: mode)
-        let fileURL = cardsDirectoryURL.appendingPathComponent(filename)
+    public func cachedCardURL(callsign: String, date: String, band: String, mode: String, time: String? = nil, username: String? = nil) -> URL? {
+        let filename = localCardFilename(callsign: callsign, date: date, band: band, mode: mode, time: time)
+        let root = username.map { cardsDirectoryURL.appendingPathComponent($0.uppercased().replacingOccurrences(of: "/", with: "-"), isDirectory: true) } ?? cardsDirectoryURL
+        let fileURL = root.appendingPathComponent(filename)
         return fileManager.fileExists(atPath: fileURL.path) ? fileURL : nil
     }
 
-    public func hasCachedCard(callsign: String, date: String, band: String, mode: String) -> Bool {
-        return cachedCardURL(callsign: callsign, date: date, band: band, mode: mode) != nil
+    public func hasCachedCard(callsign: String, date: String, band: String, mode: String, time: String? = nil) -> Bool {
+        return cachedCardURL(callsign: callsign, date: date, band: band, mode: mode, time: time) != nil
     }
 
     public func allCachedCards() -> [CachedEQSLCard] {
@@ -179,19 +192,7 @@ public final class EQSLService: ObservableObject {
         guard let url = components.url else { throw URLError(.badURL) }
 
         self.statusMessage = "Downloading eQSL Inbox..."
-        let (data, response) = try await urlSession.data(from: url)
-
-        guard let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else {
-            throw URLError(.badServerResponse)
-        }
-
-        guard let rawString = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) else {
-            throw NSError(domain: "EQSLService", code: 500, userInfo: [NSLocalizedDescriptionKey: "Failed to decode eQSL response"])
-        }
-
-        if rawString.contains("Error:") || rawString.contains("Login Failed") {
-            throw NSError(domain: "EQSLService", code: 401, userInfo: [NSLocalizedDescriptionKey: "eQSL Authentication Failed: Invalid credentials"])
-        }
+        let rawString = try await EQSLInboxDownload.download(session: urlSession, url: url)
 
         self.statusMessage = "eQSL Sync Complete."
         return [rawString]
@@ -208,7 +209,7 @@ public final class EQSLService: ObservableObject {
         username: String,
         password: String
     ) async throws -> URL {
-        if let existing = cachedCardURL(callsign: callsign, date: date, band: band, mode: mode) {
+        if let existing = cachedCardURL(callsign: callsign, date: date, band: band, mode: mode, time: time, username: username) {
             return existing
         }
 
@@ -222,11 +223,15 @@ public final class EQSLService: ObservableObject {
         let month = String(cleanDate.dropFirst(4).prefix(2))
         let day = String(cleanDate.suffix(2))
         let hour = String(cleanTime.prefix(2))
-        let minute = String(cleanTime.suffix(2))
+        let minute = String(cleanTime.dropFirst(2).prefix(2))
 
+        guard cleanDate.count == 8, cleanTime.count >= 4, !band.isEmpty, !mode.isEmpty else {
+            throw EQSLInboxDownload.error("A complete QSO date, time, band and mode are required to retrieve an eQSL card.")
+        }
         var components = URLComponents(string: "https://www.eqsl.cc/qslcard/GeteQSL.cfm")!
         FormURLEncoding.setQuery([
-            URLQueryItem(name: "SubMode", value: mode),
+            URLQueryItem(name: "QSOMode", value: mode),
+            URLQueryItem(name: "QSOBand", value: band),
             URLQueryItem(name: "UserName", value: username),
             URLQueryItem(name: "Password", value: password),
             URLQueryItem(name: "CallsignFrom", value: cleanCall),
@@ -241,6 +246,10 @@ public final class EQSLService: ObservableObject {
             throw URLError(.badURL)
         }
 
+        let delay = nextGraphicRequest.timeIntervalSinceNow
+        if delay > 0 { try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000)) }
+        try Task.checkCancellation()
+        nextGraphicRequest = Date().addingTimeInterval(graphicRequestSpacing)
         let (initialData, response) = try await urlSession.data(from: imageFetchURL)
         guard let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else {
             throw URLError(.badServerResponse)
@@ -253,8 +262,8 @@ public final class EQSLService: ObservableObject {
            (initialData.starts(with: [0xFF, 0xD8, 0xFF]) || initialData.starts(with: [0x89, 0x50, 0x4E, 0x47])) {
             finalImageData = initialData
         } else if let html = String(data: initialData, encoding: .utf8) ?? String(data: initialData, encoding: .isoLatin1) {
-            if html.contains("Error:") || html.contains("No match") || html.contains("Login Failed") {
-                throw NSError(domain: "EQSLService", code: 404, userInfo: [NSLocalizedDescriptionKey: "No graphical eQSL card found for this QSO"])
+            if let message = EQSLInboxDownload.failure(in: html) {
+                throw EQSLInboxDownload.error(message)
             }
 
             // Extract <img src="..."> using regex
@@ -285,8 +294,10 @@ public final class EQSLService: ObservableObject {
             throw NSError(domain: "EQSLService", code: 404, userInfo: [NSLocalizedDescriptionKey: "No graphical eQSL card found for this QSO"])
         }
 
-        let destURL = cardsDirectoryURL.appendingPathComponent(localCardFilename(callsign: callsign, date: date, band: band, mode: mode))
-        try validData.write(to: destURL)
+        let stationDirectory = cardsDirectoryURL.appendingPathComponent(username.uppercased().replacingOccurrences(of: "/", with: "-"), isDirectory: true)
+        try fileManager.createDirectory(at: stationDirectory, withIntermediateDirectories: true)
+        let destURL = stationDirectory.appendingPathComponent(localCardFilename(callsign: callsign, date: date, band: band, mode: mode, time: time))
+        try validData.write(to: destURL, options: .atomic)
 
         self.downloadedCardCount += 1
         return destURL
@@ -304,6 +315,11 @@ public final class EQSLService: ObservableObject {
             throw NSError(domain: "EQSLService", code: 400, userInfo: [NSLocalizedDescriptionKey: "eQSL username or password is missing. Please check Settings."])
         }
 
+        guard !isSyncing else { throw EQSLInboxDownload.error("An eQSL download is already running.") }
+        guard let owner = appState.activeStationProfileID else {
+            throw EQSLInboxDownload.error("Select a station profile before downloading cards.")
+        }
+        let candidateIDs = appState.qsoRecords.map(\.id)
         isCancelled = false
         isSyncing = true
         downloadProgress = nil
@@ -316,12 +332,18 @@ public final class EQSLService: ObservableObject {
             lastSyncDate = Date()
         }
 
-        // 1. Download full inbox ADIF using RcvdSince=20000101
+        // Scope this collection to the operator's six-month review.
+        let since = Calendar(identifier: .gregorian).date(byAdding: .month, value: -6, to: Date()) ?? Date()
+        let dateFormatter = DateFormatter()
+        dateFormatter.locale = Locale(identifier: "en_US_POSIX")
+        dateFormatter.timeZone = TimeZone(secondsFromGMT: 0)
+        dateFormatter.dateFormat = "yyyyMMdd"
+        let receivedSince = dateFormatter.string(from: since)
         var components = URLComponents(string: "https://www.eqsl.cc/qslcard/DownloadInBox.cfm")!
         var queryItems = [
             URLQueryItem(name: "UserName", value: username),
             URLQueryItem(name: "Password", value: password),
-            URLQueryItem(name: "RcvdSince", value: "20000101"),
+            URLQueryItem(name: "RcvdSince", value: receivedSince),
             URLQueryItem(name: "XML", value: "0")
         ]
         if let nick = qthNickname, !nick.isEmpty {
@@ -331,31 +353,37 @@ public final class EQSLService: ObservableObject {
 
         guard let inboxURL = components.url else { throw URLError(.badURL) }
 
-        let (inboxData, inboxResponse) = try await urlSession.data(from: inboxURL)
-        guard let httpResponse = inboxResponse as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else {
-            throw URLError(.badServerResponse)
-        }
+        let rawString = try await EQSLInboxDownload.download(session: urlSession, url: inboxURL)
 
-        guard let rawString = String(data: inboxData, encoding: .utf8) ?? String(data: inboxData, encoding: .isoLatin1) else {
-            throw NSError(domain: "EQSLService", code: 500, userInfo: [NSLocalizedDescriptionKey: "Failed to read eQSL response."])
+        let downloadedRecords = parseADIF(content: rawString).records
+        let notices = QSLInboxEngine.shared.receivedCards.filter { $0.stationProfileID == owner && $0.source == .eqsl && $0.mediaFileURL == nil && $0.status != .rejected }
+        let parsed = notices.isEmpty ? downloadedRecords : downloadedRecords.filter { record in
+            notices.contains { notice in
+                notice.callsign.uppercased() == (record["CALL"] ?? "").uppercased() &&
+                notice.qsoDate == (record["QSO_DATE"] ?? "") &&
+                notice.band.uppercased() == (record["BAND"] ?? "").uppercased() &&
+                notice.qsoTime.prefix(4) == (record["TIME_ON"] ?? "").prefix(4)
+            }
         }
-
-        if rawString.contains("Error: Bad password") || rawString.contains("Login Failed") || rawString.contains("Error: No such user") {
-            throw NSError(domain: "EQSLService", code: 401, userInfo: [NSLocalizedDescriptionKey: "eQSL Authentication Failed: Invalid Username or Password."])
-        }
-
-        let parsed = parseADIF(content: rawString).records
         if parsed.isEmpty {
+            if !notices.isEmpty && !downloadedRecords.isEmpty {
+                throw EQSLInboxDownload.error("The eQSL inbox has no records matching the pending email notices. Check the station account and QTH nickname.")
+            }
             statusMessage = "No cards found in eQSL inbox."
             return 0
         }
 
         var downloadedCount = 0
+        var failureCount = 0
+        var firstFailure: String?
         let totalCount = parsed.count
         var claimed = Set<Int>()
         let candidates = appState.qsoRecords.map(\.fields)
 
         for (index, record) in parsed.enumerated() {
+            guard appState.activeStationProfileID == owner else {
+                throw EQSLInboxDownload.error("The station profile changed. Download stopped; existing cards were kept.")
+            }
             if isCancelled {
                 statusMessage = "Download stopped by user."
                 break
@@ -373,16 +401,23 @@ public final class EQSLService: ObservableObject {
             statusMessage = "Card \(index + 1) of \(totalCount): \(call)..."
 
             // Link in local log
-            let localIdx = appState.eqslConfirmationMatchIndex(record, candidates: candidates, claimed: &claimed)
+            let matched = appState.eqslConfirmationMatchIndex(record, candidates: candidates, claimed: &claimed)
+            let localID = matched.flatMap { candidateIDs.indices.contains($0) ? candidateIDs[$0] : nil }
+            let localIdx = localID.flatMap { id in appState.qsoRecords.firstIndex { $0.id == id } }
             if let localIdx {
                 appState.qsoRecords[localIdx].fields["EQSL_QSL_RCVD"] = "Y"
-                if let cached = cachedCardURL(callsign: call, date: date, band: band, mode: mode) {
+                if let cached = cachedCardURL(callsign: call, date: date, band: band, mode: mode, time: time, username: username) {
                     appState.qsoRecords[localIdx].fields["QSL_MEDIA_PATH"] = cached.path
                 }
             }
 
             // If already cached, continue
-            if hasCachedCard(callsign: call, date: date, band: band, mode: mode) {
+            if let cached = cachedCardURL(callsign: call, date: date, band: band, mode: mode, time: time, username: username) {
+                let archivedURL = try await QSLInboxEngine.shared.receiveEQSLCard(record: record, from: cached, profileID: owner, matchedQSOID: localID)
+                if appState.activeStationProfileID == owner, let localID,
+                   let current = appState.qsoRecords.firstIndex(where: { $0.id == localID }) {
+                    appState.qsoRecords[current].fields["QSL_MEDIA_PATH"] = archivedURL.path
+                }
                 continue
             }
 
@@ -398,20 +433,30 @@ public final class EQSLService: ObservableObject {
                 )
                 downloadedCount += 1
 
-                if let localIdx {
-                    appState.qsoRecords[localIdx].fields["QSL_MEDIA_PATH"] = cardURL.path
+                guard appState.activeStationProfileID == owner else {
+                    throw EQSLInboxDownload.error("The station profile changed during the download.")
                 }
-
-                // Rate limiting pause: 400ms buffer
-                try? await Task.sleep(nanoseconds: 400_000_000)
+                if let localID, let current = appState.qsoRecords.firstIndex(where: { $0.id == localID }) {
+                    appState.qsoRecords[current].fields["QSL_MEDIA_PATH"] = cardURL.path
+                }
+                let archivedURL = try await QSLInboxEngine.shared.receiveEQSLCard(record: record, from: cardURL, profileID: owner, matchedQSOID: localID)
+                if appState.activeStationProfileID == owner, let localID,
+                   let current = appState.qsoRecords.firstIndex(where: { $0.id == localID }) {
+                    appState.qsoRecords[current].fields["QSL_MEDIA_PATH"] = archivedURL.path
+                }
             } catch {
-                // Continue to next card if this one failed
+                failureCount += 1
+                if firstFailure == nil { firstFailure = error.localizedDescription }
+                lastError = "\(failureCount) card(s) failed. \(firstFailure ?? "")"
+                if downloadedCount == 0 && failureCount >= 3 {
+                    throw EQSLInboxDownload.error(lastError ?? "eQSL card download failed.")
+                }
                 continue
             }
         }
 
-        appState.autoSaveActiveWorkspace()
-        statusMessage = "eQSL download finished: \(downloadedCount) new card(s) saved."
+        if appState.activeStationProfileID == owner { appState.autoSaveActiveWorkspace() }
+        statusMessage = "eQSL: \(downloadedCount) new card(s) saved, \(failureCount) failed."
         return downloadedCount
     }
 }

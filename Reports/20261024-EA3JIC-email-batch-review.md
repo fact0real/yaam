@@ -34,6 +34,8 @@ Lab599 Utility separately addresses the 13 reports in its archives plus the conf
 
 Board #405 / B-023 is a future capability architecture proposal, not a demonstrated new defect. Existing Lab599 modem-pin restrictions remain in place; no new RTS/DTR keying capability or permission was added.
 
+Later follow-up: the 24 October correction identifies B-023 as overlapping Y-066 (#25). The user subsequently requested completion of the remaining safety work; the YAAM modem-line capability boundary is implemented and verified in [the follow-up review](20261024-EA3JIC-modem-line-followup.md). The original batch dispositions above describe that earlier batch, not the later change.
+
 ## Verification
 
 - Debug build of YAAM with the project's Swift isolation settings.

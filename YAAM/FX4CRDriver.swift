@@ -168,7 +168,7 @@ public final class FX4CRDriver: ObservableObject {
     }
 
     // MARK: - Internal Transport & Polling
-    nonisolated private let serialPort = SerialPortService()
+    nonisolated private let serialPort = SerialPortService(modemLines: [.dtr, .rts])
     private var serialHealthTask: Task<Void, Never>?
     private var serialRetryTask: Task<Void, Never>?
     private var serialRetryAttempt = 0
@@ -339,8 +339,8 @@ public final class FX4CRDriver: ObservableObject {
             let portName = selectedPort.components(separatedBy: "/").last ?? selectedPort
             self.lastMessage = "Connected to FX-4CR (\(portName) via \(transportLabel) @ \(baudRate) 8N\(stopBits))"
 
-            let rtsReleased = serialPort.setRTS(active: false)
-            if !rtsReleased, connectionType == .usb {
+            let rtsReleased = connectionType != .usb || serialPort.setRTS(active: false)
+            if !rtsReleased {
                 let text = "FX-4CR: RTS could not be released on connect at \(TXLimits.utc()). CAT remains connected, but receive is unconfirmed. Check the radio is on receive locally before using PTT."
                 lastMessage = text
                 TransmitNotices.shared.post(noticeSource, text: text)
@@ -598,7 +598,7 @@ public final class FX4CRDriver: ObservableObject {
 
     /// Pulse hardware DTR/RTS lines for Morse keying (if keying via USB-C serial pin)
     public func setKeyPin(active: Bool, pin: SerialControlPin) {
-        guard isConnected else { return }
+        guard isConnected, connectionType == .usb else { return }
         if pin == .dtr {
             serialPort.setDTR(active: active)
         } else if pin == .rts {

@@ -35,7 +35,7 @@ public final class SerialKeyerDriver: ObservableObject {
     @Published public var statusMessage: String = "Disconnected"
     @Published public var availablePorts: [String] = []
 
-    private let serialPort = SerialPortService()
+    private let serialPort = SerialPortService(modemLines: [.dtr, .rts])
     private var transmitTask: Task<Void, Never>?
 
     public init() {

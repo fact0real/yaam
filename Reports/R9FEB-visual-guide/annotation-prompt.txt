@@ -1,0 +1,2 @@
+Built-in image_gen used to annotate 02-existing-contact.png.
+Preserve screenshot values, checkbox states, and service statuses. Add numbered outlines only: 1 around UTC time 042644, with comparison Email: 05:09 UTC; 2 around destination progress for LoTW, QRZ Logbook and Club Log; 3 around Send saved contact with WAIT. Do not depict actions, new success, or checked boxes.

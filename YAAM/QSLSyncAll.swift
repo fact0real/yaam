@@ -656,8 +656,8 @@ nonisolated struct QSLPassSummary: Sendable, Equatable {
 }
 
 /// One service's upload run, request by request.
-/// - QRZ takes one QSO per request. LoTW takes up to 200. eQSL.cc and Club Log take up to 200 QSOs that never failed;
-///   a QSO that already failed goes on its own, so one bad QSO cannot fail the same 200 at every run (R15).
+/// - QRZ takes one QSO per request. LoTW takes up to 200. eQSL.cc isolates previously failed QSOs;
+///   Club Log isolates only a rejected payload, keeping credential and transport retries in batches.
 /// - The service stops for this run after two failed requests in a row, or after one that clearly refused the
 ///   credentials (R9). The jobs of a refused request are blocked; the jobs not sent because of the stop stay pending
 ///   and go at the next Sync.
@@ -678,15 +678,16 @@ nonisolated struct QSLProviderPass {
         self.summary = QSLPassSummary(provider: provider, alreadyThere: alreadyThere)
     }
 
-    /// How a service's jobs are split into requests, in their order: QRZ one per request; LoTW up to 200; eQSL.cc and
-    /// Club Log up to 200 that never failed, and each one that already failed on its own.
+    /// Club Log's batch API rejects repeated small uploads. A locked vault, missing credential, or transport
+    /// failure says nothing about the QSO payload and must not turn its next run into individual uploads.
     static func requests(_ jobs: [QSLQueueJob], provider: QSLProvider) -> [[QSLQueueJob]] {
         var requests: [[QSLQueueJob]] = []
         var batch: [QSLQueueJob] = []
         let size = provider == .qrz ? 1 : 200
-        let singleAfterFailure = provider == .eqsl || provider == .clubLog
         for job in jobs {
-            if singleAfterFailure && job.attempts > 0 {
+            let rejectedPayload = job.message.localizedCaseInsensitiveContains("Club Log returned HTTP 400")
+            let isolateFailure = provider == .eqsl || (provider == .clubLog && rejectedPayload)
+            if isolateFailure && job.attempts > 0 {
                 if !batch.isEmpty { requests.append(batch); batch = [] }
                 requests.append([job])
                 continue

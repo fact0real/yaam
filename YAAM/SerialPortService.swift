@@ -11,6 +11,8 @@ import Darwin
 import Foundation
 
 nonisolated public final class SerialPortService: @unchecked Sendable {
+    public enum ModemLine: Sendable, Hashable { case dtr, rts }
+
     public static let shared = SerialPortService()
 
     private var fileDescriptor: Int32 = -1
@@ -24,8 +26,28 @@ nonisolated public final class SerialPortService: @unchecked Sendable {
     private var isReading: Bool = false
     private let readQueue = DispatchQueue(label: "com.yaam.serialport.read", qos: .userInitiated)
     private var readCallback: (@Sendable (Data) -> Void)?
+    // Immutable driver capability. Ordinary CAT and WinKeyer byte streams need neither line.
+    private let allowedModemLines: Set<ModemLine>
+    private let modemLineWriter: @Sendable (Int32, Bool, Int32) -> Int32
+    private var managedModemBits: Int32 = 0
 
-    public init() {}
+    public init(modemLines: Set<ModemLine> = []) {
+        allowedModemLines = modemLines
+        modemLineWriter = { fd, active, mask in
+            Self.writeModemLines(fd: fd, active: active, mask: mask)
+        }
+    }
+
+    // Test seam for observing the actual permission boundary without changing physical modem pins.
+    init(modemLines: Set<ModemLine>, modemLineWriter: @escaping @Sendable (Int32, Bool, Int32) -> Int32) {
+        allowedModemLines = modemLines
+        self.modemLineWriter = modemLineWriter
+    }
+
+    private static func writeModemLines(fd: Int32, active: Bool, mask: Int32) -> Int32 {
+        var bits = mask
+        return active ? ioctl(fd, TIOCMBIS, &bits) : ioctl(fd, TIOCMBIC, &bits)
+    }
 
     deinit {
         closePort()
@@ -169,12 +191,15 @@ nonisolated public final class SerialPortService: @unchecked Sendable {
             if ioctl(fileDescriptor, TIOCOUTQ, &pending) == 0 && pending > 0 {
                 errorText = "Serial output did not drain before disconnect; verify receive on the radio."
             }
-            // Drop modem lines safely on close
-            var lines: Int32 = TIOCM_DTR | TIOCM_RTS
-            _ = ioctl(fileDescriptor, TIOCMBIC, &lines)
+            // Release only lines this driver actually controlled in this session. A CAT-only
+            // connection must not change unrelated pins, even during cleanup or a failed open.
+            if managedModemBits != 0, modemLineWriter(fileDescriptor, false, managedModemBits) != 0 {
+                errorText = "Serial modem-line release failed; verify receive on the radio."
+            }
             close(fileDescriptor)
             fileDescriptor = -1
         }
+        managedModemBits = 0
         readCallback = nil
         if let ownedPath {
             Self.ownershipLock.lock()
@@ -188,20 +213,29 @@ nonisolated public final class SerialPortService: @unchecked Sendable {
 
     @discardableResult
     public func setDTR(active: Bool) -> Bool {
-        ioLock.lock(); defer { ioLock.unlock() }
-        guard fileDescriptor >= 0 else { return false }
-        var bit: Int32 = TIOCM_DTR
-        let res = active ? ioctl(fileDescriptor, TIOCMBIS, &bit) : ioctl(fileDescriptor, TIOCMBIC, &bit)
-        return res == 0
+        setModemLine(.dtr, active: active)
     }
 
     @discardableResult
     public func setRTS(active: Bool) -> Bool {
+        setModemLine(.rts, active: active)
+    }
+
+    private func setModemLine(_ line: ModemLine, active: Bool) -> Bool {
         ioLock.lock(); defer { ioLock.unlock() }
+        guard allowedModemLines.contains(line) else {
+            errorText = "This serial driver has not declared permission to control \(line == .dtr ? "DTR" : "RTS")."
+            return false
+        }
         guard fileDescriptor >= 0 else { return false }
-        var bit: Int32 = TIOCM_RTS
-        let res = active ? ioctl(fileDescriptor, TIOCMBIS, &bit) : ioctl(fileDescriptor, TIOCMBIC, &bit)
-        return res == 0
+        let bit = Int32(line == .dtr ? TIOCM_DTR : TIOCM_RTS)
+        // An unsuccessful assertion can still leave physical state uncertain; retry release on close.
+        managedModemBits |= bit
+        guard modemLineWriter(fileDescriptor, active, bit) == 0 else {
+            errorText = "Serial \(line == .dtr ? "DTR" : "RTS") change failed; verify the radio locally."
+            return false
+        }
+        return true
     }
 
     public func getControlLines() -> (dtr: Bool, rts: Bool, cts: Bool, dsr: Bool, dcd: Bool, ri: Bool)? {

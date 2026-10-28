@@ -19,14 +19,22 @@ import Foundation
 
 /// Stand-in: records the line writes the driver makes.
 final class SerialPortService {
+    nonisolated enum ModemLine: Sendable, Hashable { case dtr, rts }
     struct Write { let line: String; let active: Bool; let at: Date }
     static var writes: [Write] = []
-    init() {}
+    private let modemLines: Set<ModemLine>
+    init(modemLines: Set<ModemLine> = []) { self.modemLines = modemLines }
     static func availablePorts(includeBluetooth: Bool = true) -> [String] { [] }
     func openPort(path: String, baudRate: Int = 1200, stopBits: Int = 1, onReceive: ((Data) -> Void)? = nil) -> Bool { true }
     func closePort() {}
-    @discardableResult func setDTR(active: Bool) -> Bool { Self.writes.append(Write(line: "DTR", active: active, at: Date())); return true }
-    @discardableResult func setRTS(active: Bool) -> Bool { Self.writes.append(Write(line: "RTS", active: active, at: Date())); return true }
+    @discardableResult func setDTR(active: Bool) -> Bool {
+        guard modemLines.contains(.dtr) else { return false }
+        Self.writes.append(Write(line: "DTR", active: active, at: Date())); return true
+    }
+    @discardableResult func setRTS(active: Bool) -> Bool {
+        guard modemLines.contains(.rts) else { return false }
+        Self.writes.append(Write(line: "RTS", active: active, at: Date())); return true
+    }
 }
 
 /// Stand-in: only the Morse letters this test sends.
