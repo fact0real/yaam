@@ -520,7 +520,11 @@ struct StatisticsView: View {
                                                 UnconfirmedCountryButton(
                                                     band: bandStat.band,
                                                     countryStat: countryStat,
-                                                    onOpenContact: showUnconfirmedContactInLog
+                                                    onOpenContact: showUnconfirmedContactInLog,
+                                                    onComposeEmail: { contact in
+                                                        guard let record = appState.qsoRecords.first(where: { $0.id == contact.id }) else { return }
+                                                        prepareEmail(for: record, qslDelivery: false)
+                                                    }
                                                 ) {
                                                     showUnconfirmedQSOs(
                                                         band: bandStat.band,
@@ -1760,6 +1764,7 @@ struct UnconfirmedCountryButton: View {
     let band: String
     let countryStat: UnconfirmedCountryStatModel
     let onOpenContact: (UnconfirmedQSOContactPreview) -> Void
+    let onComposeEmail: (UnconfirmedQSOContactPreview) -> Void
     let action: () -> Void
 
     @State private var isShowingHoverDetails = false
@@ -1883,6 +1888,26 @@ struct UnconfirmedCountryButton: View {
                 .stroke(ageColor.opacity(0.30), lineWidth: 1)
         )
         .buttonStyle(.plain)
+        .overlay(alignment: .topTrailing) {
+            if let contact = countryStat.contactPreviews.first {
+                Button {
+                    hoverShowTask?.cancel()
+                    hoverDismissTask?.cancel()
+                    isShowingHoverDetails = false
+                    onComposeEmail(contact)
+                } label: {
+                    Image(systemName: "envelope.fill")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Color(red: 0.22, green: 0.52, blue: 0.88))
+                        .frame(width: 23, height: 23)
+                        .background(.regularMaterial, in: Circle())
+                }
+                .buttonStyle(.plain)
+                .padding(4)
+                .help("Compose an email to a contact in this country")
+                .accessibilityLabel("Email a contact in \(countryStat.country)")
+            }
+        }
         .accessibilityHint(tooltipText)
         .onHover(perform: updateHoverDetails)
         .onDisappear {
@@ -1894,6 +1919,12 @@ struct UnconfirmedCountryButton: View {
                 band: band,
                 countryStat: countryStat,
                 onHover: updateHoverDetails,
+                onComposeEmail: { contact in
+                    hoverShowTask?.cancel()
+                    hoverDismissTask?.cancel()
+                    isShowingHoverDetails = false
+                    onComposeEmail(contact)
+                },
                 onOpenContact: { contact in
                     hoverShowTask?.cancel()
                     hoverDismissTask?.cancel()
@@ -1947,6 +1978,7 @@ private struct UnconfirmedCountryHoverPreview: View {
     let band: String
     let countryStat: UnconfirmedCountryStatModel
     let onHover: (Bool) -> Void
+    let onComposeEmail: (UnconfirmedQSOContactPreview) -> Void
     let onOpenContact: (UnconfirmedQSOContactPreview) -> Void
 
     var body: some View {
@@ -1999,9 +2031,19 @@ private struct UnconfirmedCountryHoverPreview: View {
                         .font(.system(.body, design: .monospaced).weight(.bold))
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(Color.accentColor)
+                .foregroundStyle(.primary)
+                .textSelection(.disabled)
                 .help("Open this QSO in the Log Table")
                 Spacer(minLength: 4)
+                Button {
+                    onComposeEmail(contact)
+                } label: {
+                    Image(systemName: "envelope")
+                        .font(.caption.weight(.semibold))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Color.accentColor)
+                .help("Compose an email to \(contact.callsign)")
                 if !contact.operatorCallsign.isEmpty {
                     Text("OP \(contact.operatorCallsign)")
                         .font(.caption2.monospaced())
@@ -2034,6 +2076,33 @@ private struct UnconfirmedCountryHoverPreview: View {
             Text([dateTime, radio].filter { !$0.isEmpty }.joined(separator: " · "))
                 .font(.caption2.monospacedDigit())
                 .foregroundStyle(.secondary)
+
+            if !contact.emailHistory.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    Label("Sent email history", systemImage: "envelope.badge")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    ForEach(contact.emailHistory.prefix(5)) { email in
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(email.subject.isEmpty ? "(No subject)" : email.subject)
+                                .font(.caption2.weight(.medium))
+                                .lineLimit(1)
+                            Text([email.date.formatted(date: .abbreviated, time: .shortened), email.email]
+                                .filter { !$0.isEmpty }
+                                .joined(separator: " · "))
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundStyle(.tertiary)
+                                .lineLimit(1)
+                        }
+                    }
+                    if contact.emailHistory.count > 5 {
+                        Text("and \(contact.emailHistory.count - 5) earlier message(s)")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .padding(.top, 3)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -2183,8 +2252,10 @@ nonisolated struct StatisticsSnapshot: Sendable {
         guard !Task.isCancelled else { return .empty }
         let confirmedDxccCountries = Set(
             records.compactMap { record -> String? in
-                let country = ConfirmationOpportunityIndex.normalizedCountry(for: record)
-                return record.isConfirmed && !country.isEmpty ? country : nil
+                guard record.isConfirmed else { return nil }
+                let rawDXCC = record["DXCC"].trimmingCharacters(in: .whitespacesAndNewlines)
+                guard let dxccCode = Int(rawDXCC), dxccCode > 0 else { return nil }
+                return String(dxccCode)
             }
         )
 
@@ -2352,14 +2423,20 @@ nonisolated struct StatisticsSnapshot: Sendable {
     ) -> [UnconfirmedBandCountryStatModel] {
         var values: [String: [String: (total: Int, confirmed: Int, dates: [Date], dateStrings: [String], callsigns: Set<String>, contacts: [UnconfirmedQSOContactPreview])]] = [:]
 
-        // Fast lookup map for sent email requests by callsign
+        // Match the app's outgoing QSL history policy; internal and failed mail is not a sent contact email.
         var emailCountsByCall: [String: (count: Int, lastDate: Date)] = [:]
+        var emailHistoryByCall: [String: [UnconfirmedEmailHistoryPreview]] = [:]
         for entry in emailHistory {
+            guard entry.countsAsQSL else { continue }
             let call = entry.callsign.uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
             guard !call.isEmpty else { continue }
             let existing = emailCountsByCall[call]?.count ?? 0
             let lastDate = emailCountsByCall[call]?.lastDate ?? entry.date
             emailCountsByCall[call] = (existing + 1, max(lastDate, entry.date))
+            emailHistoryByCall[call, default: []].append(UnconfirmedEmailHistoryPreview(entry: entry))
+        }
+        for call in emailHistoryByCall.keys {
+            emailHistoryByCall[call]?.sort { $0.date > $1.date }
         }
 
         for record in records {
@@ -2376,7 +2453,11 @@ nonisolated struct StatisticsSnapshot: Sendable {
 
             let call = record["CALL"].uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
             if !call.isEmpty { value.callsigns.insert(call) }
-            value.contacts.append(UnconfirmedQSOContactPreview(record: record, band: band))
+            value.contacts.append(UnconfirmedQSOContactPreview(
+                record: record,
+                band: band,
+                emailHistory: emailHistoryByCall[call] ?? []
+            ))
 
             let dateRaw = record["QSO_DATE"].filter(\.isNumber)
             if !dateRaw.isEmpty {

@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.37.53 - 2026-10-28
+
+- Show sent email history for each callsign in the Unconfirmed DXCC hover details and count only successful outgoing contact emails.
+- Add an email button to each country card and contact preview so an email can be composed without navigating to the Log Table.
+- Make hover-preview callsigns bold without link styling.
+- Count confirmed DXCC entities by their ADIF DXCC code, merging alternate country labels for the same entity.
+
 ## 1.37.52 - 2026-10-28
 
 - Delay unconfirmed-country hover details by 500 ms and cancel them when the pointer leaves before they appear.

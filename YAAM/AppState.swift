@@ -99,8 +99,9 @@ nonisolated struct UnconfirmedQSOContactPreview: Identifiable, Sendable {
     let frequency: String
     let rstSent: String
     let rstReceived: String
+    let emailHistory: [UnconfirmedEmailHistoryPreview]
 
-    init(record: QSORecordModel, band: String) {
+    init(record: QSORecordModel, band: String, emailHistory: [UnconfirmedEmailHistoryPreview] = []) {
         func firstValue(_ keys: [String]) -> String {
             for key in keys {
                 let value = record[key].trimmingCharacters(in: .whitespacesAndNewlines)
@@ -122,6 +123,21 @@ nonisolated struct UnconfirmedQSOContactPreview: Identifiable, Sendable {
         frequency = firstValue(["FREQ"])
         rstSent = firstValue(["RST_SENT"])
         rstReceived = firstValue(["RST_RCVD"])
+        self.emailHistory = emailHistory
+    }
+}
+
+nonisolated struct UnconfirmedEmailHistoryPreview: Identifiable, Sendable {
+    let id: UUID
+    let date: Date
+    let email: String
+    let subject: String
+
+    init(entry: EmailHistoryEntry) {
+        id = entry.id
+        date = entry.date
+        email = entry.email
+        subject = entry.subject
     }
 }
 
