@@ -3,6 +3,7 @@ import Foundation
 nonisolated enum SKEDMessagingError: LocalizedError, Equatable, Sendable {
     case invalidInput, missingToken, unavailable, identityRequired, optInRequired
     case unauthorized, recipientUnavailable, rateLimited, conflict, invalidResponse, transport
+    case certificateVerificationRefused
 
     var errorDescription: String? {
         switch self {
@@ -17,6 +18,7 @@ nonisolated enum SKEDMessagingError: LocalizedError, Equatable, Sendable {
         case .conflict: return "This send request has expired or conflicts with a previous request. Refresh before starting a new message."
         case .invalidResponse: return "The messaging service returned an unexpected response."
         case .transport: return "Delivery could not be confirmed. Retry the same message to check safely; it will not be sent twice."
+        case .certificateVerificationRefused: return "LoTW verification could not be completed. Use a current certificate for this callsign with an RSA key of at least 2,048 bits. An existing or revoked identity requires administrator review. If LoTW is unavailable, try later or contact the administrator."
         }
     }
 }
@@ -26,9 +28,11 @@ nonisolated struct SKEDMessagingStatus: Codable, Sendable {
     let verifiedCallsign: String?
     let enabled: Bool
     let retentionDays: Int
+    var lotwVerificationAvailable: Bool? = nil
     enum CodingKeys: String, CodingKey {
         case available, enabled
         case verifiedCallsign = "verified_callsign", retentionDays = "retention_days"
+        case lotwVerificationAvailable = "lotw_verification_available"
     }
 }
 
@@ -96,7 +100,7 @@ nonisolated enum SKEDMessagingContract {
         guard normalized.range(of: #"^qrz_[A-Za-z0-9_-]{40,80}$"#, options: .regularExpression) != nil else {
             throw SKEDMessagingError.missingToken
         }
-        let allowed = ["status", "preferences", "messages", "blocks", "reports"]
+        let allowed = ["status", "preferences", "messages", "blocks", "reports", "identity/lotw/challenge", "identity/lotw/verify"]
         guard allowed.contains(action) || (action.hasPrefix("blocks/") && validCallsign(String(action.dropFirst(7)))),
               ["GET", "POST", "PUT"].contains(method), body?.count ?? 0 <= 12000,
               before == nil || (action == "messages" && method == "GET" && validID(before!)) else {
@@ -166,6 +170,17 @@ actor SKEDMessagingService {
     func status(token: String) async throws -> SKEDMessagingStatus {
         let value: SKEDMessagingStatus = try await perform(action: "status", token: token)
         return try validated(value)
+    }
+
+    func lotwChallenge(call: String, certificate: String, token: String) async throws -> LoTWProofChallenge {
+        try await perform(action: "identity/lotw/challenge", method: "POST", token: token,
+            body: JSONSerialization.data(withJSONObject: ["callsign": call, "certificate": certificate]))
+    }
+
+    func verifyLoTW(challenge: LoTWProofChallenge, proof: LoTWPublicProof, token: String) async throws -> LoTWProofResult {
+        try await perform(action: "identity/lotw/verify", method: "POST", token: token,
+            body: JSONSerialization.data(withJSONObject: ["challenge_id": challenge.challengeID,
+                "certificate": proof.certificate, "signature": proof.signature]))
     }
 
     func setEnabled(_ enabled: Bool, token: String) async throws -> SKEDMessagingStatus {
@@ -242,6 +257,9 @@ actor SKEDMessagingService {
             guard let http = response as? HTTPURLResponse, http.url?.scheme == "https",
                   http.url?.host == SKEDMessagingContract.origin.host else { throw SKEDMessagingError.invalidResponse }
             if http.statusCode != 200 {
+                if action.hasPrefix("identity/lotw/"), [400, 403, 409, 422, 503].contains(http.statusCode) {
+                    throw SKEDMessagingError.certificateVerificationRefused
+                }
                 switch http.statusCode {
                 case 401: throw SKEDMessagingError.unauthorized
                 case 403:

@@ -1,5 +1,6 @@
 // swiftc -D MESSAGING_REGRESSION -parse-as-library Tests/SKEDMessagingRegression.swift
-// YAAM/SKEDMessagingService.swift YAAM/SKEDMessagingModel.swift -o /tmp/sked-messaging && /tmp/sked-messaging
+// YAAM/SKEDMessagingService.swift YAAM/SKEDMessagingModel.swift YAAM/LoTWProofSigner.swift
+// -o /tmp/sked-messaging && /tmp/sked-messaging
 import Foundation
 
 final class MessagingStubProtocol: URLProtocol, @unchecked Sendable {
