@@ -190,11 +190,6 @@ final class NetworkTransceiverEmulatorEngine: ObservableObject {
     init() {
         configureSubcomponents()
         rfEngine.setupDefaultSignals()
-        if UserDefaults.standard.bool(forKey: "networkTransceiverEmulatorAutoStart") {
-            DispatchQueue.main.async { [weak self] in
-                self?.startServers()
-            }
-        }
     }
 
     private func configureSubcomponents() {
@@ -474,7 +469,6 @@ final class NetworkTransceiverEmulatorEngine: ObservableObject {
             startTelemetryLoop()
 
             isServerRunning = true
-            UserDefaults.standard.set(true, forKey: "networkTransceiverEmulatorAutoStart")
             appendLog("Network Transceiver Emulator online: Icom CI-V/Audio and Hamlib rigctld ready", category: .info)
         } catch {
             appendLog("Failed to start emulator: \(error.localizedDescription)", category: .error)
@@ -483,7 +477,6 @@ final class NetworkTransceiverEmulatorEngine: ObservableObject {
 
     func stopServers() {
         guard isServerRunning else { return }
-        UserDefaults.standard.set(false, forKey: "networkTransceiverEmulatorAutoStart")
         telemetryTimer?.cancel()
         telemetryTimer = nil
         icomServer.stop()

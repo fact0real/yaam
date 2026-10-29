@@ -39,8 +39,11 @@ public struct AzimuthalAndFlatMapCanvas: View {
     @ObservedObject private var balloonEngine = APRSBalloonTrackingEngine.shared
     @State private var feedConsumerID = UUID()
     @State private var feedsVisible = false
-    @State private var liveDate = Date()
-    private let timer = Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()
+    @State private var mapFrameDate = Date()
+    @State private var mapFrameRevision = 0
+    private let mapFrameTimer = Timer.publish(every: 5.0, on: .main, in: .common).autoconnect()
+
+    private var liveDate: Date { mapFrameDate }
 
     @AppStorage("azimuthMapTheme") private var selectedThemeRaw: String = AzimuthMapTheme.shackNight.rawValue
     @AppStorage("antennaBeamwidth") private var antennaBeamwidth: Double = 60.0
@@ -94,43 +97,45 @@ public struct AzimuthalAndFlatMapCanvas: View {
     public var body: some View {
         GeometryReader { geometry in
             let size = geometry.size
-            let subSolar = SolarEphemeris.calculate(at: liveDate)
-            let subLunar = LunarEphemeris.calculate(at: liveDate)
-            let terminatorPoints = SolarEphemeris.terminatorCoordinates(at: liveDate, stepDegrees: 2.0)
 
             ZStack(alignment: .bottomLeading) {
                 // Outer Canvas Background matching theme
                 WorldVectorGeography.colorCanvasBackground(for: currentTheme)
                     .ignoresSafeArea()
 
-                Canvas { context, canvasSize in
-                    if mode == .azimuthal {
-                        drawAzimuthalMap(
-                            context: context,
-                            size: canvasSize,
-                            home: homeCoordinate,
-                            subSolar: subSolar,
-                            subLunar: subLunar,
-                            terminator: terminatorPoints
-                        )
-                    } else {
-                        drawEquirectangularMap(
-                            context: context,
-                            size: canvasSize,
-                            home: homeCoordinate,
-                            subSolar: subSolar,
-                            subLunar: subLunar,
-                            terminator: terminatorPoints
-                        )
+                ThrottledMapCanvas(revision: mapFrameRevision, size: size) {
+                    Canvas { context, canvasSize in
+                        let subSolar = SolarEphemeris.calculate(at: mapFrameDate)
+                        let subLunar = LunarEphemeris.calculate(at: mapFrameDate)
+                        let terminatorPoints = SolarEphemeris.terminatorCoordinates(at: mapFrameDate, stepDegrees: 2.0)
+
+                        if mode == .azimuthal {
+                            drawAzimuthalMap(
+                                context: context,
+                                size: canvasSize,
+                                home: homeCoordinate,
+                                subSolar: subSolar,
+                                subLunar: subLunar,
+                                terminator: terminatorPoints
+                            )
+                        } else {
+                            drawEquirectangularMap(
+                                context: context,
+                                size: canvasSize,
+                                home: homeCoordinate,
+                                subSolar: subSolar,
+                                subLunar: subLunar,
+                                terminator: terminatorPoints
+                            )
+                        }
                     }
+                    .drawingGroup()
                 }
-                .drawingGroup()
+                .equatable()
 
                 // Live UTC GMT Clock & Station Profile Watermark (Bottom-Leading)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(formattedGMT(liveDate))
-                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                        .foregroundColor(currentTheme == .classicLight ? Color(red: 0.15, green: 0.20, blue: 0.25) : Color(red: 0.70, green: 0.80, blue: 0.90))
+                    LiveGMTClock(theme: currentTheme)
 
                     Text("\(stationCallsign.isEmpty ? TransmitIdentity.callsignNotSetLabel : stationCallsign) · \(stationLocator.isEmpty ? TransmitIdentity.locatorNotSetLabel : stationLocator) · Great-Circle")
                         .font(.system(size: 9, weight: .medium, design: .monospaced))
@@ -163,8 +168,9 @@ public struct AzimuthalAndFlatMapCanvas: View {
                 }
             }
             .contentShape(Rectangle())
-            .onReceive(timer) { newDate in
-                liveDate = newDate
+            .onReceive(mapFrameTimer) { newDate in
+                mapFrameDate = newDate
+                mapFrameRevision &+= 1
             }
             .gesture(
                 DragGesture(minimumDistance: 0)
@@ -184,13 +190,6 @@ public struct AzimuthalAndFlatMapCanvas: View {
         satEngine.setFeedConsumer(feedConsumerID, active: feedsVisible && showSatelliteTracks)
         auroraEngine.setFeedConsumer(feedConsumerID, active: feedsVisible && showAuroralOval)
         drapEngine.setFeedConsumer(feedConsumerID, active: feedsVisible && showDRAPLayer)
-    }
-
-    private func formattedGMT(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss 'GMT'"
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
-        return formatter.string(from: date)
     }
 
     private func handleCanvasTap(location: CGPoint, size: CGSize) {
@@ -2027,6 +2026,43 @@ public struct AzimuthalAndFlatMapCanvas: View {
                 anchor: .center
             )
         }
+    }
+}
+
+private struct ThrottledMapCanvas<Content: View>: View, Equatable {
+    let revision: Int
+    let size: CGSize
+    let content: Content
+
+    init(revision: Int, size: CGSize, @ViewBuilder content: () -> Content) {
+        self.revision = revision
+        self.size = size
+        self.content = content()
+    }
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.revision == rhs.revision && lhs.size == rhs.size
+    }
+
+    var body: some View { content }
+}
+
+private struct LiveGMTClock: View {
+    let theme: AzimuthMapTheme
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            Text(formattedGMT(context.date))
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .foregroundColor(theme == .classicLight ? Color(red: 0.15, green: 0.20, blue: 0.25) : Color(red: 0.70, green: 0.80, blue: 0.90))
+        }
+    }
+
+    private func formattedGMT(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss 'GMT'"
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        return formatter.string(from: date)
     }
 }
 

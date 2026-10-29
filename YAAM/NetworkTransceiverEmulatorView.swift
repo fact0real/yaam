@@ -66,9 +66,6 @@ struct NetworkTransceiverEmulatorView: View {
         .background(Color(NSColor.windowBackgroundColor))
         .onAppear {
             emulator.isSpectrumVisualizerActive = (selectedTab == 3)
-            if !emulator.isServerRunning {
-                emulator.startServers()
-            }
         }
         .onDisappear {
             emulator.isSpectrumVisualizerActive = false
