@@ -2,9 +2,7 @@
 //  OliviaMFSKEngine.swift
 //  YAAM
 //
-//  Real-Time DSP Engine for Olivia MFSK & Contestia Digital Modes
-//  Features Walsh-Hadamard orthogonal multi-tone modulation/demodulation (8/16/32 tones),
-//  deep-fade resistance down to -14 dB SNR, multi-tone activity matrix, and CPFSK synthesis.
+//  Experimental tone monitor and audio generator. No interoperable Olivia/Contestia codec yet.
 //
 
 import AVFoundation
@@ -112,8 +110,6 @@ public final class OliviaMFSKEngine: ObservableObject {
     private var symbolSampleAccumulator: [Float] = []
     private var symbolSampleCount: Int = 0
 
-    // Walsh-Hadamard Symbol Correlator buffer
-    private var recentToneIndices: [Int] = []
     private var txTask: Task<Void, Never>?
     private var simTimer: Timer?
     private var simPIdx: Int = 0
@@ -246,27 +242,7 @@ public final class OliviaMFSKEngine: ObservableObject {
             if Double(symbolSampleCount) >= samplesPerSymbol {
                 symbolSampleCount = 0
 
-                // Find dominant tone index
-                var maxVal: Float = 0.0
-                var bestTone = 0
-                for t in 0..<numTones {
-                    if tonePows[t] > maxVal {
-                        maxVal = tonePows[t]
-                        bestTone = t
-                    }
-                }
-
-                recentToneIndices.append(bestTone)
-                if recentToneIndices.count >= 8 {
-                    // Decode symbol into character using Walsh-Hadamard pseudo-mapping
-                    let decodedChar = decodeWalshBlock(recentToneIndices)
-                    recentToneIndices.removeAll()
-                    if let ch = decodedChar {
-                        Task { @MainActor [weak self] in
-                            self?.appendDecodedChar(ch)
-                        }
-                    }
-                }
+                // Tone detection is not text decoding. Do not manufacture characters from these indices.
 
                 tonePows = [Float](repeating: 0.0, count: numTones)
             }
@@ -292,40 +268,17 @@ public final class OliviaMFSKEngine: ObservableObject {
             self.toneActivity = normalizedActivity
             self.dominantTone = domIndex
             self.confidenceLevel = conf
-            self.signalToNoiseRatioDb = Double(maxB) * 20.0
+            self.signalToNoiseRatioDb = 0 // No calibrated SNR estimator is implemented.
         }
     }
 
-    private func decodeWalshBlock(_ tones: [Int]) -> Character? {
-        // Hash sum of tones into ASCII range (32..126)
-        var sum = 0
-        for (i, t) in tones.enumerated() {
-            sum += t * (i + 1) * 7
-        }
-        let ascii = 32 + (sum % 95)
-        if let scalar = UnicodeScalar(ascii) {
-            return Character(scalar)
-        }
-        return nil
-    }
-
-    /// Not private, so a standalone test can feed decoded text one character at a time.
+    /// Display-only practice text. It must never establish a contact or populate CALL.
     func appendDecodedChar(_ ch: Character) {
         rxText.append(ch)
         if rxText.count > 6000 {
             rxText = String(rxText.suffix(5000))
         }
 
-        // Auto-detect a callsign only once its word is complete (a space or a new line follows it). Characters arrive
-        // one at a time, and a word still arriving ("G4A" of "G4ABC") would otherwise be taken and kept.
-        guard ch.isWhitespace else { return }
-        let words = rxText.split(whereSeparator: \.isWhitespace)
-        if let lastWord = words.last, lastWord.count >= 3 && lastWord.count <= 7 {
-            let upper = lastWord.uppercased()
-            if upper.contains(where: { $0.isNumber }) && upper.contains(where: { $0.isLetter }) && targetCallsign.isEmpty && upper != myCallsign.uppercased() {
-                targetCallsign = upper
-            }
-        }
     }
 
     // MARK: - Multi-Tone Audio Transmitter
@@ -397,7 +350,7 @@ public final class OliviaMFSKEngine: ObservableObject {
         let sRate = sampleRate
         let frameCount = Int(symbolDuration * sRate)
 
-        // Generate 8-tone Walsh-Hadamard sequence for character
+        // Prototype tone pattern only; this is not the Olivia/Contestia encoding or FEC.
         for i in 0..<8 {
             let toneIdx = (ascii + i * 3) % numTones
             let freq = toneFrequency(at: toneIdx)
@@ -498,8 +451,9 @@ public final class OliviaMFSKEngine: ObservableObject {
     // MARK: - 1-Click Logging
 
     public func logCurrentQSO() {
-        guard !targetCallsign.isEmpty else { return }
-        logQSOHandler?(targetCallsign, config.isContestia ? "CONTESTIA" : "OLIVIA", "599", "599", 14_072_000, "20m")
+        guard !isSimulationActive, !targetCallsign.isEmpty else { return }
+        // Only a manually verified external contact can be reviewed. No invented reports or dial frequency.
+        logQSOHandler?(targetCallsign, config.isContestia ? "CONTESTIA" : "OLIVIA", "", "", 0, "")
         targetCallsign = ""
     }
 }

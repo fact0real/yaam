@@ -1058,7 +1058,7 @@ struct LocalActivityMatrixView: View {
                 }
 
                 let call = r["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-                let country = canonicalCountryName(r["COUNTRY"]).trimmingCharacters(in: .whitespacesAndNewlines)
+                let country = ConfirmationOpportunityIndex.normalizedCountry(for: r)
                 let flag = country.isEmpty ? "🌐" : countryToFlag(country)
                 let band = ConfirmationOpportunityIndex.normalizedBand(for: r)
                 let mode = r["SUBMODE"].isEmpty ? r["MODE"] : r["SUBMODE"]

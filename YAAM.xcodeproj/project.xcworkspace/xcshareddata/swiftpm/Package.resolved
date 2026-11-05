@@ -1,5 +1,5 @@
 {
-  "originHash" : "d31d0ee436953521130b5c33aa9ecbd2b803802ce12ccf2d4a0f2e34b457f48a",
+  "originHash" : "d7d1600c0ae71c485e7d20489403e9d9b5731f047cd119c229a05d7294077bf4",
   "pins" : [
     {
       "identity" : "ft8-808",
@@ -7,6 +7,15 @@
       "location" : "https://github.com/mattackerman808/ft8-808",
       "state" : {
         "revision" : "efe779c6bab3c5ee7c359378614debfd14ae1e00"
+      }
+    },
+    {
+      "identity" : "sparkle",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/sparkle-project/Sparkle",
+      "state" : {
+        "revision" : "ab7d71291238df6e0492143b120c9b696a35f603",
+        "version" : "2.10.1"
       }
     }
   ],

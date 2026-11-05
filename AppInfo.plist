@@ -2,6 +2,28 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+    <key>SUFeedURL</key>
+    <string>https://yaam.asis.sh/updates/appcast.xml</string>
+    <key>SUPublicEDKey</key>
+    <string>DsYrufXR2fz1DpG6Xg6nGWLBJdzSR9aH7cXEoDfBg24=</string>
+    <key>SUEnableInstallerLauncherService</key>
+    <true/>
+    <key>SUVerifyUpdateBeforeExtraction</key>
+    <true/>
+    <key>SURequireSignedFeed</key>
+    <true/>
+    <key>SUSignedFeedFailureExpirationInterval</key>
+    <integer>0</integer>
+    <key>SUEnableAutomaticChecks</key>
+    <true/>
+    <key>SUScheduledCheckInterval</key>
+    <integer>86400</integer>
+    <key>SUAutomaticallyUpdate</key>
+    <false/>
+    <key>SUEnableSystemProfiling</key>
+    <false/>
+    <key>SUEnableJavaScript</key>
+    <false/>
     <key>NSScreenCaptureUsageDescription</key>
     <string>YAAM captures system playback audio to decode WebSDR FT8 signals without using the microphone.</string>
     <key>NSAppTransportSecurity</key>

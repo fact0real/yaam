@@ -11,6 +11,38 @@
 
 import Foundation
 
+/// A local, immutable review snapshot. Contains no credentials and performs no network or database writes.
+nonisolated struct QSLSyncPreview: Identifiable, Sendable {
+    let id = UUID()
+    var profileID: UUID?
+    var stationCallsign: String
+    var uploads: [QSLProvider: [UUID]]
+    var fieldsByID: [UUID: [String: String]]
+    var notChecked: [QSLProvider: String]
+    var blocker: String?
+
+    var jobKeys: Set<String> {
+        Set(uploads.flatMap { provider, ids in ids.map { QSLSyncAll.jobKey($0, provider) } })
+    }
+    var uploadCount: Int { uploads.values.reduce(0) { $0 + $1.count } }
+
+    /// Earlier providers may add acceptance marks during this run. Those marks do not change the contact reviewed.
+    func permits(_ fields: [String: String], for id: UUID) -> Bool {
+        guard let original = fieldsByID[id] else { return false }
+        let marks = Set(QSLProvider.allCases.flatMap {
+            QSLUploadStatus.acceptedFields(for: $0, date: "").map(\.field)
+        })
+        return original.filter { !marks.contains($0.key) } == fields.filter { !marks.contains($0.key) }
+    }
+
+    /// Reject changed logs, stations, provider availability or queue scope. The operator must review again.
+    func matches(_ current: Self) -> Bool {
+        profileID == current.profileID && stationCallsign == current.stationCallsign &&
+        jobKeys == current.jobKeys && fieldsByID == current.fieldsByID &&
+        notChecked == current.notChecked && blocker == current.blocker
+    }
+}
+
 nonisolated enum QSLUploadStatus {
     /// Values of a sent field that mean the QSO was uploaded and accepted. Y is the ADIF value; V, C and CONFIRMED
     /// come from the QSL Hub rule of 1.37.34 and are kept, although they are not values of these ADIF fields.

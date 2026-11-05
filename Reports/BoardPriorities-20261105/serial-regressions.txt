@@ -1,0 +1,2 @@
+PASS real PTY: exclusive UART ownership, exact byte delivery, bounded backpressure/retry and bounded close; no radio
+PASS real driver parsers: healthy replies, silent-link expiration, persistent RX uncertainty and Icom normalized BCD speed; fake ports only

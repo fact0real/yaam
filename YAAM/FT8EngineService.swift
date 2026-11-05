@@ -857,6 +857,7 @@ final class FT8EngineService: ObservableObject {
     }
 
     func stopMonitoring() {
+        clockSkewAlert = nil
         suggestedTxAudioHz = nil
         quietSpectrumRows.removeAll(keepingCapacity: true)
         decodeTask?.cancel()
@@ -1712,16 +1713,8 @@ final class FT8EngineService: ObservableObject {
             }
         }
 
-        // Clock Drift Analysis: Calculate median DT across decoded signals
-        if !rows.isEmpty {
-            let dtValues = rows.map { $0.timeOffset }.sorted()
-            let medianDT = dtValues[dtValues.count / 2]
-            if abs(medianDT) > 2.0 {
-                clockSkewAlert = "Clock Drift Warning: Median DT is \(String(format: "%+.2f", medianDT))s! Local system clock is misaligned. Run 'sudo sntp -sS time.apple.com' to sync."
-            } else if abs(medianDT) < 0.8 {
-                clockSkewAlert = nil
-            }
-        }
+        // No network time measurement is available here. Never diagnose the local clock from peer DT alone.
+        clockSkewAlert = FT8TimingDiagnostic.warning(offsets: rows.map { Double($0.timeOffset) })
 
         if !rows.isEmpty {
             decodedRows.insert(contentsOf: rows, at: 0)

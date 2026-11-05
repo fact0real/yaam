@@ -128,7 +128,7 @@ extension AppState {
             let targetCountry = canonicalCountryName(country).lowercased()
             return self.qsoRecords.contains { rec in
                 let recBand = (rec.fields["BAND"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-                let recCountry = canonicalCountryName(rec.fields["COUNTRY"] ?? "").lowercased()
+                let recCountry = ConfirmationOpportunityIndex.normalizedCountry(for: rec).lowercased()
                 return recBand == targetBand && recCountry == targetCountry
             }
         }
@@ -189,17 +189,17 @@ extension AppState {
 
     /// The frequency of the connected radio, or nil: TCI, FLRig and rigctld in the bandmap's order (BandmapView), then
     /// the Icom network radio and the direct drivers. A source is read only while it is connected; the drivers all
-    /// start at 14.074 MHz.
+    /// start at 14.074 MHz. Only a fresh physical readback can establish the logged dial frequency.
     func currentRadioFrequencyHz() -> UInt64? {
         RadioFrequency.firstConnected([
-            .init(isConnected: TCIClient.shared.isConnected, frequencyHz: TCIClient.shared.vfoAFrequencyHz),
-            .init(isConnected: FLRigClient.shared.isConnected, frequencyHz: FrequencyBounds.hertz(kHz: FLRigClient.shared.frequencyHz.rounded() / 1000) ?? 0),
-            .init(isConnected: rigControlClient.state.isConnected, frequencyHz: rigControlClient.snapshot?.frequencyHz ?? 0),
-            .init(isConnected: icomNetworkRadio.state.isConnected, frequencyHz: icomNetworkRadio.snapshot?.frequencyHz ?? 0),
-            .init(isConnected: Lab599TX500Driver.shared.isConnected, frequencyHz: Lab599TX500Driver.shared.frequencyHz),
-            .init(isConnected: IcomUSBRadioDriver.shared.isConnected, frequencyHz: IcomUSBRadioDriver.shared.frequencyHz),
-            .init(isConnected: Xiegu6100Driver.shared.isConnected, frequencyHz: Xiegu6100Driver.shared.frequencyHz),
-            .init(isConnected: FX4CRDriver.shared.isConnected, frequencyHz: FX4CRDriver.shared.frequencyHz)
+            .init(isConnected: TCIClient.shared.isConnected, frequencyHz: TCIClient.shared.frequencyReadbackHz ?? 0, observedUptime: TCIClient.shared.frequencyReadbackUptime),
+            .init(isConnected: FLRigClient.shared.isConnected, frequencyHz: FLRigClient.shared.frequencyReadbackHz ?? 0, observedUptime: FLRigClient.shared.frequencyReadbackUptime),
+            .init(isConnected: rigControlClient.state.isConnected, frequencyHz: rigControlClient.frequencyReadbackHz ?? 0, observedUptime: rigControlClient.frequencyReadbackUptime),
+            .init(isConnected: icomNetworkRadio.state.isConnected, frequencyHz: icomNetworkRadio.frequencyReadbackHz ?? 0, observedUptime: icomNetworkRadio.frequencyReadbackUptime),
+            .init(isConnected: Lab599TX500Driver.shared.isConnected, frequencyHz: Lab599TX500Driver.shared.frequencyReadbackHz ?? 0, observedUptime: Lab599TX500Driver.shared.frequencyReadbackUptime),
+            .init(isConnected: IcomUSBRadioDriver.shared.isConnected, frequencyHz: IcomUSBRadioDriver.shared.frequencyReadbackHz ?? 0, observedUptime: IcomUSBRadioDriver.shared.frequencyReadbackUptime),
+            .init(isConnected: Xiegu6100Driver.shared.isConnected, frequencyHz: Xiegu6100Driver.shared.frequencyReadbackHz ?? 0, observedUptime: Xiegu6100Driver.shared.frequencyReadbackUptime),
+            .init(isConnected: FX4CRDriver.shared.isConnected, frequencyHz: FX4CRDriver.shared.frequencyReadbackHz ?? 0, observedUptime: FX4CRDriver.shared.frequencyReadbackUptime)
         ])
     }
 

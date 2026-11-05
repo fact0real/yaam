@@ -23,6 +23,7 @@ enum YAAMWindowID {
 struct YAAMApp: App {
     @NSApplicationDelegateAdaptor(YAAMAppDelegate.self) private var appDelegate
     @StateObject private var appState = AppState()
+    @StateObject private var updater = YAAMUpdater.shared
     @Environment(\.openWindow) private var openWindow
 
     var body: some Scene {
@@ -39,6 +40,7 @@ struct YAAMApp: App {
                 )
                 .onAppear {
                     appState.loadRecentLogsFromDatabase()
+                    updater.start()
                 }
         }
         .defaultSize(width: 1620, height: 940)
@@ -208,6 +210,7 @@ struct YAAMApp: App {
                     appState.showFeedbackSheet = true
                 }
                 Button("Check for Updates...") { appState.checkForUpdates() }
+                    .disabled(!updater.canCheckForUpdates)
             }
             CommandGroup(replacing: .help) {
                 Button("YAAM User Guide & Documentation") { openWindow(id: YAAMWindowID.help) }

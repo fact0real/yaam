@@ -58,6 +58,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
 
     // Safety & AI
     case dataSafety = "dataSafety"
+    case softwareUpdates = "softwareUpdates"
     case antennaWeatherSafety = "antennaWeatherSafety"
     case assistant = "assistant"
     case audioAlerts = "audioAlerts"
@@ -88,6 +89,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .on4kst: return "ON4KST DX Chat"
         case .smtp: return "Email (SMTP)"
         case .dataSafety: return "Data Safety & Backups"
+        case .softwareUpdates: return "Software Updates"
         case .antennaWeatherSafety: return "Antenna Weather Radar"
         case .assistant: return "AI Log Assistant"
         case .audioAlerts: return "Voice Alerts & TTS"
@@ -118,6 +120,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .on4kst: return "bubble.left.and.bubble.right.fill"
         case .smtp: return "envelope"
         case .dataSafety: return "externaldrive.fill.badge.checkmark"
+        case .softwareUpdates: return "arrow.down.app"
         case .antennaWeatherSafety: return "bolt.trianglebadge.exclamationmark.fill"
         case .assistant: return "sparkles"
         case .audioAlerts: return "speaker.wave.2.fill"
@@ -148,6 +151,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .on4kst: return "VHF/UHF/Microwave/160m real-time propagation chat and DX skeds"
         case .smtp: return "Outgoing mail server configuration for QSL cards and reports"
         case .dataSafety: return "Database integrity checks, automatic backups, and rollback points"
+        case .softwareUpdates: return "Signed updates, automatic downloads, and safe restarts"
         case .antennaWeatherSafety: return "Live Open-Meteo weather alerts for lightning and gale-force winds"
         case .assistant: return "Local or cloud AI for log diagnostics, advice, and summaries"
         case .audioAlerts: return "Speech synthesis alerts for DX spots, multipliers, and warnings"
@@ -164,7 +168,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
             return .cloudAndLogbooks
         case .sdrControl, .externalADIF, .on4kst, .smtp:
             return .syncAndImports
-        case .dataSafety, .antennaWeatherSafety, .assistant, .audioAlerts, .waitAndPounce, .bustedCallsigns:
+        case .dataSafety, .softwareUpdates, .antennaWeatherSafety, .assistant, .audioAlerts, .waitAndPounce, .bustedCallsigns:
             return .safetyAndAI
         }
     }
@@ -479,6 +483,9 @@ struct SettingsView: View {
         case .dataSafety:
             DataSafetySettingsView()
                 .environmentObject(appState)
+
+        case .softwareUpdates:
+            SoftwareUpdateSettingsView()
 
         case .antennaWeatherSafety:
             AntennaWeatherSafetySettingsView()

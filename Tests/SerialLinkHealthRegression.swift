@@ -24,11 +24,16 @@ nonisolated enum CIVCapture {
         // Accelerated fixture sources keep all parsing and lifecycle logic, changing only clock intervals.
         pump(0.8)
         precondition(tx.isConnected && fx.isConnected && icom.isConnected && xiegu.isConnected,"Fresh replies keep every transport connected: TX500 \(tx.isConnected) FX \(fx.isConnected) Icom \(icom.isConnected) Xiegu \(xiegu.isConnected)")
+        precondition(tx.frequencyReadbackHz == 14_074_000 && fx.frequencyReadbackHz == 14_074_000 && icom.frequencyReadbackHz == 14_074_000 && xiegu.frequencyReadbackHz == 14_074_000, "Physical replies establish evidence for all four serial drivers")
+        tx.setFrequencyHz(7_030_000); fx.setFrequencyHz(7_030_000)
+        icom.setFrequencyHz(7_030_000); xiegu.setFrequencyHz(7_030_000)
+        precondition(tx.frequencyReadbackHz == nil && fx.frequencyReadbackHz == nil && icom.frequencyReadbackHz == nil && xiegu.frequencyReadbackHz == nil, "Optimistic tunes cannot establish readback")
         SerialPortService.writeReply=nil;SerialPortService.writeDataReply=nil
         pump(0.6)
         precondition(!tx.isConnected && !fx.isConnected && !icom.isConnected && !xiegu.isConnected,"A silent but open UART cannot remain connected")
         precondition(TransmitNotices.shared.notices.filter{$0.text.contains("CAT stopped answering")}.count>=4)
         tx.disconnect();fx.disconnect();icom.disconnect();xiegu.disconnect()
+        precondition(tx.frequencyReadbackHz == nil && fx.frequencyReadbackHz == nil && icom.frequencyReadbackHz == nil && xiegu.frequencyReadbackHz == nil, "Disconnect clears frequency evidence")
         print("PASS real driver parsers: healthy replies, silent-link expiration, persistent RX uncertainty and Icom normalized BCD speed; fake ports only")
     }
 }

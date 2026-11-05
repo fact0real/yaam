@@ -1,0 +1,61 @@
+{
+  "date": "2026-11-05",
+  "project": "https://github.com/users/fact0real/projects/3",
+  "items": [
+    {
+      "title": "[Y-162] Digital QSO confirmation: a driver default frequency can still be logged as read from the radio",
+      "status": "Todo",
+      "labels": [
+        "bug",
+        "app: YAAM",
+        "owner: unclaimed",
+        "priority: High"
+      ],
+      "url": "https://github.com/fact0real/yaam-lab599-shared-board/issues/415"
+    },
+    {
+      "title": "[Y-030] Olivia does not use the Olivia code (short option: mark it experimental)",
+      "status": "Todo",
+      "labels": [
+        "app: YAAM",
+        "owner: factoreal",
+        "priority: High",
+        "imported"
+      ],
+      "url": "https://github.com/fact0real/yaam-lab599-shared-board/issues/85"
+    },
+    {
+      "title": "[Y-038] Sync All: confirmation with a count per service (or a date limit) before first use",
+      "status": "Todo",
+      "labels": [
+        "app: YAAM",
+        "owner: factoreal",
+        "priority: High",
+        "imported"
+      ],
+      "url": "https://github.com/fact0real/yaam-lab599-shared-board/issues/88"
+    },
+    {
+      "title": "[Notes N084] Diagnose large FT8 DT without incorrectly blaming the local clock",
+      "status": "Todo",
+      "labels": [
+        "bug",
+        "app: YAAM",
+        "owner: unclaimed",
+        "priority: High"
+      ],
+      "url": "https://github.com/fact0real/yaam-lab599-shared-board/issues/294"
+    },
+    {
+      "title": "[Notes N038] Resolve ambiguous Russia country names using ADIF entity identity",
+      "status": "Todo",
+      "labels": [
+        "bug",
+        "app: YAAM",
+        "owner: unclaimed",
+        "priority: Medium"
+      ],
+      "url": "https://github.com/fact0real/yaam-lab599-shared-board/issues/318"
+    }
+  ]
+}

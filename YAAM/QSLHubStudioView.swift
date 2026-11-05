@@ -45,6 +45,7 @@ public struct QSLHubStudioView: View {
     @ObservedObject private var syncEngine = QSLSyncEngine.shared
     @ObservedObject private var eqsl = EQSLService.shared
 
+    @State private var syncPreview: QSLSyncPreview?
     @State private var selectedTab: QSLStudioTab = .matrix
     @State private var isDropTargeted: Bool = false
     @State private var searchText: String = ""
@@ -112,6 +113,15 @@ public struct QSLHubStudioView: View {
             set: { viewingCardURL = $0?.url }
         )) { item in
             QSLCardViewerModal(cardURL: item.url)
+        }
+        .sheet(item: $syncPreview) { preview in
+            QSLSyncPreviewSheet(preview: preview) {
+                syncPreview = nil
+                Task {
+                    await syncEngine.syncAllServices(appState: appState, approved: preview)
+                    showToast(syncEngine.lastRunSummary)
+                }
+            } cancel: { syncPreview = nil }
         }
         .sheet(isPresented: $showingEQSLCredentialsPrompt) {
             eqslCredentialsSheet
@@ -193,10 +203,7 @@ public struct QSLHubStudioView: View {
 
             // ONE-CLICK SYNC ALL BUTTON
             Button {
-                Task {
-                    await syncEngine.syncAllServices(appState: appState)
-                    showToast(syncEngine.lastRunSummary)
-                }
+                syncPreview = appState.makeQSLSyncPreview()
             } label: {
                 HStack(spacing: 6) {
                     if syncEngine.isSyncing {

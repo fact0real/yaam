@@ -349,6 +349,8 @@ The shared `YAAM/YAAM.entitlements` file must not contain `com.apple.security.ge
 | Entitlement | Current purpose / boundary |
 | --- | --- |
 | `com.apple.security.app-sandbox` | Keep application sandboxing enabled. |
+| `com.apple.security.temporary-exception.mach-lookup.global-name` | Only `ASIS.YAAM-spks` and `ASIS.YAAM-spki` for Sparkle installer/status communication; no wildcard or general Mach lookup access. |
+| `com.apple.security.personal-information.location` | Existing operator-requested Locate me workflow for previewing the station grid; no background location is added by updates. |
 | `com.apple.security.device.audio-input` | Operator-started radio/microphone audio capture through AVFoundation/Core Audio. |
 | `com.apple.security.device.bluetooth` | Retained for the supported FX-4CR paired Bluetooth serial/audio workflow pending a sandboxed hardware test without this grant; there is no direct CoreBluetooth/IOBluetooth implementation. |
 | `com.apple.security.device.serial` | POSIX serial CAT, WinKeyer and serial keying devices. |
@@ -365,3 +367,8 @@ Every provider ADIF builder starts from `QSLUploadStatus.uploadFields(_:for:opti
 The QSL Hub filters again at the request boundary, and TQSL always receives a private filtered copy even when handed a file URL. A queued preview does not grant permission to send a field later. Keep the active-station checks before each Hub batch and before Wavelog full sync/import; a changed workspace must leave unsubmitted jobs retryable without increasing attempts or marking sent. Only TQSL exit zero confirms the whole submitted batch. Codes 8, 9 and 14 require reconciliation, not blanket success.
 
 Focused runners for this review: `Tests/run-upload-privacy-regressions.sh`, `Tests/run-review-regressions.sh`, `Tests/run-workspace-review-regressions.sh`, and the existing `Tests/run-cw-safety-regressions.sh`. The workspace runner compiles the actual two AppState method bodies into isolated side-effect stand-ins, so tests do not initialize the live application. See `Reports/EA3JIC-20261017-review.md` for the evidence, deferred protocol work and exact scope.
+
+
+## Signed software updates
+
+See [Docs/Software-Updates.md](Docs/Software-Updates.md) for Sparkle integration, the pinned feed/public key, sandbox installer boundary, safe restart behavior and reproducible publishing. Source v1.37.56 introduces this path; GitHubReleaseCheck remains only as a legacy parser for existing input regressions, not the live updater.

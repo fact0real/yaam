@@ -46,6 +46,9 @@ public final class FLRigClient: ObservableObject {
     @Published public var host: String = "127.0.0.1"
     @Published public var port: Int = 12345
     @Published public var rigName: String = "FLRig Transceiver"
+    private(set) var frequencyReadbackHz: UInt64?
+    private(set) var frequencyReadbackUptime: TimeInterval?
+
     @Published public var frequencyHz: Double = 14_074_000
     @Published public var mode: String = "USB"
     @Published public var isPTTActive: Bool = false
@@ -91,6 +94,8 @@ public final class FLRigClient: ObservableObject {
     }
 
     public func disconnect() {
+        frequencyReadbackHz = nil
+        frequencyReadbackUptime = nil
         stopPolling()
         link = .idle
         errors = FlrigErrorState()
@@ -112,6 +117,8 @@ public final class FLRigClient: ObservableObject {
     }
 
     public func stopPolling() {
+        frequencyReadbackHz = nil
+        frequencyReadbackUptime = nil
         pollTimer?.invalidate()
         pollTimer = nil
         isPolling = false
@@ -145,7 +152,11 @@ public final class FLRigClient: ObservableObject {
         guard newLink.isReporting else { return }
 
         // 2. VFO, 3. mode, 4. S-meter, 5. PTT. A fault or a missing answer leaves the old value; it is never read as data.
-        if let freq = try await query(.getVFO, generation)?.text.flatMap({ Double($0) }), FrequencyBounds.isUsable(kHz: freq / 1000) { frequencyHz = freq }
+        if let freq = try await query(.getVFO, generation)?.text.flatMap({ Double($0) }), FrequencyBounds.isUsable(kHz: freq / 1000) {
+            frequencyHz = freq
+            frequencyReadbackHz = UInt64(freq.rounded())
+            frequencyReadbackUptime = ProcessInfo.processInfo.systemUptime
+        }
         if let newMode = try await query(.getMode, generation)?.text, !newMode.isEmpty { mode = newMode }
         if let sm = try await query(.getSmeter, generation)?.text.flatMap({ Double($0) }), sm.isFinite { sMeter = min(100, max(0, sm)) }
         if let ptt = try await query(.getPTT, generation)?.text.flatMap({ Int($0) }) {
@@ -158,6 +169,8 @@ public final class FLRigClient: ObservableObject {
     // MARK: - Control Commands (1-Click QSY & Mode)
 
     public func setFrequency(hz: Double) async throws {
+        frequencyReadbackHz = nil
+        frequencyReadbackUptime = nil
         try await run(.setVFO(hz: hz))
         self.frequencyHz = hz
     }

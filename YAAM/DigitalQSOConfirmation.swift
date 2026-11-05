@@ -16,12 +16,17 @@ nonisolated enum RadioFrequency {
     struct Source: Sendable {
         let isConnected: Bool
         let frequencyHz: UInt64
+        var observedUptime: TimeInterval? = nil
     }
 
-    /// The frequency of the first connected source, in the order given, or nil when none is connected. A source that
-    /// is not connected is never read: they all start at 14.074 MHz before they connect.
-    static func firstConnected(_ sources: [Source]) -> UInt64? {
-        sources.first(where: { $0.isConnected && $0.frequencyHz > 0 })?.frequencyHz
+    /// Use a positive radio readback from this session at most three seconds old. Driver defaults, command echoes,
+    /// mode-only replies, disconnected sources and future timestamps cannot establish a frequency.
+    static func firstConnected(_ sources: [Source], now: TimeInterval = ProcessInfo.processInfo.systemUptime) -> UInt64? {
+        sources.first(where: {
+            guard $0.isConnected, $0.frequencyHz > 0, let observed = $0.observedUptime,
+                  observed.isFinite, now.isFinite else { return false }
+            return (0...3).contains(now - observed)
+        })?.frequencyHz
     }
 }
 
@@ -93,6 +98,24 @@ nonisolated struct DigitalQSODraft: Identifiable, Equatable, Sendable {
     var band: String? { frequencyMHz.flatMap(AmateurBandPlan.band(forMHz:)) }
     var frequencyHz: UInt64? { frequencyMHz.map { UInt64(($0 * 1_000_000).rounded()) } }
 
+    var frequencyEvidence: String {
+        guard let radioFrequencyHz else {
+            return "Frequency not confirmed by the radio. Enter the frequency you actually worked on."
+        }
+        return frequencyHz == radioFrequencyHz
+            ? "Frequency reported by the radio when this draft was created."
+            : "Frequency entered by the operator; this value was not confirmed by the radio."
+    }
+
+    var missingFields: [String] {
+        var fields: [String] = []
+        if !Self.isValidCallsign(cleanCallsign) { fields.append("a valid callsign") }
+        if band == nil { fields.append("a frequency in an amateur band") }
+        if !reportIsValid(cleanReportSent) { fields.append(isSSTV ? "a valid RSV sent" : "the sent report") }
+        if !reportIsValid(cleanReportReceived) { fields.append(isSSTV ? "a valid RSV received" : "the received report") }
+        return fields
+    }
+
     /// Everything a QSO needs. Both reports are needed because an empty one is saved as 599; for SSTV they are RSV.
     var isComplete: Bool {
         Self.isValidCallsign(cleanCallsign) && band != nil
@@ -103,9 +126,9 @@ nonisolated struct DigitalQSODraft: Identifiable, Equatable, Sendable {
         isSSTV ? Self.isValidRSV(report) : !report.isEmpty
     }
 
-    /// SSTV is always confirmed; the other modes when the setting says so or when something is missing.
+    /// SSTV and experimental Olivia/Contestia manual contacts are always reviewed.
     func needsConfirmation(_ setting: DigitalQSOConfirmationMode) -> Bool {
-        isSSTV || setting == .always || !isComplete
+        isSSTV || ["OLIVIA", "CONTESTIA"].contains(mode.uppercased()) || setting == .always || !isComplete
     }
 
     /// The same rule as the Quick Log (AppState.isValidOperatorCallsign): 3 to 20 characters, letters and digits,

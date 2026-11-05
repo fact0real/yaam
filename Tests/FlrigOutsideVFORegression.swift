@@ -29,19 +29,27 @@ nonisolated final class VFOURLProtocol: URLProtocol, @unchecked Sendable {
         config.protocolClasses = [VFOURLProtocol.self]
         let client = FLRigClient(session: URLSession(configuration: config))
         client.pollingInterval = 3600
+        precondition(client.frequencyReadbackHz == nil, "Driver default must not be evidence")
         client.connect(host: "fixture.invalid")
         try await Task.sleep(for: .milliseconds(150))
         await client.pollRigStatus()
         precondition(client.isConnected && client.frequencyHz == 14_074_000)
+        precondition(client.frequencyReadbackHz == 14_074_000 && client.frequencyReadbackUptime != nil)
+        let observed = client.frequencyReadbackUptime
         for value in ["nan", "inf", "-5", "1e30", "18446744073709551616"] {
             VFOURLProtocol.vfo = value
             await client.pollRigStatus()
             precondition(client.frequencyHz == 14_074_000, "Invalid VFO must never enter published state")
         }
+        precondition(client.frequencyReadbackUptime == observed, "Invalid VFO replies cannot renew frequency freshness")
+        try await client.setFrequency(hz: 7_030_000)
+        precondition(client.frequencyReadbackHz == nil, "Local tune cannot establish physical frequency")
         VFOURLProtocol.vfo = "7030000.5"
         await client.pollRigStatus()
         precondition(client.frequencyHz == 7_030_000.5)
+        precondition(client.frequencyReadbackHz == 7_030_001)
         client.stopPolling()
+        precondition(client.frequencyReadbackHz == nil && client.frequencyReadbackUptime == nil)
         print("PASS actual FLRig client rejects malformed VFOs and accepts fractional valid hertz; mocked HTTP only")
     }
 }

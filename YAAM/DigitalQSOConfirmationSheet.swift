@@ -31,11 +31,13 @@ struct DigitalQSOConfirmationSheet: View {
                 LabeledContent("Band", value: draft.band ?? "-")
             }
 
-            Text(draft.radioFrequencyHz == nil
-                 ? "No radio connected: type the frequency you worked on."
-                 : "Frequency read from the radio.")
+            Text(draft.frequencyEvidence)
                 .font(.caption2)
                 .foregroundColor(draft.radioFrequencyHz == nil ? .orange : .secondary)
+            if !draft.missingFields.isEmpty {
+                Text("To record this QSO, provide: " + draft.missingFields.joined(separator: ", ") + ".")
+                    .font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+            }
             if draft.isSSTV {
                 Text("RSV: readability 1-5, signal 1-9, video 1-5.")
                     .font(.caption2)
@@ -73,7 +75,7 @@ struct DigitalQSOConfirmationModePicker: View {
             }
             .pickerStyle(.menu)
             .fixedSize()
-            .help("SSTV QSOs are always confirmed. With a radio connected, the frequency and band come from it.")
+            .help("SSTV and manual Olivia/Contestia contacts are always reviewed. Frequency and band require a fresh radio readback or manual entry.")
             Text(setting.tradeOffs)
                 .font(.caption2)
                 .foregroundColor(.secondary)

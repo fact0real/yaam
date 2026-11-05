@@ -1,0 +1,205 @@
+PASS no source connected
+PASS connected driver default is not a readback
+PASS disconnected readback is rejected
+PASS zero hertz rejected
+PASS fresh physical report accepted
+PASS stale/future/nonfinite report rejected: 96.99
+PASS stale/future/nonfinite report rejected: 100.01
+PASS stale/future/nonfinite report rejected: nan
+PASS stale/future/nonfinite report rejected: inf
+PASS fresh source after stale source is used
+PASS from the radio at 14.230 MHz: 14.23, 20m
+PASS from the radio at 7.074 MHz: 40m
+PASS no radio: the frequency is empty and the QSO is not complete
+PASS typed "7.074": 40m
+PASS typed "7074": 40m
+PASS typed "14,230": 20m
+PASS typed "3573000": 80m
+PASS typed "15.000": outside the bands, not complete
+PASS typed "abc": outside the bands, not complete
+PASS typed "0": outside the bands, not complete
+PASS SSTV with RSV 595 and 575 is complete
+PASS SSTV with 599 is not an RSV report (video 1-5)
+PASS JS8 with -10 and -12 is complete
+PASS an empty report is not complete
+PASS an empty callsign is not complete
+PASS initial evidence names the actual readback
+PASS manual edits lose radio confirmation label
+PASS missing fields explain why saving is blocked
+PASS experimental manual OLIVIA contacts always reviewed
+PASS experimental manual CONTESTIA contacts always reviewed
+PASS radio connected, nothing missing, setting "only when missing": saved without asking
+PASS setting "Always": asked
+PASS no radio: asked
+PASS SSTV: always asked
+PASS an empty callsign: asked
+PASS the setting starts at "only when missing"
+PASS each option, the default too, says what it is good and not good for
+PASS with the radio, a complete QSO is saved at once with the radio's frequency
+PASS without a radio, the QSO waits for the operator and nothing is saved
+PASS Record QSO with no frequency saves nothing
+PASS Record QSO with 7.074 saves one QSO on 40m
+PASS after Record QSO the confirmation is closed
+PASS an SSTV QSO waits for the operator, with the radio's frequency
+PASS Discard QSO saves nothing and closes the confirmation
+PASS logDigitalModemQSO takes the radio's frequency, not the engine's, and hands the QSO to the confirmation
+PASS recordDigitalModemQSO saves with the draft's frequency and band
+PASS the radio's frequency is read from eight sources, each only while connected
+PASS the confirmed QSOs are saved by AppState
+PASS the Digital Suite shows the confirmation and the setting
+PASS under the setting, the text of the option chosen
+PASS the confirmation has Record QSO, needing a complete QSO, and Discard QSO
+PASS the frequency can be typed in the confirmation
+52 passed, 0 failed
+PASS preview counts provider uploads, including repeated contacts
+PASS unchanged snapshot can proceed
+PASS station switch invalidates approval
+PASS new provider cannot inherit approval
+PASS new contact-provider pair cannot inherit approval
+PASS edited QSO invalidates preview
+PASS Guest Log invalidates approval
+PASS changed service readiness requires review
+PASS earlier provider acceptance does not block another approved provider
+PASS contact edit during upload stops later batches
+PASS unreviewed UUID is refused
+PASS preview planner leaves existing queue untouched and excludes blocked jobs
+PASS with every upload credential and TQSL found, all four services are used
+PASS each upload credential, emptied on its own, leaves out its service and only it (9 cases)
+PASS LoTW is left out when TQSL is not found
+PASS with no credentials, no service is used
+PASS the Station Workspace switches: never saved = all on; a saved list = those; an empty list = none
+PASS a service switched off is not checked, and says why; one with no credentials too
+PASS Y, V, C and CONFIRMED in each service's sent field count as sent, also with spaces or in lower case
+PASS for Club Log, the ADIF field CLUBLOG_QSO_UPLOAD_STATUS counts as sent, as YAAM's own field does
+PASS a LoTW confirmation (LOTW_QSL_RCVD Y or V) means the QSO is at LoTW, and only at LoTW
+PASS a QRZ confirmation (QRZLOG_QSL_RCVD Y, or APP_QRZLOG_STATUS C or CONFIRMED) means the QSO is at QRZ
+PASS downloaded from QRZ (QRZCOM_QSO_DOWNLOAD_STATUS Y) or Lab599's APP_QRZLOG_STATUS UPLOADED: at QRZ, for QRZ only
+PASS an eQSL confirmation does not count as sent to eQSL (the inbox also gets cards for QSOs never uploaded)
+PASS an empty sent field and N, R, Q, I or M are pending, for every service
+PASS a QSO the LoTW download added is not sent back to LoTW, and still goes to Club Log
+PASS a job finished or being sent is not queued again
+PASS a stopped job (blocked, or failed five times) is not queued again by Sync, but is by the QSO's own Upload button
+PASS a job queued or waiting to retry is queued again
+PASS a job blocked before its service's credentials were saved again is unblocked; one blocked after, not
+PASS the import keeps CLUBLOG_QSO_UPLOAD_STATUS
+PASS the plan for QRZ has only the QSOs not at QRZ (not the one sent, not the one with a finished job)
+PASS the plan for Club Log has only the QSOs not at Club Log (not the imported one, not YAAM's)
+PASS nothing is planned for a service that is not used
+PASS the import keeps LOTW_QSL_SENT, QRZCOM_QSO_UPLOAD_STATUS, CLUBLOG_QSO_UPLOAD_STATUS and EQSL_QSL_SENT, and such a QSO is planned for none
+PASS Sync Selected takes the selected QSOs only, and the unselected ones (also not sent) get no job
+PASS Sync All takes every QSO
+PASS Sync Selected sends only the selected QSOs' jobs, for the services it uses
+PASS Sync All sends only the jobs of the services it uses; the QSL Hub's own buttons send them all
+PASS a job whose QSO is no longer in the log is dropped
+PASS a job whose QSO is now at the service is not sent
+PASS a job is sent with the QSO's current fields, not the ones it was queued with
+PASS the ADIF sent to a service has no local path, QRZ page link or APP_YAAM_ field
+PASS each local-only field is left out of what goes to a service, and the others stay (EMAIL and MY_ fields too)
+PASS a QRZ reply that says duplicate, in any case, is an accepted upload
+PASS a QRZ reply RESULT=OK is accepted; RESULT=AUTH, or a reason naming the API key, is a credential rejection
+PASS a QRZ failure about the QSO (invalid band, invalid date) is neither accepted nor a credential rejection
+PASS a QRZ duplicate finishes the job and marks the QSO, counted as already there
+PASS a refused key costs one request: that job is blocked, the other four are not sent and stay pending for the next Sync
+PASS after two failed requests in a row the service stops for the run, and the rest are not sent and stay pending
+PASS one failure between successes does not stop the service
+PASS two QSOs that always fail, in front: the first run stops after them and sends none, the second sends all the others
+PASS Club Log: one bad QSO fails the first request of 200; the second run sends them one by one and the 199 good ones go
+PASS Club Log credential and transport retries remain one batch, preserving attempt history
+PASS requests: QRZ one QSO each, LoTW up to 200, eQSL.cc and Club Log up to 200 that never failed and the others one each
+PASS the order puts the jobs that never failed first, then the oldest
+PASS services other than QRZ take 200 QSOs per request
+PASS an accepted batch finishes every job of it and marks every QSO of it
+PASS a run with nothing wrong says done, and the last line says successfully
+PASS a run with blocked jobs says problems, names the reason, and never says successfully
+PASS a run that left a service out names it, and the last line says not every service was checked
+PASS a run that found the queue busy did nothing and says so
+PASS a failed LoTW download is a problem, and the last line does not say successfully
+PASS a LoTW and QRZ download that did not run although ready (or did not report) is a problem; when neither is ready, it is not
+PASS a download that cannot run (eQSL.cc without credentials) is named, and the last line is not successfully
+PASS jobs stopped by an earlier run are reported with the way out, and the run is not successful
+PASS with a problem in this run too, the line keeps both the run's message and the way out for the earlier ones
+PASS a Sync refused for every service says nothing was uploaded, and why, never "Uploads done"
+PASS a job unblocked by new credentials is not reported as stopped
+PASS the QSOs already at a service are counted, so the line says how many were already there
+PASS download readiness: LoTW needs username and web password, QRZ its key, eQSL.cc user and password, Club Log email, password and key (each emptied on its own: 8 cases)
+PASS Sync All with every upload and download done says successfully
+PASS R16 during the run: with a Guest Log opened during the uploads, the downloads are not run and that is a problem
+PASS Sync All is not successful with a failed LoTW download, a LoTW/QRZ download that did not run, or an error in another download
+PASS with only the QRZ key set (no LoTW login), a LoTW/QRZ download that did not run is still a problem
+PASS QSOs not sent because the service stopped are a problem: in the line, the status and the end of Sync All
+PASS Sync All without eQSL.cc credentials names that download as not checked and is not successful
+PASS the station's own log is open only in master mode with the station's log loaded; a Guest Log is not
+PASS with the credential vault locked, every service says so instead of "no upload credentials"
+PASS a lost mark is written with its upload date when the service's sent fields are empty or pending (N, LoTW's default); dropped when one says sent; kept when the QSO is not in the open log
+PASS lost marks: saving twice keeps every mark with its date, under the station's own key; another station reads none
+PASS lost marks: restoring gives the marks to write with their saved dates and keeps saved only the QSO not in the log; once written, the key is removed
+PASS an accepted Club Log upload writes YAAM's field and the ADIF field, each with its date
+PASS a second Sync queues nothing: no QSO goes twice to the same service
+PASS for each service, an accepted upload still writes what 1.37.34 wrote (its sent field and date), and the QSO then counts as sent
+PASS the Zero-Click daemon's services map to the QSL Hub's, and Wavelog to none
+PASS a QSO the daemon uploaded to all four services is then planned for none
+PASS a 1.37.34 Club Log mark gets CLUBLOG_QSO_UPLOAD_STATUS=Y and the date; M, a Y already there or no mark are left alone
+PASS the shared queue builder filters ADIF and only unblocks stopped jobs after changed credentials
+PASS Sync reads the Station Workspace switches under the key the page saves, and only a touched switch saves it
+PASS Sync looks TQSL up for LoTW and takes switched-on services with credentials, none while the vault is locked
+PASS Sync takes the QSOs with recordsToSync, queues them without stopped jobs, and reports what was there before
+PASS Sync Selected passes the table's selection and downloads nothing
+PASS R16: with a Guest Log open, Sync uploads nothing and the queue sends, drops and saves nothing
+PASS the queue run takes due jobs, looks again at each with review, and runs each service in passOrder
+PASS Sync All in this order: the station noted, the uploads, the second R16 look and the error count, the downloads, then endOfSync
+PASS Sync All uploads first, runs one at a time (the daemon and a loading log included), and its last line comes from finalLine
+PASS Sync All gives endOfSync exactly what it saw, and the readiness the same credentials each download tests
+PASS the downloads are still the same three (eQSL, LoTW and QRZ, Club Log)
+PASS the Zero-Click daemon reports each accepted service, and its outbox asks first whether the QSO is already there
+PASS the daemon chain in AppState: the QSO is found (by id, or by a non-empty key from the end), marked for each service, and saved
+PASS the daemon counts its uploads in flight, so Sync waits while any is running
+PASS the queue sends current fields, writes no mark for jobs already there, drops gone ones, and Upload and Retry queue stopped jobs
+PASS lost marks are saved with their upload date and written when the station's own log loads; the Club Log field is added at load and at Sync
+PASS opening a Guest Log saves the station's log first, so the marks written since the last save are kept
+PASS the daemon and the QSL Hub read QRZ replies the same way
+PASS R11: the daemon, Wavelog (one QSO and the full sync), HRDLog and HamQTH leave the local fields out
+PASS new credentials: every save records its time, and Sync reads it per service
+PASS the Station Workspace reads the same rule
+PASS the awards pill runs the same Sync All, shows it is running, and the Club Log count uses the same rule
+PASS the QRZ download writes QRZCOM_QSO_DOWNLOAD_STATUS=Y without counting it as a change or a confirmation
+PASS the QSL Hub button is called Sync All, shows the run's last line, and the menu has Retry Failed Uploads
+PASS the new CLUBLOG_ columns stay out of the log table, as the other services' columns do
+113 passed, 0 failed
+PASS Russian ADIF entity grouping, distinct continents, portable ambiguity, filtering and original-field preservation
+FT8 identity, DXCC, fresh SWR telemetry and quiet-frequency regressions passed
+PASS Olivia practice isolation, simulation logging refusal and manual contact review without invented fields
+PASS ready alone never establishes the driver default frequency
+PASS receiver 1 and VFO B cannot establish receiver 0 VFO A
+PASS actual VFO A report establishes evidence
+PASS mode-only events do not refresh frequency evidence
+PASS optimistic tune is not evidence
+PASS CW speed is sent as cw_macros_speed
+PASS CW text is sent with cw_macros, the command TCI has
+PASS nothing is sent as cw_macro:, which TCI does not have
+PASS a comma in CW text is sent as ~, not as an argument break
+PASS macroText sends : , ; as ^ ~ *
+PASS a spot is sent
+PASS its comment's :, , and ; go as ^, ~ and *
+PASS a spot whose comment carries a command is still sent
+PASS but the command in it arrives as text only
+PASS a callsign with a reserved character: the spot is not sent
+PASS a mode with a reserved character: the spot is not sent
+PASS an empty mode: the spot is not sent (TCI drops empty arguments, and the fields would shift)
+PASS nothing is sent for them, nor to delete a spot whose callsign has a reserved character
+PASS nothing the SDR could read as trx:0,true; was sent
+PASS a mode is sent (unchanged)
+PASS as modulation:0,cw;
+PASS and shown
+PASS a mode with a reserved character is not sent
+PASS the mode shown stays the SDR's
+PASS and the operator is told why and what to do
+PASS an empty mode is not sent
+PASS the bandmap's check (modeRefusal) agrees with setMode
+PASS a line break or control character in the mode is shown as ?, so it cannot add a line to the log: TCI: mode "a?FAKE LOG;?" not sent to the SDR at 2026-11-05 12:14:31 UTC: it is empty or has ":", "," or ";", which TCI reserves. The SDR keeps its mode; choose the mode by hand. The rest of YAAM is not affected.
+PASS nothing reached the SDR from them
+PASS disconnect clears frequency evidence
+PASS without a connection, postSpot says it was not sent
+TCI outside text regression passed
+PASS actual FLRig client rejects malformed VFOs and accepts fractional valid hertz; mocked HTTP only
+PASS rigctld physical readback, mode-only replies, failed reads, optimistic tunes and reconnect; fake connection only
+Board priorities regressions passed. Binaries: /tmp/yaam-board-priorities.khMLCE

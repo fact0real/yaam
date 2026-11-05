@@ -314,22 +314,18 @@ struct FT8StationView: View {
         if let skew = engine.clockSkewAlert {
             HStack(spacing: 8) {
                 Image(systemName: "clock.badge.exclamationmark.fill")
-                    .foregroundStyle(.red)
+                    .foregroundStyle(.orange)
                     .font(.system(size: 13))
                 Text(skew)
                     .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.red)
+                    .foregroundStyle(.orange)
                 Spacer()
-                Button("Copy NTP Sync Command") {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString("sudo sntp -sS time.apple.com", forType: .string)
-                }
-                .buttonStyle(.bordered)
+                Link("Clock settings help", destination: URL(string: "https://support.apple.com/guide/mac-help/set-the-date-and-time-automatically-mchlp2996/mac")!)
                 .controlSize(.mini)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 5)
-            .background(Color.red.opacity(0.12))
+            .background(Color.orange.opacity(0.12))
             Divider()
         }
 

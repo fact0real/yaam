@@ -222,6 +222,10 @@ nonisolated struct ConfirmationOpportunityIndex: Sendable {
     }
 
     static func normalizedCountry(for record: QSORecordModel) -> String {
+        if let identity = CountryNameNormalizer.russianEntity(country: record["COUNTRY"], dxcc: record["DXCC"], callsign: record["CALL"],
+                                                             resolve: { DXCCDatabase.resolve(callsign: $0).entityName }) {
+            return identity
+        }
         let direct = canonicalCountryName(record["COUNTRY"])
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let placeholder = direct.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "en_US_POSIX"))

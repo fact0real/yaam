@@ -74,6 +74,9 @@ public final class Xiegu6100Driver: ObservableObject {
     }
 
     // Real-Time Radio Telemetry
+    private(set) var frequencyReadbackHz: UInt64?
+    private(set) var frequencyReadbackUptime: TimeInterval?
+
     @Published public var frequencyHz: UInt64 = 14074000
     @Published public var mode: String = "USB-D"
     @Published public var sMeterValue: Double = 0.0 // 0 to 15 S-units (S9 = 9, >9 is +dB)
@@ -227,6 +230,8 @@ public final class Xiegu6100Driver: ObservableObject {
     // MARK: - Connect & Disconnect
 
     public func connect(port: String? = nil, recovering: Bool = false) {
+        frequencyReadbackHz = nil
+        frequencyReadbackUptime = nil
         serialRetryTask?.cancel()
         serialRetryTask = nil
         if !recovering { serialRetryAttempt = 0 }
@@ -312,6 +317,8 @@ public final class Xiegu6100Driver: ObservableObject {
     }
 
     public func disconnect() {
+        frequencyReadbackHz = nil
+        frequencyReadbackUptime = nil
         if isConnected { NotificationCenter.default.post(name: Notification.Name("YAAMRadioConnectionLost"), object: self) }
         serialSession = UUID()
         serialHealthTask?.cancel()
@@ -390,6 +397,8 @@ public final class Xiegu6100Driver: ObservableObject {
 
     /// Sets operating frequency in Hz using CI-V command 0x05 (5-byte BCD, LSB-first)
     public func setFrequencyHz(_ hz: UInt64) {
+        frequencyReadbackHz = nil
+        frequencyReadbackUptime = nil
         guard isConnected, hz > 0 else { return }
         self.frequencyHz = hz
         let bcd = Self.frequencyToBCD(hz)
@@ -622,6 +631,8 @@ public final class Xiegu6100Driver: ObservableObject {
                     lastSerialReply = ProcessInfo.processInfo.systemUptime
                     serialRetryAttempt = 0
                     self.frequencyHz = freq
+                    self.frequencyReadbackHz = freq
+                    self.frequencyReadbackUptime = ProcessInfo.processInfo.systemUptime
                 }
             }
         case 0x01, 0x04:

@@ -879,3 +879,29 @@ QRZ Login stays open during password entry, MFA and browser verification. **Veri
 ### Received QSL card archive
 
 Open **Operator Desk → QSL Hub Studio → Received Cards** to import email files, images or PDFs. Every visual attachment in an email is saved separately with an immutable filename. The archive keeps the original card, sender, received date, extracted contact details and any recorded reply receipt for the active station profile. Search by callsign, sender or subject; **Pending only** hides archived/rejected items. **Archive pending** and **Confirm & Attach** keep the original card and archive row after restarting YAAM. The gallery also includes cards without a matching QSO. An eQSL notification without a downloaded image is explicitly labelled as a notice. Import or archive errors are shown without replacing a damaged index.
+
+
+## Software updates (1.37.56 and later)
+
+Choose **YAAM → Check for Updates…**, or open **Settings → Safety & AI → Software Updates**. YAAM checks its HTTPS release feed daily by default. You can disable automatic checks or opt into downloading updates automatically and installing them when YAAM quits. Otherwise, review the release notes and select the install action in the update window.
+
+Sparkle 2 verifies the Ed25519-signed feed and release archive before extraction, then uses its installer service to replace the app and relaunch. The pinned release origin and increasing build number are checked in addition to Sparkle's signature, compatibility and installation checks. An invalid signature, wrong-origin package or downgrade is rejected. Failure never enables an unsigned fallback.
+
+A requested update restart waits for registered transmitters and CW Auto-CQ to stop; the normal application quit handler remains responsible for draining CAT/PTT release. End the active exchange and stop Auto-CQ before updating. This is software coordination, not confirmation of physical receive.
+
+The updater does not alter the logbook, station profile or credential-vault location. Normal backups remain important. Update checks send ordinary HTTP metadata and app/framework versions, not a callsign or logbook; system profiling starts disabled.
+
+Older YAAM builds cannot acquire a new updater retroactively. Install the updater-enabled preview once from **https://yaam.asis.sh/#download**. The current preview is not Apple-notarized; publisher signatures used for update validation are distinct from Apple notarization. See the website for the published archive and corresponding source.
+
+
+## Shared-board workflow improvements (1.37.57, 2026-11-05)
+
+**Digital QSO frequency:** a connected transport is insufficient. YAAM uses a positive physical radio report from the current session at most three seconds old. Defaults, mode-only responses and optimistic tune commands do not establish frequency. Otherwise, enter the dial frequency actually used. The confirmation explains missing fields and changes its evidence label after a manual edit. TCI requests VFO A periodically with a read-only command.
+
+**Olivia/Contestia:** these panels are experimental tone monitors and audio test generators; native interoperable text encoding/decoding is not implemented. Live tone hashes no longer generate receive text or callsigns. Practice text cannot populate CALL, and logging is disabled during practice. Use an external modem for on-air contacts. **Review QSO** always opens manual review and requires actual reports and a valid frequency; it supplies neither a fabricated 599 nor a default dial frequency. **Test Audio** produces prototype tones only.
+
+**Sync All:** both QSL Hub Studio and Awards first show a local preview with upload counts per service and reasons why an upload cannot run. Cancel queues nothing. Confirm uploads only the reviewed contact/provider pairs, then downloads available confirmations. Changed station, log, readiness or planned scope requires a new review. An edited contact stops subsequent batches; previously accepted provider status marks do not invalidate the remaining approved contacts. This review applies to Sync All; separately enabled background upload and individual upload controls retain their existing settings.
+
+**FT8 timing:** large received DT indicates relative timing, not proof that the Mac clock is wrong. YAAM labels local accuracy unverified, clears obsolete warnings on empty decode cycles or stop, and links to Apple's Date & Time guidance. It does not change the system clock. A trusted independent reference with freshness and uncertainty tracking is not implemented in this patch.
+
+**Russia statistics:** generic COUNTRY values such as Russia use explicit ADIF DXCC 15 (Asiatic Russia) or 54 (European Russia) when available. With no DXCC value, an unambiguous mainland callsign can supply the identity. Explicit conflicting identities and ambiguous portable callsigns are preserved for review; displayed grouping does not rewrite historical ADIF fields.

@@ -139,6 +139,25 @@ nonisolated enum CountryNameNormalizer {
         rawComparisonKey(canonicalName(rawValue))
     }
 
+    /// Read-time reconciliation only. Never rewrites imported COUNTRY/DXCC fields or guesses a portable location.
+    static func russianEntity(country: String, dxcc: String, callsign: String,
+                              resolve: (String) -> String? = { _ in nil }) -> String? {
+        let name = canonicalName(country)
+        let generic = ["russia", "russian federation", "russian fed.", "russian fed"]
+            .contains(name.lowercased())
+        guard generic || name.isEmpty else { return nil }
+        let code = dxcc.trimmingCharacters(in: .whitespacesAndNewlines)
+        // ADIF DXCC enumeration: 15 Asiatic Russia, 54 European Russia.
+        if code == "15" { return "Asiatic Russia" }
+        if code == "54" { return "European Russia" }
+        // A different, deleted or invalid explicit identity is not replaced using today's prefix table.
+        guard code.isEmpty, generic else { return nil }
+        let call = callsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard !call.isEmpty, !call.contains("/") else { return nil }
+        let resolved = resolve(call) ?? ""
+        return ["European Russia", "Asiatic Russia"].contains(resolved) ? resolved : nil
+    }
+
     /// All known aliases for a country (including canonical name)
     static func aliases(for country: String) -> [String] {
         let canonical = canonicalName(country)

@@ -8750,44 +8750,7 @@ class AppState: NSObject, ObservableObject {
     }
 
     func checkForUpdates() {
-        appendLog("Checking GitHub repository for updates...")
-        isCheckingUpdates = true
-        
-        guard let url = URL(string: "https://api.github.com/repos/fact0real/yaam/releases/latest") else {
-            isCheckingUpdates = false
-            return
-        }
-        
-        URLSession.shared.dataTask(with: url) { [weak self] data, response, error in
-            DispatchQueue.main.async {
-                guard let self = self else { return }
-                self.isCheckingUpdates = false
-                
-                if let error = error {
-                    self.appendLog("Update check failed: \(error.localizedDescription)")
-                    self.showNativeAlert(
-                        title: "Update Check Failed 🔴",
-                        message: "Unable to connect to GitHub releases.\n\nError: \(error.localizedDescription)"
-                    )
-                    return
-                }
-                
-                switch GitHubReleaseCheck.evaluate(data: data, response: response, currentVersion: self.currentVersion) {
-                case .available(let tag, let releaseURL):
-                    self.appendLog("YAAM update available: \(tag)")
-                    self.showNativeAlert(title: "YAAM Update Available",
-                        message: "Version \(tag) is available. Your version is \(self.currentVersion). Open the release page?",
-                        actionURL: releaseURL)
-                case .current:
-                    self.appendLog("Checked GitHub releases: v\(self.currentVersion) is at least as recent as the published release.")
-                    self.showNativeAlert(title: "Up to Date",
-                        message: "Your version (\(self.currentVersion)) is at least as recent as the latest published release.")
-                case .failed(let reason):
-                    self.appendLog("Update check failed: \(reason)")
-                    self.showNativeAlert(title: "Update Check Failed", message: reason)
-                }
-            }
-        }.resume()
+        YAAMUpdater.shared.checkForUpdates()
     }
     
     func showNativeAlert(title: String, message: String, actionURL: URL? = nil) {

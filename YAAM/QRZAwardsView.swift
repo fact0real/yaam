@@ -134,6 +134,8 @@ struct QRZAwardsView: View {
 
     // MARK: Body ─ Sidebar + Content
 
+    @State private var syncPreview: QSLSyncPreview?
+
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
 
@@ -155,6 +157,12 @@ struct QRZAwardsView: View {
             .frame(maxWidth: .infinity)
         }
         .background(Color(NSColor.textBackgroundColor))
+        .sheet(item: $syncPreview) { preview in
+            QSLSyncPreviewSheet(preview: preview) {
+                syncPreview = nil
+                Task { await QSLSyncEngine.shared.syncAllServices(appState: appState, approved: preview) }
+            } cancel: { syncPreview = nil }
+        }
         .onAppear {
             withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) { animateIcon = true }
             if selectedSource == .qrz && appState.qrzAwardSummaries.isEmpty && !appState.isFetchingQRZAwards {
@@ -460,7 +468,7 @@ struct QRZAwardsView: View {
                 icon: "arrow.triangle.2.circlepath",
                 disabled: syncEngine.isSyncing || appState.isUnifiedSyncRunning || appState.isSyncingAPI || appState.isProcessingQSLQueue
             ) {
-                Task { await QSLSyncEngine.shared.syncAllServices(appState: appState) }
+                syncPreview = appState.makeQSLSyncPreview()
             }
         }
     }

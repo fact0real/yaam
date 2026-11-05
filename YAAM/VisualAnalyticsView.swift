@@ -1392,13 +1392,14 @@ struct VisualAnalyticsView: View {
                         if info.dist > sectorMaxDists[sectorIdx] {
                             sectorMaxDists[sectorIdx] = info.dist
                         }
-                        if let c = r.fields["COUNTRY"], !c.isEmpty {
-                            sectorCountries[sectorIdx][c, default: 0] += 1
+                        let country = ConfirmationOpportunityIndex.normalizedCountry(for: r)
+                        if !country.isEmpty {
+                            sectorCountries[sectorIdx][country, default: 0] += 1
                         }
 
                         if info.dist > maxDist {
                             maxDist = info.dist
-                            let cName = r.fields["COUNTRY"] ?? ""
+                            let cName = country
                             maxDistCall = "\(r.call)\(cName.isEmpty ? "" : " (\(cName))")"
                         }
                     }

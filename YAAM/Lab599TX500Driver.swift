@@ -63,6 +63,9 @@ public final class Lab599TX500Driver: ObservableObject {
     @Published public var autoConnect: Bool = false
 
     // Real-Time Radio Telemetry
+    private(set) var frequencyReadbackHz: UInt64?
+    private(set) var frequencyReadbackUptime: TimeInterval?
+
     @Published public var frequencyHz: UInt64 = 14074000
     @Published public var mode: String = "DIG"
     @Published public var sMeterValue: Double = 0.0 // 0 to 15 S-units (S9 = 9, >9 is +dB)
@@ -190,6 +193,8 @@ public final class Lab599TX500Driver: ObservableObject {
     // MARK: - Connect & Disconnect
 
     public func connect(port: String? = nil, recovering: Bool = false) {
+        frequencyReadbackHz = nil
+        frequencyReadbackUptime = nil
         serialRetryTask?.cancel()
         serialRetryTask = nil
         if !recovering { serialRetryAttempt = 0 }
@@ -282,6 +287,8 @@ public final class Lab599TX500Driver: ObservableObject {
     }
 
     public func disconnect() {
+        frequencyReadbackHz = nil
+        frequencyReadbackUptime = nil
         if isConnected { NotificationCenter.default.post(name: Notification.Name("YAAMRadioConnectionLost"), object: self) }
         serialHealthTask?.cancel()
         serialHealthTask = nil
@@ -320,6 +327,8 @@ public final class Lab599TX500Driver: ObservableObject {
 
     /// Tunes VFO-A to target frequency in Hz
     public func setFrequencyHz(_ hz: UInt64) {
+        frequencyReadbackHz = nil
+        frequencyReadbackUptime = nil
         guard isConnected, hz > 0 else { return }
         self.frequencyHz = hz
         let cmd = String(format: "FA%011llu;", hz)
@@ -609,6 +618,8 @@ public final class Lab599TX500Driver: ObservableObject {
                 lastSerialReply = ProcessInfo.processInfo.systemUptime
                 serialRetryAttempt = 0
                 self.frequencyHz = freq
+                self.frequencyReadbackHz = freq
+                self.frequencyReadbackUptime = ProcessInfo.processInfo.systemUptime
             }
         // Operating Mode: MD1 ... MD9
         } else if response.hasPrefix("MD") {
@@ -637,6 +648,8 @@ public final class Lab599TX500Driver: ObservableObject {
                     lastSerialReply = ProcessInfo.processInfo.systemUptime
                     serialRetryAttempt = 0
                     self.frequencyHz = freq
+                    self.frequencyReadbackHz = freq
+                    self.frequencyReadbackUptime = ProcessInfo.processInfo.systemUptime
                 }
             }
         }

@@ -47,6 +47,9 @@ final class RigControlClient: ObservableObject {
     public static let shared = RigControlClient()
 
     @Published private(set) var state: RigConnectionState = .disconnected
+    private(set) var frequencyReadbackHz: UInt64?
+    private(set) var frequencyReadbackUptime: TimeInterval?
+
     @Published private(set) var snapshot: RigSnapshot?
     @Published private(set) var isTransmitting = false
     @Published private(set) var lastMessage = "Ready to connect to rigctld"
@@ -148,7 +151,11 @@ final class RigControlClient: ObservableObject {
             }
             guard reply.result == 0, reply.command == "get_freq" || reply.command == "get_mode" else { return }
             self.retryAttempt = 0
-            if let value = reply.fields["Frequency"].flatMap(UInt64.init) { self.pendingFrequency = value }
+            if reply.command == "get_freq", let value = reply.fields["Frequency"].flatMap(UInt64.init), value > 0 {
+                self.pendingFrequency = value
+                self.frequencyReadbackHz = value
+                self.frequencyReadbackUptime = ProcessInfo.processInfo.systemUptime
+            }
             if let mode = reply.fields["Mode"] { self.pendingMode = mode }
             if let band = reply.fields["Passband"].flatMap(Int.init) { self.pendingPassband = band }
             guard let frequency = self.pendingFrequency else { return }
@@ -171,6 +178,8 @@ final class RigControlClient: ObservableObject {
     }
 
     func disconnect() {
+        frequencyReadbackHz = nil
+        frequencyReadbackUptime = nil
         if state.isConnected { NotificationCenter.default.post(name: Notification.Name("YAAMRadioConnectionLost"), object: self) }
         retryTask?.cancel()
         retryTask = nil
@@ -204,6 +213,8 @@ final class RigControlClient: ObservableObject {
     }
 
     func setFrequencyHz(_ frequencyHz: UInt64) {
+        frequencyReadbackHz = nil
+        frequencyReadbackUptime = nil
         guard state.isConnected, frequencyHz > 0 else { return }
         send("F \(frequencyHz)\n")
         queue.asyncAfter(deadline: .now() + 0.15) { [weak self] in self?.refresh() }

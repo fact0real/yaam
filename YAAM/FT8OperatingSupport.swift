@@ -1,5 +1,18 @@
 import Foundation
 
+/// DT measures relative signal timing; it cannot independently identify a local clock error.
+nonisolated enum FT8TimingDiagnostic {
+    static func warning(offsets: [Double]) -> String? {
+        let values = offsets.filter(\.isFinite).sorted()
+        guard !values.isEmpty else { return nil }
+        let middle = values.count / 2
+        let median = values.count.isMultiple(of: 2)
+            ? values[middle - 1] / 2 + values[middle] / 2 : values[middle]
+        guard abs(median) > 2 else { return nil }
+        return "Relative timing offset: median DT \(String(format: "%+.2f", median)) s across \(values.count) decoded signals. Local clock accuracy is unverified. Remote timing or decoder bias can also cause this; verify the Mac clock against an independent time reference."
+    }
+}
+
 /// Pure receive-side helpers; none of these routines keys or tunes a radio.
 nonisolated enum FT8MessageIdentity {
     static func callsign(_ token: String) -> String? {

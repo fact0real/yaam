@@ -68,14 +68,19 @@ struct DigitalQSOConfirmationRegression {
     // 1. The radio's frequency: only from a connected source, never a built-in value
     static func radio() {
         typealias S = RadioFrequency.Source
-        check("no source connected: no frequency", RadioFrequency.firstConnected([]) == nil)
-        check("sources not connected are not read, though they hold 14.074 MHz",
-              RadioFrequency.firstConnected([S(isConnected: false, frequencyHz: 14_074_000), S(isConnected: false, frequencyHz: 14_074_000)]) == nil)
-        check("the first connected source gives the frequency",
-              RadioFrequency.firstConnected([S(isConnected: false, frequencyHz: 14_074_000), S(isConnected: true, frequencyHz: 7_040_000),
-                                             S(isConnected: true, frequencyHz: 3_573_000)]) == 7_040_000)
-        check("a connected source at 0 Hz is skipped",
-              RadioFrequency.firstConnected([S(isConnected: true, frequencyHz: 0), S(isConnected: true, frequencyHz: 21_074_000)]) == 21_074_000)
+        func read(_ source: S) -> UInt64? { RadioFrequency.firstConnected([source], now: 100) }
+        check("no source connected", RadioFrequency.firstConnected([], now: 100) == nil)
+        check("connected driver default is not a readback", read(S(isConnected: true, frequencyHz: 14_074_000)) == nil)
+        check("disconnected readback is rejected", read(S(isConnected: false, frequencyHz: 7_040_000, observedUptime: 100)) == nil)
+        check("zero hertz rejected", read(S(isConnected: true, frequencyHz: 0, observedUptime: 100)) == nil)
+        check("fresh physical report accepted", read(S(isConnected: true, frequencyHz: 7_040_000, observedUptime: 99)) == 7_040_000)
+        for observed in [96.99, 100.01, .nan, .infinity] {
+            check("stale/future/nonfinite report rejected: \(observed)", read(S(isConnected: true, frequencyHz: 14_074_000, observedUptime: observed)) == nil)
+        }
+        check("fresh source after stale source is used", RadioFrequency.firstConnected([
+            S(isConnected: true, frequencyHz: 14_074_000, observedUptime: 90),
+            S(isConnected: true, frequencyHz: 21_074_000, observedUptime: 99)
+        ], now: 100) == 21_074_000)
     }
 
     // 2. The draft: frequency and band as the Quick Log reads them
@@ -106,6 +111,15 @@ struct DigitalQSOConfirmationRegression {
         check("JS8 with -10 and -12 is complete", draft("EP2AES", "JS8", "-10", "-12", radio: 14_078_000).isComplete)
         check("an empty report is not complete", !draft("EP2AES", "OLIVIA", "", "599", radio: 14_072_000).isComplete)
         check("an empty callsign is not complete", !draft(" ", "OLIVIA", "599", "599", radio: 14_072_000).isComplete)
+        var edited = draft("EA3JIC", "RTTY", "599", "599", radio: 14_074_000)
+        check("initial evidence names the actual readback", edited.frequencyEvidence.contains("reported by the radio"))
+        edited.frequencyText = "7.074"
+        check("manual edits lose radio confirmation label", edited.frequencyEvidence.contains("entered by the operator"))
+        check("missing fields explain why saving is blocked", none.missingFields.contains("a frequency in an amateur band"))
+        for mode in ["OLIVIA", "CONTESTIA"] {
+            check("experimental manual \(mode) contacts always reviewed", draft("EA3JIC", mode, "599", "599", radio: 14_072_000).needsConfirmation(.whenFrequencyMissing))
+        }
+
     }
 
     // 3. When the operator is asked

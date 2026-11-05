@@ -1,3 +1,15 @@
+# 1.37.57 (207) — shared-board priorities (2026-11-05)
+
+- Require a fresh physical frequency readback for Digital Suite logging across eight radio paths; explain missing fields and distinguish manual frequency edits.
+- Mark Olivia/Contestia as experimental tone tools, remove synthetic live decoding and callsign inference, block practice logging and always review manual contacts without invented reports.
+- Review Sync All upload counts per service before queueing; bind approval to station, log and exact contact/provider pairs and recheck contact changes during delivery.
+- Replace categorical FT8 local-clock diagnosis with an inconclusive relative-DT warning and Apple clock-settings guidance. Independent reference acquisition remains follow-up work.
+- Reconcile generic Russia country labels with valid ADIF entity identity for coverage, statistics and activity displays while preserving original records and ambiguous portable identities.
+
+# 1.37.56 (206)
+
+Signed in-app updates through Sparkle 2.10.1, software-update preferences, pinned release policy and transmit-aware restart. See Docs/Release/1.37.56-release-notes.md.
+
 # Changelog
 
 ## 1.37.54 - 2026-10-28

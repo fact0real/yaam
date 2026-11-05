@@ -3,6 +3,20 @@ import Foundation
 @main
 struct FT8OperatingSupportRegression {
     static func main() {
+        let engineSource = try! String(contentsOfFile: "YAAM/FT8EngineService.swift", encoding: .utf8)
+        let viewSource = try! String(contentsOfFile: "YAAM/FT8StationView.swift", encoding: .utf8)
+        precondition(!engineSource.contains("sudo sntp") && !viewSource.contains("sudo sntp"))
+        precondition(engineSource.contains("clockSkewAlert = nil"))
+        precondition(FT8TimingDiagnostic.warning(offsets: []) == nil)
+        precondition(FT8TimingDiagnostic.warning(offsets: [.nan, .infinity]) == nil)
+        precondition(FT8TimingDiagnostic.warning(offsets: [0.1, -0.1, 7]) == nil, "One remote outlier cannot diagnose a local clock error")
+        precondition(FT8TimingDiagnostic.warning(offsets: [-3, 3]) == nil, "Even-sized median averages both central values")
+        for offsets in [[3.0], [-3.0, -2.5, -4], [3.0, 4.0, .nan]] {
+            let warning = FT8TimingDiagnostic.warning(offsets: offsets)!
+            precondition(warning.contains("unverified") && warning.contains("Remote timing or decoder bias"))
+            precondition(!warning.contains("sudo") && !warning.contains("misaligned"))
+        }
+
         precondition(FT8MessageIdentity.sender(in: "CQ DX K1ABC FN42") == "K1ABC")
         precondition(FT8MessageIdentity.sender(in: "CQ SV2AOB KN10") == "SV2AOB")
         precondition(FT8MessageIdentity.sender(in: "W1AW <G7ABC> -10") == "G7ABC")

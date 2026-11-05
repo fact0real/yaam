@@ -1,0 +1,324 @@
+[
+  {
+    "id": "logbook",
+    "title": "Logbook & data integrity",
+    "subtitle": "Local records. Open formats. Station-aware workflows.",
+    "items": [
+      {
+        "title": "ADIF import & QSO matching",
+        "description": "Import ADIF records, normalize contact identity, review duplicates and reconcile incoming data with existing QSOs. Import and matching logic preserve the distinction between new contacts and updates."
+      },
+      {
+        "title": "Station profiles",
+        "description": "Organize home, portable, rover, club and contest identities. Use the active station for new QSOs, and choose a station scope or the full database for supported views and exports."
+      },
+      {
+        "title": "Quick Log & worked history",
+        "description": "Look up a callsign, inspect previous contacts and enter reports, frequency, mode and exchange data in a keyboard-oriented operating form. Digital Suite contact logging uses a fresh physical radio frequency readback or operator-confirmed manual entry, with visible missing-field explanations."
+      },
+      {
+        "title": "Search, filters & bulk editing",
+        "description": "Combine callsign, name, QTH, state, county, grid, notes, band, mode, DXCC, continent, date and confirmation criteria. Apply reviewed changes to selected records."
+      },
+      {
+        "title": "SQLite persistence & recovery",
+        "description": "Store the log locally in SQLite using write-ahead logging and transactional operations. Database integrity, snapshot, backup and recovery tools support log maintenance."
+      },
+      {
+        "title": "Conversion & export",
+        "description": "Export ADIF 3.1.4, UTF-8 CSV, Cabrillo 3.0, JSON, an HTML report or a text summary. Filter a source file or choose records from the YAAM database before export."
+      }
+    ]
+  },
+  {
+    "id": "dx",
+    "title": "DX activity & geographic intelligence",
+    "subtitle": "Signals, spots and your own worked context.",
+    "items": [
+      {
+        "title": "DX Cluster & local redistribution",
+        "description": "Connect to operator-selected DX nodes, filter live spots and inspect callsigns. An optional loopback-only Telnet/UDP feed can pass spots to other software on the same Mac."
+      },
+      {
+        "title": "Club Log personal spots",
+        "description": "Use configured Club Log access to review personal live spots and band opportunities alongside logbook context."
+      },
+      {
+        "title": "Bandmap Studio",
+        "description": "Explore spots by frequency, inspect spectrum and waterfall displays, filter activity and use supported radio connections to tune from a spot."
+      },
+      {
+        "title": "Globe, flat & azimuthal maps",
+        "description": "Explore countries, Maidenhead squares, worked and confirmed stations, great-circle contact paths and antenna bearings. Select map layers and projections for the operating task."
+      },
+      {
+        "title": "Signal Footprint & Digital Callsign Monitor",
+        "description": "Review PSKReporter and Reverse Beacon Network reception evidence. Monitor target-callsign activity with PSKReporter MQTT and DX Cluster history; inspect geographic and polar views."
+      },
+      {
+        "title": "Digital Call Roster",
+        "description": "Prioritize FT8/FT4 activity from WSJT-X/JTDX and the internal modem against worked countries, bands and grids. Use configured visual and speech alerts for opportunities."
+      },
+      {
+        "title": "6m Watch & propagation context",
+        "description": "Combine 6-meter activity and propagation evidence, review opening assessments and configure alert destinations. Estimates describe operating opportunities, not guaranteed propagation."
+      },
+      {
+        "title": "DX news & ON4KST",
+        "description": "Read DXpedition news and bulletins, check upcoming activity, and connect to ON4KST rooms to coordinate on-air schedules."
+      }
+    ]
+  },
+  {
+    "id": "radio",
+    "title": "Radio control & station integration",
+    "subtitle": "Choose the transport that fits your hardware.",
+    "items": [
+      {
+        "title": "Hamlib rigctld & FLRig",
+        "description": "Connect to a configured rigctld or FLRig endpoint for supported frequency, mode and PTT operations. Actual commands and telemetry depend on the selected radio and backend."
+      },
+      {
+        "title": "TCI SDR integration",
+        "description": "Connect to compatible ExpertSDR/Thetis TCI services for VFO telemetry, supported control and SDR spot exchange."
+      },
+      {
+        "title": "Direct Icom paths",
+        "description": "Use supported Icom network UDP and USB CI-V/audio paths. Authentication, audio routing and available controls depend on the model and connection."
+      },
+      {
+        "title": "Dedicated portable-radio paths",
+        "description": "Select model-specific Lab599 Discovery TX-500, FX-4CR USB/Bluetooth or Xiegu X6100 USB-C connection paths. Configure the corresponding serial and Core Audio devices."
+      },
+      {
+        "title": "WSJT-X / JTDX bridge",
+        "description": "Receive live digital decodes and logged-QSO events through the supported UDP integration, then review activity in the operating desk and logbook workflows."
+      },
+      {
+        "title": "Rotator control",
+        "description": "Connect to a configured antenna-rotator service, review azimuth and send a target bearing from the operating workflow."
+      },
+      {
+        "title": "Network transceiver emulator",
+        "description": "Exercise supported Icom-style network radio and rig-control client workflows without physical transceiver hardware. Intended for development, demonstrations and connection testing."
+      }
+    ]
+  },
+  {
+    "id": "digital",
+    "title": "Digital modes & multi-rig operation",
+    "subtitle": "Integrated tools, with explicit implementation boundaries.",
+    "items": [
+      {
+        "title": "Built-in FT8 / FT4 station",
+        "description": "Select input/output audio devices, receive and inspect decodes, set RX/TX audio frequencies, arm transmission and complete exchanges with the ft8-808 engine. Completed QSOs save to the active station log."
+      },
+      {
+        "title": "Multi-Rig FT8 hub",
+        "description": "Configure up to four independent radio slots with separate audio and modem instances. Choose dual, triple, quad, focused or hero-and-secondary layouts and use the dedicated multi-monitor window."
+      },
+      {
+        "title": "Cross-rig TX coordination",
+        "description": "Select strict lockout, alternating even/odd FT8 slots or concurrent transmission policy. Review cross-band opportunities and use Disarm All TX. Software coordination does not replace physical RF isolation."
+      },
+      {
+        "title": "RTTY & BPSK",
+        "description": "Use RTTY 45.45/170, 75/170 and 45.45/850 configurations, plus BPSK31 and BPSK63. Work with receive text, audio generation and QSO review; CAT/PTT depends on the configured path."
+      },
+      {
+        "title": "Feld Hell & experimental Olivia",
+        "description": "Feld Hell offers raster reception and audio generation. Olivia/Contestia is an experimental tone monitor and prototype audio generator without native interoperable text encoding/decoding. Synthetic live text and callsign inference are removed; practice logging is blocked, and external-modem contacts require manual review. These audio-only paths do not key radio PTT."
+      },
+      {
+        "title": "JS8, SSTV & remote receive",
+        "description": "JS8 offers monitoring, simulation and logging; native JS8 transmit encoding is unavailable. SSTV offers audio monitoring, scan simulation and test-card audio, without live image decoding. Selected WebSDR/KiwiSDR sources support remote FT8 receive workflows."
+      }
+    ]
+  },
+  {
+    "id": "cw",
+    "title": "CW workstation & training",
+    "subtitle": "Memories, practice and hardware in one place.",
+    "items": [
+      {
+        "title": "Keyer & memories",
+        "description": "Prepare Morse memories, use live typing and Auto-CQ, and work with supported keying transports. Radio and keyer configuration determine the available send path."
+      },
+      {
+        "title": "WinKeyer & hardware diagnostics",
+        "description": "Configure compatible K1EL WinKeyer hardware, inspect serial/keyer diagnostics and review the state of supported hardware connections."
+      },
+      {
+        "title": "CW Academy",
+        "description": "Practice with guided Koch-method lessons, Farnsworth spacing, adaptive training and echo exercises. Keep learning tools close to the operating desk."
+      },
+      {
+        "title": "Audio decoder",
+        "description": "Receive CW audio from a selected input or supported file workflow and inspect decoded characters and signal-processing displays."
+      },
+      {
+        "title": "Pileup trainer",
+        "description": "Practice copying callsigns in a simulated pileup with configurable training conditions, without requiring a live station."
+      },
+      {
+        "title": "Q-codes & prosigns",
+        "description": "Look up Morse prosigns, Q-codes and operating abbreviations in the built-in reference tools."
+      }
+    ]
+  },
+  {
+    "id": "contest",
+    "title": "Contest sessions & exchange tools",
+    "subtitle": "From the first serial to Cabrillo export.",
+    "items": [
+      {
+        "title": "Sessions, exchanges & ESM",
+        "description": "Set up contest sessions, manage serials and exchanges, and use Enter Sends Message in supported operating workflows."
+      },
+      {
+        "title": "SCP & exchange history",
+        "description": "Use Super Check Partial callsign suggestions and imported or learned call-history data to assist callsign and exchange entry."
+      },
+      {
+        "title": "Rate & multiplier displays",
+        "description": "Review operating rate, multiplier matrices and contest bandmap context. Scoring and exchange behavior follow the supported contest configuration."
+      },
+      {
+        "title": "Calendar & submission preparation",
+        "description": "Review contest-calendar entries, prepare a session, validate supported digital-contest logs and export Cabrillo 3.0 with station and category fields."
+      }
+    ]
+  },
+  {
+    "id": "qsl",
+    "title": "QSL, synchronization & outreach",
+    "subtitle": "Reconcile the contact. Preserve the evidence.",
+    "items": [
+      {
+        "title": "LoTW & TrustedQSL",
+        "description": "Configure ARRL certificates and the matching station location, sign through the separately installed TrustedQSL tool and use supported LoTW upload and confirmation-download workflows."
+      },
+      {
+        "title": "QRZ, eQSL & Club Log",
+        "description": "Configure service-specific accounts, upload selected QSOs and reconcile downloaded confirmation state. Account access, provider limits and supported fields vary by service. Sync All previews upload counts per service and requires confirmation bound to the reviewed station and contacts before queueing."
+      },
+      {
+        "title": "Wavelog, HRDLog & HamQTH",
+        "description": "Use configured Wavelog synchronization and supported HRDLog/HamQTH upload paths. Configure each provider and its automation options separately."
+      },
+      {
+        "title": "Outbox & scheduled synchronization",
+        "description": "Manage configured new-QSO outbox dispatch and scheduled source updates. Review upload scope and field-sharing preferences; background operation depends on the enabled accounts and switches."
+      },
+      {
+        "title": "Incoming requests & received cards",
+        "description": "Review QRZ Incoming requests before an upload decision. Match received confirmation evidence and organize archived card images and paper-QSL state."
+      },
+      {
+        "title": "Card & label design",
+        "description": "Prepare QSL cards and adhesive labels, calibrate print alignment, and export or print the result. Use station-profile information in supported templates."
+      },
+      {
+        "title": "Follow-ups & QSL Graylist",
+        "description": "Prepare reusable email templates with contact tags and review batches before dispatch through configured mail tools. QSL Graylist highlights callsigns with repeated contacts and no received QSL, with optional Call Roster deprioritization."
+      }
+    ]
+  },
+  {
+    "id": "awards",
+    "title": "Awards, statistics & SKED",
+    "subtitle": "Turn contact history into a useful next step.",
+    "items": [
+      {
+        "title": "DXCC, WAS & Maidenhead grids",
+        "description": "Compare worked and confirmed coverage across countries, US states, bands and grids. Keep local confirmed, credited and granted states distinct in supported award views."
+      },
+      {
+        "title": "Next-credit opportunities",
+        "description": "Identify unconfirmed contacts that could improve country, band or grid coverage, and prioritize the confirmations worth following up."
+      },
+      {
+        "title": "Visual statistics & QRZ Rank",
+        "description": "Explore logbook statistics, confirmation sources and band/mode coverage. Review configured QRZ Rank history, country context and tracked competitors using the external rank service."
+      },
+      {
+        "title": "SKED operator directory",
+        "description": "Discover operators by region, country or US state, review available names/contact data, compare against your log, plan daily UTC hours and bands, and export directory results as CSV."
+      },
+      {
+        "title": "SKED invitations & messaging",
+        "description": "Prepare operator-started invitations through configured mail tools. Opt-in private messaging requires the external service and verified callsigns; it is not end-to-end encrypted messaging."
+      },
+      {
+        "title": "Club memberships",
+        "description": "Look up supported amateur-radio club rosters and exchange numbers using downloaded, cached or imported membership data."
+      }
+    ]
+  },
+  {
+    "id": "field",
+    "title": "Field operations & station awareness",
+    "subtitle": "Bring location, timing and conditions into view.",
+    "items": [
+      {
+        "title": "POTA / SOTA operations",
+        "description": "Use the field operations hub for rapid activation logging, live spots, park-to-park context and supported POTA/SOTA log exports."
+      },
+      {
+        "title": "Offline park & summit directory",
+        "description": "Browse cached/bundled location data and use the native map-based directory when preparing portable operation. Live maps and provider updates may still require a connection."
+      },
+      {
+        "title": "Rover & grid context",
+        "description": "Track the active portable/rover station location and Maidenhead context as you move between operating locations."
+      },
+      {
+        "title": "Shack Clock & solar context",
+        "description": "Combine UTC station clocks, solar and geomagnetic indices, selected NOAA/NASA layers and station-awareness panes. Demand-driven public feeds have their own controls."
+      },
+      {
+        "title": "Satellite & propagation tools",
+        "description": "Inspect amateur satellite passes, orbit-based geometry and calculated Doppler context. Use HF propagation estimates, ionosonde/MUF information and band-advisor tools as planning aids."
+      },
+      {
+        "title": "Station weather",
+        "description": "Optionally request Open-Meteo forecasts for the selected grid precision and review derived station-weather guidance. Weather starts disabled on new installations; forecasts are not local lightning detection."
+      }
+    ]
+  },
+  {
+    "id": "connect",
+    "title": "Companion, automation & architecture",
+    "subtitle": "Keep your tools connected on your terms.",
+    "items": [
+      {
+        "title": "Cloud folder packages",
+        "description": "Exchange versioned logbook packages through an operator-selected synchronized folder, such as iCloud Drive. The chosen folder provider handles its own cloud transfer."
+      },
+      {
+        "title": "Mobile web companion & local API",
+        "description": "Enable supported local companion dashboards and REST API workflows. What other devices can access depends on configured listeners, tokens and your network exposure."
+      },
+      {
+        "title": "Log sources & automation",
+        "description": "Configure supported logger sources, scheduled imports and synchronization in the QSL & Data workspace. Review source scope and automatic-update controls per workflow."
+      },
+      {
+        "title": "Optional Log Assistant",
+        "description": "Configure an API key/provider to ask questions with aggregate station/logbook context. Submitted prompt text and configured context go to that provider; it is not an offline assistant."
+      },
+      {
+        "title": "Credential vault & session lock",
+        "description": "Current-source credentials use AES-256-GCM with a random device-local Keychain root. Optional Mac authentication gates the app session. Re-enter credentials when moving to another Mac."
+      },
+      {
+        "title": "Native implementation & open source",
+        "description": "Swift/SwiftUI, SQLite WAL, AVAudioEngine/Core Audio, Accelerate, Network and CryptoKit. GPL-3.0 source is available for inspection, modification and redistribution under the license."
+      },
+      {
+        "title": "Signed in-app software updates",
+        "description": "Sparkle 2 checks the pinned HTTPS release feed daily and verifies Ed25519-signed metadata and archives before extraction. Review and install in the app, or opt into automatic downloads/install-on-quit. Requested restart waits for active registered TX and CW Auto-CQ. Older builds need one manual bootstrap installation."
+      }
+    ]
+  }
+]

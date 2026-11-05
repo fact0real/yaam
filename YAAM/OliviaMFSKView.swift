@@ -2,9 +2,7 @@
 //  OliviaMFSKView.swift
 //  YAAM
 //
-//  Multi-Tone Orthogonal Workstation for Olivia MFSK & Contestia Modes
-//  Features live multi-tone LED matrix activity indicator, Walsh-Hadamard confidence gauge,
-//  sub-noise decoding down to -14 dB SNR, and type-ahead conversational terminal.
+//  Experimental Olivia/Contestia tone monitor and audio test workspace.
 //
 
 import AppKit
@@ -19,6 +17,9 @@ public struct OliviaMFSKView: View {
 
     public var body: some View {
         VStack(spacing: 8) {
+            Label("Experimental: tone monitoring and audio tests only. Olivia/Contestia text encoding and decoding are not implemented. Practice text cannot be logged. Use an external modem for on-air contacts.", systemImage: "exclamationmark.triangle")
+                .font(.callout).foregroundStyle(.orange)
+                .fixedSize(horizontal: false, vertical: true)
             if !engine.receiveError.isEmpty {
                 Text(engine.receiveError).font(.callout).foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true).accessibilityAddTraits(.isStaticText)
@@ -75,7 +76,7 @@ public struct OliviaMFSKView: View {
                 HStack(spacing: 6) {
                     Image(systemName: engine.isListening ? "stop.circle.fill" : "play.circle.fill")
                         .font(.title3)
-                    Text(engine.isListening ? "STOP OLIVIA" : "START OLIVIA")
+                    Text(engine.isListening ? "STOP MONITOR" : "TONE MONITOR")
                         .font(.caption.bold())
                 }
                 .padding(.horizontal, 10)
@@ -102,12 +103,12 @@ public struct OliviaMFSKView: View {
                     .foregroundColor(.secondary)
                 Text("\(Int(engine.centerFrequencyHz)) Hz")
                     .font(.system(size: 11.5, weight: .bold, design: .monospaced))
-                    .frame(width: 52)
+                    .fixedSize()
             }
 
             // Confidence Level Badge
             HStack(spacing: 4) {
-                Text("FEC LOCK:")
+                Text("TONE PEAK:")
                     .font(.caption2.bold())
                     .foregroundColor(.secondary)
                 Text(String(format: "%0.1f%%", engine.confidenceLevel))
@@ -148,7 +149,7 @@ public struct OliviaMFSKView: View {
     private var toneMatrixBay: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Label("MFSK WALSH-HADAMARD TONE MATRIX (\(engine.config.toneCount) TONES · \(Int(engine.config.bandwidthHz)) Hz BW)", systemImage: "music.note.list")
+                Label("EXPERIMENTAL TONE MATRIX (\(engine.config.toneCount) TONES · \(Int(engine.config.bandwidthHz)) Hz BW)", systemImage: "music.note.list")
                     .font(.system(size: 10, weight: .bold, design: .monospaced))
                     .foregroundColor(.cyan)
 
@@ -156,7 +157,7 @@ public struct OliviaMFSKView: View {
 
                 Text("TONE SPACING: \(String(format: "%0.2f", engine.config.toneSpacingHz)) Hz")
                     .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(.white.opacity(0.65))
             }
 
             // Glowing Tone Bars Row
@@ -188,7 +189,7 @@ public struct OliviaMFSKView: View {
                         // Tone Number Label
                         Text("\(t)")
                             .font(.system(size: 8, weight: .bold, design: .monospaced))
-                            .foregroundColor(isDom ? .cyan : .secondary)
+                            .foregroundColor(isDom ? .cyan : .white.opacity(0.65))
                     }
                     .frame(maxWidth: .infinity)
                 }
@@ -203,7 +204,7 @@ public struct OliviaMFSKView: View {
             // RX Terminal
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
-                    Label("RX DECODED TEXT (DOWN TO -14 dB SNR)", systemImage: "text.bubble")
+                    Label("PRACTICE TEXT · NOT A LIVE DECODE", systemImage: "text.bubble")
                         .font(.system(size: 9.5, weight: .bold, design: .monospaced))
                         .foregroundColor(.green)
                     Spacer()
@@ -213,9 +214,9 @@ public struct OliviaMFSKView: View {
 
                 ScrollViewReader { proxy in
                     ScrollView {
-                        Text(engine.rxText.isEmpty ? "Waiting for MFSK signal on \(Int(engine.centerFrequencyHz)) Hz..." : engine.rxText)
+                        Text(engine.rxText.isEmpty ? "Tone monitor only. Practice text appears here." : engine.rxText)
                             .font(.system(size: 11.5, design: .monospaced))
-                            .foregroundColor(engine.rxText.isEmpty ? .secondary.opacity(0.7) : .green)
+                            .foregroundColor(engine.rxText.isEmpty ? .white.opacity(0.65) : .green)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(8)
                             .id("OLIVIA_RX_BOTTOM")
@@ -238,7 +239,7 @@ public struct OliviaMFSKView: View {
                         .foregroundColor(.teal)
                     Spacer()
                     if engine.isTransmitting {
-                        Text("TRANSMITTING")
+                        Text("AUDIO TEST")
                             .font(.system(size: 9, weight: .heavy, design: .monospaced))
                             .foregroundColor(.orange)
                     }
@@ -247,6 +248,7 @@ public struct OliviaMFSKView: View {
                 .padding(.top, 6)
 
                 TextEditor(text: $engine.txBufferText)
+                    .scrollContentBackground(.hidden)
                     .font(.system(size: 11.5, design: .monospaced))
                     .foregroundColor(.white)
                     .background(Color(red: 0.06, green: 0.05, blue: 0.07))
@@ -290,12 +292,13 @@ public struct OliviaMFSKView: View {
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 90)
 
-                Button("LOG QSO") {
+                Button("Review QSO") {
                     engine.logCurrentQSO()
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.blue)
-                .disabled(engine.targetCallsign.isEmpty)
+                .disabled(engine.targetCallsign.isEmpty || engine.isSimulationActive)
+                .help("Review a manually verified contact made using an external modem. Enter actual reports and frequency before saving.")
             }
 
             Divider().frame(height: 20)
@@ -309,7 +312,7 @@ public struct OliviaMFSKView: View {
             } label: {
                 HStack(spacing: 4) {
                     Image(systemName: engine.isTransmitting ? "stop.fill" : "paperplane.fill")
-                    Text(engine.isTransmitting ? "ABORT" : "TRANSMIT")
+                    Text(engine.isTransmitting ? "ABORT" : "TEST AUDIO")
                         .font(.caption.bold())
                 }
                 .frame(width: 85)

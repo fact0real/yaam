@@ -109,7 +109,7 @@ public final class QSLSyncEngine: ObservableObject {
 
     // MARK: - One-Click Sync All Services
 
-    func syncAllServices(appState: AppState) async {
+    func syncAllServices(appState: AppState, approved: QSLSyncPreview) async {
         // One sync at a time (R8): if another sync or upload is running (the Zero-Click daemon's included) or a log is
         // loading, nothing is uploaded or downloaded, and it says so. R16: only on the station's own log.
         let daemon = ZeroClickCloudUploadDaemon.shared
@@ -122,6 +122,11 @@ public final class QSLSyncEngine: ObservableObject {
         if let problem = appState.qslOwnLogProblem {
             lastRunSummary = "Sync All did nothing: \(problem)."
             appendLog(level: .warning, service: "Sync Manager", message: "⚠️ \(lastRunSummary)")
+            return
+        }
+        guard approved.matches(appState.makeQSLSyncPreview()) else {
+            lastRunSummary = "The log, queue or services changed. Review Sync All again; nothing was sent."
+            appendLog(level: .warning, service: "Sync Manager", message: lastRunSummary)
             return
         }
         // The station this Sync is for (R16 is checked again after the uploads).
@@ -142,7 +147,7 @@ public final class QSLSyncEngine: ObservableObject {
         // unmatched confirmations count as sent to that service (QSLUploadStatus.cameFrom) and go to the others
         // next time.
         currentStepText = "Uploading QSOs never sent..."
-        let upload = await appState.uploadNeverSentQSOs()
+        let upload = await appState.uploadNeverSentQSOs(approved: approved)
         for line in QSLSyncReport.lines(upload) {
             appendLog(level: line.problem ? .warning : .info, service: "Upload", message: line.text)
         }

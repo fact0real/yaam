@@ -1,0 +1,11 @@
+YAAM application icon and bundled-guide screenshots: the YAAM project by EP2AES.
+Source: https://github.com/fact0real/yaam — GNU GPL version 3.
+Screenshots are illustrative of the documented application and may differ by build.
+
+Land outlines: Natural Earth 1:110m land, public domain.
+Source: https://github.com/nvkelso/natural-earth-vector/blob/master/geojson/ne_110m_land.geojson
+Natural Earth data terms: https://www.naturalearthdata.com/about/terms-of-use/
+
+Website layout, illustrations, animation and copy were created for YAAM.
+The system-font stack and cyan/amber/dark palette follow the requested Audio Hijack reference.
+No Rogue Amoeba artwork, logos, screenshots, copy or font files are included.

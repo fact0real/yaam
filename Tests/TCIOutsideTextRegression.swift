@@ -46,6 +46,17 @@ struct TCIOutsideTextRegression {
         let socket = URLSession.tasks.last!
         socket.deliver("ready;"); pump()
         precondition(client.isConnected)
+        check(client.frequencyReadbackHz == nil, "ready alone never establishes the driver default frequency")
+        socket.deliver("vfo:1,0,7074000;vfo:0,1,3573000;"); pump()
+        check(client.frequencyReadbackHz == nil, "receiver 1 and VFO B cannot establish receiver 0 VFO A")
+        socket.deliver("vfo:0,0,7030000;"); pump()
+        check(client.frequencyReadbackHz == 7_030_000 && client.frequencyReadbackUptime != nil, "actual VFO A report establishes evidence")
+        let observed = client.frequencyReadbackUptime
+        socket.deliver("modulation:0,usb;"); pump()
+        check(client.frequencyReadbackUptime == observed, "mode-only events do not refresh frequency evidence")
+        client.setFrequency(hz: 14_074_000)
+        check(client.frequencyReadbackHz == nil && client.frequencyReadbackUptime == nil, "optimistic tune is not evidence")
+
 
         // CW: TCI Protocol 2.1 names the command CW_MACROS (case does not matter); there is no "cw_macro".
         socket.sent.removeAll()
@@ -100,6 +111,7 @@ struct TCIOutsideTextRegression {
         check(socket.sent == ["modulation:0,cw;"] && keyings() == 0, "nothing reached the SDR from them")
 
         client.disconnect()
+        check(client.frequencyReadbackHz == nil && client.frequencyReadbackUptime == nil, "disconnect clears frequency evidence")
         check(!client.postSpot(callsign: "EP2AES", mode: "CW", frequencyHz: 7_030_000), "without a connection, postSpot says it was not sent")
 
         if failures > 0 {

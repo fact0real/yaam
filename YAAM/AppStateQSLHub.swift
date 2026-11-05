@@ -177,20 +177,48 @@ extension AppState {
         return dates
     }
 
+    /// The first click is read-only: use the queue's own planner without enqueuing or contacting a service.
+    func makeQSLSyncPreview() -> QSLSyncPreview {
+        let configured = qslConfiguredProvidersForSync()
+        let switchedOn = QSLSyncAll.switchedOn(stored: UserDefaults.standard.string(forKey: "stationWorkspace.enabledProviders"))
+        let locked = !CredentialVault.isVaultSessionUnlocked
+        var reasons: [QSLProvider: String] = [:]
+        for provider in QSLProvider.allCases {
+            reasons[provider] = QSLSyncAll.notChecked(provider, configured: configured, switchedOn: switchedOn, vaultLocked: locked)
+        }
+        let providers = locked ? Set<QSLProvider>() : configured.intersection(switchedOn)
+        let records = QSLSyncAll.recordsToSync(all: qsoRecords.map { (id: $0.id, fields: $0.fields) },
+                                              selectedIDs: nil, stationCallsign: currentStationCallsign)
+        let unblocked = QSLSyncAll.unblockedJobKeys(qslQueueJobs, credentialsChangedAt: qslCredentialsChangedAt())
+        let jobs = activeStationProfileID.map { profile in
+            QSLSyncAll.queueChanges(records: records, profileID: profile, providers: providers,
+                                    existingJobs: qslQueueJobs, unblockedKeys: unblocked)
+        } ?? []
+        let uploads = Dictionary(grouping: jobs, by: \.provider).mapValues { $0.map(\.qsoID) }
+        return QSLSyncPreview(profileID: activeStationProfileID, stationCallsign: currentStationCallsign,
+                              uploads: uploads,
+                              fieldsByID: Dictionary(records.map { ($0.id, $0.fields) }, uniquingKeysWith: { first, _ in first }),
+                              notChecked: reasons, blocker: qslOwnLogProblem)
+    }
+
     /// The upload part of Sync All (every QSO) and of Sync Selected (`selectedIDs`), on the station's own log only.
     /// The services are those switched on in the Station Workspace with their upload credentials set; for each, the
     /// QSOs not at the service yet go to the queue, and the queue sends them, those services and QSOs only. The
     /// summaries also count the QSOs already there and the jobs left stopped by an earlier run. One upload at a time:
     /// when the queue is already busy, nothing is done and the result says so.
     @MainActor
-    func uploadNeverSentQSOs(selectedIDs: Set<UUID>? = nil) async -> QSLSyncUploadRun {
+    func uploadNeverSentQSOs(selectedIDs: Set<UUID>? = nil, approved: QSLSyncPreview? = nil) async -> QSLSyncUploadRun {
         guard !isProcessingQSLQueue else { return QSLSyncUploadRun(busy: true) }
         var run = QSLSyncUploadRun()
         if let problem = qslOwnLogProblem {
             for provider in QSLProvider.allCases { run.notChecked[provider] = problem }
             return run
         }
-        if addStandardClubLogStatus() > 0 { autoSaveActiveWorkspace() }
+        if let approved, !approved.matches(makeQSLSyncPreview()) {
+            for provider in QSLProvider.allCases { run.notChecked[provider] = "the preview changed; review Sync All again" }
+            return run
+        }
+        if approved == nil, addStandardClubLogStatus() > 0 { autoSaveActiveWorkspace() }
         let vaultLocked = !CredentialVault.isVaultSessionUnlocked
         let configured = qslConfiguredProvidersForSync()
         let switchedOn = QSLSyncAll.switchedOn(stored: UserDefaults.standard.string(forKey: "stationWorkspace.enabledProviders"))
@@ -209,8 +237,16 @@ extension AppState {
         let alreadyThere = QSLSyncAll.alreadyThereCounts(records: chosenFields, providers: providers)
         let unblocked = QSLSyncAll.unblockedJobKeys(qslQueueJobs, credentialsChangedAt: qslCredentialsChangedAt())
         let leftover = QSLSyncAll.leftoverStopped(jobs: qslQueueJobs, fieldsByID: fieldsByID, providers: providers, unblocked: unblocked)
-        enqueueQSL(records: qsoRecords.filter { chosenIDs.contains($0.id) }, providers: providers, retryStopped: false, unblockedKeys: unblocked)
-        let summaries = await processQSLQueue(providers: providers, qsoIDs: selectedIDs == nil ? nil : chosenIDs, countAlreadyThere: false)
+        if let approved {
+            for provider in QSLProvider.allCases where providers.contains(provider) {
+                let ids = Set(approved.uploads[provider] ?? [])
+                enqueueQSL(records: qsoRecords.filter { ids.contains($0.id) }, providers: [provider], retryStopped: false, unblockedKeys: unblocked)
+            }
+        } else {
+            enqueueQSL(records: qsoRecords.filter { chosenIDs.contains($0.id) }, providers: providers, retryStopped: false, unblockedKeys: unblocked)
+        }
+        let summaries = await processQSLQueue(providers: providers, qsoIDs: selectedIDs == nil ? nil : chosenIDs,
+                                              countAlreadyThere: false, approved: approved)
         run.summaries = QSLSyncReport.withPriorState(summaries, providers: providers, alreadyThere: alreadyThere, leftover: leftover)
         return run
     }
@@ -254,7 +290,8 @@ extension AppState {
     func processQSLQueue(
         providers: Set<QSLProvider>? = nil,
         qsoIDs: Set<UUID>? = nil,
-        countAlreadyThere: Bool = true
+        countAlreadyThere: Bool = true,
+        approved: QSLSyncPreview? = nil
     ) async -> [QSLPassSummary] {
         guard !isProcessingQSLQueue, let database = logbookDatabase else { return [] }
         // R16: with a Guest Log open, the station's jobs are not for these QSOs: nothing is sent and nothing dropped.
@@ -268,8 +305,11 @@ extension AppState {
             UploadStationPolicy.matches($0.fields, stationCallsign: uploadStationCallsign)
         }.map(\.id))
         let existingIDs = Set(qsoRecords.map(\.id))
+        let approvedKeys = approved?.jobKeys
         let due = QSLSyncAll.dueJobs(qslQueueJobs, now: Date(), providers: providers, qsoIDs: qsoIDs).filter {
-            $0.stationProfileID == uploadProfileID && (!existingIDs.contains($0.qsoID) || eligibleIDs.contains($0.qsoID))
+            job in
+            job.stationProfileID == uploadProfileID && (!existingIDs.contains(job.qsoID) || eligibleIDs.contains(job.qsoID)) &&
+                (approvedKeys?.contains(QSLSyncAll.jobKey(job.qsoID, job.provider)) ?? true)
         }
         guard !due.isEmpty else {
             qslHubStatus = "No uploads are due"
@@ -329,6 +369,13 @@ extension AppState {
                     currentByID[job.qsoID].map { UploadStationPolicy.matches($0, stationCallsign: uploadStationCallsign) } ?? false
                 }) else {
                     pass.stopBeforeSending(reason: "a QSO was removed or its station callsign changed")
+                    break
+                }
+                if let approved, !batch.allSatisfy({ job in
+                    approvedKeys?.contains(QSLSyncAll.jobKey(job.qsoID, provider)) == true &&
+                        (currentByID[job.qsoID].map { approved.permits($0, for: job.qsoID) } ?? false)
+                }) {
+                    pass.stopBeforeSending(reason: "a reviewed QSO changed; review Sync All again")
                     break
                 }
                 let adif = batch.compactMap { job in currentByID[job.qsoID].map { QSLUploadStatus.uploadADIF($0, for: provider) } }

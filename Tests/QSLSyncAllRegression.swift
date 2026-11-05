@@ -63,7 +63,40 @@ struct QSLSyncAllRegression {
         QSLQueueJob(stationProfileID: UUID(), qsoID: qsoID, provider: provider, adif: adif, state: state)
     }
 
+    static func previewSafety() {
+        let a = UUID(), b = UUID(), profile = UUID()
+        let fields = ["CALL": "K1ABC", "STATION_CALLSIGN": "EA3JIC", "FREQ": "14.074", "MODE": "FT8"]
+        let p = QSLSyncPreview(profileID: profile, stationCallsign: "EA3JIC", uploads: [.qrz: [a], .eqsl: [a, b]],
+                               fieldsByID: [a: fields, b: fields], notChecked: [.lotw: "not configured"], blocker: nil)
+        check("preview counts provider uploads, including repeated contacts", p.uploadCount == 3 && p.jobKeys.count == 3)
+        check("unchanged snapshot can proceed", p.matches(p))
+        var changed = p
+        changed.profileID = UUID()
+        check("station switch invalidates approval", !p.matches(changed))
+        changed = p; changed.uploads[.clubLog] = [a]
+        check("new provider cannot inherit approval", !p.matches(changed))
+        changed = p; changed.uploads[.qrz] = [a, b]
+        check("new contact-provider pair cannot inherit approval", !p.matches(changed))
+        changed = p; changed.fieldsByID[a]?["FREQ"] = "7.074"
+        check("edited QSO invalidates preview", !p.matches(changed))
+        changed = p; changed.blocker = "Guest Log"
+        check("Guest Log invalidates approval", !p.matches(changed))
+        changed = p; changed.notChecked[.lotw] = nil
+        check("changed service readiness requires review", !p.matches(changed))
+        var accepted = fields
+        for mark in QSLUploadStatus.acceptedFields(for: .qrz, date: "20261105") { accepted[mark.field] = mark.value }
+        check("earlier provider acceptance does not block another approved provider", p.permits(accepted, for: a))
+        accepted["CALL"] = "W1AW"
+        check("contact edit during upload stops later batches", !p.permits(accepted, for: a))
+        check("unreviewed UUID is refused", !p.permits(fields, for: UUID()))
+        let before = [QSLQueueJob(stationProfileID: profile, qsoID: a, provider: .qrz, adif: "fixture", state: .blocked)]
+        let plan = QSLSyncAll.queueChanges(records: [(a, fields), (b, fields)], profileID: profile,
+                                         providers: [.qrz], existingJobs: before)
+        check("preview planner leaves existing queue untouched and excludes blocked jobs", before[0].state == .blocked && plan.map(\.qsoID) == [b])
+    }
+
     static func main() {
+        previewSafety()
         let now = Date(timeIntervalSince1970: 1_791_590_400) // 2026-10-10 00:00 UTC
 
         // ---- R6 · the services: switched on in the Station Workspace, and with their upload credentials
@@ -666,7 +699,7 @@ struct QSLSyncAllRegression {
               upload.contains("let chosenFields = QSLSyncAll.recordsToSync(all: selectedFields, selectedIDs: nil, stationCallsign: currentStationCallsign)") &&
               upload.contains("enqueueQSL(records: qsoRecords.filter { chosenIDs.contains($0.id) }, providers: providers, retryStopped: false, unblockedKeys: unblocked)") &&
               upload.contains("let unblocked = QSLSyncAll.unblockedJobKeys(qslQueueJobs, credentialsChangedAt: qslCredentialsChangedAt())") &&
-              upload.contains("let summaries = await processQSLQueue(providers: providers, qsoIDs: selectedIDs == nil ? nil : chosenIDs, countAlreadyThere: false)") &&
+              upload.contains("let summaries = await processQSLQueue(providers: providers, qsoIDs: selectedIDs == nil ? nil : chosenIDs,") && upload.contains("countAlreadyThere: false, approved: approved)") &&
               upload.contains("run.summaries = QSLSyncReport.withPriorState(summaries, providers: providers, alreadyThere: alreadyThere, leftover: leftover)"))
         check("Sync Selected passes the table's selection and downloads nothing",
               selectedSync.contains("let selectedIDs = selectedRecordIDs") &&
@@ -688,10 +721,10 @@ struct QSLSyncAllRegression {
               queueRun.contains("switch QSLSyncAll.review(job, currentFields: fieldsByID[job.qsoID]) {") &&
               queueRun.contains("let jobs = QSLSyncAll.passOrder(toSend.filter { $0.provider == provider })") &&
               queueRun.contains("pass.record(QSLBatchOutcome(result), for: batch, now: Date())") && queueRun.contains("pass.finish(now: Date())"))
-        let uploadAt = engine.range(of: "await appState.uploadNeverSentQSOs()")?.lowerBound
+        let uploadAt = engine.range(of: "await appState.uploadNeverSentQSOs(approved: approved)")?.lowerBound
         let downloadAt = engine.range(of: "await withTaskGroup(of: Void.self)")?.lowerBound
         func at(_ text: String) -> String.Index? { syncAll.range(of: text)?.lowerBound }
-        let order = [at("let startProfileID = appState.activeStationProfileID"), at("await appState.uploadNeverSentQSOs()"),
+        let order = [at("let startProfileID = appState.activeStationProfileID"), at("await appState.uploadNeverSentQSOs(approved: approved)"),
                      at("let downloadsSkipped = appState.qslOwnLogProblem"), at("let errorsBeforeDownloads = errorsLogged"),
                      at("await withTaskGroup(of: Void.self)"), at("let end = QSLSyncReport.endOfSync(")]
         check("Sync All in this order: the station noted, the uploads, the second R16 look and the error count, the downloads, then endOfSync",
@@ -745,7 +778,7 @@ struct QSLSyncAllRegression {
               source("YAAM/QSLSyncAll.swift").contains("QSLLostMarkStore(read: { UserDefaults.standard.data(forKey: $0) }, write: { key, data in") &&
               loadState.contains("restoreLostQSLMarks()") && loadState.contains("addStandardClubLogStatus()") &&
               appState.contains("// Sent marks saved while another log was open (QSLLostMark) are written now.\n                restoreLostQSLMarks()") &&
-              upload.contains("if addStandardClubLogStatus() > 0 { autoSaveActiveWorkspace() }"))
+              upload.contains("if approved == nil, addStandardClubLogStatus() > 0 { autoSaveActiveWorkspace() }"))
         let guestLog = slice(appState, from: "func loadGuestLog(from url: URL) {", to: "excludingSelfContacts(")
         check("opening a Guest Log saves the station's log first, so the marks written since the last save are kept",
               guestLog.contains("if isOwnStationLogOpen { autoSaveActiveWorkspace() }\n                isMasterMode = false"))
@@ -764,7 +797,7 @@ struct QSLSyncAllRegression {
               workspace.components(separatedBy: "QSLUploadStatus.isSent(record.fields, to: provider)").count == 3 &&
               !workspace.contains("[\"Y\", \"V\", \"C\", \"CONFIRMED\"].contains(record[provider.sentField]"))
         check("the awards pill runs the same Sync All, shows it is running, and the Club Log count uses the same rule",
-              awards.contains("Task { await QSLSyncEngine.shared.syncAllServices(appState: appState) }") &&
+              awards.contains("syncPreview = appState.makeQSLSyncPreview()") && awards.contains("approved: preview") && studio.contains("QSLSyncPreviewSheet(preview: preview)") &&
               awards.contains("label: syncEngine.isSyncing ? \"Syncing…\" : \"Sync All\"") &&
               awards.contains("QSLUploadStatus.isSent($0.fields, to: .clubLog)"))
         let isConfirmed = slice(appState, from: "var isConfirmed: Bool {", to: "\n    }\n")

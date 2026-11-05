@@ -137,6 +137,8 @@ nonisolated enum IcomNetworkError: LocalizedError, Sendable {
 nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable {
     private static let maximumLoginAttempts = 8
 
+    @MainActor private(set) var frequencyReadbackHz: UInt64?
+    @MainActor private(set) var frequencyReadbackUptime: TimeInterval?
     @MainActor @Published private(set) var state: IcomNetworkConnectionState = .disconnected
     @MainActor @Published private(set) var snapshot: IcomNetworkSnapshot?
     @MainActor @Published private(set) var lastMessage = "Direct Icom LAN is offline"
@@ -290,6 +292,8 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
 
     @MainActor
     func connect(settings proposed: IcomNetworkSettings, password proposedPassword: String) {
+        frequencyReadbackHz = nil
+        frequencyReadbackUptime = nil
         let proposedUsername = proposed.username.trimmingCharacters(in: .whitespacesAndNewlines)
         let proposedClientName = proposed.clientName.trimmingCharacters(in: .whitespacesAndNewlines)
         let clean = IcomNetworkSettings(
@@ -363,6 +367,8 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
 
     @MainActor
     func disconnect() {
+        frequencyReadbackHz = nil
+        frequencyReadbackUptime = nil
         let id = UUID()
         publishedGeneration = id
         pttWatchdog?.cancel()
@@ -419,6 +425,8 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
 
     @MainActor
     func setFrequencyHz(_ frequencyHz: UInt64) {
+        frequencyReadbackHz = nil
+        frequencyReadbackUptime = nil
         guard frequencyHz > 0 else { return }
         queue.async { [weak self] in
             guard let self else { return }
@@ -1235,7 +1243,11 @@ nonisolated final class IcomNetworkRadio: ObservableObject, @unchecked Sendable 
         if (command == 0x00 || command == 0x03), frame.count >= 11 {
             let frequency = Self.frequencyFromBCD(Array(frame[5..<10]))
             let modeCode = frame.count >= 12 ? frame[10] : nil
+            let receivedGeneration = generation
             DispatchQueue.main.async {
+                guard self.publishedGeneration == receivedGeneration, frequency > 0 else { return }
+                self.frequencyReadbackHz = frequency
+                self.frequencyReadbackUptime = ProcessInfo.processInfo.systemUptime
                 let modeStr = modeCode != nil ? Self.modeName(modeCode!) : (self.snapshot?.mode ?? "USB-D")
                 self.snapshot = IcomNetworkSnapshot(
                     frequencyHz: frequency,

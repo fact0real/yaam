@@ -1,0 +1,186 @@
+[
+  {
+    "feature": "Native macOS interface",
+    "yaam": "Swift / SwiftUI",
+    "macloggerdx": "Native macOS",
+    "rumlogng": "Native macOS",
+    "wavelog": "Browser interface",
+    "advantage": false
+  },
+  {
+    "feature": "License & software cost",
+    "yaam": "Free \u00b7 GPL-3.0",
+    "macloggerdx": "Commercial license",
+    "rumlogng": "Freeware",
+    "wavelog": "Free \u00b7 MIT; hosting separate",
+    "advantage": false
+  },
+  {
+    "feature": "Core logbook storage",
+    "yaam": "Local SQLite",
+    "macloggerdx": "Local SQLite",
+    "rumlogng": "Local Mac logbooks",
+    "wavelog": "Self-hosted server",
+    "advantage": false
+  },
+  {
+    "feature": "ADIF import / export",
+    "yaam": "Included",
+    "macloggerdx": "Included",
+    "rumlogng": "Included",
+    "wavelog": "Included",
+    "advantage": false
+  },
+  {
+    "feature": "FT8 / FT4 audio modem",
+    "yaam": "Built into YAAM",
+    "macloggerdx": "Via WSJT-X / JTDX",
+    "rumlogng": "Via WSJT-X / JTDX",
+    "wavelog": "Via WSJT-X + WLGate",
+    "advantage": true
+  },
+  {
+    "feature": "Internal multi-rig FT8 console",
+    "yaam": "Up to four independent slots",
+    "macloggerdx": "Not documented",
+    "rumlogng": "Not documented\u00b9",
+    "wavelog": "Not documented",
+    "advantage": true
+  },
+  {
+    "feature": "Cross-rig transmit policies",
+    "yaam": "Lockout / alternating / concurrent",
+    "macloggerdx": "Not documented",
+    "rumlogng": "Not documented\u00b9",
+    "wavelog": "Not documented",
+    "advantage": true
+  },
+  {
+    "feature": "CAT & SDR connection paths",
+    "yaam": "Direct + Hamlib / FLRig / TCI",
+    "macloggerdx": "Direct + Hamlib / TCI",
+    "rumlogng": "Direct model-specific control",
+    "wavelog": "WLGate + FLRig / Hamlib",
+    "advantage": false
+  },
+  {
+    "feature": "DX Cluster & needed-spot context",
+    "yaam": "Included",
+    "macloggerdx": "Included",
+    "rumlogng": "Included",
+    "wavelog": "Included",
+    "advantage": false
+  },
+  {
+    "feature": "Geographic operating views",
+    "yaam": "Globe / flat / azimuthal",
+    "macloggerdx": "2D / 3D / web maps",
+    "rumlogng": "Grayline & map tools",
+    "wavelog": "Maps & globe",
+    "advantage": false
+  },
+  {
+    "feature": "Awards & confirmation statistics",
+    "yaam": "DXCC / WAS / grids",
+    "macloggerdx": "Awards & grid tracking",
+    "rumlogng": "Multiple award programs",
+    "wavelog": "20+ award programs",
+    "advantage": false
+  },
+  {
+    "feature": "LoTW / eQSL workflows",
+    "yaam": "Included; TQSL for signing",
+    "macloggerdx": "Included; TQSL for signing",
+    "rumlogng": "Included; TQSL for signing",
+    "wavelog": "Included; service setup",
+    "advantage": false
+  },
+  {
+    "feature": "Club Log integration",
+    "yaam": "Included",
+    "macloggerdx": "Included",
+    "rumlogng": "Included",
+    "wavelog": "Included",
+    "advantage": false
+  },
+  {
+    "feature": "Paper QSL & label tools",
+    "yaam": "Cards / labels / calibration",
+    "macloggerdx": "Labels / QSL print / email",
+    "rumlogng": "Labels / paper-QSL management",
+    "wavelog": "Labels / postcards / scans",
+    "advantage": false
+  },
+  {
+    "feature": "CW memories / WinKeyer",
+    "yaam": "Included",
+    "macloggerdx": "CW / WinKeyer support",
+    "rumlogng": "CW / WinKeyer support",
+    "wavelog": "Not documented",
+    "advantage": false
+  },
+  {
+    "feature": "Guided CW learning",
+    "yaam": "Koch / Farnsworth / echo",
+    "macloggerdx": "Not documented",
+    "rumlogng": "Not documented",
+    "wavelog": "Not documented",
+    "advantage": true
+  },
+  {
+    "feature": "Built-in CW pileup practice",
+    "yaam": "Included",
+    "macloggerdx": "Not documented",
+    "rumlogng": "Not documented",
+    "wavelog": "Not documented",
+    "advantage": true
+  },
+  {
+    "feature": "Contest workflow",
+    "yaam": "Sessions / ESM / Cabrillo",
+    "macloggerdx": "Contest Helper / dupe checks",
+    "rumlogng": "Contest module / scoring / ESM",
+    "wavelog": "Multi-operator contest logger",
+    "advantage": false
+  },
+  {
+    "feature": "Portable reference workflows",
+    "yaam": "POTA / SOTA field hub",
+    "macloggerdx": "POTA / SOTA spots & export",
+    "rumlogng": "Log / ADIF workflows",
+    "wavelog": "POTA / SOTA reference fields",
+    "advantage": false
+  },
+  {
+    "feature": "Offline park / summit directory",
+    "yaam": "Built-in field directory",
+    "macloggerdx": "Not documented",
+    "rumlogng": "Not documented",
+    "wavelog": "Not documented",
+    "advantage": true
+  },
+  {
+    "feature": "Country / state SKED discovery",
+    "yaam": "Rank-backed operator directory",
+    "macloggerdx": "Schedules; directory not documented",
+    "rumlogng": "Not documented",
+    "wavelog": "Not documented",
+    "advantage": true
+  },
+  {
+    "feature": "Browser-first multi-operator logging",
+    "yaam": "Local companion / API\u00b2",
+    "macloggerdx": "Desktop workflow",
+    "rumlogng": "Desktop workflow",
+    "wavelog": "Designed for shared club logs",
+    "advantage": false
+  },
+  {
+    "feature": "Older Mac / Intel availability",
+    "yaam": "macOS 15.6+; published ZIP arm64",
+    "macloggerdx": "Stable 6.62: 10.13+; Universal",
+    "rumlogng": "Current listing: macOS 12+",
+    "wavelog": "Browser; supported server needed",
+    "advantage": false
+  }
+]

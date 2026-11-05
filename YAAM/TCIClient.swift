@@ -16,6 +16,9 @@ import SwiftUI
 public final class TCIClient: ObservableObject {
     public static let shared = TCIClient()
 
+    private(set) var frequencyReadbackHz: UInt64?
+    private(set) var frequencyReadbackUptime: TimeInterval?
+
     // MARK: - Published State
     @Published public var isConnected: Bool = false
     @Published public var host: String = "127.0.0.1"
@@ -36,6 +39,7 @@ public final class TCIClient: ObservableObject {
     private var webSocketTask: URLSessionWebSocketTask?
     private var isIntentionalDisconnect: Bool = false
     private var pingTimer: Timer?
+    private var frequencyPollTimer: Timer?
     private var pingDeadlineTask: Task<Void, Never>?
     private var pingID: UUID?
     private var retryTask: Task<Void, Never>?
@@ -120,6 +124,8 @@ public final class TCIClient: ObservableObject {
     }
 
     public func disconnect() {
+        frequencyReadbackHz = nil
+        frequencyReadbackUptime = nil
         if isConnected { NotificationCenter.default.post(name: Notification.Name("YAAMRadioConnectionLost"), object: self) }
         retryTask?.cancel()
         retryTask = nil
@@ -130,6 +136,8 @@ public final class TCIClient: ObservableObject {
         isIntentionalDisconnect = true
         pingTimer?.invalidate()
         pingTimer = nil
+        frequencyPollTimer?.invalidate()
+        frequencyPollTimer = nil
         transmitWatchdog?.cancel()
         transmitWatchdog = nil
         let task = webSocketTask
@@ -165,6 +173,14 @@ public final class TCIClient: ObservableObject {
 
     private func startPingTimer() {
         pingTimer?.invalidate()
+        frequencyPollTimer?.invalidate()
+        frequencyPollTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, self.isConnected else { return }
+                // TCI protocol: VFO:<receiver>,<channel>; is a read, never a tune command.
+                self.sendCommand("vfo:0,0;")
+            }
+        }
         pingTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in self?.probeLink() }
         }
@@ -193,6 +209,10 @@ public final class TCIClient: ObservableObject {
     }
 
     private func handleDisconnect(reason: String) {
+        frequencyPollTimer?.invalidate()
+        frequencyPollTimer = nil
+        frequencyReadbackHz = nil
+        frequencyReadbackUptime = nil
         guard !isIntentionalDisconnect else { return }
         rememberUncertainRelease("the link was lost (\(reason))")
         NotificationCenter.default.post(name: Notification.Name("YAAMRadioConnectionLost"), object: self)
@@ -298,14 +318,18 @@ public final class TCIClient: ObservableObject {
         switch key {
         case "vfo":
             // vfo:<receiver>,<vfo_id>,<frequency_hz>
-            if args.count >= 3, let vfoIndex = Int(args[1]), let hz = UInt64(args[2]) {
+            if args.count >= 3, args[0] == "0", let vfoIndex = Int(args[1]), let hz = UInt64(args[2]), hz > 0 {
                 if vfoIndex == 0 {
                     self.vfoAFrequencyHz = hz
+                    self.frequencyReadbackHz = hz
+                    self.frequencyReadbackUptime = ProcessInfo.processInfo.systemUptime
                 } else {
                     self.vfoBFrequencyHz = hz
                 }
-            } else if args.count == 1, let hz = UInt64(args[0]) {
+            } else if args.count == 1, let hz = UInt64(args[0]), hz > 0 {
                 self.vfoAFrequencyHz = hz
+                self.frequencyReadbackHz = hz
+                self.frequencyReadbackUptime = ProcessInfo.processInfo.systemUptime
             }
 
         case "modulation":
@@ -403,6 +427,8 @@ public final class TCIClient: ObservableObject {
     }
 
     public func setFrequency(hz: UInt64, receiver: Int = 0, vfo: Int = 0) {
+        frequencyReadbackHz = nil
+        frequencyReadbackUptime = nil
         self.vfoAFrequencyHz = hz
         sendCommand("vfo:\(receiver),\(vfo),\(hz);")
     }
