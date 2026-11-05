@@ -85,6 +85,7 @@ public struct HellColumn: Identifiable, Sendable {
 
 @MainActor
 public final class HellschreiberEngine: ObservableObject {
+    @Published public private(set) var receiveError = ""
     public static let shared = HellschreiberEngine()
 
     // Operating Controls
@@ -149,7 +150,10 @@ public final class HellschreiberEngine: ObservableObject {
         let engine = AVAudioEngine()
         let inputNode = engine.inputNode
         let format = inputNode.outputFormat(forBus: 0)
-        guard format.sampleRate > 0 else { return }
+        guard format.sampleRate > 0 else {
+            receiveError = "Audio input: no usable input format. Receiving is stopped. Check the audio device and microphone permission, then retry."
+            return
+        }
 
         self.sampleRate = format.sampleRate
         self.updatePixelTiming()
@@ -169,8 +173,12 @@ public final class HellschreiberEngine: ObservableObject {
             try engine.start()
             self.audioEngine = engine
             self.isListening = true
+            self.receiveError = ""
         } catch {
-            print("HellschreiberEngine start error: \(error)")
+            inputNode.removeTap(onBus: 0)
+            engine.stop()
+            self.playerNode = nil
+            self.receiveError = "Hellschreiber audio input: could not start (code \((error as NSError).code)). Receiving is stopped. Check microphone permission, the selected input, and other apps using it, then retry."
         }
     }
 

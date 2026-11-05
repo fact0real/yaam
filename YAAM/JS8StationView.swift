@@ -22,6 +22,11 @@ public struct JS8StationView: View {
 
     public var body: some View {
         VStack(spacing: 8) {
+            if !engine.receiveError.isEmpty {
+                Text(engine.receiveError).font(.callout).foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true).accessibilityAddTraits(.isStaticText)
+            }
+
             // 1. Top Control Bar & UTC Slot Progress
             topControlBar
                 .padding(.horizontal, 12)

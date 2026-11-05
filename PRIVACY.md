@@ -70,3 +70,6 @@ YAAM's current vault uses AES-256-GCM and a random 256-bit root held in a non-sy
 The optional Touch ID/Mac authentication preference gates the application's credential session. It is not a Secure Enclave claim or a per-item biometric ACL. Locking clears cached values; authorization results from before that lock cannot reopen it. Keep the matching Keychain item and encrypted file for same-Mac recovery; re-enter credentials on another Mac. Tests use synthetic values and isolated stores, not production credentials.
 
 POTA/SOTA spot clients no longer start polling when constructed. A manual refresh contacts only the selected provider; source permissions and rate policies still require their own review.
+
+### Diagnostic privacy (1.37.55)
+Activity and persistent audit messages remove credential-shaped fields, URL queries/fragments, URL user information, authentication/cookie headers and control characters before display/storage. Oversized diagnostics are omitted. This is defense in depth: arbitrary prose can still contain private information, so raw upload-server replies are withheld and operators should review diagnostics before sharing them. Existing log files are not rewritten.

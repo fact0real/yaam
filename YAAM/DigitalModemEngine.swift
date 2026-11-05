@@ -257,6 +257,7 @@ public struct DigitalMacro: Identifiable, Sendable {
 
 @MainActor
 public final class DigitalModemEngine: ObservableObject {
+    @Published public private(set) var receiveError = ""
     public static let shared = DigitalModemEngine()
 
     // MARK: - Published Operating Controls
@@ -419,7 +420,7 @@ public final class DigitalModemEngine: ObservableObject {
         let format = inputNode.outputFormat(forBus: 0)
 
         guard format.sampleRate > 0 else {
-            print("DigitalModemEngine: Invalid sample rate")
+            receiveError = "Digital modem audio input: no usable input format. Check the device and microphone permission, then retry."
             return
         }
 
@@ -444,8 +445,12 @@ public final class DigitalModemEngine: ObservableObject {
             try engine.start()
             self.audioEngine = engine
             self.isListening = true
+            self.receiveError = ""
         } catch {
-            print("DigitalModemEngine: AudioEngine start error: \(error)")
+            inputNode.removeTap(onBus: 0)
+            engine.stop()
+            self.playerNode = nil
+            self.receiveError = "Digital modem audio input: could not start (code \((error as NSError).code)). Receiving is stopped. Check microphone permission, the selected input, and other apps using it, then retry."
         }
     }
 

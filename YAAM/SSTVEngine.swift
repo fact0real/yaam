@@ -95,6 +95,7 @@ public struct SSTVImageFrame: Identifiable, Sendable {
 
 @MainActor
 public final class SSTVEngine: ObservableObject {
+    @Published public private(set) var receiveError = ""
     public static let shared = SSTVEngine()
 
     // Operating Controls
@@ -169,7 +170,10 @@ public final class SSTVEngine: ObservableObject {
         let engine = AVAudioEngine()
         let inputNode = engine.inputNode
         let format = inputNode.outputFormat(forBus: 0)
-        guard format.sampleRate > 0 else { return }
+        guard format.sampleRate > 0 else {
+            receiveError = "Audio input: no usable input format. Receiving is stopped. Check the audio device and microphone permission, then retry."
+            return
+        }
 
         self.sampleRate = format.sampleRate
 
@@ -188,8 +192,12 @@ public final class SSTVEngine: ObservableObject {
             try engine.start()
             self.audioEngine = engine
             self.isListening = true
+            self.receiveError = ""
         } catch {
-            print("SSTVEngine start error: \(error)")
+            inputNode.removeTap(onBus: 0)
+            engine.stop()
+            self.playerNode = nil
+            self.receiveError = "SSTV audio input: could not start (code \((error as NSError).code)). Receiving is stopped. Check microphone permission, the selected input, and other apps using it, then retry."
         }
     }
 

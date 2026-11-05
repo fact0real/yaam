@@ -19,6 +19,11 @@ public struct SSTVStudioView: View {
 
     public var body: some View {
         VStack(spacing: 8) {
+            if !engine.receiveError.isEmpty {
+                Text(engine.receiveError).font(.callout).foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true).accessibilityAddTraits(.isStaticText)
+            }
+
             Text("Audio monitor and test simulation. Live SSTV image decoding is not available in this version.")
                 .font(.caption).foregroundStyle(.secondary)
             // 1. Top Control Bar

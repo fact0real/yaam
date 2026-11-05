@@ -2820,6 +2820,7 @@ class AppState: NSObject, ObservableObject {
     }
 
     func appendLog(_ text: String) {
+        let text = DiagnosticPrivacy.redacted(text)
         AuditLogger.shared.log(action: "ACTIVITY", details: text, station: currentStationCallsign)
         DispatchQueue.main.async {
             self.logText += "\(text)\n"

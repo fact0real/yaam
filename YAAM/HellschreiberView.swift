@@ -48,6 +48,11 @@ public struct HellschreiberView: View {
 
     public var body: some View {
         VStack(spacing: 8) {
+            if !engine.receiveError.isEmpty {
+                Text(engine.receiveError).font(.callout).foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true).accessibilityAddTraits(.isStaticText)
+            }
+
             // 1. Top Control Bar
             topControlBar
                 .padding(.horizontal, 12)

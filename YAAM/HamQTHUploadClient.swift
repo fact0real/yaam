@@ -116,7 +116,7 @@ public final class HamQTHUploadClient: ObservableObject {
             if let httpRes = response as? HTTPURLResponse, httpRes.statusCode == 200 {
                 let responseStr = String(data: data, encoding: .utf8) ?? ""
                 if responseStr.lowercased().contains("error") || responseStr.lowercased().contains("invalid") {
-                    self.lastError = responseStr
+                    self.lastError = "HamQTH: upload rejected. Check the service credentials and ADIF data; the upload was not confirmed."
                     return false
                 }
                 self.lastError = nil
@@ -127,7 +127,7 @@ public final class HamQTHUploadClient: ObservableObject {
                 return false
             }
         } catch {
-            self.lastError = error.localizedDescription
+            self.lastError = "HamQTH: upload request failed (code \((error as NSError).code)). Logging is available. Check the connection and retry."
             return false
         }
     }

@@ -42,13 +42,15 @@ final class AuditLogger: @unchecked Sendable {
     }
 
     func log(action: String, details: String = "", station: String? = nil) {
-        let timestamp = dateFormatter.string(from: Date())
-        let stationCall = (station?.isEmpty == false) ? station! : "DEFAULT"
-        let cleanDetails = details.replacingOccurrences(of: "\n", with: " ⏎ ")
-        let line = "[\(timestamp)] [\(stationCall)] [\(action)] \(cleanDetails)\n"
+        let eventDate = Date()
+        let stationCall = DiagnosticPrivacy.redacted((station?.isEmpty == false) ? station! : "DEFAULT")
+        let action = DiagnosticPrivacy.redacted(action)
+        let cleanDetails = DiagnosticPrivacy.redacted(details)
 
         queue.async { [weak self] in
             guard let self = self else { return }
+            let timestamp = self.dateFormatter.string(from: eventDate)
+            let line = "[\(timestamp)] [\(stationCall)] [\(action)] \(cleanDetails)\n"
             self.write(line: line)
         }
     }
