@@ -4459,13 +4459,14 @@ class AppState: NSObject, ObservableObject {
         if let adifType = UTType(filenameExtension: "adif") { types.append(adifType) }
 
         panel.allowedContentTypes = types
-        panel.allowsMultipleSelection = false
+        panel.allowsMultipleSelection = true
         panel.canChooseDirectories = false
-        panel.title = "Select External ADIF Log"
-        panel.message = "Choose a .adi or .adif file from WSJT-X, JTDX, GridTracker, Log4OM, N1MM, SDR-Control export, or another logger."
+        panel.title = "Add External ADIF Logs"
+        panel.message = "Choose one or more .adi or .adif files from your loggers."
 
-        if panel.runModal() == .OK, let url = panel.url {
-            guard isADIFFile(url) else {
+        if panel.runModal() == .OK {
+            let urls = panel.urls.filter(isADIFFile)
+            guard !urls.isEmpty else {
                 showNativeAlert(
                     title: "ADIF Export Required",
                     message: "YAAM can sync external logs only from .adi or .adif files."
@@ -4473,11 +4474,46 @@ class AppState: NSObject, ObservableObject {
                 return
             }
 
-            UserDefaults.standard.set(url.path, forKey: "externalADIFLogPath")
-            UserDefaults.standard.set(url.path, forKey: "sdrControlLogPath")
-            appendLog("External ADIF log selected: \(url.lastPathComponent)")
+            let defaults = UserDefaults.standard
+            var paths = configuredExternalADIFLogPaths()
+            for url in urls where !paths.contains(url.path) {
+                paths.append(url.path)
+            }
+            defaults.set(paths, forKey: "externalADIFLogPaths")
+            defaults.set(paths.first ?? "", forKey: "externalADIFLogPath")
+            defaults.set(paths.first ?? "", forKey: "sdrControlLogPath")
+            appendLog("External ADIF logs selected: \(urls.map(\.lastPathComponent).joined(separator: ", "))")
             configureExternalADIFAutoSync()
+            refreshSyncServiceConfiguration()
         }
+    }
+
+    func removeExternalADIFLogFile(at path: String) {
+        let paths = configuredExternalADIFLogPaths().filter { $0 != path }
+        let defaults = UserDefaults.standard
+        defaults.set(paths, forKey: "externalADIFLogPaths")
+        defaults.set(paths.first ?? "", forKey: "externalADIFLogPath")
+        defaults.set(paths.first ?? "", forKey: "sdrControlLogPath")
+        if paths.isEmpty {
+            defaults.removeObject(forKey: "externalADIFLogPaths")
+            defaults.removeObject(forKey: "externalADIFLogPath")
+            defaults.removeObject(forKey: "sdrControlLogPath")
+        }
+        configureExternalADIFAutoSync()
+        refreshSyncServiceConfiguration()
+    }
+
+    func configuredExternalADIFLogPaths() -> [String] {
+        let defaults = UserDefaults.standard
+        let saved = (defaults.stringArray(forKey: "externalADIFLogPaths") ?? [])
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        if !saved.isEmpty {
+            var unique: [String] = []
+            for path in saved where !unique.contains(path) { unique.append(path) }
+            return unique
+        }
+        let legacy = defaults.string(forKey: "externalADIFLogPath") ?? defaults.string(forKey: "sdrControlLogPath") ?? ""
+        return legacy.isEmpty ? [] : [legacy]
     }
 
     func selectSDRControlLogFile() {
@@ -4538,12 +4574,8 @@ class AppState: NSObject, ObservableObject {
             return
         }
 
-        let path = (
-            UserDefaults.standard.string(forKey: "externalADIFLogPath") ??
-            UserDefaults.standard.string(forKey: "sdrControlLogPath") ??
-            ""
-        ).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !path.isEmpty else {
+        let paths = configuredExternalADIFLogPaths()
+        guard !paths.isEmpty else {
             if !isAutomatic {
                 showNativeAlert(
                     title: "External ADIF Log Not Selected",
@@ -4559,50 +4591,55 @@ class AppState: NSObject, ObservableObject {
             return
         }
 
-        let url = URL(fileURLWithPath: path)
-        guard isADIFFile(url) else {
-            appendLog("External ADIF sync skipped: select a .adi or .adif file.")
-            if !isAutomatic {
-                showNativeAlert(
-                    title: "ADIF Export Required",
-                    message: "The saved external log path is not an ADIF file. Select a .adi or .adif file in Preferences."
-                )
-                playActivitySound(.failure)
-            }
-            completion?(.failure(NSError(
-                domain: "YAAM.ExternalADIF",
-                code: 4,
-                userInfo: [NSLocalizedDescriptionKey: "The configured source is not an ADIF file."]
-            )))
+        let urls = paths.map { URL(fileURLWithPath: $0) }
+        let invalid = urls.filter { !isADIFFile($0) }
+        guard invalid.isEmpty else {
+            completion?(.failure(NSError(domain: "YAAM.ExternalADIF", code: 4, userInfo: [NSLocalizedDescriptionKey: "One or more configured sources are not ADIF files."])))
             return
         }
-
-        guard FileManager.default.fileExists(atPath: url.path) else {
-            appendLog("External ADIF sync skipped: file not found at saved path.")
-            if !isAutomatic { playActivitySound(.failure) }
-            completion?(.failure(NSError(
-                domain: "YAAM.ExternalADIF",
-                code: 5,
-                userInfo: [NSLocalizedDescriptionKey: "The configured ADIF file could not be found."]
-            )))
+        let availableURLs = urls.filter { url in
+            let exists = FileManager.default.fileExists(atPath: url.path)
+            if !exists { appendLog("External ADIF source is unavailable: \(url.path)") }
+            return exists
+        }
+        guard !availableURLs.isEmpty else {
+            completion?(.failure(NSError(domain: "YAAM.ExternalADIF", code: 5, userInfo: [NSLocalizedDescriptionKey: "None of the configured ADIF files could be found."])))
             return
         }
-
-        beginSyncStatus(.externalADIF, detail: "Reading external ADIF log...")
-
-        let lastModified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
-        appendLog("External ADIF sync started...")
+        appendLog("External ADIF sync started for \(availableURLs.count) file(s)...")
+        beginSyncStatus(.externalADIF, detail: "Reading \(availableURLs.count) external ADIF log(s)...")
         isExternalADIFSyncRunning = true
-        mergeADIFIntoMaster(from: url) { result in
+        syncExternalADIFFiles(availableURLs, index: 0, summary: MergeSummary(added: 0, updated: 0, skipped: 0)) { result in
             self.isExternalADIFSyncRunning = false
-            if case .success = result {
-                if let lastModified {
-                    UserDefaults.standard.set(lastModified, forKey: "externalADIFLastSyncedModificationDate")
-                }
-                UserDefaults.standard.set(Date(), forKey: "externalADIFLastSyncRunDate")
-            }
+            if case .success = result { UserDefaults.standard.set(Date(), forKey: "externalADIFLastSyncRunDate") }
             self.completeSyncStatus(.externalADIF, result: result, unchangedText: "No new ADIF QSOs")
             completion?(result)
+        }
+    }
+
+    private func syncExternalADIFFiles(
+        _ urls: [URL],
+        index: Int,
+        summary: MergeSummary,
+        completion: @escaping (Result<MergeSummary, Error>) -> Void
+    ) {
+        guard index < urls.count else { completion(.success(summary)); return }
+        let url = urls[index]
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            completion(.failure(NSError(domain: "YAAM.ExternalADIF", code: 5, userInfo: [NSLocalizedDescriptionKey: "Configured ADIF file could not be found: \(url.lastPathComponent)"])))
+            return
+        }
+        mergeADIFIntoMaster(from: url) { result in
+            switch result {
+            case .failure(let error): completion(.failure(error))
+            case .success(let next):
+                let combined = MergeSummary(
+                    added: summary.added + next.added,
+                    updated: summary.updated + next.updated,
+                    skipped: summary.skipped + next.skipped
+                )
+                self.syncExternalADIFFiles(urls, index: index + 1, summary: combined, completion: completion)
+            }
         }
     }
 

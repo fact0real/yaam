@@ -230,9 +230,9 @@ struct SettingsView: View {
     @State private var hrdlogCode = ""
     @State private var hrdlogCredentialStatus = ""
     @AppStorage("hrdlogAutoUploadEnabled") private var hrdlogAutoUploadEnabled = false
-    @AppStorage("externalADIFLogPath") private var externalADIFLogPath = ""
     @AppStorage("externalADIFAutoSyncEnabled") private var externalADIFAutoSyncEnabled = false
     @AppStorage("externalADIFSyncIntervalMinutes") private var externalADIFSyncIntervalMinutes = 15.0
+    @State private var externalADIFLogPaths: [String] = []
     @AppStorage("sdrControlLogbookPath") private var sdrControlLogbookPath = ""
     @AppStorage("sdrControlPeriodicSyncEnabled") private var sdrControlPeriodicSyncEnabled = false
     @AppStorage("sdrControlPeriodicSyncIntervalMinutes") private var sdrControlPeriodicSyncIntervalMinutes = 15.0
@@ -1525,19 +1525,41 @@ struct SettingsView: View {
                     .font(.headline)
 
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("ADIF Log File:")
+                    Text("ADIF Log Files:")
                         .font(.caption)
                         .foregroundColor(.secondary)
 
-                    HStack {
-                        Text(resolvedExternalADIFPath.isEmpty ? "No external ADIF log selected" : resolvedExternalADIFPath)
+                    if externalADIFLogPaths.isEmpty {
+                        Text("No external ADIF logs selected")
                             .font(.caption)
-                            .lineLimit(2)
-                            .truncationMode(.middle)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(externalADIFLogPaths, id: \.self) { path in
+                            HStack(spacing: 8) {
+                                Image(systemName: "doc.text")
+                                    .foregroundStyle(.secondary)
+                                Text(URL(fileURLWithPath: path).lastPathComponent)
+                                    .font(.caption)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .help(path)
+                                Button {
+                                    appState.removeExternalADIFLogFile(at: path)
+                                    externalADIFLogPaths = appState.configuredExternalADIFLogPaths()
+                                } label: {
+                                    Image(systemName: "minus.circle")
+                                }
+                                .buttonStyle(.borderless)
+                                .help("Remove this log file")
+                            }
+                        }
+                    }
 
-                        Button("Choose...") {
+                    HStack {
+                        Button("Add Log Files…") {
                             appState.selectExternalADIFLogFile()
+                            externalADIFLogPaths = appState.configuredExternalADIFLogPaths()
                         }
                     }
                 }
@@ -1563,9 +1585,9 @@ struct SettingsView: View {
                 Button("Sync Now") {
                     appState.syncExternalADIFLogIfNeeded()
                 }
-                .disabled(resolvedExternalADIFPath.isEmpty)
+                .disabled(externalADIFLogPaths.isEmpty)
 
-                Text("Select a live .adi/.adif file from any logger or digital-mode app such as WSJT-X, JTDX, GridTracker, Log4OM, N1MM, or SDR-Control exports. YAAM will periodically merge new QSOs into the Master Log.")
+                Text("Add one or more live .adi/.adif files from loggers or digital-mode apps such as WSJT-X, JTDX, GridTracker, Log4OM, or N1MM. YAAM will periodically merge updates from every selected file into the Master Log.")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -1742,14 +1764,7 @@ struct SettingsView: View {
         eqslPassword = CredentialVault.value(for: .eqslPassword)
         wavelogAPIKey = CredentialVault.value(for: .wavelogAPIKey)
         refreshSDRControlPath()
-    }
-
-    private var resolvedExternalADIFPath: String {
-        if !externalADIFLogPath.isEmpty {
-            return externalADIFLogPath
-        }
-
-        return UserDefaults.standard.string(forKey: "sdrControlLogPath") ?? ""
+        externalADIFLogPaths = appState.configuredExternalADIFLogPaths()
     }
 
     private func chooseLoTWCertificateContainer() {

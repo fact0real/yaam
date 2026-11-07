@@ -303,6 +303,7 @@ Operator Desk is organized into six workspaces: **Operating**, **DX Activity**, 
 - WinKeyer diagnostics and the complete CW hardware setup are under **CW Workstation → WinKeyer & Hardware**.
 - DXpedition schedules and bulletins live in **DX Activity → DX News**. **Contest & Awards → Contest Calendar** links to them and focuses on contest planning.
 - **QSL & Data → QSL Hub → Sync Confirmations** downloads online confirmations. Its ellipsis menu includes LoTW-only and QRZ-only sync.
+- **Settings → ADIF Live Sync** lets you add multiple live `.adi` / `.adif` logger files. YAAM checks every selected source on each scheduled run and merges updates into the active Master Log; remove any source from the list when you no longer want to monitor it.
 - **QSL & Data → Log Sources & Automation → Sync Local Logs** imports External ADIF and SDR-Control updates. Wavelog has its own sync button. The existing automatic schedule still covers local logs plus LoTW and QRZ; its saved settings are preserved.
 - **Cloud & Companion** contains cloud folder packages, the mobile companion, and the local API. **Labels & Printing** contains the QSL label designer.
 

@@ -1,3 +1,9 @@
+# 1.37.58 (208) — multiple live ADIF sources (2026-11-07)
+
+- Allow operators to add and remove multiple live `.adi` / `.adif` logger files in Settings → ADIF Live Sync.
+- Read every available configured source on each scheduled or manual sync, merging updates into the active Master Log while preserving the existing single-file preference.
+- Update the sync status and help text for multiple configured sources.
+
 # 1.37.57 (207) — shared-board priorities (2026-11-05)
 
 - Require a fresh physical frequency readback for Digital Suite logging across eight radio paths; explain missing fields and distinguish manual frequency edits.

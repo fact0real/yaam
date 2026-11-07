@@ -2012,7 +2012,7 @@ struct HelpView: View {
                 HelpInstruction(number: 4, title: "Hands-Free Auto Sync", text: "Open QSL & Data > Log Sources & Automation (⌘⌥⇧S), enable Scheduled log & confirmation sync, and choose an interval. The previous schedule is preserved. ⌘⇧S remains File > Save As.")
             }
             helpSection("Local Sources & Scheduled Confirmations") {
-                HelpDefinition(icon: "doc.text.fill", title: "External ADIF", text: "Watches the configured logger file and merges only meaningful additions or updates.")
+                HelpDefinition(icon: "doc.text.fill", title: "External ADIF", text: "Watches every configured logger file and merges meaningful additions or updates from all selected .adi/.adif sources.")
                 HelpDefinition(icon: "radio.fill", title: "SDR-Control", text: "Reads SmartSDR.smartsdrlog directly, ignores entries marked Deleted, normalizes date/time fields, and preserves the SDR Control record ID. When SDR Control stores the same QSO once at a rounded minute/frequency and once with precise seconds/frequency, YAAM keeps the precise identity and merges the richer details and confirmations into it.")
                 HelpDefinition(icon: "checkmark.seal.fill", title: "LoTW", text: "The first successful run builds a complete confirmation baseline for the active callsign. Matching follows call, date, band, and LoTW's 30-minute time window; later runs use the last-QSL cursor.")
                 HelpDefinition(icon: "q.square.fill", title: "QRZ Logbook", text: "YAAM pages through every confirmed QRZ entry using APP_QRZLOG_LOGID and rejects an incomplete response instead of saving a partial baseline. Later runs request only records modified since the previous success.")

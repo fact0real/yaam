@@ -323,6 +323,7 @@ tqsl -d -u -x -q -l "EP2AES-Home" -p "Password" /path/to/contacts.adi
 * تنظیمات جامع سخت‌افزار مورس و عیب‌یابی WinKeyer در **CW Workstation → WinKeyer & Hardware** قرار دارند.
 * جزئیات DXpeditionها و بولتن‌ها در **DX Activity → DX News** هستند. تقویم مسابقات در **Contest & Awards → Contest Calendar** به این صفحه پیوند دارد.
 * در **QSL & Data → QSL Hub**، دکمهٔ **Sync Confirmations** تأییدیه‌های آنلاین را دریافت می‌کند. منوی سه‌نقطه، همگام‌سازی جداگانهٔ LoTW و QRZ را نیز دارد.
+* در **Settings → ADIF Live Sync** می‌توان چند فایل زندهٔ `.adi` یا `.adif` را اضافه کرد. YAAM در هر نوبت زمان‌بندی‌شده همهٔ فایل‌های انتخاب‌شده را می‌خواند و تغییرات را با Master Log فعال ادغام می‌کند؛ هر منبع را هر زمان از فهرست حذف کنید.
 * **Log Sources & Automation** جایگزین Sync Center شده است. دکمهٔ **Sync Local Logs** فقط به‌روزرسانی فایل‌های External ADIF و SDR-Control را وارد می‌کند؛ Wavelog دکمهٔ جداگانه دارد. زمان‌بندی قبلی برای این دو منبع محلی و LoTW و QRZ حفظ شده است.
 * **Cloud & Companion** شامل همگام‌سازی پوشهٔ ابری، همراه موبایل و API محلی است؛ طراح برچسب QSL در **Labels & Printing** قرار دارد.
 

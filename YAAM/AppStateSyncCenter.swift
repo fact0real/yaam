@@ -16,13 +16,15 @@ extension AppState {
 
     func refreshSyncServiceConfiguration() {
         let defaults = UserDefaults.standard
-        let externalPath = defaults.string(forKey: "externalADIFLogPath") ?? defaults.string(forKey: "sdrControlLogPath") ?? ""
+        let externalPaths = (defaults.stringArray(forKey: "externalADIFLogPaths") ?? [])
+            .filter { FileManager.default.fileExists(atPath: $0) }
+        let legacyExternalPath = defaults.string(forKey: "externalADIFLogPath") ?? defaults.string(forKey: "sdrControlLogPath") ?? ""
         let sdrPath = defaults.string(forKey: "sdrControlLogbookPath") ?? ""
         let lotwUsername = (defaults.string(forKey: "lotwUsername") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let lotwPassword = CredentialVault.value(for: .lotwPassword)
         let qrzKey = activeQRZAPIKey
         let configured: [SyncSource: Bool] = [
-            .externalADIF: !externalPath.isEmpty && FileManager.default.fileExists(atPath: externalPath),
+            .externalADIF: !externalPaths.isEmpty || (!legacyExternalPath.isEmpty && FileManager.default.fileExists(atPath: legacyExternalPath)),
             .sdrControl: (!sdrPath.isEmpty && FileManager.default.fileExists(atPath: sdrPath)) || defaults.data(forKey: "sdrControlLogbookBookmark") != nil,
             .lotw: !lotwUsername.isEmpty && !lotwPassword.isEmpty,
             .qrz: !qrzKey.isEmpty
