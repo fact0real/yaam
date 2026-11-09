@@ -50,3 +50,8 @@ The publisher currently has an Apple Development identity, not a Developer ID di
 ## 1.37.57 (207) publication
 
 The first update after the 1.37.56 website bootstrap uses the same pinned public key and an increasing build number (207 > 206). Debug/Release builds, focused regressions, effective sandbox/no-debugger entitlements and official Sparkle feed/archive signature verification passed; modified feed/archive copies were rejected. Both website and GitHub publish the same immutable binary ZIP and corresponding tagged GPL source. See `Docs/Release/1.37.57-release-notes.md` for changes and remaining limitations. This remains an explicitly non-notarized developer preview. A fresh physical-radio/live-provider acceptance or another real-app replacement test was not performed for this patch.
+
+
+## 1.37.59 (209) publication
+
+QRZ Incoming follow-up fixes and the multi-file ADIF Live Sync work from local 1.37.58 use build 209 and the unchanged publisher public key. The release includes a corresponding source snapshot with a file-hash manifest; unrelated untracked analysis reports are excluded. Validation covers focused QRZ regressions, update-policy and Release-entitlement regressions, the optimized Release build, effective sandbox/no-debugger privileges, and authentic feed/archive acceptance with corrupted-copy rejection. Live UI and real QRZ/SMTP delivery were not completed. The website retains prior downloads; publication changes the versioned assets, signed feed and current-site symlink.

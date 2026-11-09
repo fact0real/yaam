@@ -799,21 +799,64 @@ struct QRZIncomingRequestsView: View {
     @State private var rejectionContext: RejectionContext?
     @StateObject private var emailChecker: QRZIncomingEmailChecker
     @State private var selectedRequestIDs = Set<String>()
-    @State private var bulkRequests: [QRZIncomingConfirmation] = []
-    @State private var showBulkComposer = false
+    @State private var emailBatch: QRZIncomingEmailBatch?
+    @State private var selectAvailableEmails = false
     @State private var showEmailQRZLogin = false
     @State private var showPastRecovery = false
     @State private var pastRecoveryCall = ""
+    @State private var needsReview: [String: Bool] = [:]
+    @State private var localCandidateIDs = Set<String>()
 
     init(emailChecker: QRZIncomingEmailChecker? = nil) {
         _emailChecker = StateObject(wrappedValue: emailChecker ?? QRZIncomingEmailChecker())
     }
 
     private var outstanding: [QRZIncomingConfirmation] {
-        appState.qrzIncomingRequests.filter { appState.incomingRecoveryRecord($0) == nil }
+        appState.qrzIncomingRequests.filter { needsReview[$0.id] ?? true }
+    }
+
+    private func refreshLocalReviewState() {
+        // Email progress must not rescan the entire station log for every row and checkbox.
+        needsReview = Dictionary(appState.qrzIncomingRequests.map {
+            ($0.id, appState.incomingRecoveryRecord($0) == nil)
+        }, uniquingKeysWith: { first, _ in first })
+        localCandidateIDs = Set(appState.qrzIncomingRequests.filter {
+            appState.hasIncomingCandidate(for: $0)
+        }.map(\.id))
+    }
+
+    private var emailEligibleIDs: Set<String> {
+        Set(outstanding.filter {
+            emailChecker.status(for: $0.callsign).email.map(QRZIncomingBulkMail.isUsableEmail) == true
+        }.map(\.id))
+    }
+
+    private var allEmailRecipientsSelected: Bool {
+        selectAvailableEmails || (!emailEligibleIDs.isEmpty && selectedRequestIDs == emailEligibleIDs)
+    }
+
+    private var emailCheckSummary: String {
+        if emailChecker.states.values.contains(.signInRequired) {
+            return "QRZ sign-in is required. Choose QRZ Login to continue checking."
+        }
+        if emailChecker.states.values.contains(.unavailable) {
+            return "Some email checks failed. Use Check emails to retry; these requests stay unchecked."
+        }
+        return "Only requests with a published QRZ email can be selected. No email? Use Reject · no email."
+    }
+
+    private func updateEmailSelection() {
+        if selectAvailableEmails { selectedRequestIDs = emailEligibleIDs }
+        else { selectedRequestIDs.formIntersection(emailEligibleIDs) }
+    }
+
+    private func checkEmails() {
+        guard !appState.isFetchingQRZIncoming, !appState.isRejectingQRZIncoming else { return }
+        emailChecker.checkAll(outstanding.map(\.callsign))
     }
 
     var body: some View {
+        let eligibleIDs = emailEligibleIDs
         VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
@@ -841,35 +884,52 @@ struct QRZIncomingRequestsView: View {
                 incomingSummary(title: "To review", value: outstanding.count, color: .orange, icon: "envelope.badge.fill")
                 incomingSummary(
                     title: "Local candidates",
-                    value: appState.qrzIncomingRequests.filter { appState.hasIncomingCandidate(for: $0) }.count,
+                    value: localCandidateIDs.count,
                     color: .orange,
                     icon: "doc.text.magnifyingglass"
                 )
             }
 
             HStack(spacing: 10) {
-                Button(selectedRequestIDs.count == appState.qrzIncomingRequests.count && !appState.qrzIncomingRequests.isEmpty
-                       ? "Clear selection" : "Select all requests") {
-                    if selectedRequestIDs.count == appState.qrzIncomingRequests.count {
+                Button(allEmailRecipientsSelected ? "Clear selection" : "Select all with email") {
+                    if allEmailRecipientsSelected {
+                        selectAvailableEmails = false
                         selectedRequestIDs.removeAll()
                     } else {
-                        selectedRequestIDs = Set(appState.qrzIncomingRequests.map(\.id))
+                        selectAvailableEmails = true
+                        updateEmailSelection()
+                        checkEmails()
                     }
                 }
-                .disabled(appState.qrzIncomingRequests.isEmpty || appState.isFetchingQRZIncoming)
-                Text("\(selectedRequestIDs.count) selected · one personalized email per callsign")
+                .disabled(outstanding.isEmpty || appState.isFetchingQRZIncoming || appState.isRejectingQRZIncoming)
+                Text("\(selectedRequestIDs.count) selected · one email per callsign")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
                 Button {
-                    bulkRequests = outstanding.filter { selectedRequestIDs.contains($0.id) }
-                    showBulkComposer = true
+                    emailBatch = QRZIncomingEmailBatch(requests: outstanding, selectedIDs: selectedRequestIDs,
+                        states: emailChecker.states, profileID: appState.activeStationProfileID)
                 } label: {
                     Label("Email selected", systemImage: "envelope.stack.fill")
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(!outstanding.contains { selectedRequestIDs.contains($0.id) } || appState.isFetchingQRZIncoming || appState.isRejectingQRZIncoming)
+                .disabled(selectedRequestIDs.intersection(eligibleIDs).isEmpty || emailChecker.checkingCall != nil || appState.isFetchingQRZIncoming || appState.isRejectingQRZIncoming)
             }
+
+            HStack(spacing: 8) {
+                if emailChecker.checkingCall != nil {
+                    ProgressView().controlSize(.small)
+                    Text("Checking QRZ emails · \(emailChecker.completed)/\(emailChecker.total)")
+                    Button("Stop checking") { emailChecker.stop() }
+                } else {
+                    Text(emailCheckSummary)
+                    Spacer(minLength: 0)
+                    Button("Check emails") { checkEmails() }
+                        .disabled(outstanding.isEmpty || appState.isFetchingQRZIncoming || appState.isRejectingQRZIncoming)
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
 
             if appState.isRejectingQRZIncoming {
                 HStack(spacing: 8) {
@@ -897,12 +957,15 @@ struct QRZIncomingRequestsView: View {
                                 Toggle("Select \(request.callsign)", isOn: Binding(
                                     get: { selectedRequestIDs.contains(request.id) },
                                     set: { selected in
-                                        if selected { selectedRequestIDs.insert(request.id) }
+                                        selectAvailableEmails = false
+                                        if selected && emailEligibleIDs.contains(request.id) { selectedRequestIDs.insert(request.id) }
                                         else { selectedRequestIDs.remove(request.id) }
                                     }
                                 ))
                                 .labelsHidden()
                                 .toggleStyle(.checkbox)
+                                .disabled(!eligibleIDs.contains(request.id) || appState.isFetchingQRZIncoming || appState.isRejectingQRZIncoming)
+                                .help("Selection requires a published QRZ email and a request needing details.")
                             }
                             Image(systemName: "exclamationmark.circle.fill")
                                 .foregroundStyle(Color.orange)
@@ -914,8 +977,8 @@ struct QRZIncomingRequestsView: View {
                                 if !appState.qrzIncomingArchive.lastReturnedKeys.contains(request.recoveryKey) {
                                     Text("Saved recovery case · no current QRZ request shown").font(.caption).foregroundStyle(.secondary)
                                 }
-                                Text(appState.incomingRecoveryRecord(request) != nil ? "Saved locally · open Review for LoTW / QRZ / Club Log progress." :
-                                     (appState.hasIncomingCandidate(for: request) ? "Local call/date candidate — details still need review." : "No call/date candidate. Obtain actual details before adding anything."))
+                                Text(needsReview[request.id] == false ? "Saved locally · open Review for LoTW / QRZ / Club Log progress." :
+                                     (localCandidateIDs.contains(request.id) ? "Local call/date candidate — details still need review." : "No call/date candidate. Obtain actual details before adding anything."))
                                     .font(.caption)
                                     .foregroundStyle(Color.orange)
                                 Text(emailChecker.status(for: request.callsign).title)
@@ -949,7 +1012,7 @@ struct QRZIncomingRequestsView: View {
                                     }
                                 }
                                 .buttonStyle(.borderedProminent)
-                                .disabled(appState.incomingEmailLookupCallsign != nil)
+                                .disabled(appState.incomingEmailLookupCallsign != nil || emailChecker.status(for: request.callsign).permitsMissingEmailRejection)
                                 .help("Prepare an editable email requesting the missing QSO details")
                             }
 
@@ -978,16 +1041,25 @@ struct QRZIncomingRequestsView: View {
                             }
                             .buttonStyle(.bordered)
                             .help("Open \(request.callsign) on QRZ.com")
+                            if !appState.qrzIncomingArchive.lastReturnedKeys.contains(request.recoveryKey) {
+                                Button("Archive locally") { appState.archiveQRZIncomingRecovery(request) }
+                                    .help("Remove this saved case from Incoming; local QSOs are retained.")
+                            }
                             Spacer(minLength: 0)
                         }
                     }
                     .padding(.vertical, 4)
+                    .contextMenu {
+                        Button("Archive locally") { appState.archiveQRZIncomingRecovery(request) }
+                    }
                 }
                 .listStyle(.inset)
             }
 
             HStack {
-                Text("\(outstanding.count) request(s) need a local-log review")
+                Text(appState.qrzIncomingStatus.isEmpty ? "\(outstanding.count) request(s) need a local-log review" : appState.qrzIncomingStatus)
+                    .lineLimit(2)
+                    .help(appState.qrzIncomingStatus)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
@@ -1029,13 +1101,17 @@ struct QRZIncomingRequestsView: View {
             Text("Enter the callsign, then compare the actual contact details from your notes, the operator's reply or your QRZ log. Nothing is imported or confirmed automatically.")
         }
         .onAppear {
+            refreshLocalReviewState()
             if appState.qrzIncomingRequests.isEmpty { appState.fetchQRZIncomingRequests() }
+            else { checkEmails() }
         }
         .onChange(of: appState.qrzIncomingRequests) { _, _ in
-            selectedRequestIDs.formIntersection(Set(appState.qrzIncomingRequests.map(\.id)))
+            refreshLocalReviewState()
+            updateEmailSelection()
         }
         .onChange(of: appState.qsoRecordsRevision) { _, _ in
-            selectedRequestIDs.formIntersection(Set(appState.qrzIncomingRequests.map(\.id)))
+            refreshLocalReviewState()
+            updateEmailSelection()
         }
         .sheet(item: $requestToReview, onDismiss: {
             if let request = detailsAfterReview { detailsAfterReview = nil; appState.draftIncomingQRZDetailsEmail(for: request) }
@@ -1044,25 +1120,31 @@ struct QRZIncomingRequestsView: View {
                 detailsAfterReview = request; requestToReview = nil
             }).environmentObject(appState)
         }
-        .sheet(isPresented: $showEmailQRZLogin, onDismiss: { emailChecker.reset() }) {
+        .sheet(isPresented: $showEmailQRZLogin, onDismiss: { emailChecker.reset(); checkEmails() }) {
             QRZLoginView().environmentObject(appState)
         }
         .sheet(isPresented: $appState.showIncomingEmailComposer) {
             EmailComposerView()
                 .environmentObject(appState)
         }
-        .sheet(isPresented: $showBulkComposer) {
-            QRZIncomingBulkEmailView(requests: bulkRequests)
+        .sheet(item: $emailBatch) { batch in
+            QRZIncomingBulkEmailView(batch: batch)
                 .environmentObject(appState)
         }
         .onChange(of: appState.activeStationProfileID) { _, _ in
+            refreshLocalReviewState()
             emailChecker.reset()
             rejectionContext = nil
+            emailBatch = nil
+            selectAvailableEmails = false
             selectedRequestIDs.removeAll()
+            checkEmails()
         }
         .onChange(of: appState.isFetchingQRZIncoming) { _, fetching in
             if fetching { emailChecker.reset() }
+            else { checkEmails() }
         }
+        .onChange(of: emailChecker.states) { _, _ in updateEmailSelection() }
         .onDisappear { emailChecker.reset() }
         .sheet(item: $rejectionContext) { context in
             QRZRejectRequestSheet(request: context.request,

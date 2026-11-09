@@ -11,12 +11,25 @@ import WebKit
 }
 @MainActor enum QRZSessionStore { static func restoreToWebKit(completion: (() -> Void)? = nil) { completion?() } }
 struct QSORecordModel { }
+struct EmailHistoryEntry {
+    let callsign: String; let kind: String?; let status: String; let date: Date
+}
+enum FixtureSound { case success, failure }
 enum IncomingContactReview { static func clean(_ call: String) -> String { call.uppercased() } }
 @MainActor final class AppState: ObservableObject {
     @Published var activeStationProfileID: UUID? = UUID()
     @Published var qrzIncomingStatus = "Visual fixture · no services"
     @Published var showIncomingEmailComposer = false
     let qsoRecordsRevision = 0
+    let currentStationCallsign = "ZZ0TEST"
+    let isSMTPConfigured = true
+    let emailHistory: [EmailHistoryEntry] = []
+    func resolveFirstName(for call: String) -> String { call }
+    func playActivitySound(_ sound: FixtureSound) { }
+    func sendEmail(to: String, subject: String, body: String, callsign: String, historyKind: String,
+                   playSound: Bool, completion: @escaping (Bool, String) -> Void) {
+        completion(false, "Fixture only · no email was sent")
+    }
     let isFetchingQRZIncoming = false, isRejectingQRZIncoming = false
     let rejectingQRZIncomingID: String? = nil, incomingEmailLookupCallsign: String? = nil
     let qrzIncomingRequests = ["ZZ1TEST", "ZZ2TEST", "ZZ3TEST", "ZZ4TEST", "ZZ5TEST"].enumerated().map {
@@ -37,7 +50,6 @@ struct QRZIncomingReviewView: View {
 }
 struct QRZLoginView: View { var body: some View { Text("Fixture · authentication not used") } }
 struct EmailComposerView: View { var body: some View { Text("Fixture · email not used") } }
-struct QRZIncomingBulkEmailView: View { let requests: [QRZIncomingConfirmation]; var body: some View { Text("Fixture · bulk email not used") } }
 extension View { func resizablePresentation(minWidth: CGFloat, minHeight: CGFloat) -> some View { self } }
 
 @MainActor final class VisualControls: NSObject {
@@ -52,7 +64,7 @@ extension View { func resizablePresentation(minWidth: CGFloat, minHeight: CGFloa
     @MainActor static func main() {
         _ = NSApplication.shared; NSApp.setActivationPolicy(.accessory)
         let appState = AppState()
-        let checker = QRZIncomingEmailChecker(initialStates: ["ZZ1TEST": .notPublished, "ZZ2TEST": .available("fixture@example.org"), "ZZ3TEST": .unavailable, "ZZ5TEST": .signInRequired], lookup: { _ in .unavailable })
+        let checker = QRZIncomingEmailChecker(initialStates: ["ZZ1TEST": .notPublished, "ZZ2TEST": .available("fixture@example.org"), "ZZ3TEST": .unavailable, "ZZ5TEST": .signInRequired], lookup: { call in call == "ZZ5TEST" ? .signInRequired : .unavailable })
         let root = QRZIncomingRequestsView(emailChecker: checker).environmentObject(appState)
         let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 760, height: 500), styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
         window.contentView = NSHostingView(rootView: root)

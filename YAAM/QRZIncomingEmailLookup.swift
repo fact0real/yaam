@@ -17,6 +17,10 @@ nonisolated enum QRZIncomingEmailStatus: Equatable, Sendable {
         }
     }
     var permitsMissingEmailRejection: Bool { self == .notPublished }
+    var email: String? {
+        if case .available(let address) = self { return address }
+        return nil
+    }
 }
 
 nonisolated enum QRZIncomingEmailEvidence {
@@ -72,6 +76,8 @@ nonisolated enum QRZIncomingEmailEvidence {
 @MainActor final class QRZIncomingEmailChecker: ObservableObject {
     @Published private(set) var states: [String: QRZIncomingEmailStatus] = [:]
     @Published private(set) var checkingCall: String?
+    @Published private(set) var completed = 0
+    @Published private(set) var total = 0
     private var task: Task<Void, Never>?
     private var reader: QRZIncomingEmailReader?
     private var generation = UUID()
@@ -88,30 +94,59 @@ nonisolated enum QRZIncomingEmailEvidence {
     }
 
     func check(_ rawCall: String) {
-        guard checkingCall == nil, let call = QRZIncomingEmailEvidence.normalizedCall(rawCall) else { return }
-        checkingCall = call
-        states[call] = .checking
+        guard let call = QRZIncomingEmailEvidence.normalizedCall(rawCall) else { return }
+        start([call])
+    }
+
+    func checkAll(_ rawCalls: [String]) {
+        var seen = Set<String>()
+        let calls = rawCalls.compactMap(QRZIncomingEmailEvidence.normalizedCall).filter {
+            seen.insert($0).inserted && status(for: $0).email == nil && status(for: $0) != .notPublished
+        }
+        start(calls)
+    }
+
+    private func start(_ calls: [String]) {
+        guard checkingCall == nil, let first = calls.first else { return }
+        completed = 0
+        total = calls.count
+        checkingCall = first
         let currentGeneration = generation
-        let reader = lookupOverride == nil ? QRZIncomingEmailReader() : nil
-        self.reader = reader
         task = Task { @MainActor in
-            let result: QRZIncomingEmailStatus
-            if let lookupOverride { result = await lookupOverride(call) }
-            else if let reader { result = await reader.fetch(call) }
-            else { result = .unavailable }
-            guard !Task.isCancelled, generation == currentGeneration else { return }
-            states[call] = result
+            for call in calls {
+                guard !Task.isCancelled, generation == currentGeneration else { return }
+                checkingCall = call
+                states[call] = .checking
+                let reader = lookupOverride == nil ? QRZIncomingEmailReader() : nil
+                self.reader = reader
+                let result: QRZIncomingEmailStatus
+                if let lookupOverride { result = await lookupOverride(call) }
+                else if let reader { result = await reader.fetch(call) }
+                else { result = .unavailable }
+                guard !Task.isCancelled, generation == currentGeneration else { return }
+                states[call] = result
+                completed += 1
+                self.reader = nil
+                // One sign-in fixes the whole batch; do not repeat the same failed session check.
+                if result == .signInRequired { break }
+            }
             checkingCall = nil
-            self.reader = nil
             task = nil
         }
     }
 
-    func reset() {
+    func stop() {
         generation = UUID()
         task?.cancel(); task = nil
         reader?.cancel(); reader = nil
+        if let checkingCall, states[checkingCall] == .checking { states[checkingCall] = .unchecked }
         checkingCall = nil
+    }
+
+    func reset() {
+        stop()
+        completed = 0
+        total = 0
         states = [:]
     }
 }

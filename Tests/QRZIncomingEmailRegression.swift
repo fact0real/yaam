@@ -1,4 +1,4 @@
-// swiftc -parse-as-library Tests/QRZIncomingEmailRegression.swift YAAM/QRZIncomingEmailLookup.swift -o /tmp/yaam-incoming-email-test
+// See Tests/run-incoming-email-regressions.sh; all profiles and outgoing addresses are inert fixtures.
 import Foundation
 import WebKit
 
@@ -80,6 +80,61 @@ import WebKit
         expect(fresh.status(for: "W1AW") == .notPublished)
         fresh.reset()
         expect(fresh.status(for: "W1AW") == .unchecked)
+        // A batch checks each normalized callsign once, skips known results and pauses at sign-in.
+        var checked: [String] = []
+        let batchChecker = QRZIncomingEmailChecker(initialStates: ["ZZ0TEST": .notPublished], lookup: { call in
+            checked.append(call)
+            switch call {
+            case "ZZ1TEST": return .available("fixture@example.org")
+            case "ZZ2TEST": return .notPublished
+            case "ZZ3TEST": return .signInRequired
+            default: return .unavailable
+            }
+        })
+        batchChecker.checkAll(["zz1test", " ZZ1TEST ", "ZZ0TEST", "ZZ2TEST", "ZZ3TEST", "ZZ4TEST"])
+        while batchChecker.checkingCall != nil { await Task.yield() }
+        expect(checked == ["ZZ1TEST", "ZZ2TEST", "ZZ3TEST"])
+        expect(batchChecker.completed == 3 && batchChecker.total == 4)
+        expect(batchChecker.status(for: "ZZ4TEST") == .unchecked)
+        expect(batchChecker.status(for: "ZZ1TEST").email == "fixture@example.org")
+        batchChecker.checkAll(["ZZ1TEST", "ZZ2TEST", "ZZ4TEST"])
+        while batchChecker.checkingCall != nil { await Task.yield() }
+        expect(checked == ["ZZ1TEST", "ZZ2TEST", "ZZ3TEST", "ZZ4TEST"])
+        expect(batchChecker.status(for: "ZZ4TEST") == .unavailable)
+
+        // Stop keeps completed evidence, removes the pending state and ignores a late result.
+        var stoppedPending: CheckedContinuation<QRZIncomingEmailStatus, Never>?
+        let stopped = QRZIncomingEmailChecker(initialStates: ["ZZ1TEST": .available("fixture@example.org")], lookup: { _ in
+            await withCheckedContinuation { stoppedPending = $0 }
+        })
+        stopped.checkAll(["ZZ1TEST", "ZZ2TEST", "ZZ3TEST"])
+        while stoppedPending == nil { await Task.yield() }
+        stopped.stop()
+        expect(stopped.status(for: "ZZ1TEST").email == "fixture@example.org")
+        expect(stopped.status(for: "ZZ2TEST") == .unchecked)
+        stoppedPending?.resume(returning: .notPublished)
+        for _ in 0..<10 { await Task.yield() }
+        expect(stopped.status(for: "ZZ2TEST") == .unchecked)
+        expect(stopped.status(for: "ZZ3TEST") == .unchecked)
+
+        // A sheet receives a nonempty, immutable snapshot of selected, email-ready requests.
+        let requests = ["ZZ1TEST", "ZZ2TEST", "ZZ3TEST", "ZZ4TEST", "ZZ1TEST"].enumerated().map {
+            QRZIncomingConfirmation(callsign: $0.element, qsoDate: "2026-11-0\($0.offset + 1)", requestedAt: "", rawSummary: "", qsoID: String($0.offset))
+        }
+        let allIDs = Set(requests.map(\.id))
+        let profileID = UUID()
+        let snapshot = QRZIncomingEmailBatch(requests: requests, selectedIDs: allIDs, states: batchChecker.states, profileID: profileID)
+        expect(snapshot?.requests.count == 2)
+        expect(snapshot?.emails == ["ZZ1TEST": "fixture@example.org"])
+        expect(snapshot?.profileID == profileID)
+        let groups = QRZIncomingBulkMail.group(snapshot!.requests.map { .init(id: $0.id, callsign: $0.callsign, qsoDate: $0.qsoDate) })
+        expect(groups.count == 1 && groups[0].requestIDs.count == 2)
+        batchChecker.reset()
+        expect(snapshot?.emails["ZZ1TEST"] == "fixture@example.org")
+        expect(QRZIncomingEmailBatch(requests: requests, selectedIDs: allIDs, states: batchChecker.states, profileID: profileID) == nil)
+        expect(QRZIncomingEmailBatch(requests: requests, selectedIDs: [], states: ["ZZ1TEST": .available("fixture@example.org")], profileID: profileID) == nil)
+        expect(QRZIncomingEmailBatch(requests: requests, selectedIDs: allIDs, states: ["ZZ1TEST": .available("bad")], profileID: profileID) == nil)
+
         let page = EmailFixturePage()
         for (html, expected) in [
             ("<td id='csdata'><span class='hamcall'>W1AW</span><p>Email: (none)</p></td>", QRZIncomingEmailStatus.notPublished),
