@@ -50,3 +50,15 @@ Previous download: `/releases/YAAM-1.37.56-macOS.zip`, 32,393,072 bytes, SHA-256
 Current download: `/releases/YAAM-1.37.57-macOS.zip`, 32,436,009 bytes, SHA-256 `c9078e6b1e56982a649e5154e53a631fe7489f4456d3f6f6a006de0be0f25141`. Corresponding source: `/releases/YAAM-1.37.57-source.zip`; GitHub release: https://github.com/fact0real/yaam/releases/tag/v1.37.57 .
 
 The website feature reference matches this build. Sync All reviews per-provider counts before queueing, Digital Suite logging requires fresh radio frequency evidence, and Olivia/Contestia is explicitly a tone prototype without native interoperable text coding. Relative FT8 DT does not diagnose the local clock; independent reference acquisition remains unimplemented. Russia grouping preserves ADIF entity distinctions. This remains a non-notarized developer preview. Existing 1.37.56 users can update through the signed feed; older builds need a manual bootstrap installation.
+
+
+## 1.37.59 (209) — QRZ Incoming follow-up
+
+Current download: `/releases/YAAM-1.37.59-macOS.zip`, 32,475,322 bytes, SHA-256 `e16028c4b3ed406075d11ec18555b521156774d6d0c994461a57fa61ad60c7a0`. Corresponding source: `/releases/YAAM-1.37.59-source.zip`. Release notes: `/updates/release-1.37.59.html`.
+
+QRZ profile emails are checked automatically; only requests needing details with a published usable email can be selected. Bulk drafts receive their recipients atomically and combine request dates per callsign. Failed checks remain distinct from missing published emails; current no-email requests offer a prefilled rejection. The build also includes multi-file ADIF Live Sync from local 1.37.58. This remains a non-notarized developer preview with publisher-signed feed and archive.
+
+
+## 1.37.60 (210) — consistent DXCC identities
+
+Current download: `/releases/YAAM-1.37.60-macOS.zip`, 32,521,038 bytes, SHA-256 `7dd7421e1c54d0533a7ef4ff4419e6dd6104b24523cea6ce878875611b8f24ac`. Corresponding source: `/releases/YAAM-1.37.60-source.zip`. Release notes: `/updates/release-1.37.60.html`. Worked/confirmed counts and country/band views share an ADIF identity, missing codes use unambiguous country/operating-call evidence, and Russia entities remain distinct. Local QRZ confirmations are separate from all-source confirmations. Invalid/unresolved identities have a review list; original ADIF fields remain unchanged. Non-notarized preview, signed publisher feed/archive.

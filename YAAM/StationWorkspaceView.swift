@@ -101,8 +101,7 @@ private enum WorkspaceData {
     }
 
     nonisolated static func entity(_ record: QSORecordModel) -> String {
-        let country = record["COUNTRY"].trimmingCharacters(in: .whitespacesAndNewlines)
-        return country.isEmpty ? DXCCDatabase.resolve(callsign: record["CALL"]).entityName : country
+        ConfirmationOpportunityIndex.countryFilterLabel(for: record)
     }
 
     static func flag(_ record: QSORecordModel) -> String {

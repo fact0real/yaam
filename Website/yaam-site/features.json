@@ -212,7 +212,7 @@
       },
       {
         "title": "Incoming requests & received cards",
-        "description": "Review QRZ Incoming requests before an upload decision. Match received confirmation evidence and organize archived card images and paper-QSL state."
+        "description": "Review QRZ Incoming requests before an upload decision. Automatically check published QRZ emails, select eligible requests and prepare one personalized follow-up per callsign. Requests without a published email stay unchecked and offer a prefilled rejection. Match received confirmation evidence and organize archived card images and paper-QSL state."
       },
       {
         "title": "Card & label design",
@@ -239,7 +239,7 @@
       },
       {
         "title": "Visual statistics & QRZ Rank",
-        "description": "Explore logbook statistics, confirmation sources and band/mode coverage. Review configured QRZ Rank history, country context and tracked competitors using the external rank service."
+        "description": "Explore logbook statistics, confirmation sources and band/mode coverage. Worked and confirmed DXCC share one ADIF entity identity, including distinct Asiatic and European Russia. Compare local QRZ-confirmed entities separately from all-source confirmations and review unresolved identities. QRZ Rank provides configured ranking history, country context and tracked competitors."
       },
       {
         "title": "SKED operator directory",

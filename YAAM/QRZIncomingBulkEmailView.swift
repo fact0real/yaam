@@ -12,7 +12,6 @@ private struct IncomingRecipientDraft: Identifiable {
     var id: String { group.id }
     var name: String
     var email: String = ""
-    var isLookingUp = false
     var delivery: IncomingDeliveryState = .ready
 }
 
@@ -25,8 +24,6 @@ struct QRZIncomingBulkEmailView: View {
     @State private var recipients: [IncomingRecipientDraft]
     @State private var previewCallsign: String
     @State private var isPrepared = false
-    @State private var lookupTask: Task<Void, Never>?
-    @State private var isLookingUp = false
     @State private var includePreviouslyEmailed = false
     @State private var isSending = false
     @State private var stopAfterCurrent = false
@@ -35,11 +32,14 @@ struct QRZIncomingBulkEmailView: View {
     @State private var totalToSend = 0
     @State private var notice = ""
 
-    init(requests: [QRZIncomingConfirmation]) {
-        let groups = QRZIncomingBulkMail.group(requests.map {
+    private let profileID: UUID?
+
+    init(batch: QRZIncomingEmailBatch) {
+        profileID = batch.profileID
+        let groups = QRZIncomingBulkMail.group(batch.requests.map {
             .init(id: $0.id, callsign: $0.callsign, qsoDate: $0.qsoDate)
         })
-        _recipients = State(initialValue: groups.map { .init(group: $0, name: $0.callsign) })
+        _recipients = State(initialValue: groups.map { .init(group: $0, name: $0.callsign, email: batch.emails[$0.callsign] ?? "") })
         _previewCallsign = State(initialValue: groups.first?.callsign ?? "")
     }
 
@@ -87,12 +87,14 @@ struct QRZIncomingBulkEmailView: View {
 
             Divider()
 
-            HStack(alignment: .top, spacing: 16) {
-                recipientList
-                    .frame(width: 340)
-                Divider()
-                editorAndPreview
-                    .frame(maxWidth: .infinity)
+            GeometryReader { geometry in
+                HStack(alignment: .top, spacing: 16) {
+                    recipientList
+                        .frame(width: min(340, geometry.size.width * 0.36))
+                    Divider()
+                    editorAndPreview
+                        .frame(maxWidth: .infinity)
+                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding(.vertical, 14)
@@ -100,6 +102,13 @@ struct QRZIncomingBulkEmailView: View {
             Divider()
 
             VStack(alignment: .leading, spacing: 8) {
+                if !appState.isSMTPConfigured {
+                    Text("Set up your sending account in Settings → Email before sending.")
+                        .font(.caption).foregroundStyle(.orange)
+                } else if myCallsign.isEmpty {
+                    Text("Set the active station callsign before sending.")
+                        .font(.caption).foregroundStyle(.orange)
+                }
                 if !notice.isEmpty {
                     Text(notice)
                         .font(.caption)
@@ -124,14 +133,14 @@ struct QRZIncomingBulkEmailView: View {
                         showSendConfirmation = true
                     }
                         .buttonStyle(.borderedProminent)
-                        .disabled(isSending || readyCount == 0 || myCallsign.isEmpty)
+                        .disabled(isSending || readyCount == 0 || myCallsign.isEmpty || !appState.isSMTPConfigured || appState.activeStationProfileID != profileID)
                 }
             }
             .padding(.top, 12)
         }
         .padding(18)
-        .frame(minWidth: 860, idealWidth: 1080, minHeight: 590, idealHeight: 740)
-        .resizablePresentation(minWidth: 860, minHeight: 590)
+        .frame(minWidth: 760, idealWidth: 1080, minHeight: 500, idealHeight: 740)
+        .resizablePresentation(minWidth: 760, minHeight: 500)
         .interactiveDismissDisabled(isSending)
         .confirmationDialog("Send separate personalized emails?",
                             isPresented: $showSendConfirmation) {
@@ -141,7 +150,10 @@ struct QRZIncomingBulkEmailView: View {
             Text("YAAM will send one message per callsign through your configured SMTP account. Requests from the same callsign are combined in one message.")
         }
         .onAppear(perform: prepareRecipients)
-        .onDisappear { lookupTask?.cancel() }
+        .onChange(of: appState.activeStationProfileID) { _, _ in
+            stopAfterCurrent = true
+            notice = "Station changed. Close this draft and select requests for the active station."
+        }
     }
 
     private var recipientList: some View {
@@ -149,18 +161,6 @@ struct QRZIncomingBulkEmailView: View {
             HStack {
                 Text("Recipients").font(.headline)
                 Spacer()
-                if isLookingUp {
-                    ProgressView().controlSize(.small)
-                    Button("Stop lookup") {
-                        lookupTask?.cancel()
-                        isLookingUp = false
-                    }
-                    .font(.caption)
-                } else if missingCount > 0 {
-                    Button("Find missing emails") { startLookup() }
-                        .font(.caption)
-                        .disabled(isSending)
-                }
             }
             if previousCount > 0 {
                 Toggle("Include \(previousCount) previously emailed", isOn: $includePreviouslyEmailed)
@@ -197,7 +197,6 @@ struct QRZIncomingBulkEmailView: View {
                                 TextField("Email address", text: $recipient.email)
                                     .textFieldStyle(.roundedBorder)
                                     .disabled(isSending || recipient.delivery == .sent)
-                                if recipient.isLookingUp { ProgressView().controlSize(.small) }
                             }
                             TextField("Operator name", text: $recipient.name)
                                 .textFieldStyle(.roundedBorder)
@@ -243,7 +242,7 @@ struct QRZIncomingBulkEmailView: View {
                 .disabled(isSending)
             TextEditor(text: $bodyTemplate)
                 .font(.system(.body, design: .monospaced))
-                .frame(minHeight: 175, maxHeight: 240)
+                .frame(minHeight: 100, maxHeight: 175)
                 .overlay(RoundedRectangle(cornerRadius: 6).stroke(.secondary.opacity(0.25)))
                 .disabled(isSending)
             HStack {
@@ -295,49 +294,11 @@ struct QRZIncomingBulkEmailView: View {
         for index in recipients.indices {
             let call = recipients[index].id
             recipients[index].name = appState.resolveFirstName(for: call)
-            if let stored = appState.qsoRecords.lazy
-                .filter({ $0["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == call })
-                .map({ $0["EMAIL"].trimmingCharacters(in: .whitespacesAndNewlines) })
-                .first(where: QRZIncomingBulkMail.isUsableEmail) {
-                recipients[index].email = stored
-            }
-        }
-        startLookup()
-    }
-
-    private func startLookup() {
-        lookupTask?.cancel()
-        guard recipients.contains(where: { !QRZIncomingBulkMail.isUsableEmail($0.email) }) else { return }
-        isLookingUp = true
-        lookupTask = Task { @MainActor in
-            for index in recipients.indices {
-                if Task.isCancelled || isSending { break }
-                guard !QRZIncomingBulkMail.isUsableEmail(recipients[index].email) else { continue }
-                recipients[index].isLookingUp = true
-                let call = recipients[index].id
-                let contact = await appState.fetchContactInfo(
-                    for: call, allowQRZWebKitFallback: true, allowCredentialPrompt: false)
-                guard !Task.isCancelled else {
-                    recipients[index].isLookingUp = false
-                    break
-                }
-                if !QRZIncomingBulkMail.isUsableEmail(recipients[index].email),
-                   let fetched = contact.email, QRZIncomingBulkMail.isUsableEmail(fetched) {
-                    recipients[index].email = fetched.trimmingCharacters(in: .whitespacesAndNewlines)
-                }
-                if recipients[index].name == call,
-                   let fetchedName = contact.name?.trimmingCharacters(in: .whitespacesAndNewlines),
-                   !fetchedName.isEmpty {
-                    recipients[index].name = appState.formatFirstName(from: fetchedName, fallbackCallsign: call)
-                }
-                recipients[index].isLookingUp = false
-            }
-            isLookingUp = false
         }
     }
 
     private func startSend() {
-        guard !isSending else { return }
+        guard !isSending, appState.activeStationProfileID == profileID else { return }
         guard !myCallsign.isEmpty else {
             notice = "Error: Set the active station callsign before sending."
             return
@@ -352,8 +313,6 @@ struct QRZIncomingBulkEmailView: View {
             notice = "Error: Enter a subject and message."
             return
         }
-        lookupTask?.cancel()
-        isLookingUp = false
 
         let candidates: [(index: Int, call: String, email: String, subject: String, body: String)] =
             recipients.indices.compactMap { index in
@@ -385,8 +344,15 @@ struct QRZIncomingBulkEmailView: View {
         Task { @MainActor in
             var sent = 0
             var failed = 0
+            var skipped = 0
             for candidate in candidates {
-                if stopAfterCurrent { break }
+                if stopAfterCurrent || appState.activeStationProfileID != profileID { break }
+                // Another mail window may have contacted this operator since this batch was prepared.
+                if !includePreviouslyEmailed && previousIncomingEmail(for: candidate.call) != nil {
+                    skipped += 1
+                    completed += 1
+                    continue
+                }
                 recipients[candidate.index].delivery = .sending
                 let result: (Bool, String) = await withCheckedContinuation { continuation in
                     appState.sendEmail(to: candidate.email, subject: candidate.subject,
@@ -414,7 +380,7 @@ struct QRZIncomingBulkEmailView: View {
             isSending = false
             appState.playActivitySound(failed == 0 ? .success : .failure)
             if !notice.hasPrefix("HISTORY SAVE FAILED") {
-                notice = "\(sent) sent · \(failed) failed\(stopAfterCurrent ? " · stopped after the current message" : ""). Review the results before closing."
+                notice = "\(sent) sent · \(failed) failed\(skipped > 0 ? " · \(skipped) already emailed" : "")\(stopAfterCurrent ? " · stopped after the current message" : ""). Review the results before closing."
             }
         }
     }

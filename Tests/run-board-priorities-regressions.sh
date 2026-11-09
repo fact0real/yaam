@@ -16,7 +16,7 @@ run() {
 }
 run DigitalQSOConfirmationRegression YAAM/DigitalQSOConfirmation.swift "${operator[@]}"
 run QSLSyncAllRegression YAAM/QSLSyncAll.swift YAAM/QSLHub.swift YAAM/EQSLInboxDownload.swift YAAM/ADIFParser.swift YAAM/FormURLEncoding.swift YAAM/QSOMetadataFormatter.swift "${operator[@]}"
-run RussianEntityGroupingRegression YAAM/ConfirmationOpportunity.swift YAAM/ADIFParser.swift YAAM/QSOMetadataFormatter.swift YAAM/GridLocator.swift "${operator[@]}"
+run RussianEntityGroupingRegression YAAM/LogDXCCEntity.swift YAAM/DXCCEntityCatalog.swift YAAM/ConfirmationOpportunity.swift YAAM/ADIFParser.swift YAAM/QSOMetadataFormatter.swift YAAM/GridLocator.swift "${operator[@]}"
 run FT8OperatingSupportRegression YAAM/FT8OperatingSupport.swift YAAM/DXCCDatabase.swift YAAM/CountryFlagEngine.swift YAAM/CountryNameNormalizer.swift
 run OliviaCallsignDetectRegression Tests/Support/TransmitGateStubs.swift Tests/Support/TransmitGateDXCCStub.swift YAAM/OliviaMFSKEngine.swift YAAM/TransmitShutdown.swift YAAM/AudioOnlyTransmit.swift YAAM/TXLimits.swift YAAM/TransmitIdentity.swift YAAM/GridLocator.swift
 run TCIOutsideTextRegression YAAM/TCIClient.swift YAAM/MorseTiming.swift YAAM/TXLimits.swift YAAM/TransmitShutdown.swift YAAM/TransmitNotices.swift
