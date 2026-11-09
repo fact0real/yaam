@@ -62,3 +62,10 @@ QRZ profile emails are checked automatically; only requests needing details with
 ## 1.37.60 (210) — consistent DXCC identities
 
 Current download: `/releases/YAAM-1.37.60-macOS.zip`, 32,521,038 bytes, SHA-256 `7dd7421e1c54d0533a7ef4ff4419e6dd6104b24523cea6ce878875611b8f24ac`. Corresponding source: `/releases/YAAM-1.37.60-source.zip`. Release notes: `/updates/release-1.37.60.html`. Worked/confirmed counts and country/band views share an ADIF identity, missing codes use unambiguous country/operating-call evidence, and Russia entities remain distinct. Local QRZ confirmations are separate from all-source confirmations. Invalid/unresolved identities have a review list; original ADIF fields remain unchanged. Non-notarized preview, signed publisher feed/archive.
+
+
+## 1.37.61 (211) — logbook scrolling
+
+Current download: `/releases/YAAM-1.37.61-macOS.zip`, 32,518,447 bytes, SHA-256 `eda312df1e75c266cc37d5b1acba85228b35564b151fcc9ac1a1d55668e695ef`. Corresponding source: `/releases/YAAM-1.37.61-source.zip`; release notes: `/updates/release-1.37.61.html`; GitHub: https://github.com/fact0real/yaam/releases/tag/v1.37.61 .
+
+The table constructs pinned and nearby horizontal cells, retains exact column positions, and exposes the complete filtered log without the 1,000-row loading boundary. Includes the complete 1.37.60 DXCC/Russia corrections and 1.37.59 QRZ follow-up changes. A 100,000-row/30-column production-rendering fixture, 2,800 geometry checks, DXCC regressions and Debug/Release builds cover the change. Measurements are fixture-specific; see the release notes. Non-notarized developer preview with signed publisher feed/archive. Activation is guarded against the prior 1.37.60 site and build 210; previous downloads/site directories remain available.
