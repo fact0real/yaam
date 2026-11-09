@@ -1,23 +1,23 @@
-# بررسی بستهٔ EA3JIC (۸ اکتبر ۲۰۲۶)
+# EA3JIC Package Review (October 8, 2026)
 
-این بسته برای YAAM 1.37.31 نوشته شده بود. تغییرات پذیرفته‌شده روی کد 1.37.33 ادغام و در نسخهٔ 1.37.34 ساخته شدند. متن‌ها و برنامه‌های بسته به‌عنوان داده و پیشنهاد بررسی شدند، نه دستور اجرایی.
+This package was originally prepared for YAAM 1.37.31. Accepted changes were merged onto the 1.37.33 codebase and built in release 1.37.34. Texts and tools in the package were evaluated as data and suggestions, not execution mandates.
 
-## تغییرات پذیرفته‌شده
+## Accepted Changes
 
-- وصله‌های 31، 32 و 38: نوع درست پارامترهای XML-RPC برای flrig، ترتیب فرمان‌ها، گزارش خطا و وضعیت اتصال، CW از راه `cwio`، و خواندن دوبارهٔ PTT بعد از فرمان آزادسازی. برای PTT مسیر toolbar، آزادسازی در قطع اتصال و نگهبان ۱۲۰ ثانیه‌ای نیز افزوده شد.
-- وصله‌های 33 و 35: بررسی شناسهٔ اپراتور در مسیرهای CW و ارسال دیجیتال و حذف شناسه، لوکیتور، مکان و پارک نمونه از ورودی‌ها. بخش FT8 با تغییرات تازه‌تر 1.37.33 ادغام شد. JS8 و صدای کارت آزمایشی SSTV نیز پیش از ارسال شناسه را بررسی می‌کنند. FT8 متن آزاد حاوی شناسه‌های جایگزین مانند `N0CALL` را رد می‌کند.
-- وصلهٔ 34: درخواست و مقیاس S-meter برای TX-500. نگاشت S9 در شمارش ۱۵ فرض پیشنهادی بسته است و باید با رادیوی واقعی سنجیده شود.
-- وصلهٔ 36: فهرست رشته‌های کاتالان و اسپانیایی. این پوشش جزئی است؛ همهٔ نماها ترجمه نشده‌اند.
-- وصلهٔ 37: تاریخ‌های ذخیره‌شده یا مبادله‌شده میلادی و با رقم لاتین هستند. نمایش تاریخ روی صفحه تغییر نکرد.
-- ایمنی شبیه‌ساز: سرورهای Icom UDP و rigctld TCP فقط روی loopback گوش می‌دهند؛ فرمان ناشناختهٔ rigctld خطا می‌دهد.
+- Patches 31, 32, and 38: Correct XML-RPC parameter types for flrig, command sequencing, error reporting, connection status, CW keying via `cwio`, and re-reading PTT state after a release command. For toolbar PTT, disconnect release handling and a 120-second watchdog timer were also added.
+- Patches 33 and 35: Operator callsign validation across CW and digital transmission paths, stripping placeholder callsigns, grid locators, locations, and sample parks from inputs. The FT8 section was merged with newer 1.37.33 changes. JS8 and SSTV test-card audio generators also validate the operator callsign prior to transmission. FT8 free text containing substitute callsigns like `N0CALL` is rejected.
+- Patch 34: S-meter query and scaling for the TX-500. Mapping S9 to a count of 15 is the package's proposed assumption and must be verified against physical hardware.
+- Patch 36: Catalan and Spanish string tables. This coverage is partial; not all views are translated.
+- Patch 37: Stored or exchanged dates are Gregorian with ASCII Latin digits. On-screen date rendering policy was not changed.
+- Emulator safety: Icom UDP and rigctld TCP servers bind strictly to loopback (`127.0.0.1`); unrecognized rigctld commands return an error.
 
-## مواردی که در این نسخه اعمال نشدند
+## Items Not Applied in This Release
 
-- طرح hub در Lab599 Utility، وصله‌های آن برنامه، و طرح وضعیت آپلود QSO به مخزن/قابلیت دیگری مربوط‌اند و در این نسخهٔ YAAM پیاده‌سازی نشدند.
-- اصلاح کدگذاری `RR73` و اندازه‌گیری SNR در وابستگی `ft8-808` نیازمند تغییر همان کتابخانه و آزمون دوبارهٔ سازگاری و حساسیت با bench است. تغییری در نسخهٔ وابستگی داده نشد.
-- بازنویسی کلاینت rigctld و یکپارچه‌سازی همهٔ درایورهای رادیو تغییر معماری جداگانه‌اند. در این نسخه فقط سرور شبیه‌ساز محدود شد.
-- داده‌های فهرست پارک‌ها/قله‌ها و سیاست تاریخ روی صفحه بدون تأیید منبع و تصمیم محصول تغییر نکردند.
+- The Lab599 Utility hub design, patches for that external application, and QSO upload status designs belong to another repository/feature scope and were not implemented in this YAAM release.
+- Modifying `RR73` encoding and SNR measurement in the `ft8-808` dependency requires changing that upstream library and re-running benchmark sensitivity/compatibility suites. No change was made to the dependency version.
+- Rewriting the rigctld client and consolidating all radio drivers are distinct architectural changes. In this release, only the emulator server was scoped down.
+- Park/summit directory data and on-screen date presentation policies were kept unchanged pending source verification and product decisions.
 
-## راستی‌آزمایی و محدودیت
+## Verification & Limitations
 
-ساخت Debug و Release، آزمون‌های مستقل flrig/PTT/CW/S-meter، آزمون‌های هویت و پیش‌فرض‌ها، ترجمه، تاریخ، و آزمون‌های رفتاری CW/مودم و FT8/FT4 انجام شدند. آزمون‌های رفتاری صوتی در sandbox بدون دسترسی به میکروفون اجرا شدند. آزمون با رادیوی واقعی یا ارسال روی هوا انجام نشد؛ به‌ویژه آزادسازی PTT، CW از راه flrig و مقیاس S-meter روی سخت‌افزار باید تأیید شوند.
+Debug and Release builds, independent flrig/PTT/CW/S-meter unit tests, identity/default tests, localization, date handling, and CW/modem/FT8/FT4 behavioral test suites passed. Audio behavioral tests were executed in sandbox without live microphone access. No testing was performed on physical radios over the air; in particular, PTT release, flrig-mediated CW, and S-meter scaling should be confirmed on physical hardware.

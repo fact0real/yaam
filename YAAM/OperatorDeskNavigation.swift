@@ -265,7 +265,7 @@ nonisolated enum OperatorDeskDestination: String, CaseIterable, Identifiable {
         case .cwHardware: "WinKeyer USB Serial DTR RTS CAT"
         case .emulator: "Network Transceiver Emulator IC-705"
         case .qslLabels: "QSL Label Designer Print Studio"
-        case .qslGraylist: "QSL Greylist Gray List Unconfirmed Low Priority فهرست خاکستری"
+        case .qslGraylist: "QSL Greylist Gray List Unconfirmed Low Priority Pending Queue"
         case .sixMeter: "6m Band 6m Magic Band Watch"
         case .clubs: "Clubs Club Memberships"
         case .multiRigFT8: "Multi-Rig Cluster SO2R SO3R"

@@ -3,7 +3,7 @@
 //  YAAM
 //
 //  Live PSKReporter & Reverse Beacon Network (RBN) Signal Footprint Console
-//  ("ردپای سیگنال من در جهان")
+//  Global signal footprint and coverage workspace console
 //  Multi-projection 3D Globe, Azimuthal NS6T Map, and 2D GridTracker with
 //  geodesic great circle propagation arcs, antenna polar radiation pattern radar,
 //  and 1-click antenna rotator beam steering.

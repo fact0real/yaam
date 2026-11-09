@@ -3,7 +3,7 @@
 //  YAAM
 //
 //  Intelligent Busted Callsign Warning & Instant Correction HUD
-//  ("کارت هوشمند هشدار و تصحیح کال‌ساین‌های اشتباه")
+//  Smart busted callsign warning and correction card
 //  Renders real-time visual alerts for Voice (Phone) and CW (Morse) miscopies,
 //  explaining the acoustic/telegraphic error and offering 1-click replacement.
 //

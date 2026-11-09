@@ -1,0 +1,180 @@
+{
+  "date": "2026-11-06",
+  "project": "https://github.com/users/fact0real/projects/3",
+  "work_items": {
+    "OG-01": {
+      "url": "https://github.com/fact0real/yaam-lab599-shared-board/issues/492",
+      "number": 492,
+      "title": "[OpsLog OG-01] DXCC Challenge: exclude 60 m and make the counted band set explicit",
+      "project_item_id": "PVTI_lAHOAAN6ts4BnmntzhGgstk",
+      "todo_set": true
+    },
+    "OG-02": {
+      "url": "https://github.com/fact0real/yaam-lab599-shared-board/issues/493",
+      "number": 493,
+      "title": "[OpsLog OG-02] Logbook: arbitrary-field Boolean filters and independent named presets",
+      "project_item_id": "PVTI_lAHOAAN6ts4BnmntzhGgs1o",
+      "todo_set": true
+    },
+    "OG-03": {
+      "url": "https://github.com/fact0real/yaam-lab599-shared-board/issues/494",
+      "number": 494,
+      "title": "[OpsLog OG-03] DXCC: dated Club Log exceptions and reviewed historical re-resolution",
+      "project_item_id": "PVTI_lAHOAAN6ts4BnmntzhGgs90",
+      "todo_set": true
+    },
+    "OG-04": {
+      "url": "https://github.com/fact0real/yaam-lab599-shared-board/issues/495",
+      "number": 495,
+      "title": "[OpsLog OG-04] Station profiles: isolate CAT, audio, cluster and workspace operating settings",
+      "project_item_id": "PVTI_lAHOAAN6ts4BnmntzhGgtaE",
+      "todo_set": true
+    },
+    "OG-05": {
+      "url": "https://github.com/fact0real/yaam-lab599-shared-board/issues/496",
+      "number": 496,
+      "title": "[OpsLog OG-05] Awards: user-defined rules, reference catalogues and explainable matching",
+      "project_item_id": "PVTI_lAHOAAN6ts4BnmntzhGgthw",
+      "todo_set": true
+    },
+    "OG-06": {
+      "url": "https://github.com/fact0real/yaam-lab599-shared-board/issues/497",
+      "number": 497,
+      "title": "[OpsLog OG-06] ADIF: versioned field dictionary, validation and explicit export field selection",
+      "project_item_id": "PVTI_lAHOAAN6ts4BnmntzhGgzW0",
+      "todo_set": true
+    },
+    "OG-07": {
+      "url": "https://github.com/fact0real/yaam-lab599-shared-board/issues/498",
+      "number": 498,
+      "title": "[OpsLog OG-07] Multi-operator: shared live log, conflict handling and on-air presence",
+      "project_item_id": "PVTI_lAHOAAN6ts4BnmntzhGgzjg",
+      "todo_set": true
+    },
+    "OG-08": {
+      "url": "https://github.com/fact0real/yaam-lab599-shared-board/issues/499",
+      "number": 499,
+      "title": "[OpsLog OG-08] Station accessories: model-specific amplifier, tuner and antenna-switch control",
+      "project_item_id": "PVTI_lAHOAAN6ts4BnmntzhGgzsI",
+      "todo_set": true
+    },
+    "OG-09": {
+      "url": "https://github.com/fact0real/yaam-lab599-shared-board/issues/500",
+      "number": 500,
+      "title": "[OpsLog OG-09] Satellites: validated pass prediction, Doppler CAT and az/el tracking workflow",
+      "project_item_id": "PVTI_lAHOAAN6ts4BnmntzhGgzzw",
+      "todo_set": true
+    },
+    "OG-10": {
+      "url": "https://github.com/fact0real/yaam-lab599-shared-board/issues/501",
+      "number": 501,
+      "title": "[OpsLog OG-10] Directed nets: persistent rosters, check-ins and reviewed group logging",
+      "project_item_id": "PVTI_lAHOAAN6ts4BnmntzhGgz6E",
+      "todo_set": true
+    },
+    "OG-11": {
+      "url": "https://github.com/fact0real/yaam-lab599-shared-board/issues/502",
+      "number": 502,
+      "title": "[OpsLog OG-11] Logbook audio: rolling RX/mic recording linked to individual QSOs",
+      "project_item_id": "PVTI_lAHOAAN6ts4BnmntzhGg0AM",
+      "todo_set": true
+    },
+    "OG-12": {
+      "url": "https://github.com/fact0real/yaam-lab599-shared-board/issues/503",
+      "number": 503,
+      "title": "[OpsLog OG-12] Voice keyer: recorded messages with reviewed audio/PTT routing",
+      "project_item_id": "PVTI_lAHOAAN6ts4BnmntzhGg0HQ",
+      "todo_set": true
+    },
+    "OG-13": {
+      "url": "https://github.com/fact0real/yaam-lab599-shared-board/issues/504",
+      "number": 504,
+      "title": "[OpsLog OG-13] TCI: binary network audio routes for receive, recording and digital output",
+      "project_item_id": "PVTI_lAHOAAN6ts4BnmntzhGg0PE",
+      "todo_set": true
+    },
+    "OG-14": {
+      "url": "https://github.com/fact0real/yaam-lab599-shared-board/issues/505",
+      "number": 505,
+      "title": "[OpsLog OG-14] QSL cards: reusable user-designed photo templates per station",
+      "project_item_id": "PVTI_lAHOAAN6ts4BnmntzhGg0Xk",
+      "todo_set": true
+    },
+    "OG-15": {
+      "url": "https://github.com/fact0real/yaam-lab599-shared-board/issues/506",
+      "number": 506,
+      "title": "[OpsLog OG-15] DX alerts: spotter filters, band/mode cells and optional email delivery",
+      "project_item_id": "PVTI_lAHOAAN6ts4BnmntzhGg0tc",
+      "todo_set": true
+    },
+    "OG-16": {
+      "url": "https://github.com/fact0real/yaam-lab599-shared-board/issues/507",
+      "number": 507,
+      "title": "[OpsLog OG-16] Remote station: paired operator console with capability and audio negotiation",
+      "project_item_id": "PVTI_lAHOAAN6ts4BnmntzhGg1GM",
+      "todo_set": true
+    }
+  },
+  "comments": {
+    "10": {
+      "url": "https://github.com/fact0real/yaam-lab599-shared-board/issues/10#issuecomment-6680977379",
+      "heading": "Physical CAT sharing scope"
+    },
+    "96": {
+      "url": "https://github.com/fact0real/yaam-lab599-shared-board/issues/96#issuecomment-6680978006",
+      "heading": "Per-award evidence and consistency"
+    },
+    "108": {
+      "url": "https://github.com/fact0real/yaam-lab599-shared-board/issues/108#issuecomment-6680978608",
+      "heading": "Saved multi-pane operating desk and shared statistics scope"
+    },
+    "144": {
+      "url": "https://github.com/fact0real/yaam-lab599-shared-board/issues/144#issuecomment-6680979064",
+      "heading": "Current localization inventory"
+    },
+    "260": {
+      "url": "https://github.com/fact0real/yaam-lab599-shared-board/issues/260#issuecomment-6680979598",
+      "heading": "Prioritize model-specific native CAT gaps"
+    },
+    "446": {
+      "url": "https://github.com/fact0real/yaam-lab599-shared-board/issues/446#issuecomment-6680980278",
+      "heading": "Make multi-program digital integration testable"
+    },
+    "443": {
+      "url": "https://github.com/fact0real/yaam-lab599-shared-board/issues/443#issuecomment-6680980796",
+      "heading": "Preserve multi-source spot evidence"
+    },
+    "444": {
+      "url": "https://github.com/fact0real/yaam-lab599-shared-board/issues/444#issuecomment-6680981254",
+      "heading": "Activity-aware hunting criteria"
+    },
+    "299": {
+      "url": "https://github.com/fact0real/yaam-lab599-shared-board/issues/299#issuecomment-6680981803",
+      "heading": "Portable snapshots beyond merge sync"
+    },
+    "293": {
+      "url": "https://github.com/fact0real/yaam-lab599-shared-board/issues/293#issuecomment-6680982526",
+      "heading": "Reproducible comparison workload"
+    },
+    "168": {
+      "url": "https://github.com/fact0real/yaam-lab599-shared-board/issues/168#issuecomment-6680983142",
+      "heading": "Interoperability scope alongside MQTT"
+    },
+    "149": {
+      "url": "https://github.com/fact0real/yaam-lab599-shared-board/issues/149#issuecomment-6680983713",
+      "heading": "Separate multi-profile operation from a concurrent shared log"
+    },
+    "307": {
+      "url": "https://github.com/fact0real/yaam-lab599-shared-board/issues/307#issuecomment-6680984292",
+      "heading": "Dated OpsLog comparison delivered"
+    }
+  },
+  "parent": {
+    "url": "https://github.com/fact0real/yaam-lab599-shared-board/issues/491",
+    "number": 491,
+    "title": "[YAAM × OpsLog] Feature audit and prioritized roadmap — 2026-11-06",
+    "project_item_id": "PVTI_lAHOAAN6ts4BnmntzhGgsiY",
+    "todo_set": true,
+    "body_sha256": "1da1d7b4c633ab4bd9d01abe98ec2e877c107551f453fd51fe68bbc50fd428aa"
+  }
+}

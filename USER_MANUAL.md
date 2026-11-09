@@ -2,6 +2,8 @@
 ### (Yet Another ADIF Manager — Native macOS Edition)
 
 > **Welcome:** **YAAM** is a high-performance, native amateur radio logging and station automation suite engineered specifically for macOS (macOS 15+). It delivers local-first ADIF record management, direct transceiver network control, dedicated digital mode modems, a full CW training academy, shack clock telemetry, live weather radar, and tactical propagation HUD navigation within a unified, elegant macOS interface.
+>
+> **Official Website & Downloads:** [https://yaam.asis.sh/](https://yaam.asis.sh/) — Latest releases, documentation, and project updates.
 
 ---
 

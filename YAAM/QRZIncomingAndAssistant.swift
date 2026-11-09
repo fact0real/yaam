@@ -1550,20 +1550,20 @@ private enum LogAssistantAction {
 
     static func interpret(prompt: String, appState: AppState) -> (message: String, action: LogAssistantAction?) {
         let normalized = prompt.lowercased()
-        if normalized.contains("unconfirmed") || prompt.contains("تایید نشده") {
+        if normalized.contains("unconfirmed") {
             let count = appState.qsoRecords.filter { !$0.isConfirmed }.count
             return ("There are \(count.formatted()) unconfirmed QSOs in the active log. I can apply the confirmation filter.", .unconfirmed)
         }
-        if normalized.contains("incoming") || prompt.contains("ورودی") {
+        if normalized.contains("incoming") {
             return ("I can open QRZ Incoming and identify requests that do not have a local QSO yet.", .incoming)
         }
-        if normalized.contains("sync") || prompt.contains("همگام") {
+        if normalized.contains("sync") {
             return ("I can download the latest LoTW and QRZ confirmations. A full-history rebuild remains a separate explicit action.", .syncConfirmations)
         }
-        if normalized.contains("contest") || prompt.contains("مسابق") || normalized.contains("calendar") {
+        if normalized.contains("contest") || normalized.contains("calendar") {
             return ("I can open the contest calendar and the 6m propagation workspace.", .calendar)
         }
-        if normalized.contains("lotw") || normalized.contains("qrz") || prompt.contains("تایید") {
+        if normalized.contains("lotw") || normalized.contains("qrz") || normalized.contains("confirm") {
             return ("I can open the provider reconciliation report, which separates downloaded, matched, and unmatched records.", .confirmationReport)
         }
         return ("I can help with confirmations, QRZ Incoming, the contest calendar, and active-log confirmation filtering. Try a direct request such as ‘show unconfirmed QSOs’.", nil)

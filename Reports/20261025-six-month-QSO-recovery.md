@@ -1,27 +1,27 @@
-# گزارش بازیابی تماس‌ها از ایمیل‌های شش ماه گذشته
+# Contact Recovery Report from Prior Six Months Email Audit
 
-بازهٔ اصلی: ۲۵ آوریل تا ۲۵ اکتبر ۲۰۲۶. جست‌وجو شامل آرشیو، زباله‌دان، پاسخ‌های نقل‌قول‌شده و پیوست‌ها بود؛ یک روز حاشیه برای اختلاف منطقهٔ زمانی جست‌وجو شد. عنوان اولیه، عبارت‌های بازیابی/لاگ مفقود و عنوان‌های دیگر QSO/QSL بررسی شدند. مکاتبات عادی درخواست تأیید، خبرنامه، اعلان توسعه و برنامه‌ریزی تماس با بازیابی تماسِ انجام‌شده تفکیک شدند.
+Primary Date Range: April 25 to October 25, 2026. Search scope covered archive, trash, quoted replies, and attachments, with a 1-day margin for timezone differences. Primary subject keywords, missing recovery/log terms, and alternate QSO/QSL subjects were audited. Routine confirmation requests, newsletters, release announcements, and future SKED planning were segregated from genuine past contact recovery.
 
-165 رشتهٔ ایمیل باز و بررسی شد. شواهد و پیوست‌های مرتبط به‌صورت محلی نگهداری شده‌اند.
+165 email threads were inspected. Associated evidence and attachments are maintained locally.
 
-## نتیجهٔ فعلی
+## Current Results
 
-- ۷۱ تماس مستند تطبیق داده شد: ۹ تماس جدید و ۶۲ تماس موجود.
-- تعداد تماس‌های پروفایل EP2AES از ۲۱٬۷۴۲ به 21,751 رسید.
-- ۱۵ رکورد موجود تکمیل یا اصلاح شد؛ چهار مورد گزارش ارسالی/دریافتی جابه‌جا بود. گزارش‌های پیش‌فرض 59 در تماس‌های دیجیتال مبنای بازیابی قرار نگرفت.
-- ارسال‌های تازهٔ این بررسی: ۲۷ تماس به LoTW تحویل شد؛ TQSL در هر سه دسته Success(0) و «File queued for processing» برگرداند. تحویل با تأیید نهایی طرف مقابل متفاوت است.
+- 71 documented contacts reconciled: 9 new contacts and 62 existing contacts.
+- Total contacts for station profile EP2AES increased from 21,742 to 21,751.
+- 15 existing records updated or corrected; four instances of transposed sent/received signal reports fixed. Default "59" placeholders in digital modes were not accepted as recovery grounds.
+- New submissions from this audit: 27 contacts submitted to LoTW; TQSL returned Success(0) and "File queued for processing" across all three batches. Acceptance for processing is distinct from final peer confirmation.
 
-| سرویس | از ۷۱ تماس، سابقهٔ معتبر حضور یا پذیرش ارسال | باقی‌مانده |
+| Service | Valid Presence or Accepted Submission (of 71) | Remaining |
 |---|---:|---:|
 | QRZ | 71 | 0 |
 | LoTW | 71 | 0 |
 | Club Log | 71 | 0 |
 
-تمام ارسال‌های لازم این مجموعه پذیرفته شدند: ۱۴ به QRZ و ۶۳ به Club Log. سایر تماس‌ها پیش‌تر در سرویس مربوطه حضور معتبر داشتند.
+All required submissions in this batch were accepted: 14 to QRZ and 63 to Club Log. All other contacts were already recorded in the corresponding services.
 
-## تماس‌های جدید
+## New Contacts
 
-| کال‌ساین | تاریخ UTC | زمان UTC | باند | مد |
+| Callsign | UTC Date | UTC Time | Band | Mode |
 |---|---|---|---|---|
 | CT1FMX | 20260426 | 0019 | 40M | FT8 |
 | JK1NIU | 20260719 | 2023 | 20M | FT8 |
@@ -33,36 +33,35 @@
 | DL9GCG | 20261022 | 2059 | 40M | FT8 |
 | SP5GMM | 20261022 | 211915 | 60M | FT8 |
 
-برای I2FAK تماس ۰۷:۲۷ با تبادل کامل RR73/73 در ایمیل بازیابی شد؛ تماس محلی قدیمی ۰۷:۱۳:۲۹ نیز حفظ شد. برای دو تماس جدید ۲۲ اکتبر، گرید خود ایستگاه LM47 از رکوردهای همان روز حفظ شد؛ دیگر تماس‌های جدید با گرید چهارحرفی LM55 مستند شدند. مد FT4 در دو پیوست صریح بود و به FT8 تبدیل نشد.
+For I2FAK, the 07:27 contact with complete RR73/73 exchange in email was recovered; the legacy local 07:13:29 record was also preserved. For the two new October 22 contacts, station grid LM47 from same-day records was preserved; other new contacts were documented with 4-character grid LM55. FT4 mode was explicit in two attachments and was not downgraded to FT8.
 
-## موارد نیازمند اطلاعات بیشتر
+## Items Requiring Further Evidence
 
-24 درخواست هنوز اطلاعات کافی برای ثبت معتبر ندارند. فهرست کامل، اختلاف تاریخ‌ها و موارد ردشده در [نیازمند اطلاعات بیشتر](/Users/factoreal/Downloads/QSO-Recovery-2026-10-25/six-month-audit/نیازمند-اطلاعات-بیشتر.md) آمده است. تا رسیدن شواهد تکمیلی نمی‌توان گفت هیچ تماس مفقودی باقی نمانده است.
+24 requests still lack sufficient documentation for valid recording. The complete list, date discrepancies, and rejected items are documented in the audit directory. Until supplementary evidence is received, absence of further missing contacts cannot be definitively claimed.
 
-## حفاظت و راستی‌آزمایی
+## Protection and Verification
 
-- پیش از نوشتن، نسخهٔ پشتیبان یکپارچه گرفته شد و YAAM بسته بود. ابزار موقت از LogbookDatabase.saveWorkspace و QSLSyncAll/QSOIdentity خود پروژه استفاده کرد؛ نوشتن دستی SQL انجام نشد.
-- ثبت و صف ارسال در تراکنش واحد با کنترل پروفایل، تطبیق شناسهٔ رکورد، جلوگیری از تماس تکراری و حذف‌نشدن رکوردهای دیگر انجام شد.
-- مسیر ابتدا روی پایگاه دادهٔ جداگانه آزموده شد؛ ۲۱٬۷۲۸ رکورد اولیهٔ خارج از اصلاحات مرحلهٔ نخست دقیقاً حفظ شدند. مجموعهٔ Incoming Recovery Regression شامل rollback، restart، ownership، privacy و duplicate replay موفق بود.
-- بررسی نهایی پایگاه داده: `ok`. هیچ تأیید دریافت‌شده‌ای صرفاً به دلیل آپلود جعل نشد؛ فقط وضعیت «ارسال پذیرفته شد» ثبت شد.
-- هیچ ایمیل پیگیری ارسال نشده است. کلیدها و رمزها در گزارش، ADIF یا صف ذخیره نشدند. پیوست‌ها و توضیحات ایمیل به سرویس‌ها ارسال نشدند.
+- Consistent database backups taken prior to writing with YAAM closed. Temporary tools utilized project-native `LogbookDatabase.saveWorkspace` and `QSLSyncAll/QSOIdentity`; no raw SQL edits performed.
+- Contact entry and upload queuing executed in a single transaction with profile scoping, record ID matching, duplicate prevention, and zero deletion of unrelated records.
+- Workflow tested first on an isolated database; all 21,728 initial records outside first-stage modifications were preserved intact. Incoming Recovery Regression suite (rollback, restart, ownership, privacy, duplicate replay) passed.
+- Final database integrity check: `ok`. No received confirmation was fabricated due to upload; status was recorded strictly as "submission accepted".
+- No unsolicited outreach emails dispatched. Keys and credentials were excluded from reports, ADIF, and queues. Attachments and email explanations were not uploaded to external services.
 
-## فایل‌های شواهد
+## Evidence Artifacts
 
-- [پوشهٔ بررسی](/Users/factoreal/Downloads/QSO-Recovery-2026-10-25/six-month-audit)
-- [وضعیت رکوردها](/Users/factoreal/Downloads/QSO-Recovery-2026-10-25/six-month-audit/records-status.json)
-- [شواهد اولیه](/Users/factoreal/Downloads/QSO-Recovery-2026-10-25/six-month-audit/mail-evidence.json)
-- [شواهد عنوان‌های دیگر](/Users/factoreal/Downloads/QSO-Recovery-2026-10-25/six-month-audit/late-evidence.json)
-- [رسید LoTW، دستهٔ ۱۹تایی](/Users/factoreal/Downloads/QSO-Recovery-2026-10-25/six-month-audit/lotw-result.txt)
-- [رسید LoTW، دستهٔ ۷تایی](/Users/factoreal/Downloads/QSO-Recovery-2026-10-25/six-month-audit/supplement/lotw-result.txt)
-- [رسید LoTW، تماس UR5KAN](/Users/factoreal/Downloads/QSO-Recovery-2026-10-25/six-month-audit/forward/lotw-result.txt)
+- [Audit Directory](/Users/factoreal/Downloads/QSO-Recovery-2026-10-25/six-month-audit)
+- [Records Status](/Users/factoreal/Downloads/QSO-Recovery-2026-10-25/six-month-audit/records-status.json)
+- [Primary Evidence](/Users/factoreal/Downloads/QSO-Recovery-2026-10-25/six-month-audit/mail-evidence.json)
+- [Late Evidence](/Users/factoreal/Downloads/QSO-Recovery-2026-10-25/six-month-audit/late-evidence.json)
+- [LoTW Receipt, 19-QSO Batch](/Users/factoreal/Downloads/QSO-Recovery-2026-10-25/six-month-audit/lotw-result.txt)
+- [LoTW Receipt, 7-QSO Batch](/Users/factoreal/Downloads/QSO-Recovery-2026-10-25/six-month-audit/supplement/lotw-result.txt)
+- [LoTW Receipt, UR5KAN Contact](/Users/factoreal/Downloads/QSO-Recovery-2026-10-25/six-month-audit/forward/lotw-result.txt)
 
-این گزارش تعدادهای مرحلهٔ بررسی شش‌ماهه را نشان می‌دهد و سه تماس جدیدی را که در مرحلهٔ قبلی همین گفت‌وگو ثبت شده بودند دوباره «جدید» نمی‌شمارد.
+This report accounts for six-month review phase counts and does not re-count the three contacts logged in the earlier session.
 
-## اصلاح تلاش مجدد Club Log
+## Club Log Retry Remediation
 
-- در QSLSyncAll.swift، خطاهای نبود اطلاعات ورود، Touch ID و شبکه دیگر درخواست گروهی Club Log را در تلاش بعدی به درخواست‌های تکی تبدیل نمی‌کنند. شمارنده‌ها و تاریخچهٔ تلاش‌ها حفظ می‌شوند؛ جداسازی رکورد دارای خطای HTTP 400 همچنان برقرار است.
-- آزمون رگرسیون متمرکز: ۱۰۱ موفق، صفر ناموفق. ساخت‌های Debug و Release موفق بودند؛ نسخهٔ Release اصلاح‌شده در /Applications/YAAM.app نصب شد و نسخهٔ پیشین محفوظ است.
-- راهنمای رسمی Club Log ارسال‌های تکیِ پیاپی از putlogs.php را منع می‌کند و پاسخ 403 را لزوماً به رمز محدود نمی‌داند: [راهنمای ارسال گروهی](https://clublog.org/support/fd/54905). در این کار رمز یا کلید سرویس تغییر نکرد.
-- تطبیق نهایی: هر ۲۱٬۷۴۲ شناسهٔ اولیهٔ پروفایل اصلی حفظ شد و ۱۱٬۵۰۶ تماس پروفایل‌های دیگر دقیقاً بدون تغییر ماند.
-
+- In `QSLSyncAll.swift`, missing credential, Touch ID, and network errors no longer fragment batch Club Log uploads into single requests on subsequent retry attempts. Counters and retry histories are preserved; HTTP 400 error record isolation remains active.
+- Focused regression test: 101 passed, 0 failed. Debug and Release builds succeeded; corrected Release build installed to `/Applications/YAAM.app` with previous version archived.
+- Official Club Log guidance prohibits rapid sequential individual uploads via `putlogs.php` and notes 403 responses do not strictly indicate invalid passwords: [Batch Upload Guide](https://clublog.org/support/fd/54905). No service passwords or keys were modified during this task.
+- Final reconciliation: all 21,742 initial primary profile record IDs preserved, and 11,506 records across other station profiles remained completely untouched.

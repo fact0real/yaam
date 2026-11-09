@@ -16,7 +16,7 @@ import Foundation
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
-        let file = dir.appendingPathComponent("تماس آزمایشی & log.adi")
+        let file = dir.appendingPathComponent("test contact & log.adi")
         let content = Data("<CALL:4>W1AW<EOR>".utf8); try content.write(to: file)
         let read = try UploadFileReader.read(file); precondition(read == content)
         precondition((try? Data(contentsOf: file)) == content)

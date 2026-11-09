@@ -9,7 +9,7 @@ continent_definitions = '''CONTINENT_DIVISIONS = {
     'me': {
         'id': 'me',
         'name': 'Middle East',
-        'name_fa': 'خاورمیانه',
+        'name_code': 'ME',
         'icon': '🕌',
         'countries': ['ir', 'sa', 'ae', 'kw', 'qa', 'om', 'bh', 'iq', 'jo', 'lb', 'sy', 'ye', 'tr', 'cy', 'eg', 'ps', 'il'],
         'description': 'Middle Eastern & Gulf amateur radio operators'
@@ -17,7 +17,7 @@ continent_definitions = '''CONTINENT_DIVISIONS = {
     'eu': {
         'id': 'eu',
         'name': 'Europe',
-        'name_fa': 'اروپا',
+        'name_code': 'EU',
         'icon': '🇪🇺',
         'countries': ['de', 'gb', 'it', 'fr', 'es', 'pl', 'nl', 'be', 'ru', 'ua', 'se', 'no', 'fi', 'dk', 'at', 'ch', 'pt', 'gr', 'cz', 'ro', 'hu', 'hr', 'rs', 'bg', 'sk', 'si', 'lt', 'lv', 'ee', 'ie', 'is', 'lu', 'al', 'ba', 'mk', 'md', 'me', 'mt', 'je', 'gg', 'im'],
         'description': 'European Continent (IARU Region 1)'
@@ -25,7 +25,7 @@ continent_definitions = '''CONTINENT_DIVISIONS = {
     'as': {
         'id': 'as',
         'name': 'Asia',
-        'name_fa': 'آسیا',
+        'name_code': 'AS',
         'icon': '🌏',
         'countries': ['ir', 'jp', 'kr', 'cn', 'in', 'id', 'th', 'my', 'ph', 'sg', 'vn', 'kz', 'tw', 'hk', 'mn', 'kp', 'mv', 'sa', 'ae', 'kw', 'qa', 'om', 'bh', 'iq', 'jo', 'lb', 'sy', 'il', 'ye', 'am', 'az', 'ge'],
         'description': 'Asian Continent (IARU Region 3)'
@@ -33,7 +33,7 @@ continent_definitions = '''CONTINENT_DIVISIONS = {
     'af': {
         'id': 'af',
         'name': 'Africa',
-        'name_fa': 'آفریقا',
+        'name_code': 'AF',
         'icon': '🌍',
         'countries': ['ma', 'za', 'dz', 'eg', 'ng', 'gh', 'mu', 'sc', 'st', 'gq', 'bw', 'mw', 'zw', 'bf', 'cf'],
         'description': 'African Continent'
@@ -41,7 +41,7 @@ continent_definitions = '''CONTINENT_DIVISIONS = {
     'na': {
         'id': 'na',
         'name': 'North America',
-        'name_fa': 'آمریکای شمالی',
+        'name_code': 'NA',
         'icon': '🌎',
         'countries': ['us', 'ca', 'mx', 'cu', 'cr', 'pa', 'do', 'pr', 'gt', 'bz', 'sv', 'bb', 'bm', 'ky', 'tt', 'gl', 'aw', 'bq1'],
         'description': 'North American Continent & Caribbean'
@@ -49,7 +49,7 @@ continent_definitions = '''CONTINENT_DIVISIONS = {
     'sa': {
         'id': 'sa',
         'name': 'South America',
-        'name_fa': 'آمریکای جنوبی',
+        'name_code': 'SA',
         'icon': '🌎',
         'countries': ['br', 'ar', 'cl', 'co', 'pe', 've', 'uy', 'py', 'ec', 'bo'],
         'description': 'South American Continent'
@@ -57,7 +57,7 @@ continent_definitions = '''CONTINENT_DIVISIONS = {
     'oc': {
         'id': 'oc',
         'name': 'Oceania',
-        'name_fa': 'اقیانوسیه',
+        'name_code': 'OC',
         'icon': '🌏',
         'countries': ['au', 'cc', 'cx', 'fj', 'ki', 'nc', 'nz', 'pn', 'to', 'tv'],
         'description': 'Pacific & Australasia'
@@ -245,25 +245,25 @@ view_continents_code = '''                        <div class="flex items-center 
                     <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Select Continental Division</span>
                     <div class="flex flex-wrap gap-2" id="continentDivisionPills">
                         <button class="cont-div-btn active px-3.5 py-1.5 rounded-xl text-xs font-bold bg-emerald-600 border border-emerald-500 text-white flex items-center gap-1.5 shadow-lg shadow-emerald-600/20 transition-all" data-div="me">
-                            <span>🕌</span> Middle East (خاورمیانه)
+                            <span>🕌</span> Middle East
                         </button>
                         <button class="cont-div-btn px-3.5 py-1.5 rounded-xl text-xs font-bold bg-slate-900/80 border border-slate-700/60 text-slate-300 hover:text-white flex items-center gap-1.5 transition-all" data-div="eu">
-                            <span>🇪🇺</span> Europe (اروپا)
+                            <span>🇪🇺</span> Europe
                         </button>
                         <button class="cont-div-btn px-3.5 py-1.5 rounded-xl text-xs font-bold bg-slate-900/80 border border-slate-700/60 text-slate-300 hover:text-white flex items-center gap-1.5 transition-all" data-div="as">
-                            <span>🌏</span> Asia (آسیا)
+                            <span>🌏</span> Asia
                         </button>
                         <button class="cont-div-btn px-3.5 py-1.5 rounded-xl text-xs font-bold bg-slate-900/80 border border-slate-700/60 text-slate-300 hover:text-white flex items-center gap-1.5 transition-all" data-div="af">
-                            <span>🌍</span> Africa (آفریقا)
+                            <span>🌍</span> Africa
                         </button>
                         <button class="cont-div-btn px-3.5 py-1.5 rounded-xl text-xs font-bold bg-slate-900/80 border border-slate-700/60 text-slate-300 hover:text-white flex items-center gap-1.5 transition-all" data-div="na">
-                            <span>🌎</span> North America (آمریکای شمالی)
+                            <span>🌎</span> North America
                         </button>
                         <button class="cont-div-btn px-3.5 py-1.5 rounded-xl text-xs font-bold bg-slate-900/80 border border-slate-700/60 text-slate-300 hover:text-white flex items-center gap-1.5 transition-all" data-div="sa">
-                            <span>🌎</span> South America (آمریکای جنوبی)
+                            <span>🌎</span> South America
                         </button>
                         <button class="cont-div-btn px-3.5 py-1.5 rounded-xl text-xs font-bold bg-slate-900/80 border border-slate-700/60 text-slate-300 hover:text-white flex items-center gap-1.5 transition-all" data-div="oc">
-                            <span>🌏</span> Oceania (اقیانوسیه)
+                            <span>🌏</span> Oceania
                         </button>
                     </div>
                 </div>

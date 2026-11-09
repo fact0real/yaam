@@ -3,7 +3,7 @@
 //  YAAM
 //
 //  Intelligent Busted Callsign Detection & Multi-Database Verification Engine
-//  ("سیستم هوشمند تشخیص و تصحیح کال‌ساین‌های اشتباه")
+//  Intelligent busted callsign detection and correction engine
 //  Detects miscopied or mistyped callsigns in Voice (SSB/AM/FM) and CW (Morse) modes,
 //  identifies auditory confusion and telegraphic rhythm/dit-dah errors,
 //  and verifies candidates against Super Check Partial (SCP), ARRL LoTW, Club Log, and local logs.

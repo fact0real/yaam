@@ -102,7 +102,7 @@ struct SKEDPlanningRegression {
         precondition(SKEDMailTemplate.greetingName("SMITH, JOHN") == "JOHN")
         precondition(SKEDMailTemplate.greetingName("J. Robert Smith") == "Robert")
         precondition(SKEDMailTemplate.greetingName("Doe, Jr.", callsign: "EP1AAA") == "EP1AAA")
-        precondition(SKEDMailTemplate.greetingName("رضایی، علی") == "علی")
+        precondition(SKEDMailTemplate.greetingName("Smith, Jane") == "Jane")
         precondition(SKEDMailTemplate.unresolvedFields("{BAND2} {foo-bar}") == ["BAND2", "foo-bar"])
         let noRescan = SKEDMailTemplate.render("{name}", callsign: "EP2BBB", name: "{my_call}",
             bands: [], stationCallsign: "W1ABC", stationGrid: "", stationQTH: "")

@@ -1,0 +1,199 @@
+{
+  "date": "2026-11-06",
+  "method": "Read-after-write from GitHub project and issue inventories; no runtime or hardware test.",
+  "new_project_items_verified": 17,
+  "new_work_items": 16,
+  "existing_issue_comments": 13,
+  "existing_commented_project_statuses_unchanged": true,
+  "comparison_matrix_rows": 42,
+  "items": [
+    {
+      "number": 491,
+      "url": "https://github.com/fact0real/yaam-lab599-shared-board/issues/491",
+      "status": "Todo",
+      "labels": [
+        "app: YAAM",
+        "documentation",
+        "owner: unclaimed",
+        "priority: High"
+      ]
+    },
+    {
+      "number": 492,
+      "url": "https://github.com/fact0real/yaam-lab599-shared-board/issues/492",
+      "status": "Todo",
+      "labels": [
+        "app: YAAM",
+        "bug",
+        "owner: unclaimed",
+        "priority: High"
+      ]
+    },
+    {
+      "number": 493,
+      "url": "https://github.com/fact0real/yaam-lab599-shared-board/issues/493",
+      "status": "Todo",
+      "labels": [
+        "app: YAAM",
+        "enhancement",
+        "owner: unclaimed",
+        "priority: High"
+      ]
+    },
+    {
+      "number": 494,
+      "url": "https://github.com/fact0real/yaam-lab599-shared-board/issues/494",
+      "status": "Todo",
+      "labels": [
+        "app: YAAM",
+        "enhancement",
+        "owner: unclaimed",
+        "priority: High"
+      ]
+    },
+    {
+      "number": 495,
+      "url": "https://github.com/fact0real/yaam-lab599-shared-board/issues/495",
+      "status": "Todo",
+      "labels": [
+        "app: YAAM",
+        "enhancement",
+        "owner: unclaimed",
+        "priority: High"
+      ]
+    },
+    {
+      "number": 496,
+      "url": "https://github.com/fact0real/yaam-lab599-shared-board/issues/496",
+      "status": "Todo",
+      "labels": [
+        "app: YAAM",
+        "enhancement",
+        "owner: unclaimed",
+        "priority: Medium"
+      ]
+    },
+    {
+      "number": 497,
+      "url": "https://github.com/fact0real/yaam-lab599-shared-board/issues/497",
+      "status": "Todo",
+      "labels": [
+        "app: YAAM",
+        "enhancement",
+        "owner: unclaimed",
+        "priority: Medium"
+      ]
+    },
+    {
+      "number": 498,
+      "url": "https://github.com/fact0real/yaam-lab599-shared-board/issues/498",
+      "status": "Todo",
+      "labels": [
+        "app: YAAM",
+        "enhancement",
+        "owner: unclaimed",
+        "priority: Future"
+      ]
+    },
+    {
+      "number": 499,
+      "url": "https://github.com/fact0real/yaam-lab599-shared-board/issues/499",
+      "status": "Todo",
+      "labels": [
+        "app: YAAM",
+        "enhancement",
+        "owner: unclaimed",
+        "priority: Medium"
+      ]
+    },
+    {
+      "number": 500,
+      "url": "https://github.com/fact0real/yaam-lab599-shared-board/issues/500",
+      "status": "Todo",
+      "labels": [
+        "app: YAAM",
+        "enhancement",
+        "owner: unclaimed",
+        "priority: Medium"
+      ]
+    },
+    {
+      "number": 501,
+      "url": "https://github.com/fact0real/yaam-lab599-shared-board/issues/501",
+      "status": "Todo",
+      "labels": [
+        "app: YAAM",
+        "enhancement",
+        "owner: unclaimed",
+        "priority: Medium"
+      ]
+    },
+    {
+      "number": 502,
+      "url": "https://github.com/fact0real/yaam-lab599-shared-board/issues/502",
+      "status": "Todo",
+      "labels": [
+        "app: YAAM",
+        "enhancement",
+        "owner: unclaimed",
+        "priority: Medium"
+      ]
+    },
+    {
+      "number": 503,
+      "url": "https://github.com/fact0real/yaam-lab599-shared-board/issues/503",
+      "status": "Todo",
+      "labels": [
+        "app: YAAM",
+        "enhancement",
+        "owner: unclaimed",
+        "priority: Medium"
+      ]
+    },
+    {
+      "number": 504,
+      "url": "https://github.com/fact0real/yaam-lab599-shared-board/issues/504",
+      "status": "Todo",
+      "labels": [
+        "app: YAAM",
+        "enhancement",
+        "owner: unclaimed",
+        "priority: Medium"
+      ]
+    },
+    {
+      "number": 505,
+      "url": "https://github.com/fact0real/yaam-lab599-shared-board/issues/505",
+      "status": "Todo",
+      "labels": [
+        "app: YAAM",
+        "enhancement",
+        "owner: unclaimed",
+        "priority: Low"
+      ]
+    },
+    {
+      "number": 506,
+      "url": "https://github.com/fact0real/yaam-lab599-shared-board/issues/506",
+      "status": "Todo",
+      "labels": [
+        "app: YAAM",
+        "enhancement",
+        "owner: unclaimed",
+        "priority: Medium"
+      ]
+    },
+    {
+      "number": 507,
+      "url": "https://github.com/fact0real/yaam-lab599-shared-board/issues/507",
+      "status": "Todo",
+      "labels": [
+        "app: YAAM",
+        "enhancement",
+        "owner: unclaimed",
+        "priority: Future"
+      ]
+    }
+  ],
+  "application_source_changed": false
+}

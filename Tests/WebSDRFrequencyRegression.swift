@@ -53,7 +53,7 @@ struct WebSDRFrequencyRegression {
         precondition(rejects("۱۴.۰۷۴۴۴۴۴"))
         precondition(rejects("۱۴\u{060C}۰۷\u{060C}۴"))
         precondition(rejects("\u{200F}MHz\u{200F}"))
-        precondition(rejects("۱۴٫۰۷۴ مگاهرتز"))
+        precondition(rejects("14.074 megahertz"))
         let standard = URL(string: "http://example.org/?tune=7074usb&theme=dark")!
         precondition(WebSDRTuningStyle.webSDR.tunedURL(standard, dialHz: 14_074_000)?.absoluteString ==
                      "http://example.org/?theme=dark&tune=14074usb")

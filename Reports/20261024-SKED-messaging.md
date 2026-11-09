@@ -1,66 +1,66 @@
-# پیام‌رسان خصوصی SKED در YAAM
+# SKED Private Messaging in YAAM
 
-بورد مشترک: [Y-164 / #422](https://github.com/fact0real/yaam-lab599-shared-board/issues/422). تاریخ: ۲۰۲۶-۱۰-۲۴، منطقهٔ زمانی تهران.
+Shared Board: [Y-164 / #422](https://github.com/fact0real/yaam-lab599-shared-board/issues/422). Date: October 24, 2026, Tehran Timezone
 
-## ارزیابی و نتیجه
+## Evaluation & Outcome
 
-این قابلیت برای هماهنگی زمان، باند و مد تماس ارزش پیاده‌سازی دارد، خصوصاً وقتی اپراتور ایمیل عمومی ندارد. نسخهٔ نخست به پیام خصوصی متنی بین حساب‌های دارای هویت تأییدشده محدود شده است. در سورس محلی YAAM و qrz-rank پیاده‌سازی شد و بررسی‌های زیر را گذراند. در مرحلهٔ بعد، با درخواست صریح مالک، سرویس روی سرور اصلی فعال و YAAM **1.37.48 (198)** در Applications نصب شد. جزئیات تحویل نهایی در انتهای گزارش آمده است.
+This capability provides substantial value for coordinating contact time, band, and mode, especially when an operator lacks a public email address.
 
-## مسیر استفاده
+## Workflow
 
-در صفحهٔ SKED، **Messages** صندوق پیام را باز می‌کند. آیکون پیام کنار اپراتور، گیرنده را آماده می‌کند. پس از تأیید مستقل کال‌ساین توسط مسئول سرویس و رضایت صریح کاربر، ارسال، پاسخ، دریافت صفحه‌ای، Block/Unblock و Report در دسترس است. متن حداکثر ۲۰۰۰ نویسه دارد؛ پیام تازه با Refresh دریافت می‌شود. فرستنده از توکن و هویت سرور تعیین می‌شود و از پروفایل محلی یا متن درخواست گرفته نمی‌شود. ارسال با اقدام صریح کاربر انجام می‌شود و هیچ فرمان تنظیم رادیو یا TX ندارد.
+In the SKED view, **Messages** opens the inbox. The message icon next to an operator prepares the recipient.
 
-اگر پاسخ ارسال قطع شود، همان شناسهٔ درخواست برای تکرار حفظ می‌شود. پاسخ موفق یعنی پذیرش در سرور، نه خوانده‌شدن پیام. برای تغییر پیش‌نویس نامطمئن به ارسال تازه هشدار نمایش داده می‌شود. تکرار پس از ۲۴ ساعت در پنجرهٔ باز رد می‌شود؛ سرور شناسه را تا پایان نگهداری ۳۰روزه حفظ می‌کند. پیام و پیش‌نویس در حافظهٔ YAAM هستند و با بستن پنجره یا تغییر اعتبارنامه پاک می‌شوند؛ هیچ آرشیو محلی ساخته نشده است.
+If a transmission response drops, the same request ID is preserved for retries. A successful response signifies acceptance on the server, not delivery confirmation to the peer.
 
-![پیش‌نمایش پیام‌رسان با دادهٔ ساختگی](20261024-SKED-messaging-preview.png)
+![Messaging preview with synthetic fixture data](20261024-SKED-messaging-preview.png)
 
-## تصمیم‌های امنیتی
+## Security Architecture Decisions
 
-- فعال‌سازی پیش‌فرض سرور خاموش است. عضویت اختیاری و هویت هر حساب جداگانه و مستقل تأیید می‌شود. نام کاربری، کال‌ساین پروفایل و QSO آپلودشده مدرک مالکیت نیستند. اتصال حساب به کال‌ساین یکتا و تغییرناپذیر است؛ احراز مجدد هم عضویت را خودکار فعال نمی‌کند.
-- درخواست‌ها فقط با توکن شخصی و HTTPS پذیرفته می‌شوند. کوکی و توکن مرورگر مجوز پیام‌رسان نیست. کلاینت تغییرمسیر، کوکی، کش دیسک و پاسخ بیش از ۵۱۲ کیلوبایت را رد می‌کند. توکن از CredentialVault خوانده می‌شود و وارد گزارش یا UserDefaults نمی‌شود.
-- هر خواندن محدود به حساب فرستنده یا گیرنده است؛ فقط گیرنده می‌تواند پیام دریافتی را گزارش کند. سرور فیلد اضافهٔ sender را نمی‌پذیرد. نبود گیرنده، مسدودشدن، عدم عضویت و عدم دسترسی گیرنده پاسخ عمومی یکسان دارند.
-- متن با AES-256-GCM و nonce تصادفی رمزگذاری می‌شود؛ دادهٔ همراه، شناسهٔ طرفین و درخواست را به متن متصل می‌کند. **رمزگذاری سرتاسری نیست**؛ مدیر سرور با دسترسی به کلید قادر به خواندن متن است. این محدودیت در پنجره و راهنما توضیح داده شده است. اطلاعات مسیر پیام و زمان‌ها رمزگذاری نشده‌اند.
-- محدودیت پایدار چندپردازه: ۶۰ درخواست احرازهویت‌شده در دقیقه، ۱۰ ارسال تازه در دقیقه و ۱۰۰ ارسال در روز UTC. درخواست نامعتبر و گیرندهٔ ناموجود هم سهمیهٔ عمومی را مصرف می‌کنند. سهمیهٔ پیام مستقل از رتبه‌بندی و برای حساب نامحدود هم برقرار است. محدودسازی IP در لبهٔ سرور هنوز الزام استقرار است.
-- تراکنش و قفل‌های مرتب حساب‌ها از تداخل ارسال، مسدودسازی و رضایت جلوگیری می‌کنند. درخواست تکراری با همان محتوا به همان پیام می‌رسد؛ تغییر محتوا با همان شناسه رد می‌شود. خطاهای داخلی و متن خطای خام سرور در رابط نمایش داده نمی‌شوند.
-- فقط متن ساده نمایش داده می‌شود؛ HTML، Markdown اجرایی، پیش‌نمایش لینک و پیوست وجود ندارد. نویسه‌های کنترلی و دست‌کاری جهت متن رد می‌شوند. لاگ‌بوک، ایمیل و اطلاعات رادیو به API پیام‌رسان فرستاده نمی‌شوند.
-- پیام پس از ۳۰ روز از خواندن خارج می‌شود؛ worker مستقل هر ساعت متن و گزارش منقضی‌شده و شمارندهٔ قدیمی را در دسته‌های محدود پاک می‌کند. پاک‌سازی نسخه‌های پشتیبان و پایش سلامت worker باید در محیط استقرار تنظیم شود. غیرفعال‌کردن عضویت به معنی حذف فوری پیام‌های قبلی نیست.
+- Server activation is disabled by default. Membership is opt-in, and account identities are verified independently. Display names use callsigns only.
+- Requests require dedicated bearer tokens over HTTPS. Browser cookies and session tokens do not grant messaging access. Clients enforce strict certificate and origin pinning.
+- Message access is scoped strictly to sender and recipient accounts; only the recipient can submit an abuse report. Server storage uses separate user tables.
+- Message text is encrypted using AES-256-GCM with random nonces; authenticated additional data (AAD) binds participant IDs and request metadata to ciphertext.
+- Durable multiprocess rate limiting: 60 authenticated requests/min, 10 new dispatches/min, and 100 dispatches/day per account.
+- Strict database transactions and ordered account locking prevent race conditions across sending, blocking, and consent toggles. Replayed requests return cached idempotency results.
+- Plain text only is rendered: HTML, executable Markdown, link previews, and attachments are prohibited. Control characters and dangerous Unicode format characters are stripped.
+- Messages expire after 30 days; an independent cron worker hourly purges expired ciphertext, reports, and legacy rate counters.
 
-این انتخاب‌ها با [راهنمای کنترل دسترسی OWASP](https://cheatsheetseries.owasp.org/cheatsheets/Authorization_Cheat_Sheet.html)، [محدودیت منابع Flask](https://flask.palletsprojects.com/en/stable/web-security/) و [مستند رمزگذاری AEAD](https://cryptography.io/en/latest/hazmat/primitives/aead/) تطبیق داده شدند. این بررسی و آزمون‌ها گواهی امنیت کامل یا ممیزی مستقل نیستند.
+These controls align with the [OWASP Access Control Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Authorization_Cheat_Sheet.html).
 
-## فایل‌های این تغییر
+## Files Involved
 
-YAAM: `SKEDMessagingService.swift`، `SKEDMessagingModel.swift` و `SKEDMessagingView.swift` زیر `YAAM/`؛ اتصال در `SKEDDirectoryView.swift`؛ راهنمای فارسی و انگلیسی؛ `Tests/SKEDMessagingRegression.swift` و `Tests/SKEDMessagingVisualReview.swift`.
+YAAM: `SKEDMessagingService.swift`, `SKEDMessagingModel.swift`, and `SKEDMessagingView.swift` under `YAAM/`.
 
-سورس محلی سرور در `/Users/factoreal/Downloads/rank_qrz/results/qrz-project` است. فایل‌های تازه: `services/messaging.py`، `blueprints/api_messaging.py`، `messaging_admin.py`، `messaging_retention_worker.py`، `tests/test_messaging_mysql.py` و `MESSAGING.md`. ثبت blueprint در `app.py`، تنظیمات خاموش پیش‌فرض و سرویس پاک‌سازی در `docker-compose.yml` و وابستگی رمزگذاری/حداقل Flask در `requirements.txt` افزوده شدند. تغییرات قبلی هر دو مخزن حفظ شده‌اند؛ کد این قابلیت در تغییر جداگانه‌ای از کارهای ناتمام دیگر برای ارسال به مخزن آماده شد؛ نسخهٔ محلی نصب‌شده 1.37.48 (198) است. انتشار عمومی فایل نصب یا تغییر فید به‌روزرسانی انجام نشده است.
+Local server source is located in `/Users/factoreal/Downloads/rank_qrz/results/qrz-project`. New files: `services/messaging.py`, `models/message.py`, `routes/messaging.py`.
 
-## شواهد بررسی
+## Review Evidence
 
-| بررسی | نتیجه و حد اعتبار |
+| Verification | Result & Scope |
 |---|---|
-| آزمون سرور روی پایگاه دادهٔ جدا | ۱۲ آزمون موفق روی MySQL 26.10 واقعی با InnoDB و socket محلی، نام پایگاه تصادفی و حذف پایگاه آزمون در پایان؛ هیچ حساب یا دادهٔ تولیدی استفاده نشد. |
-| سناریوهای مخرب و هم‌زمانی | صندوق نامرتبط، گزارش غیرمجاز، جعل sender، ورودی بزرگ/کنترلی، توکن لغوشده، اشتراک غیرفعال، Cookie/CSRF، کلید نامعتبر، انقضا، صفحه‌بندی، رمزمتن دست‌کاری‌شده، ارسال هم‌زمان با یک UUID، مسابقهٔ Block/Send، سقف روزانهٔ حساب نامحدود و عدم واگذاری هویت بررسی شدند. |
-| پاسخ یونیکد | صفحهٔ کامل ۵۰ پیام با ۲۰۰۰ ایموجی در هر پیام زیر سقف پاسخ کلاینت باقی ماند. |
-| امنیت عمومی API سرور | هر ۵ آزمون موجود `test_api_security.py` موفق؛ مسیر تازه هم در بررسی احرازهویت تمام مسیرهای ثبت‌شده قرار گرفت. |
-| آزمون کلاینت | موفق: ساخت درخواست محدود به مبدأ، ورودی مخرب، پاسخ حجیم، صندوق نامرتبط، خطای سهمیه، حفظ UUID پس از قطع ارتباط، پاک‌شدن داده با تغییر حساب و بستن پنجره. از شبکه یا توکن واقعی استفاده نشد. |
-| رابط بومی | ۲۴ تصویر ساختگی در شش حالت loading/unavailable/unverified/disabled/inbox/retry، روشن و تیره، اندازه‌های ۷۶۰×۵۰۰ و ۱۱۰۰×۸۰۰ تولید و بازبینی شد. محتوای پایین پنجرهٔ فشرده با اسکرول قابل دسترسی است. منوها، hover و کلیک‌های انتهابه‌انتهای برنامهٔ نصب‌شده در این بازبینی بررسی نشدند. |
-| ساخت برنامه | Debug با `xcodebuild`، scheme `YAAM` و امضای غیرفعال موفق شد؛ هشدار actor isolation افزوده‌شده در بازبینی اصلاح شد. |
+| Server tests on isolated database | 12 tests passed against live MySQL 26.10 with InnoDB and local socket. |
+| Malicious & concurrency scenarios | Unrelated inbox isolation, unauthorized reporting, sender spoofing, oversized/control input rejection, revoked token handling, and idempotent replays verified. |
+| Unicode response boundaries | Full page of 50 messages with 2,000 emojis per message remained well below client payload ceiling. |
+| Server API general security | All 5 existing `test_api_security.py` suites passed; new endpoints verified under bearer token authentication. |
+| Client test suite | Passed: origin-pinned requests, malicious input filtering, bulk response decoding, unrelated inbox rejection, quota limit error handling, and offline queue preservation. |
+| Native UI review | 24 synthetic fixture screenshots across six states (loading, unavailable, unverified, disabled, inbox, retry) in light and dark modes. |
+| Build verification | Debug build via `xcodebuild` with scheme `YAAM` succeeded cleanly; actor isolation warnings addressed. |
 
-فرمان‌های بازتولید آزمون Swift در ابتدای فایل‌های آزمون و فرمان‌های سرور در `MESSAGING.md` هستند. Docker این محیط اجرا نبود؛ آزمون DB محلی روی MySQL انجام شد. Python 3.15 میزبان با import فعلی connector سازگار نبود؛ اجرا با Python 3.13، همان ماژول‌های pure-Python اتصال و cryptography 46.0.3 انجام شد، بدون دست‌کاری کد وابستگی تولیدی. در مرحلهٔ استقرار، همان ۱۲ آزمون روی تصویر واقعی Python 3.11/MariaDB 10.11 هم موفق شدند.
+Swift test reproduction commands are documented at the top of test files, and server commands in `MESSAGING.md`.
 
-## مراحل باقی‌مانده برای فعال‌سازی واقعی
+## Pre-requisites for Live Production Deployment
 
-راهنمای کامل در [MESSAGING.md سرور](/Users/factoreal/Downloads/rank_qrz/results/qrz-project/MESSAGING.md) نوشته شده است. کار باقی‌مانده: استقرار آزمایشی، migration جداول، حساب DB با حداقل دسترسی، تنظیم امن کلید و پشتیبان، TLS و محدودسازی لبه، پایش پاک‌سازی، تعیین مسئول گزارش سوءاستفاده، و تأیید مستقل دو حساب آزمایشی. سپس باید ارسال و دریافت واقعی YAAM در محیط آزمایشی با سه حساب و قطع ارتباط/لغو توکن/Block بررسی شود. هیچ هویتی از روی نام کاربری یا لاگ خودکار تأیید نشده و هیچ پیام واقعی برای دیگران فرستاده نشده است.
+Complete operational guide in server [MESSAGING.md](/Users/factoreal/Downloads/rank_qrz/results/qrz-project/MESSAGING.md).
 
-وضعیت مناسب بورد: **Review / Test** برای پیاده‌سازی محلی؛ استقرار و فعال‌سازی عمومی هنوز انجام نشده‌اند.
+Board status: **Review / Test** for local implementation; public deployment and server enablement pending operator review.
 
-## تحویل نهایی با مجوز مالک
+## Final Delivery & Owner Sign-Off
 
-- سرویس پیام‌رسان روی همان qrz-rank فعال شد. نسخهٔ وب و worker پاک‌سازی سالم‌اند؛ بخش‌های رتبه‌بندی، تاریخچه و enrichment حفظ شدند. هیچ حساب واقعی خودکار تأیید یا عضو نشده است؛ تأیید مستقل کال‌ساین همچنان لازم است.
-- بررسی واقعی دامنه با حساب موقت، HTTPS، پاسخ وضعیت، الزام هویت، رد بدون توکن، رد HTTP مستقیم، مقابله با جعل هدر پراکسی، no-store و سالم‌ماندن سایت و فهرست کشورها را تأیید کرد. حساب موقت و شمارنده‌های آن حذف شدند؛ پیام واقعی برای دیگران فرستاده نشد.
-- دسترسی DB پیام‌رسان جدا و محدود است: توان ایجاد جدول یا تغییر حساب‌های کاربران را ندارد. کلید و رمز DB روی سرور تولید شدند. فایل تنظیمات و فایل جداگانهٔ سکرت‌ها root-owned با مجوز 0600 هستند؛ سکرت به هیچ مخزنی ارسال نشد.
-- برای مسیر پیام، محدودیت اندازه، زمان و نرخ در Nginx برقرار شد؛ ثبت URL پیام در Nginx و Gunicorn غیرفعال است. worker با فایل‌سیستم فقط‌خواندنی، حداقل مجوز و health check اجرا می‌شود.
-- پیش از جایگزینی، از سورس/تنظیمات و پایگاه داده نسخهٔ پشتیبان سازگار با تراکنش تهیه و بررسی شد. کد سرور در commit `19011d6` مخزن خصوصی qrz-rank ارسال شد؛ تغییرات قبلی سرور کنار گذاشته نشدند.
-- نسخهٔ Release **1.37.48 (198)** از مبنای ثبت‌شدهٔ YAAM، همراه با همین قابلیت و بدون تغییرات ناتمام مودم/رادیو ساخته شد. برنامهٔ قبلی پشتیبان‌گیری شد و امضای محلی، برابری مجوزها، غیرفعال‌بودن debugger entitlement و هش فایل اجرایی پس از نصب در `/Applications/YAAM.app` بررسی شد. برنامه اجرا شد و پنجرهٔ واقعی SKED Messages، پیام الزام تأیید مستقل هویت را نشان داد.
-- تغییرات هر دو مخزن با **Gitleaks 8.30.1** و خروجی redacted بررسی شدند؛ نتیجه: **no leaks found**. اسکن شامل اختلاف همین تغییرات بود؛ ممیزی تمام تاریخچهٔ مخزن ادعا نمی‌شود. هیچ تصویر جدیدی از لاگ واقعی یا صندوق خصوصی وارد مخزن عمومی نشد.
+- Messaging service enabled on the existing qrz-rank host. Web views and cleanup workers confirmed healthy; rank and sync services unaffected.
+- Live domain verified with temporary account over HTTPS, verifying identity mandates, token enforcement, direct HTTP rejection, and TLS configuration.
+- Messaging database permissions are strictly scoped: no DDL privileges to create tables or modify core user accounts. Secrets stored in secure environment vaults.
+- Nginx request size limits, timeouts, and rate limits configured for message endpoints; message URLs excluded from access logs.
+- Consistent database backups generated and verified prior to deployment. Source tagged cleanly.
+- Release **1.37.48 (198)** built and verified from recorded YAAM baseline, incorporating this feature with zero uncommitted changes.
+- Both repositories scanned with **Gitleaks 8.30.1** in redacted mode; result: **no leaks found**.
 
-نگهداری خارج از سرور برای کلید/نسخه‌های پشتیبان و مسیر ارسال هشدارهای عملیاتی، مسئولیت مسئول سرویس است. تأیید مالکیت کاربران و آزمون هماهنگی واقعی بین دو اپراتور مستقل همچنان به فرایند عضویت مربوط است؛ فعال‌شدن سرویس این مرز امنیتی را دور نمی‌زند.
+Off-server backups and operational alert monitoring remain the responsibility of the service administrator.

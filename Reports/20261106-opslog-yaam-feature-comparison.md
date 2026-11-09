@@ -1,0 +1,102 @@
+# YAAM and OpsLog Feature Comparison — November 6, 2026
+
+**Conclusion:** The recommended focus for the next YAAM iteration is data integrity, workflow cohesion, and connectivity. YAAM offers a wide variety of features, but some are not yet wired into a continuous end-to-end operational pipeline ("Observe → Decide → Operate Radio → Reliable Logging → Follow-up"). The primary documented strength of OpsLog across several areas lies in this end-to-end workflow completeness. Implementing competitor features indiscriminately is not equally valuable.
+
+## Audit Basis & Scope
+
+- **YAAM:** Version **1.37.57 (207)**, codebase at commit `e6d9d6d9ab9ecbed9c499f00fc6ae59fedbdcd34`. App target configuration targets macOS 15.6; the project-level value differs and is not the basis of this comparison.
+- **OpsLog:** Latest release retrieved from the GitHub API at the time of review, **v0.51.33**, published November 5, 2026 at 22:25 UTC (November 6, 01:55 Tehran time). [Release Page](https://github.com/GregTroar/OpsLog/releases/tag/v0.51.33).
+- Competitor documentation was reviewed from the official wiki and README. Promotional pages in some places still state Windows-only; the current release and Platforms wiki document macOS and Linux packages. [Platforms](https://github.com/GregTroar/OpsLog/wiki/Platforms).
+- The public checkout of OpsLog's release tag contained README and workflow assets; application implementation code was not available. Therefore, this report is a **source inspection of YAAM compared against documented OpsLog capabilities**. Runtime quality, speed claims, physical hardware compatibility, and practical equivalence between the two applications were not tested. The online wiki is also not necessarily pinned to a specific release tag.
+- All 639 retrievable board items and 490 repository issues (including other applications) were reviewed to avoid duplicate work. Only items relevant to YAAM are attached to this work plan.
+- **"Absent"** indicates that the full workflow was not found in current code and navigation; **"Partial"** indicates components exist but with limited scope or integration; **"Requires Testing"** indicates that the presence of code does not imply operational execution quality.
+
+## Comparison Matrix
+
+| Domain | Documented OpsLog Feature | YAAM Status & Audit Finding | Tracking |
+|---|---|---|---|
+| Basic logging & lookup | Quick form, QRZ/HamQTH, and history | Quick Log, concurrent lookup, and history exist; absence here is not considered a gap. `OperatorDeskView`, `CallsignLookupService`, and `AppStateOperatorFeatures`. | Preserve and benchmark existing path |
+| Advanced search | Field criteria, operators, AND/OR, and independent presets | Multiple fixed filters and multi-select search exist; a general arbitrary field criteria builder and independent preset manager are missing. Email-template presets are not equivalent. | [OG-02](https://github.com/fact0real/yaam-lab599-shared-board/issues/493) |
+| Selected/filtered export | Export scope and field selection | Selected row and filtered result export exist; versioned field dictionaries and explicit field selection are limited. | [OG-06](https://github.com/fact0real/yaam-lab599-shared-board/issues/497) |
+| ADIF | Wiki documents 3.1.7 | YAAM export interface states 3.1.4, though the generic parser preserves unknown fields. Version differences alone do not prove missing new fields. | [OG-06](https://github.com/fact0real/yaam-lab599-shared-board/issues/497) |
+| Import & duplicates | Preview/merge and batch correction | Import Review, QSOIdentity, Duplicate Review, and storage protection exist. No need to rebuild. | Complete existing cards based on tests |
+| Current & portable DXCC | CTY and prefix detection | YAAM includes CTY, prefix overrides, and `/MM` and `/AM` rules; these are not absent. | Preserve existing path |
+| Historical DXCC | QSO date-dependent exceptions | Current resolver `lookup(callsign:)` does not accept a contact date. A historical layer with rule precedence, validity dates, and change review was not found. | [OG-03](https://github.com/fact0real/yaam-lab599-shared-board/issues/494) |
+| Station profiles | Separate operating settings per profile | Identity, log, and some credentials are isolated; CAT, TCI, and rotator use global keys. Switching between home and portable can require reconfiguring. | [OG-04](https://github.com/fact0real/yaam-lab599-shared-board/issues/495) |
+| Live multi-operator logging | Shared database and operator presence | Local SQLite and `.yaamsync` packages exist; concurrent multi-client writes with conflicts, outbox, and presence represent a different workflow. | [OG-07](https://github.com/fact0real/yaam-lab599-shared-board/issues/498); related to #149 |
+| Basic awards | DXCC, WAZ, WPX, and Challenge | YAAM provides these award families across multiple paths. Claims of "no WAZ/WPX" are inaccurate. Calculation rules and sources require unified reconciliation. | #96 |
+| Award rules | Custom definitions and reference lists | Primary definitions in `AwardEngine` are hardcoded; user-facing rule and reference editors were not found. Historical RDA, DDFM, and counties require validated data and licensing. | [OG-05](https://github.com/fact0real/yaam-lab599-shared-board/issues/496) |
+| DXCC Challenge accuracy | Permitted bands only | **Defect Identified:** `challengeBands` in `ClubLogAwardsService.swift` includes 60m and is aggregated directly in the interface. | [OG-01](https://github.com/fact0real/yaam-lab599-shared-board/issues/492), High |
+| Award documentation & credits | Proof rules and credit status | YAAM lifecycle includes worked/confirmed/credited/submitted/granted, but generic `record.isConfirmed` is used in some counters. Accepted proof should be evaluated per award; service confirmation is not equivalent to official award credit. | #96; [OG-05](https://github.com/fact0real/yaam-lab599-shared-board/issues/496) |
+| Generic CAT | Additional direct backends | YAAM uses FLRig/rigctld and direct drivers for Icom, TX-500, FX-4CR, and X6100; connecting via Hamlib is distinct from native console protocols for that model. | #260 and #103 |
+| Flex/Yaesu/Kenwood/Elecraft | Native console and model capabilities | Direct implementation of Flex SmartSDR/SmartLink or full Yaesu/Kenwood/Elecraft consoles was not found in YAAM. Mediated support should not be labeled "zero radio support". | #260, prioritizing one model at a time |
+| Physical CAT sharing | Application exposing radio to clients | rigctld server exists in YAAM, but callbacks connect to `NetworkTransceiverEmulatorEngine.stateCache`; it is not a general proxy for physical radios. | #10; related to #103 |
+| TCI | Network control and audio | Control, CW, and spots exist; binary payloads in the current client are only checked for UTF-8 text. Binary TCI audio streaming paths were not found. | [OG-13](https://github.com/fact0real/yaam-lab599-shared-board/issues/504) |
+| Station peripherals | Amp/tuner/switch and model controls | rotctld control exists; amplifier managers, external tuners, and antenna switches with capability and telemetry models were not found. | [OG-08](https://github.com/fact0real/yaam-lab599-shared-board/issues/499) |
+| Rotator | Diverse direct interfaces | YAAM uses Hamlib rotctld. Direct adapters for ARCO/Rotator Genius/PstRotator and mechanical vs. electrical beam offsets require distinct implementation. | [OG-08](https://github.com/fact0real/yaam-lab599-shared-board/issues/499); related to #260 |
+| Satellite | Passes, Doppler tuning, and az/el tracking | YAAM displays orbit estimates, passes, and Doppler; an active session paired to CAT and rotator was not found. The model should be validated before auto-control. | [OG-09](https://github.com/fact0real/yaam-lab599-shared-board/issues/500) |
+| DX Cluster | Multi-source, filtering, and alerts | YAAM features two nodes/aggregation, auto-reconnect, filtering, watchlist, and five rules; these exist. Primary limitations lie in rule scope, provenance, and alert action dispatch. | [OG-15](https://github.com/fact0real/yaam-lab599-shared-board/issues/506), #443, #444 |
+| Advanced alerts | Spotter and band×mode criteria, email dispatch | Current rule model lacks spotter filters and email actions, taking a single band/mode. Evaluation occurs in the view; background execution requires standalone design. | [OG-15](https://github.com/fact0real/yaam-lab599-shared-board/issues/506) |
+| POTA/SOTA & references | Activity display and matching | YAAM provides Field/Rover/Pileup tools, but reference parsing in cluster comments and multi-source deduplication remain known gaps. Feed licensing must be respected. | #443, #444, #1, #263–265 |
+| WSJT-X and companion apps | Multicast, relay, and connection messages | YAAM provides listeners and digital pipelines; multicast and some promised paths are already filed on the board. Require code review of current implementation. | #446 and #168 |
+| Contests | Exchange, serials, dupes, and scoreboards | YAAM includes templates, multipliers, ESM, rate matrix, and Cabrillo export. "No contest support" is inaccurate; rule accuracy and hardware validation require testing. | #165 and existing cards |
+| Directed radio nets | Roster, check-ins, and QSO wrap-up | Digital Call Roster and SKED in YAAM are not directed net managers. A dedicated net session workflow was not found. | [OG-10](https://github.com/fact0real/yaam-lab599-shared-board/issues/501) |
+| Voice Keyer | Phone message record and playback | A generic phone-mode message recording/playback pipeline was not found in YAAM; distinct from Lab599/Xiegu helper utilities. | [OG-12](https://github.com/fact0real/yaam-lab599-shared-board/issues/503) |
+| QSO audio recording | Rolling buffer and audio attached to contact | WebSDR reception timeline and digital ADIF archives exist; a general RX/mic audio archive linked to individual QSOs was not found. | [OG-11](https://github.com/fact0real/yaam-lab599-shared-board/issues/502) |
+| QSL and email | Visual designer and card delivery | YAAM includes card generators, PDF/PNG exports, email dispatch, and a Label Designer; a freeform canvas designer with operator photos and multiple templates is missing. | [OG-14](https://github.com/fact0real/yaam-lab599-shared-board/issues/505) |
+| Confirmation services | Service ecosystem scope | YAAM supports LoTW/TQSL, QRZ, eQSL, Club Log, Wavelog, and HRDLog/HamQTH paths. In recent OpsLog docs, HAMLOG.online is confirmation file import without upload API; DXNode is outbound. README is insufficient to measure bi-directional parity. | Optional research under parent card; #446 for current commitments |
+| Workstation | Configurable and resizable panels | YAAM provides Station/Operator Desk and integrated navigation; arbitrary multi-panel layout saving per profile was not found. | #108; prerequisite for [OG-04](https://github.com/fact0real/yaam-lab599-shared-board/issues/495) |
+| Statistics | Synchronized period/operator/contest filters | YAAM provides statistics, country/band matrices, and follow-up opportunities; filter scope and QSO traceability should be benchmarked with a common dataset. | #108 and #293; related to [OG-02](https://github.com/fact0real/yaam-lab599-shared-board/issues/493) |
+| Localization | Documented English/French interface | Current YAAM catalog has 369 keys and 209 translations for ca/es each. Strings outside the catalog are not counted; real interface coverage can be lower than key count indicates. | #144 and #145 |
+| Backup & migration | Data backup and portability | YAAM provides backups, integrity checks, and sync; a full restorable snapshot for another Mac with complete metadata differs from basic sync. | #299; related to #214/#215 |
+| Remote control | Paired host/client station console | Icom LAN, WebSDR, and mobile companion exist; they do not replace a paired YAAM-to-YAAM station console with negotiated control and audio. | [OG-16](https://github.com/fact0real/yaam-lab599-shared-board/issues/507) |
+| Maps & beam heading | Great-circle paths and short/long path headings | YAAM includes 3D Globe, flat/azimuthal maps, grids, and beam steering; this capability exists. Hardware integration and radiation pattern display are tracked in OG-08. | Preserve feature; [OG-08](https://github.com/fact0real/yaam-lab599-shared-board/issues/499) |
+| Propagation & solar data | Band×hour matrix and MUF maps | YAAM includes HFPointToPointPropagationEngine, GIRO/WSPR feeds, and 6m tools. Approximate models must not be characterized as reference VOACAP or definitive measurement. | #451 and #307; model evaluation and attribution |
+| Credential management | Optional vault in documentation | CredentialVault and station credential paths exist in YAAM. Protection quality should be evaluated against the current implementation and audit #289. | #289; maintain credential boundaries |
+| Updates & documentation | Version checks and changelog summaries | YAAM now includes Sparkle, download/install settings, and bundled user documentation. Documentation must remain aligned with active code paths. | #446 and #211 |
+| Public log publishing | HTML/CSV generation and publishing | YAAM exports HTML/CSV; an automated web-publishing workflow over FTP was not found in audited paths. Demand should be reviewed separately. | Research in parent card; no active commitment |
+| Platform availability | Windows/Linux/macOS 12+ | YAAM is a native macOS 15.6+ app. This is a deliberate market scope, and porting costs must be weighed against target audience priorities. | Strategic decision in parent card; no current port commitment |
+| Performance & maturity | Speed and stability claims | Speed and stability cannot be inferred from promotional text or feature counts. Baseline call entry, filter, and scroll timing with identical logs is required. | #293; #307 for benchmark maintenance |
+
+Map and propagation sources: [Maps & Antennas](https://github.com/GregTroar/OpsLog/wiki/Maps-and-Antennas), [Prediction](https://github.com/GregTroar/OpsLog/wiki/Voacap-Prediction), [MUF Map](https://github.com/GregTroar/OpsLog/wiki/Propagation-MUF-Map), and [Web Settings/Publishing](https://github.com/GregTroar/OpsLog/wiki/Settings-and-Data).
+
+Table sources: [Logging Basics](https://github.com/GregTroar/OpsLog/wiki/Logging-Basics), [Filters](https://github.com/GregTroar/OpsLog/wiki/Recent-QSOs-and-Filters), [ADIF](https://github.com/GregTroar/OpsLog/wiki/Import-and-Export-ADIF), [Profiles & Databases](https://github.com/GregTroar/OpsLog/wiki/Profiles-and-Databases), [Awards](https://github.com/GregTroar/OpsLog/wiki/Awards), [Peripherals](https://github.com/GregTroar/OpsLog/wiki/Amplifiers-and-Switches), [Satellites](https://github.com/GregTroar/OpsLog/wiki/Satellites), [Cluster](https://github.com/GregTroar/OpsLog/wiki/DX-Cluster-and-Spots), [Audio](https://github.com/GregTroar/OpsLog/wiki/Audio-and-Keyers), [Net Control](https://github.com/GregTroar/OpsLog/wiki/Net-Control), [Card Designer](https://github.com/GregTroar/OpsLog/wiki/QSL-Card-Designer), [QSL](https://github.com/GregTroar/OpsLog/wiki/QSL-Management), [Connections](https://github.com/GregTroar/OpsLog/wiki/Connections), [Statistics](https://github.com/GregTroar/OpsLog/wiki/Statistics), [Remote Station](https://github.com/GregTroar/OpsLog/wiki/Remote-Station).
+
+## Key Priorities to Address First
+
+1. **Numerical Accuracy and Contact Identity:** In DXCC Challenge calculations, having a confirmed QSO on 60 meters can incorrectly inflate scores. The ten permitted bands are specified in [official ARRL regulations](https://www.arrl.org/dxcc-challenge/). Acceptance criterion: an entity confirmed on 20m and 60m must yield exactly one Challenge point. Concurrently, confirmation sources, deleted entities, and valid date spans must be audited in #96.
+2. **Repeatable Querying:** Operators must be able to query "QSOs on band X and mode Y without LoTW confirmation or with field Z empty", save the query, and export that exact result set without manual data manipulation. A clean UI over a shared predicate is more valuable than adding disconnected toggles.
+3. **Station Profile as a Complete Operating Environment:** Home, Portable, and Club profiles should each retain their own radio, audio I/O, audio levels, rotator, cluster, and workstation configurations. Profile migration must preserve current settings and guard against profile switching during active transmission.
+4. **Historical Identity & Explainability:** A callsign can represent different entities across different operating dates. Batch rewrites must first show diffs, preserve explicit historical data, and provide rollback capabilities. Award engines must explain why a QSO was or was not credited.
+5. **Interoperability with External Software:** Prioritize physical CAT sharing, command ownership, and multicast/relay. The emulator server should not be naively exposed as a physical radio proxy. This ensures operators are not forced to choose between YAAM and their existing tooling.
+
+## Existing YAAM Advantages to Preserve
+
+In terms of codebase scope, YAAM is not merely a logger: integrated FT8/FT4, Multi-Rig clustering, Digital Suite, CW training/operating tools, SKED and contact discovery, WebSDR/HamTracker, Field/Rover modes, QSL Incoming/Graylist workflows, and confirmation opportunity tracking already exist. Proof points reside in `FT8EngineService`, `MultiRigFT8Hub`, `OperatorDeskNavigation`, `SKEDContactDiscovery`, `HamTrackerWorkspaceView`, `FieldOperationsWorkspaceView`, and `AppStateQSLGraylist`.
+
+## Actionable Items Logged to Shared Board
+
+Parent Card: [Comparison and Roadmap](https://github.com/fact0real/yaam-lab599-shared-board/issues/491).
+
+16 new actionable cards and 13 supplementary comments were logged. All new cards are in the shared project with status **Todo** and **unclaimed** assignee. Priorities: 4 High, 9 Medium, 1 Low, 2 Future; Parent Card is High.
+
+| ID | Title | Priority | Size |
+|---|---|---|---|
+| [OG-01](https://github.com/fact0real/yaam-lab599-shared-board/issues/492) | DXCC Challenge: exclude 60 m and make the counted band set explicit | High | S |
+| [OG-02](https://github.com/fact0real/yaam-lab599-shared-board/issues/493) | Compound custom field filters and saved searches | High | M |
+| [OG-03](https://github.com/fact0real/yaam-lab599-shared-board/issues/494) | Historical DXCC recognition and batch review | High | L |
+| [OG-04](https://github.com/fact0real/yaam-lab599-shared-board/issues/495) | Complete operating isolation across station profiles | High | L |
+| [OG-05](https://github.com/fact0real/yaam-lab599-shared-board/issues/496) | User-defined award rules and custom reference directories | Medium | L |
+| [OG-06](https://github.com/fact0real/yaam-lab599-shared-board/issues/497) | ADIF field dictionary and selective field export | Medium | M |
+| [OG-07](https://github.com/fact0real/yaam-lab599-shared-board/issues/498) | Live shared multi-operator log and operator presence | Future | XL |
+| [OG-08](https://github.com/fact0real/yaam-lab599-shared-board/issues/499) | Amplifier, tuner, and antenna switch control | Medium | XL |
+| [OG-09](https://github.com/fact0real/yaam-lab599-shared-board/issues/500) | Satellite operations: live Doppler tracking and rotator control | Medium | L |
+| [OG-10](https://github.com/fact0real/yaam-lab599-shared-board/issues/501) | Directed radio net management and batch check-ins | Medium | M |
+| [OG-11](https://github.com/fact0real/yaam-lab599-shared-board/issues/502) | Per-QSO audio recording archive | Medium | M |
+| [OG-12](https://github.com/fact0real/yaam-lab599-shared-board/issues/503) | Voice Keyer for phone mode operations | Medium | L |
+| [OG-13](https://github.com/fact0real/yaam-lab599-shared-board/issues/504) | Native TCI network audio without virtual audio cables | Medium | L |
+| [OG-14](https://github.com/fact0real/yaam-lab599-shared-board/issues/505) | Freeform visual QSL card template designer | Low | M |
+| [OG-15](https://github.com/fact0real/yaam-lab599-shared-board/issues/506) | Advanced DX alert rules with optional SMTP email dispatch | Medium | M |
+| [OG-16](https://github.com/fact0real/yaam-lab599-shared-board/issues/507) | Remote station: paired operator console with capability/audio negotiation | Future | XL |
+
+Machine-readable audit metadata and verified evidence anchors are saved in [audit-plan.json](OpsLogComparison-20261106/audit-plan.json).

@@ -25,7 +25,7 @@ final class MessagingStubProtocol: URLProtocol, @unchecked Sendable {
     static func data(_ object: Any) -> Data { try! JSONSerialization.data(withJSONObject: object) }
 
     @MainActor static func main() async throws {
-        let draft = try SKEDMessageDraft(recipient: " g0jhc ", body: "سلام، 20m at 14:00 UTC?")
+        let draft = try SKEDMessageDraft(recipient: " g0jhc ", body: "Hello, 20m at 14:00 UTC?")
         let bytes = try JSONEncoder().encode(draft)
         let request = try SKEDMessagingContract.request(action: "messages", method: "POST", token: token, body: bytes, userAgent: "YAAM-test")
         precondition(request.url?.absoluteString == "https://qrz-rank.asis.sh/api/v1/messaging/messages")

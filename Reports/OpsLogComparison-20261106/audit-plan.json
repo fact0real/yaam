@@ -1,0 +1,727 @@
+{
+  "date": "2026-11-06",
+  "timezone": "Asia/Tehran",
+  "yaam_version": "1.37.57 (207)",
+  "yaam_commit": "e6d9d6d9ab9ecbed9c499f00fc6ae59fedbdcd34",
+  "opslog_release": {
+    "tag": "v0.51.33",
+    "published_at": "2026-11-05T22:25:16Z",
+    "url": "https://github.com/GregTroar/OpsLog/releases/tag/v0.51.33",
+    "assets": [
+      "OpsLog",
+      "OpsLog-macos.zip",
+      "OpsLog.exe",
+      "opslog_0.51.33_amd64.deb"
+    ]
+  },
+  "basis": "YAAM source inspection versus official OpsLog documentation fetched on the audit date. No comparative runtime, hardware, account or performance test. Public OpsLog release tag contains README/workflow material, not application implementation.",
+  "sources": [
+    {
+      "url": "https://github.com/GregTroar/OpsLog/wiki/Amplifiers-and-Switches",
+      "sha256": "4a60e941c13b4e3b41ce1a975f1615c44c9bd428a9143d0b86de8b16ceccd968"
+    },
+    {
+      "url": "https://github.com/GregTroar/OpsLog/wiki/Audio-and-Keyers",
+      "sha256": "909bb655f2d11c4dc478c82fa22b402e343b740e00395fdcfd0fdcc11c3acdfa"
+    },
+    {
+      "url": "https://github.com/GregTroar/OpsLog/wiki/Awards",
+      "sha256": "aa931dd582dc7b91cdcb3da7e1e254bf286e55ef5f6f1341456be3ca88d83b85"
+    },
+    {
+      "url": "https://github.com/GregTroar/OpsLog/wiki/Connections",
+      "sha256": "5ba7e3ac9cd093b932c1c382315f685ec4d406c2376967c5cb3f8e5bef520f9d"
+    },
+    {
+      "url": "https://github.com/GregTroar/OpsLog/wiki/DX-Cluster-and-Spots",
+      "sha256": "75d65efc3bcbd5eef32ccbcce3cd5962f21b98437071a6730c5a941cb4f60fd0"
+    },
+    {
+      "url": "https://github.com/GregTroar/OpsLog/wiki/Digital-Modes-and-GridTracker",
+      "sha256": "db8bb95d3c0f414697c587b20c80549a2ea45fa9dee74924e1344fdb063127a0"
+    },
+    {
+      "url": "https://github.com/GregTroar/OpsLog/wiki/Import-and-Export-ADIF",
+      "sha256": "4faaf521d7eb8f468204ee75b7cef4a0d82d353c6a91daa0c8ec3a09f4d8376e"
+    },
+    {
+      "url": "https://github.com/GregTroar/OpsLog/wiki/Logging-Basics",
+      "sha256": "9df1b5b456bb4a14ddb07bb721f5945473915d9838197a58ae1df85cac87bea7"
+    },
+    {
+      "url": "https://github.com/GregTroar/OpsLog/wiki/Maps-and-Antennas",
+      "sha256": "aa588048641e5104eb738c2c0259011152f5b86e66b987359bb68bf2783c4be9"
+    },
+    {
+      "url": "https://github.com/GregTroar/OpsLog/wiki/Multi-Operator-Live-Status",
+      "sha256": "a7c96ac65894898a9aa287a6e00d2b083b0b972c4671c9a3004b7887c1a3df42"
+    },
+    {
+      "url": "https://github.com/GregTroar/OpsLog/wiki/Net-Control",
+      "sha256": "a7ddbf8c2bb461bd2e069e7367861da9426327883edebffa018cf4db6b873cb9"
+    },
+    {
+      "url": "https://github.com/GregTroar/OpsLog/wiki/Platforms",
+      "sha256": "98e73ea8bc15dd0a33cddc65499c3b994d47a160d557e98429feaacbcfeb29e5"
+    },
+    {
+      "url": "https://github.com/GregTroar/OpsLog/wiki/Profiles-and-Databases",
+      "sha256": "4ac7a58ff8fba77062e3e2bb6134392666299c7cba266656ce068a57c3c9d0e1"
+    },
+    {
+      "url": "https://github.com/GregTroar/OpsLog/wiki/QSL-Card-Designer",
+      "sha256": "178e5cbe25bea2ac0116cb31190e00c21999aaa8e47cc3825f92ecd0277eb680"
+    },
+    {
+      "url": "https://github.com/GregTroar/OpsLog/wiki/QSL-Management",
+      "sha256": "2f50cc6fbc898b19b56d3fb5b896963de9731b3c60190c7cc97f5059342157b6"
+    },
+    {
+      "url": "https://github.com/GregTroar/OpsLog/wiki/Recent-QSOs-and-Filters",
+      "sha256": "1fb91ee9d1e72fab886e69729d7889c0ff24c581d30525f1f4d0dd42bbf91fd3"
+    },
+    {
+      "url": "https://github.com/GregTroar/OpsLog/wiki/Remote-Station",
+      "sha256": "90f512b8515ed7ebd82699ba7474203f80f24f4947823388bc48f358d43e60c2"
+    },
+    {
+      "url": "https://github.com/GregTroar/OpsLog/wiki/Satellites",
+      "sha256": "096fe3d06efeb9c7f8c2a1395e70bb2ee7d5366dc420f3362e0d09994e668ab3"
+    },
+    {
+      "url": "https://github.com/GregTroar/OpsLog/wiki/Settings-and-Data",
+      "sha256": "194142e324a873bc66f3d336ae1417a9017da19033443f1cf32c2c07ba20f8ee"
+    },
+    {
+      "url": "https://github.com/GregTroar/OpsLog/wiki/Statistics",
+      "sha256": "2df80602b53aacdcf63a68671a64d8d6f83e55f2ba898b2f8728c82dff226e97"
+    },
+    {
+      "url": "https://github.com/GregTroar/OpsLog/wiki/Voacap-Prediction",
+      "sha256": "a589ad484be5992e6e8036be722da4e27262c1a613bdb8cd46b7821f7453a8ea"
+    },
+    {
+      "url": "https://github.com/GregTroar/OpsLog/wiki/Propagation-MUF-Map",
+      "sha256": "7b6cce85503bf4519e51effae8dd8c7a47070ab5a45a97d457f9a5c6b97d2dcc"
+    }
+  ],
+  "new_work_items": [
+    {
+      "id": "OG-01",
+      "title": "DXCC Challenge: exclude 60 m and make the counted band set explicit",
+      "priority": "High",
+      "size": "S",
+      "finding": "Confirmed source logic defect; no production log or Swift runtime exercised.",
+      "competitor": "https://github.com/GregTroar/OpsLog/wiki/Awards",
+      "evidence": [
+        {
+          "file": "YAAM/ClubLogAwardsService.swift",
+          "line": 56,
+          "url": "https://github.com/fact0real/yaam/blob/e6d9d6d9ab9ecbed9c499f00fc6ae59fedbdcd34/YAAM/ClubLogAwardsService.swift#L56",
+          "description": "The Challenge list includes 60m; dxccChallengePoints sums every listed band."
+        },
+        {
+          "file": "YAAM/QRZAwardsView.swift",
+          "line": 525,
+          "url": "https://github.com/fact0real/yaam/blob/e6d9d6d9ab9ecbed9c499f00fc6ae59fedbdcd34/YAAM/QRZAwardsView.swift#L525",
+          "description": "Awards UI consumes this computed total."
+        }
+      ],
+      "scope": [
+        "Use the ten Challenge bands defined by ARRL; keep general logbook/QRZ 60 m statistics independent.",
+        "Show counted bands and whether the total is a local confirmation estimate or official accepted credit.",
+        "Audit deleted entities, date eligibility and proof-source policy separately under #96; do not erase QSOs."
+      ],
+      "checks": [
+        "One entity confirmed on 20 m and 60 m yields one Challenge point; a 60 m-only entity yields zero.",
+        "Cover all ten eligible bands, duplicate contacts, mixed-case bands and absent BAND derived from FREQ.",
+        "Verify the total agrees in every UI consuming the matrix."
+      ],
+      "depends": "Related #96. Normative reference: https://www.arrl.org/dxcc-challenge/ and https://www.arrl.org/dxcc-rules .",
+      "kind": "bug"
+    },
+    {
+      "id": "OG-02",
+      "title": "Logbook: arbitrary-field Boolean filters and independent named presets",
+      "priority": "High",
+      "size": "M",
+      "finding": "Partial capability: rich fixed filters and some search alternatives exist; general field/operator/AND/OR builder is absent.",
+      "competitor": "https://github.com/GregTroar/OpsLog/wiki/Recent-QSOs-and-Filters",
+      "evidence": [
+        {
+          "file": "YAAM/AppState.swift",
+          "line": 657,
+          "url": "https://github.com/fact0real/yaam/blob/e6d9d6d9ab9ecbed9c499f00fc6ae59fedbdcd34/YAAM/AppState.swift#L657",
+          "description": "Fixed criteria structure rather than a general predicate tree."
+        },
+        {
+          "file": "YAAM/FilterSheetView.swift",
+          "line": 403,
+          "url": "https://github.com/fact0real/yaam/blob/e6d9d6d9ab9ecbed9c499f00fc6ae59fedbdcd34/YAAM/FilterSheetView.swift#L403",
+          "description": "Filters can be loaded from email templates; this is not independent general preset management."
+        },
+        {
+          "file": "YAAM/AppState.swift",
+          "line": 8683,
+          "url": "https://github.com/fact0real/yaam/blob/e6d9d6d9ab9ecbed9c499f00fc6ae59fedbdcd34/YAAM/AppState.swift#L8683",
+          "description": "Filtered ADIF/CSV export already exists and must be reused."
+        }
+      ],
+      "scope": [
+        "Add typed field/operator/value predicates, ALL/ANY groups, empty/not-empty and numeric/date comparisons.",
+        "Save, rename, duplicate and delete named presets independently of email templates and scoped to station.",
+        "Apply one predicate to the complete active log, visible count, selection and filtered export."
+      ],
+      "checks": [
+        "Evaluate a band/mode condition combined with OR across two provider-status fields.",
+        "Cover unknown APP fields, Unicode, empty values and UTC boundaries.",
+        "Place a matching QSO beyond the first displayed page; count and export must still include it."
+      ],
+      "depends": "",
+      "kind": "enhancement"
+    },
+    {
+      "id": "OG-03",
+      "title": "DXCC: dated Club Log exceptions and reviewed historical re-resolution",
+      "priority": "High",
+      "size": "L",
+      "finding": "Current CTY support exists; the inspected resolver accepts callsign without QSO date and no dated exception layer was found.",
+      "competitor": "https://github.com/GregTroar/OpsLog/wiki/Import-and-Export-ADIF",
+      "evidence": [
+        {
+          "file": "YAAM/CTYDatabaseManager.swift",
+          "line": 349,
+          "url": "https://github.com/fact0real/yaam/blob/e6d9d6d9ab9ecbed9c499f00fc6ae59fedbdcd34/YAAM/CTYDatabaseManager.swift#L349",
+          "description": "Current call/prefix resolver has no QSO-date input."
+        },
+        {
+          "file": "YAAM/DXCCDatabase.swift",
+          "line": 59,
+          "url": "https://github.com/fact0real/yaam/blob/e6d9d6d9ab9ecbed9c499f00fc6ae59fedbdcd34/YAAM/DXCCDatabase.swift#L59",
+          "description": "There is also a static prefix resolver; consumers need a consistent policy."
+        }
+      ],
+      "scope": [
+        "Introduce versioned date-ranged exceptions with source, freshness and provenance; obtain provider permission/terms before automated retrieval.",
+        "Resolve using callsign plus QSO UTC date and preserve explicit historical/deleted-entity identity by default.",
+        "Provide a selected/filtered bulk preview with old/new fields and conflict decisions before transactional application."
+      ],
+      "checks": [
+        "Same callsign in two independently sourced date windows resolves to different entities.",
+        "Test date edges, /MM, /AM, guest prefixes, deleted entity preservation and manual overrides.",
+        "Updating CTY must not undo a dated exception; export/reload keeps approved identity."
+      ],
+      "depends": "Coordinate #83 and #318; these cover stamping/grouping rather than dated resolution. Reuse import review and backup paths.",
+      "kind": "enhancement"
+    },
+    {
+      "id": "OG-04",
+      "title": "Station profiles: isolate CAT, audio, cluster and workspace operating settings",
+      "priority": "High",
+      "size": "L",
+      "finding": "Partial capability: station identity, log separation and some credentials are scoped; inspected CAT/TCI/rotator settings use global keys.",
+      "competitor": "https://github.com/GregTroar/OpsLog/wiki/Profiles-and-Databases",
+      "evidence": [
+        {
+          "file": "YAAM/StationProfile.swift",
+          "line": 8,
+          "url": "https://github.com/fact0real/yaam/blob/e6d9d6d9ab9ecbed9c499f00fc6ae59fedbdcd34/YAAM/StationProfile.swift#L8",
+          "description": "Profile stores identity/equipment description, not a complete operating configuration."
+        },
+        {
+          "file": "YAAM/RigControlEngine.swift",
+          "line": 47,
+          "url": "https://github.com/fact0real/yaam/blob/e6d9d6d9ab9ecbed9c499f00fc6ae59fedbdcd34/YAAM/RigControlEngine.swift#L47",
+          "description": "CAT configuration persists globally."
+        },
+        {
+          "file": "YAAM/TCIClient.swift",
+          "line": 76,
+          "url": "https://github.com/fact0real/yaam/blob/e6d9d6d9ab9ecbed9c499f00fc6ae59fedbdcd34/YAAM/TCIClient.swift#L76",
+          "description": "TCI endpoint is global."
+        },
+        {
+          "file": "YAAM/AppStatePersistence.swift",
+          "line": 241,
+          "url": "https://github.com/fact0real/yaam/blob/e6d9d6d9ab9ecbed9c499f00fc6ae59fedbdcd34/YAAM/AppStatePersistence.swift#L241",
+          "description": "Profile switch reloads log and QSL state; equipment settings need an explicit switch transaction."
+        }
+      ],
+      "scope": [
+        "Add per-profile CAT, audio routes/levels, cluster, rotator and layout snapshots with migration from current defaults.",
+        "Make account-wide versus station-specific settings visible; retain existing credential-vault boundaries.",
+        "Switch only when transmit is idle; disconnect/reconnect intentionally and prevent callbacks from the old station changing the new one."
+      ],
+      "checks": [
+        "Home and portable profiles retain different rig endpoints, audio devices, cluster and workspace after restart.",
+        "No auto-keying or command reaches the previous radio on a station switch.",
+        "Credentials and QSO ownership remain isolated; migration can be rolled back."
+      ],
+      "depends": "Related #149; this card is equipment/settings scope, not shared multi-op storage.",
+      "kind": "enhancement"
+    },
+    {
+      "id": "OG-05",
+      "title": "Awards: user-defined rules, reference catalogues and explainable matching",
+      "priority": "Medium",
+      "size": "L",
+      "finding": "Partial capability: built-in awards, WAZ/WPX/Challenge views and lifecycle claims exist; no user-editable award rule system was found.",
+      "competitor": "https://github.com/GregTroar/OpsLog/wiki/Awards",
+      "evidence": [
+        {
+          "file": "YAAM/AwardEngine.swift",
+          "line": 181,
+          "url": "https://github.com/fact0real/yaam/blob/e6d9d6d9ab9ecbed9c499f00fc6ae59fedbdcd34/YAAM/AwardEngine.swift#L181",
+          "description": "Local award definitions are compiled in source."
+        },
+        {
+          "file": "YAAM/QRZAwardsView.swift",
+          "line": 1166,
+          "url": "https://github.com/fact0real/yaam/blob/e6d9d6d9ab9ecbed9c499f00fc6ae59fedbdcd34/YAAM/QRZAwardsView.swift#L1166",
+          "description": "WPX already exists in another award path; do not list it as missing."
+        }
+      ],
+      "scope": [
+        "Define award scope, date/band/mode restrictions, reference field, unique-count rule and accepted proof sources as versioned data.",
+        "Import/export personal reference lists and definitions with attribution; support an initial simple national/club award without rebuilding YAAM.",
+        "Provide a per-QSO explanation and explicit manual-reference override; preserve it through ADIF via a documented APP field.",
+        "Treat RDA date-aware data, DDFM and counties as later catalogue work after licensing review; do not infer a district from present-day lookup."
+      ],
+      "checks": [
+        "Create and round-trip a small club award and a date-limited national award.",
+        "Test missing reference, ambiguous match, rejected proof source and duplicate band/mode slots.",
+        "Local worked/confirmed/credited/submitted/granted states remain distinct."
+      ],
+      "depends": "Reuse and coordinate #96, #1 and #265. Do not create a parallel awards counter.",
+      "kind": "enhancement"
+    },
+    {
+      "id": "OG-06",
+      "title": "ADIF: versioned field dictionary, validation and explicit export field selection",
+      "priority": "Medium",
+      "size": "M",
+      "finding": "Partial capability: arbitrary fields round-trip and selected/filtered exports exist; UI labels ADIF 3.1.4 and no complete versioned dictionary/picker was found. This does not establish loss of all newer tags.",
+      "competitor": "https://github.com/GregTroar/OpsLog/wiki/Import-and-Export-ADIF",
+      "evidence": [
+        {
+          "file": "YAAM/LogExportEngine.swift",
+          "line": 14,
+          "url": "https://github.com/fact0real/yaam/blob/e6d9d6d9ab9ecbed9c499f00fc6ae59fedbdcd34/YAAM/LogExportEngine.swift#L14",
+          "description": "Current advertised version is 3.1.4."
+        },
+        {
+          "file": "YAAM/ADIFParser.swift",
+          "line": 254,
+          "url": "https://github.com/fact0real/yaam/blob/e6d9d6d9ab9ecbed9c499f00fc6ae59fedbdcd34/YAAM/ADIFParser.swift#L254",
+          "description": "Parser keeps generic fields."
+        },
+        {
+          "file": "YAAM/AppState.swift",
+          "line": 2703,
+          "url": "https://github.com/fact0real/yaam/blob/e6d9d6d9ab9ecbed9c499f00fc6ae59fedbdcd34/YAAM/AppState.swift#L2703",
+          "description": "Selected-row export already exists."
+        }
+      ],
+      "scope": [
+        "Audit actual 3.1.7 field/types/enumerations support against the official specification before changing the version claim.",
+        "Provide reusable per-export field selection with standard, APP/unknown and all-fields groups; keep local export distinct from upload-privacy policy.",
+        "Show validation warnings and source-field mapping previews without discarding unrecognized values.",
+        "Unify mode/submode and SAT_NAME vocabularies used in editable log fields; allow a documented station-specific catalogue."
+      ],
+      "checks": [
+        "Round-trip Unicode, unknown APP fields, new official fields, split TX/RX frequencies and satellite name.",
+        "Selected versus filtered export obeys the same field preset and reports the row count.",
+        "Provider-specific uploads retain existing allowlists and consent behavior."
+      ],
+      "depends": "Coordinate #82 and #167. Normative reference: https://www.adif.org/317/ADIF_317.htm .",
+      "kind": "enhancement"
+    },
+    {
+      "id": "OG-07",
+      "title": "Multi-operator: shared live log, conflict handling and on-air presence",
+      "priority": "Future",
+      "size": "XL",
+      "finding": "Absent workflow in inspected YAAM: SQLite/profile logs and file/cloud merging exist; these are not a concurrent shared station log.",
+      "competitor": "https://github.com/GregTroar/OpsLog/wiki/Profiles-and-Databases",
+      "evidence": [
+        {
+          "file": "YAAM/LogbookDatabase.swift",
+          "line": 38,
+          "url": "https://github.com/fact0real/yaam/blob/e6d9d6d9ab9ecbed9c499f00fc6ae59fedbdcd34/YAAM/LogbookDatabase.swift#L38",
+          "description": "Canonical storage is local SQLite."
+        },
+        {
+          "file": "YAAM/ConnectivityServices.swift",
+          "line": 25,
+          "url": "https://github.com/fact0real/yaam/blob/e6d9d6d9ab9ecbed9c499f00fc6ae59fedbdcd34/YAAM/ConnectivityServices.swift#L25",
+          "description": "Current cross-device mechanism exchanges packages, not concurrent writes."
+        }
+      ],
+      "scope": [
+        "Design one authoritative shared station service with individual operator identity, durable local outbox and idempotent replay. MySQL is a competitor example, not a required backend.",
+        "Define simultaneous edits, deletes, serial allocation and duplicate decisions before implementation.",
+        "Show per-operator band/mode/frequency with freshness and off-air state; expose optional read-only published status separately."
+      ],
+      "checks": [
+        "Two isolated clients log concurrently; both see contacts without duplicate replay.",
+        "Outage/restart/rejoin preserves unsent contacts and surfaces conflicting edits.",
+        "Expired presence cannot look live; user controls any public station-status publication."
+      ],
+      "depends": "Related #149; distinct from separate logs per operator/place. Depends on OG-04 and durable-save boundaries. Discovery first; no delivery date.",
+      "kind": "enhancement"
+    },
+    {
+      "id": "OG-08",
+      "title": "Station accessories: model-specific amplifier, tuner and antenna-switch control",
+      "priority": "Medium",
+      "size": "XL",
+      "finding": "No accessory manager/drivers for the documented competitor families were found; YAAM rotctld control already exists.",
+      "competitor": "https://github.com/GregTroar/OpsLog/wiki/Amplifiers-and-Switches",
+      "evidence": [
+        {
+          "file": "YAAM/RotatorControlEngine.swift",
+          "line": 53,
+          "url": "https://github.com/fact0real/yaam/blob/e6d9d6d9ab9ecbed9c499f00fc6ae59fedbdcd34/YAAM/RotatorControlEngine.swift#L53",
+          "description": "Existing rotator path is a Hamlib rotctld client, not an amplifier/tuner/switch subsystem."
+        },
+        {
+          "file": "YAAM/OperatorDeskNavigation.swift",
+          "line": 66,
+          "url": "https://github.com/fact0real/yaam/blob/e6d9d6d9ab9ecbed9c499f00fc6ae59fedbdcd34/YAAM/OperatorDeskNavigation.swift#L66",
+          "description": "No station-accessory destination in the current tool catalogue."
+        }
+      ],
+      "scope": [
+        "Start with one owner-selected, available hardware model and a capability-based interface; separate read-only telemetry from explicit control.",
+        "Roadmap candidates: amplifier operate/standby/faults, tuner bypass/tune, antenna switch mapping and accurate MY_ANTENNA capture.",
+        "Consider native ARCO/Rotator Genius/PstRotator and SteppIR/Ultrabeam adapters after the initial device; keep mechanical and radiating bearing distinct.",
+        "Do not switch accessories during TX; unsupported controls remain disabled and stale readings are labelled."
+      ],
+      "checks": [
+        "Protocol fixtures for the selected model cover truncation, faults, timeout and unsupported controls.",
+        "Physical acceptance records model, firmware and transport; no simulator result claims hardware readiness.",
+        "Changing band does not actuate a relay until that mapping is explicitly enabled."
+      ],
+      "depends": "Related #260 and #103. Split model implementations after hardware selection; XL describes the full family, not the first read-only milestone.",
+      "kind": "enhancement"
+    },
+    {
+      "id": "OG-09",
+      "title": "Satellites: validated pass prediction, Doppler CAT and az/el tracking workflow",
+      "priority": "Medium",
+      "size": "L",
+      "finding": "Partial capability: map/pass/Doppler estimates exist; no path from satellite telemetry into radio tuning or rotator tracking was found.",
+      "competitor": "https://github.com/GregTroar/OpsLog/wiki/Satellites",
+      "evidence": [
+        {
+          "file": "YAAM/SatelliteTrackingEngine.swift",
+          "line": 185,
+          "url": "https://github.com/fact0real/yaam/blob/e6d9d6d9ab9ecbed9c499f00fc6ae59fedbdcd34/YAAM/SatelliteTrackingEngine.swift#L185",
+          "description": "Current engine publishes estimated telemetry."
+        },
+        {
+          "file": "YAAM/SatelliteTrackingEngine.swift",
+          "line": 244,
+          "url": "https://github.com/fact0real/yaam/blob/e6d9d6d9ab9ecbed9c499f00fc6ae59fedbdcd34/YAAM/SatelliteTrackingEngine.swift#L244",
+          "description": "Current orbital implementation needs validation against a trusted propagator."
+        },
+        {
+          "file": "YAAM/RotatorControlEngine.swift",
+          "line": 53,
+          "url": "https://github.com/fact0real/yaam/blob/e6d9d6d9ab9ecbed9c499f00fc6ae59fedbdcd34/YAAM/RotatorControlEngine.swift#L53",
+          "description": "Independent rotator control exists but is not a satellite tracking session."
+        }
+      ],
+      "scope": [
+        "First validate orbit/range-rate and TLE freshness against reference vectors; Doppler must use slant range, not only ground distance.",
+        "Add an explicit armed session with uplink/downlink plan, inversion, dual-VFO or two-radio capabilities and bounded command rate.",
+        "Link az/el tracking and stop/park behavior to the session; preserve manual override and never key TX merely by tracking.",
+        "Populate PROP_MODE, SAT_NAME, BAND_RX and FREQ_RX from reviewed real session data."
+      ],
+      "checks": [
+        "Reference passes include low elevation, zenith, stale TLE and horizon boundaries.",
+        "Recorded commands track both frequencies and az/el; stop/disconnect prevents further writes.",
+        "No PTT in prediction-only mode; hardware acceptance follows deterministic fixtures."
+      ],
+      "depends": "Depends on validated radio capability paths (#103/#260) and profile isolation OG-04.",
+      "kind": "enhancement"
+    },
+    {
+      "id": "OG-10",
+      "title": "Directed nets: persistent rosters, check-ins and reviewed group logging",
+      "priority": "Medium",
+      "size": "M",
+      "finding": "No directed-net session/roster workflow found; digital Call Roster, club membership and SKED are different existing tools.",
+      "competitor": "https://github.com/GregTroar/OpsLog/wiki/Net-Control",
+      "evidence": [
+        {
+          "file": "YAAM/OperatorDeskNavigation.swift",
+          "line": 6,
+          "url": "https://github.com/fact0real/yaam/blob/e6d9d6d9ab9ecbed9c499f00fc6ae59fedbdcd34/YAAM/OperatorDeskNavigation.swift#L6",
+          "description": "No net-control destination in the current navigation catalogue."
+        },
+        {
+          "file": "YAAM/AppStateOperatorFeatures.swift",
+          "line": 261,
+          "url": "https://github.com/fact0real/yaam/blob/e6d9d6d9ab9ecbed9c499f00fc6ae59fedbdcd34/YAAM/AppStateOperatorFeatures.swift#L261",
+          "description": "Existing QSO save path can inform integration; do not write directly around persistence."
+        }
+      ],
+      "scope": [
+        "Add reusable net rosters and persistent sessions with checked-in/on-air/finished states and individual UTC intervals.",
+        "Review one or all completed contacts before saving through the normal durable log path.",
+        "Label CAT freshness and permit explicit manual frequency; do not silently reuse stale values.",
+        "Restore unfinished sessions after restart rather than reproducing the competitor in-memory limitation."
+      ],
+      "checks": [
+        "Check in three stations, edit one, log once and restart; unfinished members remain available.",
+        "Retrying group save does not duplicate already-saved QSOs.",
+        "CAT unavailable and UTC midnight boundaries are explicit and tested."
+      ],
+      "depends": "",
+      "kind": "enhancement"
+    },
+    {
+      "id": "OG-11",
+      "title": "Logbook audio: rolling RX/mic recording linked to individual QSOs",
+      "priority": "Medium",
+      "size": "M",
+      "finding": "No general per-QSO RX/mic rolling capture and playback attachment workflow found; WebSDR timelines and digital ADIF archives are different features.",
+      "competitor": "https://github.com/GregTroar/OpsLog/wiki/Audio-and-Keyers",
+      "evidence": [
+        {
+          "file": "YAAM/WebSDRAudioTimeline.swift",
+          "line": 1,
+          "url": "https://github.com/fact0real/yaam/blob/e6d9d6d9ab9ecbed9c499f00fc6ae59fedbdcd34/YAAM/WebSDRAudioTimeline.swift#L1",
+          "description": "Existing receive timeline is a useful adjacent component, not a generic logbook attachment service."
+        },
+        {
+          "file": "YAAM/DigitalQSOArchiveStore.swift",
+          "line": 6,
+          "url": "https://github.com/fact0real/yaam/blob/e6d9d6d9ab9ecbed9c499f00fc6ae59fedbdcd34/YAAM/DigitalQSOArchiveStore.swift#L6",
+          "description": "Digital archive is ADIF, not an audio attachment store."
+        }
+      ],
+      "scope": [
+        "Opt-in bounded rolling recording with pre-roll, correct RX/mic routes and per-QSO attachment metadata.",
+        "Offer local playback from the log row; select retention/storage location and preserve attached recordings when trimming unrelated buffers.",
+        "Link files only after durable QSO save, with visible missing-file and interrupted-capture states.",
+        "Keep recordings local unless the operator separately exports them; on-air replay is outside this card."
+      ],
+      "checks": [
+        "Two adjacent contacts retain the correct pre-roll/time window and stable attachments after reload.",
+        "Disk full, missing input and crash leave recoverable audio and a truthful status.",
+        "Retention cannot remove a recording pinned to a saved QSO."
+      ],
+      "depends": "",
+      "kind": "enhancement"
+    },
+    {
+      "id": "OG-12",
+      "title": "Voice keyer: recorded messages with reviewed audio/PTT routing",
+      "priority": "Medium",
+      "size": "L",
+      "finding": "No general voice-message recording/playback keyer found in YAAM source/navigation; related Voice Keyer cards on the board belong to Lab599 or Xiegu.",
+      "competitor": "https://github.com/GregTroar/OpsLog/wiki/Audio-and-Keyers",
+      "evidence": [
+        {
+          "file": "YAAM/OperatorDeskNavigation.swift",
+          "line": 66,
+          "url": "https://github.com/fact0real/yaam/blob/e6d9d6d9ab9ecbed9c499f00fc6ae59fedbdcd34/YAAM/OperatorDeskNavigation.swift#L66",
+          "description": "Radio tools contain digital/CW paths but no voice-keyer workflow."
+        },
+        {
+          "file": "YAAM/AudioOnlyTransmit.swift",
+          "line": 13,
+          "url": "https://github.com/fact0real/yaam/blob/e6d9d6d9ab9ecbed9c499f00fc6ae59fedbdcd34/YAAM/AudioOnlyTransmit.swift#L13",
+          "description": "Reuse the existing audio/transmit boundaries rather than inventing an independent PTT path."
+        }
+      ],
+      "scope": [
+        "Record/import a small set of phone-mode messages with local audition, explicit microphone/radio output selection and level control.",
+        "Integrate function keys and a single interruptible playback session with existing transmit limits and shutdown behavior.",
+        "Phone-mode checks, explicit arming, STOP and actual PTT receipts are required; Auto-CQ is an optional later milestone with finite repeats."
+      ],
+      "checks": [
+        "Local audition never keys PTT; disconnected/wrong output and non-phone modes refuse with a reason.",
+        "STOP, sleep, disconnect and route change terminate playback and request release.",
+        "Physical receive/PTT/audio-level acceptance is recorded for one supported radio."
+      ],
+      "depends": "Depends on shared TX controls (#3/#4/#10/#103); coordinate cross-app reusable components #141.",
+      "kind": "enhancement"
+    },
+    {
+      "id": "OG-13",
+      "title": "TCI: binary network audio routes for receive, recording and digital output",
+      "priority": "Medium",
+      "size": "L",
+      "finding": "Partial capability: TCI control/CW/spots exist; binary messages are only attempted as UTF-8 command text, with no binary audio decoder route found.",
+      "competitor": "https://github.com/GregTroar/OpsLog/wiki/Audio-and-Keyers",
+      "evidence": [
+        {
+          "file": "YAAM/TCIClient.swift",
+          "line": 257,
+          "url": "https://github.com/fact0real/yaam/blob/e6d9d6d9ab9ecbed9c499f00fc6ae59fedbdcd34/YAAM/TCIClient.swift#L257",
+          "description": "Binary WebSocket messages are not parsed as typed TCI audio packets."
+        },
+        {
+          "file": "YAAM/TCIClient.swift",
+          "line": 16,
+          "url": "https://github.com/fact0real/yaam/blob/e6d9d6d9ab9ecbed9c499f00fc6ae59fedbdcd34/YAAM/TCIClient.swift#L16",
+          "description": "Existing control client and transmit ownership must be reused."
+        }
+      ],
+      "scope": [
+        "Parse versioned TCI binary audio framing and expose a named network RX source with bounded buffering and format diagnostics.",
+        "Integrate RX with recording/digital input first; add TX audio as a separate armed milestone with explicit stream ownership.",
+        "Keep receiver/channel/sample-rate mapping and source-of-audio state visible; never switch the radio microphone source implicitly."
+      ],
+      "checks": [
+        "Independent protocol fixtures cover frame types, sizes, channels, sample rates and malformed input.",
+        "RX decoding/recording works without a virtual cable and cannot key TX.",
+        "TX stop/disconnect/underflow and physical loopback acceptance preserve existing release controls."
+      ],
+      "depends": "Related OG-11/OG-12 and #103. Confirm actual TCI protocol/server capabilities before implementation.",
+      "kind": "enhancement"
+    },
+    {
+      "id": "OG-14",
+      "title": "QSL cards: reusable user-designed photo templates per station",
+      "priority": "Low",
+      "size": "M",
+      "finding": "Partial capability: QSL rendering/email/export and paper-label designer exist; current full card uses the EP2AES PDF or a fallback layout, without a free photo-template editor.",
+      "competitor": "https://github.com/GregTroar/OpsLog/wiki/QSL-Card-Designer",
+      "evidence": [
+        {
+          "file": "YAAM/QSLCardView.swift",
+          "line": 15,
+          "url": "https://github.com/fact0real/yaam/blob/e6d9d6d9ab9ecbed9c499f00fc6ae59fedbdcd34/YAAM/QSLCardView.swift#L15",
+          "description": "Current renderer selects a special personal template."
+        },
+        {
+          "file": "YAAM/QSLCardView.swift",
+          "line": 35,
+          "url": "https://github.com/fact0real/yaam/blob/e6d9d6d9ab9ecbed9c499f00fc6ae59fedbdcd34/YAAM/QSLCardView.swift#L35",
+          "description": "Other calls use a fixed fallback."
+        },
+        {
+          "file": "YAAM/QSLLabelEngine.swift",
+          "line": 113,
+          "url": "https://github.com/fact0real/yaam/blob/e6d9d6d9ab9ecbed9c499f00fc6ae59fedbdcd34/YAAM/QSLLabelEngine.swift#L113",
+          "description": "Printable label settings already exist and must not be called missing."
+        }
+      ],
+      "scope": [
+        "Add reusable per-profile photo/card templates with editable text/image/QSO blocks, fonts, preview and local asset copies.",
+        "Support arbitrary station callsigns and multiple templates; keep current personal card available.",
+        "Optional automatic layout proposals can follow a usable manual editor; PDF/PNG export and existing mail review are reused."
+      ],
+      "checks": [
+        "Create two station templates, move the original photos and reload without losing assets.",
+        "Long/portable callsigns, Unicode names and missing QSO fields render legibly.",
+        "Preview/export use the selected station identity and never imply a confirmation not present in the log."
+      ],
+      "depends": "Coordinate #261 (existing personal card), #295 (truthful confirmation text) and #308 (designer guidance).",
+      "kind": "enhancement"
+    },
+    {
+      "id": "OG-15",
+      "title": "DX alerts: spotter filters, band/mode cells and optional email delivery",
+      "priority": "Medium",
+      "size": "M",
+      "finding": "Partial capability: five editable rule slots, sound/system notifications and call/entity/band/mode conditions exist; spotter predicates, exact band×mode choices and email action are absent from the inspected model.",
+      "competitor": "https://github.com/GregTroar/OpsLog/wiki/DX-Cluster-and-Spots",
+      "evidence": [
+        {
+          "file": "YAAM/OperatorModels.swift",
+          "line": 756,
+          "url": "https://github.com/fact0real/yaam/blob/e6d9d6d9ab9ecbed9c499f00fc6ae59fedbdcd34/YAAM/OperatorModels.swift#L756",
+          "description": "Current rule fields lack spotter filters and email actions."
+        },
+        {
+          "file": "YAAM/OperatorDeskView.swift",
+          "line": 3326,
+          "url": "https://github.com/fact0real/yaam/blob/e6d9d6d9ab9ecbed9c499f00fc6ae59fedbdcd34/YAAM/OperatorDeskView.swift#L3326",
+          "description": "Evaluation/delivery currently lives in the cluster view."
+        }
+      ],
+      "scope": [
+        "Extend the existing rule engine with spotter call/country/continent and selected band×mode cells.",
+        "Move evaluation to an appropriately owned service so navigation does not define whether a rule is active.",
+        "Offer explicitly enabled SMTP alerts with test/preview, cooldown, quiet periods, deduplication and station-scoped recipients.",
+        "Allow independently named rules rather than a fixed five-slot product limit if operator need is confirmed."
+      ],
+      "checks": [
+        "A rule for 20 m digital OR 40 m phone never fires on the two unwanted cross combinations.",
+        "Repeated multi-node spots produce one alert per configured interval; spotter restrictions work.",
+        "Changing views/restarting preserves rule behavior; email disabled or empty recipient sends nothing."
+      ],
+      "depends": "Coordinate #311 (digital first-call alerts), #443 and #444; preserve current sound and notification settings.",
+      "kind": "enhancement"
+    },
+    {
+      "id": "OG-16",
+      "title": "Remote station: paired operator console with capability and audio negotiation",
+      "priority": "Future",
+      "size": "XL",
+      "finding": "Partial adjacent pieces: Icom network client, rigctld/TCI clients and a mobile companion exist; no general YAAM-to-YAAM physical-station host/client workflow was found.",
+      "competitor": "https://github.com/GregTroar/OpsLog/wiki/Remote-Station",
+      "evidence": [
+        {
+          "file": "YAAM/NetworkTransceiverEmulatorEngine.swift",
+          "line": 173,
+          "url": "https://github.com/fact0real/yaam/blob/e6d9d6d9ab9ecbed9c499f00fc6ae59fedbdcd34/YAAM/NetworkTransceiverEmulatorEngine.swift#L173",
+          "description": "The network server path controls synthetic state, not a paired physical station."
+        },
+        {
+          "file": "YAAM/IcomNetworkRadio.swift",
+          "line": 6,
+          "url": "https://github.com/fact0real/yaam/blob/e6d9d6d9ab9ecbed9c499f00fc6ae59fedbdcd34/YAAM/IcomNetworkRadio.swift#L6",
+          "description": "Existing direct Icom network support is not absent and should be preserved."
+        },
+        {
+          "file": "YAAM/ConnectivityServices.swift",
+          "line": 25,
+          "url": "https://github.com/fact0real/yaam/blob/e6d9d6d9ab9ecbed9c499f00fc6ae59fedbdcd34/YAAM/ConnectivityServices.swift#L25",
+          "description": "File/cloud log exchange is not remote station audio/control."
+        }
+      ],
+      "scope": [
+        "Begin with an architecture and threat/latency/capability review for an operator console paired with a station host; do not expose the unauthenticated emulator to a network.",
+        "Use authenticated encrypted transport or a clearly documented private-tunnel model, single-controller leases and host-side transmit limits.",
+        "Negotiate radio controls and RX/TX audio independently, starting read-only/RX and disabling unsupported controls.",
+        "Make local station intervention, stale telemetry, takeover and disconnect recovery explicit."
+      ],
+      "checks": [
+        "An unpaired client cannot read/control/stream; replayed/expired control leases are refused.",
+        "Link loss, audio stall, reconnect and local override cannot leave a hidden TX state.",
+        "End-to-end latency and physical-radio acceptance are documented separately from emulator fixtures."
+      ],
+      "depends": "Depends on #10/#103/#3 and OG-04/OG-13; not a prerequisite for everyday local logging. Discovery first.",
+      "kind": "enhancement"
+    }
+  ],
+  "verification": {
+    "source_anchors": "All 16 items have an existing file and in-range one-based line anchor.",
+    "challenge_band_set": [
+      "160m",
+      "80m",
+      "60m",
+      "40m",
+      "30m",
+      "20m",
+      "17m",
+      "15m",
+      "12m",
+      "10m",
+      "6m"
+    ],
+    "source_arithmetic_example": {
+      "fixture": "one entity confirmed on 20m and 60m",
+      "current_band_set_count": 2,
+      "arrl_expected": 1,
+      "method": "source arithmetic; not a Swift app runtime test"
+    },
+    "application_changes": "None; research report and board planning only."
+  }
+}

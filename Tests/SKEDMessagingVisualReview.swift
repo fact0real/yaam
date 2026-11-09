@@ -15,7 +15,7 @@ import AppKit
                     let model = SKEDMessagingModel(recipient: "G0JHC", userAgent: "visual-test", tokenProvider: { "" })
                     let enabled = SKEDMessagingStatus(available: true, verifiedCallsign: "EP2AES", enabled: true, retentionDays: 30)
                     let received = SKEDPrivateMessage(id: "42", clientID: UUID().uuidString.lowercased(), sender: "G0JHC", recipient: "EP2AES",
-                        body: "Hello! Can we try 20m FT8 at 14:00 UTC?\nسلام، برای SKED آماده‌ام.\n[plain text](https://example.invalid) — no link preview",
+                        body: "Hello! Can we try 20m FT8 at 14:00 UTC?\nReady for SKED on 20m.\n[plain text](https://example.invalid) — no link preview",
                         createdAt: "2026-10-24T10:00:00.000000Z")
                     switch state {
                     case "loading": model.preview(status: nil, working: true)

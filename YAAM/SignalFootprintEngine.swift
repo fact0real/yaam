@@ -3,7 +3,7 @@
 //  YAAM
 //
 //  Live PSKReporter & Reverse Beacon Network (RBN) Signal Footprint Engine
-//  ("ردپای سیگنال من در جهان")
+//  Global signal footprint and reverse beacon telemetry engine
 //  Dual-feed aggregator providing real-time telemetry on where and how strong
 //  the operator's transmitted signals (FT8, FT4, CW, RTTY, etc.) are heard worldwide.
 //

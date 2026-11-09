@@ -3,7 +3,7 @@
 //  YAAM
 //
 //  Busted Callsign Intelligence & Multi-Source Database Manager
-//  ("مدیریت پایگاه‌های داده اعتبارسنجی و تصحیح هوشمند کال‌ساین")
+//  Callsign validation and intelligent correction database manager
 //  Allows 1-click downloading, updating, and calibrating databases from
 //  Super Check Partial (SCP), ARRL LoTW, Club Log, and interactive error testing.
 //

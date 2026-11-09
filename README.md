@@ -9,9 +9,10 @@
     <a href="#operator-desk">Operator Desk</a> ·
     <a href="#build-from-source">Build from source</a> ·
     <a href="#documentation">Documentation</a> ·
-    <a href="USER_MANUAL_FA.md">راهنمای فارسی</a>
+    <a href="https://yaam.asis.sh/">Official Website</a>
   </p>
 
+  <a href="https://yaam.asis.sh/"><img src="https://img.shields.io/badge/Website-yaam.asis.sh-007AFF?style=flat-square" alt="Website: yaam.asis.sh"></a>
   <a href="#build-from-source"><img src="https://img.shields.io/badge/macOS-15.6%2B-007AFF?logo=apple&amp;logoColor=white&amp;style=flat-square" alt="macOS 15.6 or later"></a>
   <a href="#under-the-hood"><img src="https://img.shields.io/badge/Swift-SwiftUI-F05138?logo=swift&amp;logoColor=white&amp;style=flat-square" alt="Built with Swift and SwiftUI"></a>
   <a href="#features"><img src="https://img.shields.io/badge/Logbook-ADIF-009B83?style=flat-square" alt="ADIF logbook"></a>
@@ -19,6 +20,8 @@
 </div>
 
 <br>
+
+> **Official Website & Downloads:** [https://yaam.asis.sh/](https://yaam.asis.sh/) — Download signed macOS application releases, review release notes, and inspect updates.
 
 **Log contacts. Find your next DX. Keep track of every confirmation.**
 
@@ -160,7 +163,7 @@ codesign --verify --deep --strict /Applications/YAAM.app
 | Guide | Start here for… |
 | :--- | :--- |
 | [English user manual](USER_MANUAL.md) | Station setup, logging, QSL services, radio tools, and day-to-day operation |
-| [راهنمای کاربری فارسی](USER_MANUAL_FA.md) | راه‌اندازی ایستگاه، ثبت تماس‌ها، سرویس‌های QSL و ابزارهای رادیویی |
+| [Official Website](https://yaam.asis.sh/) | Downloads, release announcements, feature overview, and project updates |
 | [Privacy & network connections](PRIVACY.md) | Destinations, background connections, transmitted data and privacy controls |
 | [Developer documentation](DEVELOPER_DOCUMENTATION.md) | Application architecture, modules, storage, networking, and implementation details |
 | [App icon assets](Design/AppIcon/README.md) | Production artwork, icon sizes, and asset-catalog maintenance |

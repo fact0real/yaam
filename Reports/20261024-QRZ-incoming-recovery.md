@@ -1,53 +1,52 @@
-# بازیابی یکپارچهٔ تماس از QRZ Incoming
+# Integrated Contact Recovery from QRZ Incoming
 
-تاریخ: ۲۴ اکتبر ۲۰۲۶، منطقهٔ زمانی تهران
+Date: October 24, 2026, Tehran Timezone
 
-بورد مشترک: [Y-160 / #414](https://github.com/fact0real/yaam-lab599-shared-board/issues/414). نسخهٔ تحویل: **YAAM 1.37.45 (195)**.
+Shared Board: [Y-160 / #414](https://github.com/fact0real/yaam-lab599-shared-board/issues/414). Delivery Release: **YAAM 1.37.45 (195)**.
 
-## علت ریشه‌ای
+## Root Cause
 
-ثبت تماس روی وب‌سایت QRZ، ثبت آن در YAAM نیست. درخواست اطلاعات با ایمیل نیز فقط مسیر جمع‌آوری مدرک را باز می‌کرد؛ دریافت پاسخ، مسیر ثبت تماس محلی را اجرا نمی‌کرد.
+Recording a contact on the QRZ website does not record it inside YAAM. Requesting information via email only opened an evidence gathering path; receiving a reply did not trigger the local contact recording workflow.
 
-سه گسست در سورس وجود داشت:
+Three gaps existed in the source:
 
-1. در `QRZIncomingReviewView` ذخیرهٔ محلی و آماده‌سازی LoTW / QRZ / Club Log دو اقدام جدا بودند. مرحلهٔ دوم به شناسه و تصویر رکورد در حافظهٔ همان پنجره وابسته بود؛ با بستن پنجره امکان ادامهٔ مستقیم از دست می‌رفت.
-2. تازه‌سازی Incoming، فهرست قبلی را با نتیجهٔ جدید QRZ جایگزین می‌کرد. رسیدگی به درخواست روی وب‌سایت می‌توانست پروندهٔ ناتمام محلی را از دسترس خارج کند.
-3. دانلود معمول QRZ در `ConfirmationSync.fetchQRZ` از `STATUS:CONFIRMED` استفاده می‌کند. بنابراین این مسیر، آینهٔ کامل تمام تماس‌های ثبت‌شده روی QRZ نیست و تضمین نمی‌کند یک تماس تازه یا تأییدنشده از آنجا به لاگ محلی بازگردد. این فیلتر را نباید برای حل یک پرونده، به واردسازی بی‌قید تمام تاریخچه تبدیل کرد.
+1. In `QRZIncomingReviewView`, local saving and preparing LoTW / QRZ / Club Log upload intents were two disconnected actions. The second step depended on in-memory record IDs in that window; closing the window caused loss of direct progress.
+2. Refreshing Incoming replaced the previous list with new QRZ results. Processing a request on the website could make an unfinished local recovery case inaccessible.
+3. Standard QRZ downloads in `ConfirmationSync.fetchQRZ` use `STATUS:CONFIRMED`. Consequently, this path is not a full mirror of all contacts logged on QRZ and does not guarantee that a new or unconfirmed contact will be pulled into the local log. This filter should not be relaxed to an unrestricted bulk import of full history just to resolve an isolated case.
 
-## راه‌حل پیاده‌شده
+## Implemented Solution
 
-واحد کار، «پروندهٔ بازیابی» است. پایگاه محلی مرجع ثبت تماس و صف پایدار، مرجع پیگیری ارسال‌هاست:
+The unit of work is a "Recovery Case". The local database is the source of truth for logged contacts, and the durable queue is the source of truth for tracking uploads:
 
-**پاسخ یا یادداشت واقعی ← بررسی و تأیید اپراتور ← ثبت یکجای تماس محلی + تعهد ارسال ← وضعیت مستقل هر سرویس**
+**Actual Reply/Notes → Operator Review & Verification → Unified Local Contact Save + Upload Commitments → Per-Service Independent Status**
 
-- **Save locally & queue all three** تماس و ارسال‌های باقی‌مانده را همراه با سابقهٔ بازیابی در یک تراکنش SQLite ذخیره می‌کند. پیش از آن نقطهٔ بازیابی ساخته می‌شود. شکست در ذخیرهٔ تماس، هرکدام از ارسال‌ها یا سابقهٔ بازیابی، کل تراکنش را برمی‌گرداند.
-- رکورد دقیقِ موجود دوباره ساخته نمی‌شود. چند درخواست مربوط به یک تماس می‌توانند به همان رکورد متصل شوند؛ تغییر جزئیات یک درخواستِ متصل‌شده مجوز ساخت تماس دوم نیست.
-- پرونده با ناپدید شدن درخواست از QRZ باقی می‌ماند. فهرست‌ها برای هر ایستگاه جدا هستند و تغییر ایستگاه هنگام دریافت نتیجه، آن را وارد پروندهٔ ایستگاه جدید نمی‌کند. کش قدیمیِ بدون مالک فقط در صورت وجود یک ایستگاه مهاجرت می‌کند؛ در حالت چند ایستگاهی، بازیابی دستی از اختصاص خودکار آن جلوگیری می‌کند.
-- بازکردن مجدد پرونده، رکورد ذخیره‌شده و وضعیت LoTW، QRZ و Club Log را نشان می‌دهد. ارسال موفق تکرار نمی‌شود و ذخیرهٔ دوباره، خطای متوقف‌شده یا نیاز به اصلاح حساب را دور نمی‌زند.
-- **Send saved contact** فقط کارهای موعدرسیدهٔ همان تماس را از صف موجود اجرا می‌کند. صف آماده‌شده در اجراهای معمول QSL Hub نیز قابل ارسال است. نیاز به تنظیم حساب و TQSL مانند مسیر فعلی باقی است.
-- برای تماس‌های قبلاً رسیدگی‌شده در QRZ، مسیر **Recovery cases > Recover a contact already handled on QRZ…** همان بررسی را باز می‌کند.
-- اگر اپراتور تاریخ، ساعت UTC، باند و مد یک رکورد موجود در لاگ QRZ خود را تطبیق دهد، می‌تواند حضور آن را صریحاً علامت بزند. این مدرک محلی فقط ارسال دوباره به QRZ را حذف می‌کند؛ QSL را تأییدشده نشان نمی‌دهد.
-- آرشیو محلی فقط فهرست پرونده‌ها را تغییر می‌دهد؛ تماس، ارسال‌ها یا درخواست آنلاین را حذف نمی‌کند. درخواستِ همچنان موجود روی QRZ ممکن است پس از تازه‌سازی دوباره دیده شود.
+- **Save locally & queue all three** commits the contact and pending uploads along with recovery history in a single SQLite transaction. A database restore point is created beforehand. Any failure in saving the contact, uploads, or audit history rolls back the entire transaction.
+- Exact existing records are reused, not duplicated. Multiple requests relating to one contact can link to the same record; altering details of a linked request does not permit creating a duplicate QSO.
+- Cases persist even after requests disappear from QRZ. Lists are isolated per station profile, and switching stations upon receiving results does not pollute the new station's case list. Unowned legacy caches only migrate if a single station profile exists; in multi-station setups, manual recovery prevents automatic misassignment.
+- Reopening a case displays the saved record and the live status of LoTW, QRZ, and Club Log. Successful uploads are not repeated, and saving again does not bypass halted errors or account remediation requirements.
+- **Send saved contact** processes only due jobs for that specific contact from the existing queue. The queued jobs are also dispatched during normal QSL Hub cycles. Account configurations and TQSL prerequisites remain unchanged.
+- For contacts previously processed on QRZ, the path **Recovery cases > Recover a contact already handled on QRZ…** opens the same verified review workflow.
+- If the operator confirms matching date, UTC time, band, and mode for a record existing in their QRZ logbook, they can explicitly check that box. This local evidence omits re-uploading to QRZ without falsely marking the QSL as confirmed.
+- Local archiving only updates case list visibility; it does not delete QSOs, queued uploads, or online requests. A request still present on QRZ may reappear upon refreshing.
 
-هیچ داده‌ای از متن ایمیل به‌عنوان دستور اجرایی پذیرفته نمی‌شود. زمان، باند، مد یا گزارش سیگنال حدس زده نمی‌شود. یادداشت پاسخ و شناسه‌های پرونده در محتوای ارسالی به سرویس‌ها قرار نمی‌گیرند. ارسال به ایستگاه دیگر و ثبت روی Guest Log همچنان ممنوع است. دریافت پاسخ ایمیل، به‌تنهایی، تماس تولید نمی‌کند؛ جزئیات آن در فرم بررسی می‌شوند.
+No data from email bodies is executed as instructions. No time, band, mode, or signal report is guessed. Reply notes and case IDs are excluded from service upload payloads. Guest log recording and cross-station submission remain blocked. Receiving an email reply alone does not create a QSO; details are reviewed manually in the form.
 
-## پیشنهاد مرحلهٔ بعد
+## Next Stage Recommendations
 
-برای کم‌کردن ورود دستی، می‌توان پاسخ ساختاریافته با شناسهٔ پرونده و گزینهٔ واردکردن ADIF از لاگ QRZ خود اپراتور اضافه کرد. استخراج باید قطعی و محدود به فیلدهای تماس باشد، نتیجه را فقط در پیش‌نویس نشان دهد و قبل از ذخیره همان بررسی را بخواهد. ADIF لاگ طرف مقابل نباید بدون تشخیص جهت تماس، جابه‌جایی کال‌ساین و گزارش‌ها را خودکار انجام دهد. این مرحله در تغییر فعلی پیاده نشده است.
+To minimize manual entry, structured responses with case IDs and an option to import ADIF from the operator's own QRZ log could be added. Parsing must be deterministic and confined to contact fields, presenting results strictly as a draft requiring the same verification before saving. Peer log ADIFs must not swap callsigns or signal reports automatically without explicit direction checks. This enhancement was not implemented in the current changeset.
 
-## اعتبارسنجی
+## Validation
 
-- مجموعهٔ بازیابی: اعتبارسنجی جزئیات، سازگاری پیش‌نویس قدیمی و نگارش‌های معادل باند/مد/زمان، شناسهٔ پایدار، حفظ پرونده پس از حذف آنلاین، ذخیرهٔ مجدد، چند پرونده برای یک رکورد، محدودیت ایستگاه، جلوگیری از تداخل با همگام‌سازی و برگشت وضعیت نمایشی هنگام خطا.
-- پایگاه موقت واقعی SQLite: خطای عمدی در دومین ارسال و خطای عمدی در ثبت سابقه، برگشت کامل تماس/صف/سرستون‌ها، کنترل مالکیت، بازکردن مجدد پایگاه، تکرار بدون رکورد یا ارسال اضافه و حذف ارسال QRZ با مدرک صریح.
-- مجموعهٔ محرمانگی ارسال‌ها و انتقال آزمایشی به سرویس‌ها، بدون حساب واقعی یا ارسال آنلاین.
-- ساخت Debug برنامه.
-- بازبینی زندهٔ Viewهای واقعی در پیش‌نمایش مستقل با state و تماس‌های ساختگی: فرم بررسی در حالت روشن/تیره و اندازهٔ عادی/کوچک، فهرست درخواست فعال و پروندهٔ قدیمی، غیرفعال بودن رد آنلاین برای پروندهٔ ناپدیدشده، منوی بازیابی دستی، بازشدن فرم از کال‌ساین و فعال‌شدن ذخیره فقط پس از تأیید صریح. تغییر مد پس از تأیید، دکمهٔ ذخیره را دوباره غیرفعال کرد. ادامهٔ ارسالِ رکورد ذخیره‌شده نیز پس از بازکردن پرونده در دسترس بود.
+- Recovery test suite: verified detail validation, backward draft compatibility, band/mode/time canonicalization, stable case IDs, case persistence post online removal, re-save safety, multi-case linking to a single record, station boundary enforcement, sync isolation, and UI error state rollback.
+- Realistic temporary SQLite fixture: simulated failures on upload queuing and audit logging, full rollback of contact/queue/headers, profile ownership validation, database reopen checks, zero duplicate record generation, and correct omission of QRZ uploads under explicit local confirmation evidence.
+- Upload privacy suite and mocked service transport tests without live accounts or network calls.
+- Successful application Debug build.
+- Live view reviews in standalone preview fixtures with mock state and dummy contacts: review form across light/dark modes and compact/standard widths, active request and legacy case listings, disabled online reject buttons for vanished requests, manual recovery menus, callsign deep-links, and save buttons gated strictly on explicit verification. Changing mode post-verification disabled the save button as expected. Upload continuation for saved records remained accessible upon reopening cases.
 
-ارسال زنده به حساب‌های QRZ / LoTW / Club Log انجام نشد. بررسی رابط روی پیش‌نمایش مستقل انجام شد؛ اتصال کامل آن به حساب‌های واقعی در این اجرا آزمایش نشد. نتیجهٔ نهایی ارسال سورس، نصب در Applications و تطبیق نسخه و امضای برنامه روی کارت بورد ثبت می‌شود. این تحویل، انتشار عمومی فایل نصب یا تغییر فید به‌روزرسانی نیست.
+No live submissions to real QRZ / LoTW / Club Log accounts were made. UI testing was performed in standalone fixtures; end-to-end live account execution was not tested in this run. Final source commit hashes, installation into `/Applications`, and signature verification are logged to the project board. This delivery does not constitute a public distribution or update feed bump.
 
+## Pre-Delivery Verification · Y-160
 
-## بازبینی نهایی پیش از تحویل · Y-160
+All four recovery suites passed in the final run. The upload privacy suite—including 19 allowed-field tests, 52 data-sharing preference tests, 100 synchronization tests, and transport tests with mocked services and TQSL—passed without errors. Configuration diffs and project structure were verified. Optimized build **Release 1.37.45 (195)** completed successfully.
 
-هر چهار مجموعهٔ بازیابی در اجرای نهایی موفق شدند. مجموعهٔ محرمانگی ارسال شامل ۱۹ آزمون فهرست مجاز فیلدها، ۵۲ آزمون تنظیمات اشتراک داده، ۱۰۰ آزمون همگام‌سازی و آزمون انتقال با سرویس‌ها و TQSL ساختگی نیز موفق بود. بررسی اختلاف‌ها و ساختار فایل‌های تنظیمات بدون خطا بود. ساخت بهینهٔ **Release 1.37.45 (195)** با موفقیت تمام شد.
-
-بستهٔ آمادهٔ نصب با امضای محلی بررسی شد؛ مجوزهای آن دقیقاً با نسخهٔ نصب‌شدهٔ قبلی و فایل مجوزهای پروژه برابرند. نسخهٔ قبلی برنامه پیش از جایگزینی پشتیبان‌گیری و فایل اجرایی آن تطبیق داده شد. شناسهٔ commit ارسال‌شده و نتیجهٔ نصب نهایی در کارت بورد درج می‌شود.
+The installation package was validated with ad-hoc signatures; its entitlements match the previous installation and the project entitlements file. The previous version was backed up prior to binary replacement. Commit hash and final installation verification are recorded in the board card.
