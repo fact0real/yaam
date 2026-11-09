@@ -1266,14 +1266,6 @@ Warm 73,
                         successfullySentIDs.append(record.id)
                         sentDetailsList.append((call, recipientEmail, sub))
                         self.dispatchStatusMap[record.id] = .sent
-
-                        // Only update local view state during the run to preserve smooth 60fps scrolling
-                        if let lIdx = self.localRecords.firstIndex(where: { $0.id == record.id }) {
-                            self.localRecords[lIdx].fields["QSL_SENT"] = "Y"
-                            self.localRecords[lIdx].fields["QSLSDATE"] = AppState.adifDateFormatter.string(from: Date())
-                            self.localRecords[lIdx].fields["QSL_SENT_VIA"] = "E"
-                            self.localRecords[lIdx].fields["APP_YAAM_EMAIL_SENT_DATE"] = AppState.adifDateFormatter.string(from: Date())
-                        }
                     } else {
                         failedCount += 1
                         failedDetailsList.append((call, recipientEmail, sub))
@@ -1291,32 +1283,31 @@ Warm 73,
                 let todayStr = AppState.adifDateFormatter.string(from: Date())
                 let sentIDSet = Set(successfullySentIDs)
 
-                // 1. Commit email histories without repeated full-workspace saves
+                // 1. Commit email histories in one single batch operation (1 file write & single index rebuild)
+                var batchHistoryItems: [(callsign: String, email: String, subject: String, status: String, kind: String?)] = []
                 for item in sentDetailsList {
-                    self.appState.recordEmailHistory(
-                        callsign: item.call,
-                        email: item.email,
-                        subject: item.subject,
-                        status: "Sent",
-                        updateLogbookRows: false,
-                        autoSave: false
-                    )
+                    batchHistoryItems.append((callsign: item.call, email: item.email, subject: item.subject, status: "Sent", kind: "QSL"))
                 }
-
                 for item in failedDetailsList {
-                    self.appState.recordEmailHistory(
-                        callsign: item.call,
-                        email: item.email,
-                        subject: item.subject,
-                        status: "Failed",
-                        updateLogbookRows: false,
-                        autoSave: false
-                    )
+                    batchHistoryItems.append((callsign: item.call, email: item.email, subject: item.subject, status: "Failed", kind: "QSL"))
+                }
+                if !batchHistoryItems.isEmpty {
+                    self.appState.batchRecordEmailHistory(items: batchHistoryItems, autoSave: true)
                 }
 
                 // 2. Commit all sent records in AppState and trigger exactly ONE workspace save & UI refresh!
                 if !sentIDSet.isEmpty {
                     self.appState.batchMarkRecordsAsQSLSent(ids: sentIDSet, via: "E", autoSave: true)
+                }
+
+                // 3. Update localRecords once at the end of the batch
+                for idx in self.localRecords.indices {
+                    if sentIDSet.contains(self.localRecords[idx].id) {
+                        self.localRecords[idx].fields["QSL_SENT"] = "Y"
+                        self.localRecords[idx].fields["QSLSDATE"] = todayStr
+                        self.localRecords[idx].fields["QSL_SENT_VIA"] = "E"
+                        self.localRecords[idx].fields["APP_YAAM_EMAIL_SENT_DATE"] = todayStr
+                    }
                 }
 
                 self.appState.playActivitySound(failedCount == 0 ? .success : .failure)

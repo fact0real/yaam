@@ -202,7 +202,7 @@ Direct telemetry from NOAA/SWPC space weather prediction centers:
 * Global DRAP (D-Region Absorption Predictions) map to assess High Frequency signal blackouts.
 
 ### 4.4 Local Network Web Server for iPad, Tablets & Second Monitors
-Activate the Remote Shack Server on port 8080. YAAM starts a lightweight Server-Sent Events (SSE) web server. Open `http://<your-mac-ip>:8080` on an iPad or auxiliary display to view a synchronized, hands-free shack clock with grayline terminator projection.
+Activate the Remote Shack Server on port 8080. YAAM starts a lightweight, token-authenticated web server. Scan the generated QR code or open `http://<your-mac-ip>:8080/?token=<token>` on an iPad or auxiliary display to view a synchronized, hands-free shack clock with grayline terminator projection and authenticated remote antenna rotator control.
 
 ---
 

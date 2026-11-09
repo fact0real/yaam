@@ -1906,9 +1906,13 @@ class AppState: NSObject, ObservableObject {
     @Published var selectedEmailIncomingRequest: QRZIncomingConfirmation? = nil
     @Published var incomingEmailDraftNotice: String = ""
     @Published var emailHistory: [EmailHistoryEntry] = [] {
-        didSet { invalidateStatisticsCache() }
+        didSet {
+            rebuildEmailHistoryIndices()
+            invalidateStatisticsCache()
+        }
     }
     @Published var emailHistoryByCallsign: [String: EmailHistoryEntry] = [:]
+    private(set) var emailHistoryQSLByCallsign: [String: EmailHistoryEntry] = [:]
     @Published var newlyConfirmedRecordIDs: Set<UUID> = []
     @Published var showQSLCardComposer: Bool = false
     @Published var selectedQSLCardQSO: QSORecordModel? = nil
@@ -2173,7 +2177,7 @@ class AppState: NSObject, ObservableObject {
             qsoRecordsRevision &+= 1
             filteredRecordsCache = nil
             filteredChronologicalOrdinals.removeAll(keepingCapacity: true)
-            availableCountriesCache = nil
+            scheduleAvailableCountriesRefresh()
             confirmationOpportunityIndexCache = nil
             cachedTodayConfirmedRecords = nil
             cachedTodayConfirmedIDs = nil
@@ -2315,6 +2319,28 @@ class AppState: NSObject, ObservableObject {
             return result.value
         }
         return .empty
+    }
+
+    private var availableCountriesTask: Task<Void, Never>?
+
+    func scheduleAvailableCountriesRefresh() {
+        availableCountriesTask?.cancel()
+        guard !qsoRecords.isEmpty else {
+            availableCountriesCache = []
+            return
+        }
+        let snapshot = qsoRecords
+        availableCountriesTask = Task.detached(priority: .utility) { [weak self] in
+            guard !Task.isCancelled else { return }
+            let countries = Set(snapshot.map { ConfirmationOpportunityIndex.countryFilterLabel(for: $0) })
+            let result = Array(countries).sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+            guard !Task.isCancelled else { return }
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.availableCountriesCache = result
+                self.objectWillChange.send()
+            }
+        }
     }
 
     var availableCountries: [String] {
@@ -7514,6 +7540,23 @@ class AppState: NSObject, ObservableObject {
         return dir.appendingPathComponent("EmailHistory.json")
     }
 
+    func rebuildEmailHistoryIndices() {
+        var map: [String: EmailHistoryEntry] = [:]
+        var qslMap: [String: EmailHistoryEntry] = [:]
+        for entry in emailHistory {
+            let norm = entry.callsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            guard !norm.isEmpty else { continue }
+            if map[norm] == nil {
+                map[norm] = entry
+            }
+            if entry.countsAsQSL && qslMap[norm] == nil {
+                qslMap[norm] = entry
+            }
+        }
+        emailHistoryByCallsign = map
+        emailHistoryQSLByCallsign = qslMap
+    }
+
     private func loadEmailHistory() {
         guard let url = emailHistoryURL,
               let data = try? Data(contentsOf: url),
@@ -7522,15 +7565,43 @@ class AppState: NSObject, ObservableObject {
         }
 
         emailHistory = decoded.sorted { $0.date > $1.date }
-        var map: [String: EmailHistoryEntry] = [:]
-        for entry in emailHistory {
-            let norm = entry.callsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-            if !norm.isEmpty && map[norm] == nil {
-                map[norm] = entry
-            }
-        }
-        emailHistoryByCallsign = map
         refreshEmailHistoryColumns()
+    }
+
+    @discardableResult func batchRecordEmailHistory(
+        items: [(callsign: String, email: String, subject: String, status: String, kind: String?)],
+        autoSave: Bool = true
+    ) -> Bool {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in
+                self?.batchRecordEmailHistory(items: items, autoSave: autoSave)
+            }
+            return false
+        }
+        guard !items.isEmpty else { return true }
+        let now = Date()
+        var newEntries: [EmailHistoryEntry] = []
+        for item in items {
+            let entry = EmailHistoryEntry(
+                id: UUID(),
+                date: now,
+                callsign: item.callsign,
+                email: item.email,
+                subject: item.subject,
+                status: item.status,
+                kind: item.kind,
+                sked: nil
+            )
+            newEntries.append(entry)
+        }
+
+        var combined = newEntries + emailHistory
+        combined.sort { $0.date > $1.date }
+        let recentIDs = Set(combined.prefix(500).map(\.id))
+        emailHistory = combined.filter {
+            recentIDs.contains($0.id) || ($0.kind?.uppercased() == "SKED" && $0.status == "Sent")
+        }
+        return saveEmailHistory()
     }
 
     @discardableResult func recordEmailHistory(
@@ -7574,10 +7645,6 @@ class AppState: NSObject, ObservableObject {
         let recentIDs = Set(emailHistory.prefix(500).map(\.id))
         emailHistory = emailHistory.filter {
             recentIDs.contains($0.id) || ($0.kind?.uppercased() == "SKED" && $0.status == "Sent")
-        }
-        let norm = callsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        if !norm.isEmpty {
-            emailHistoryByCallsign[norm] = entry
         }
         let saved = saveEmailHistory()
         if updateLogbookRows {
@@ -7848,16 +7915,16 @@ class AppState: NSObject, ObservableObject {
     }
 
     func isQSLSent(record: QSORecordModel) -> Bool {
-        let call = record["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         if record["QSL_SENT"].uppercased() == "Y" { return true }
         if let emailSent = record.fields["APP_YAAM_EMAIL_SENT_DATE"], !emailSent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return true }
-        if emailHistory.contains(where: { $0.callsign.caseInsensitiveCompare(call) == .orderedSame && $0.countsAsQSL }) { return true }
+        let call = record["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if !call.isEmpty, emailHistoryQSLByCallsign[call] != nil { return true }
         return false
     }
 
     func sentEmailSummary(for record: QSORecordModel) -> String {
         let call = record["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        if let entry = emailHistory.first(where: { $0.callsign.caseInsensitiveCompare(call) == .orderedSame && $0.countsAsQSL }) {
+        if !call.isEmpty, let entry = emailHistoryQSLByCallsign[call] {
             return "Sent on \(formattedEmailHistoryDate(entry.date))"
         }
         if let date = record.fields["APP_YAAM_EMAIL_SENT_DATE"], !date.isEmpty {
@@ -7908,18 +7975,20 @@ class AppState: NSObject, ObservableObject {
         guard !ids.isEmpty else { return }
         let todayStr = Self.adifDateFormatter.string(from: Date())
         var changed = false
-        for idx in qsoRecords.indices {
-            if ids.contains(qsoRecords[idx].id) {
-                qsoRecords[idx].fields["QSL_SENT"] = "Y"
-                qsoRecords[idx].fields["QSLSDATE"] = todayStr
-                qsoRecords[idx].fields["QSL_SENT_VIA"] = via
+        var updated = qsoRecords
+        for idx in updated.indices {
+            if ids.contains(updated[idx].id) {
+                updated[idx].fields["QSL_SENT"] = "Y"
+                updated[idx].fields["QSLSDATE"] = todayStr
+                updated[idx].fields["QSL_SENT_VIA"] = via
                 if via == "E" {
-                    qsoRecords[idx].fields["APP_YAAM_EMAIL_SENT_DATE"] = todayStr
+                    updated[idx].fields["APP_YAAM_EMAIL_SENT_DATE"] = todayStr
                 }
                 changed = true
             }
         }
         guard changed else { return }
+        qsoRecords = updated
         filteredRecordsCache = nil
         cachedTodayConfirmedRecords = nil
         cachedTodayConfirmedIDs = nil
@@ -7931,14 +8000,16 @@ class AppState: NSObject, ObservableObject {
 
     func queueRecordsForBureau(ids: Set<UUID>) {
         var modified = 0
-        for i in qsoRecords.indices {
-            if ids.contains(qsoRecords[i].id) {
-                qsoRecords[i].fields["QSL_SENT"] = "Q"
-                qsoRecords[i].fields["QSL_SENT_VIA"] = "B"
+        var updated = qsoRecords
+        for i in updated.indices {
+            if ids.contains(updated[i].id) {
+                updated[i].fields["QSL_SENT"] = "Q"
+                updated[i].fields["QSL_SENT_VIA"] = "B"
                 modified += 1
             }
         }
         if modified > 0 {
+            qsoRecords = updated
             filteredRecordsCache = nil
             objectWillChange.send()
             autoSaveActiveWorkspace()

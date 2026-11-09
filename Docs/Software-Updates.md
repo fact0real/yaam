@@ -64,3 +64,8 @@ Shared ADIF entity identities reconcile worked/confirmed counting and Russia dis
 ## 1.37.61 (211) publication
 
 Logbook scrolling now constructs pinned/visible columns with exact offscreen spacing and represents the complete filtered log without incremental footer loading. Build 211 retains the publisher public key. Validation covers 2,800 geometry checks, the production row/viewport fixture with 100,000 invented contacts, Debug/Release builds, update policy and staged sandbox/no-debugger entitlements. Official Sparkle tools verify authentic archive/feed signatures and reject modified copies. The website and GitHub distribute identical immutable binaries and corresponding GPL source. This remains a non-notarized developer preview; no real station/logbook is used by the scroll fixture.
+
+
+## 1.37.62 (212) publication
+
+HamClock Remote Web Server incorporates secure token authentication and connection lifecycle fixes. Build 212 retains the publisher public key. Mutating antenna rotator commands require valid authentication tokens, wildcard CORS is removed from rotator endpoints, and disconnected TCP sockets are cleanly purged from memory. Validation covers 4 focused security regression checks (`HamClockServerSecurityRegression`), the complete review regression suite, Debug and optimized Release builds, update-policy validation and staged sandbox entitlements. Official Sparkle tools verify authentic archive/feed signatures and reject modified copies. The website and GitHub distribute identical immutable binaries and corresponding GPL source. This remains a non-notarized developer preview; no real station/hardware is operated by the security test fixture.

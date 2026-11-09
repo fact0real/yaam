@@ -31,17 +31,28 @@ public final class HamClockRemoteWebServer: ObservableObject {
     @Published public private(set) var serverURLString: String = "http://127.0.0.1:8080"
     @Published public private(set) var qrCodeImage: NSImage?
     @Published public private(set) var connectedClientsCount: Int = 0
+    @Published public private(set) var authToken: String = ""
 
     private var listener: NWListener?
     private var activeConnections: [NWConnection] = []
+
+    private func getOrCreateAuthToken() -> String {
+        if let saved = UserDefaults.standard.string(forKey: "hamClockWebServerAuthToken"), !saved.isEmpty {
+            return saved
+        }
+        let newToken = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+        UserDefaults.standard.set(newToken, forKey: "hamClockWebServerAuthToken")
+        return newToken
+    }
 
     private init() {
         let savedPort = UserDefaults.standard.integer(forKey: "hamClockWebServerPort")
         if savedPort > 1024 && savedPort < 65535 {
             self.port = UInt16(savedPort)
         }
+        self.authToken = getOrCreateAuthToken()
         self.localIPAddress = Self.resolveLocalWiFiIP()
-        self.serverURLString = "http://\(localIPAddress):\(port)"
+        self.serverURLString = "http://\(localIPAddress):\(port)/?token=\(authToken)"
         self.qrCodeImage = Self.generateQRCode(from: serverURLString)
     }
 
@@ -66,8 +77,9 @@ public final class HamClockRemoteWebServer: ObservableObject {
     public func startServer() {
         guard !isRunning else { return }
 
+        self.authToken = getOrCreateAuthToken()
         self.localIPAddress = Self.resolveLocalWiFiIP()
-        self.serverURLString = "http://\(localIPAddress):\(port)"
+        self.serverURLString = "http://\(localIPAddress):\(port)/?token=\(authToken)"
         self.qrCodeImage = Self.generateQRCode(from: serverURLString)
 
         do {
@@ -133,11 +145,14 @@ public final class HamClockRemoteWebServer: ObservableObject {
 
         connection.stateUpdateHandler = { [weak self, weak connection] state in
             guard let self = self, let connection = connection else { return }
-            if case .failed = state, case .cancelled = state {
+            switch state {
+            case .failed, .cancelled:
                 DispatchQueue.main.async {
                     self.activeConnections.removeAll { $0 === connection }
                     self.connectedClientsCount = self.activeConnections.count
                 }
+            default:
+                break
             }
         }
 
@@ -174,28 +189,51 @@ public final class HamClockRemoteWebServer: ObservableObject {
         }
 
         let method = parts[0]
-        let path = parts[1]
+        let rawTarget = parts[1]
+        let urlComponents = URLComponents(string: "http://localhost" + rawTarget)
+        let path = urlComponents?.path ?? "/"
+        let queryToken = urlComponents?.queryItems?.first(where: { $0.name == "token" })?.value ?? ""
+        let bearerToken = request.components(separatedBy: "\r\n")
+            .first(where: { $0.lowercased().hasPrefix("authorization: bearer ") })?
+            .dropFirst("Authorization: Bearer ".count)
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let providedToken = queryToken.isEmpty ? bearerToken : queryToken
+
+        let isAuthenticated = !authToken.isEmpty && providedToken == authToken
 
         if method == "GET" {
             if path == "/" || path == "/index.html" {
-                let html = buildDashboardHTML()
+                if !isAuthenticated {
+                    sendResponse(connection: connection, status: "401 Unauthorized", contentType: "text/html; charset=utf-8",
+                                 body: "<html><body style='background:#07090e;color:#f0f4f8;font-family:sans-serif;padding:40px;text-align:center;'><h2>401 Unauthorized</h2><p>Authentication token required. Scan the QR code on your YAAM Shack Clock screen.</p></body></html>")
+                    return
+                }
+                let html = buildDashboardHTML(token: authToken)
                 sendResponse(connection: connection, status: "200 OK", contentType: "text/html; charset=utf-8", body: html)
             } else if path == "/api/telemetry" {
+                guard isAuthenticated else {
+                    sendResponse(connection: connection, status: "401 Unauthorized", contentType: "application/json", body: "{\"error\":\"unauthorized\"}")
+                    return
+                }
                 let json = buildTelemetryJSON()
                 sendResponse(connection: connection, status: "200 OK", contentType: "application/json", body: json)
             } else {
                 sendResponse(connection: connection, status: "404 Not Found", contentType: "text/plain", body: "Not Found")
             }
         } else if method == "POST" && path == "/api/rotator" {
-            // Rotator command from remote browser
+            guard isAuthenticated else {
+                sendResponse(connection: connection, status: "401 Unauthorized", contentType: "application/json", body: "{\"error\":\"unauthorized\"}")
+                return
+            }
+            // Rotator command from authenticated client
             if let bearingMatch = request.components(separatedBy: "\"azimuth\":").last?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
                 .components(separatedBy: CharacterSet.decimalDigits.inverted).first,
-               let az = Double(bearingMatch) {
+               let az = Double(bearingMatch), az >= 0.0, az <= 360.0 {
                 RotatorService.shared.turnTo(azimuth: az)
                 sendResponse(connection: connection, status: "200 OK", contentType: "application/json", body: "{\"status\":\"ok\",\"azimuth\":\(az)}")
             } else {
-                sendResponse(connection: connection, status: "400 Bad Request", contentType: "application/json", body: "{\"error\":\"missing azimuth\"}")
+                sendResponse(connection: connection, status: "400 Bad Request", contentType: "application/json", body: "{\"error\":\"missing or invalid azimuth (0-360)\"}")
             }
         } else {
             sendResponse(connection: connection, status: "405 Method Not Allowed", contentType: "text/plain", body: "Method Not Allowed")
@@ -208,7 +246,6 @@ public final class HamClockRemoteWebServer: ObservableObject {
             "HTTP/1.1 \(status)",
             "Content-Type: \(contentType)",
             "Content-Length: \(bodyData.count)",
-            "Access-Control-Allow-Origin: *",
             "Connection: close",
             "",
             ""
@@ -225,7 +262,7 @@ public final class HamClockRemoteWebServer: ObservableObject {
 
     // MARK: - HTML5 Responsive Kiosk Web App
 
-    public func buildDashboardHTML() -> String {
+    public func buildDashboardHTML(token: String = "") -> String {
         let clock = ShackClockEngine.shared
         return """
         <!DOCTYPE html>
@@ -406,9 +443,11 @@ public final class HamClockRemoteWebServer: ObservableObject {
             </div>
 
             <script>
+                const authToken = "\(token)";
                 async function updateTelemetry() {
                     try {
-                        const res = await fetch('/api/telemetry');
+                        const url = authToken ? '/api/telemetry?token=' + encodeURIComponent(authToken) : '/api/telemetry';
+                        const res = await fetch(url);
                         if (!res.ok) return;
                         const d = await res.json();
                         document.getElementById('utcClock').innerText = d.utcTime;
@@ -431,7 +470,8 @@ public final class HamClockRemoteWebServer: ObservableObject {
                 }
                 async function turnRotator() {
                     try {
-                        await fetch('/api/rotator', {
+                        const url = authToken ? '/api/rotator?token=' + encodeURIComponent(authToken) : '/api/rotator';
+                        await fetch(url, {
                             method: 'POST',
                             headers: {'Content-Type': 'application/json'},
                             body: JSON.stringify({azimuth: 321})

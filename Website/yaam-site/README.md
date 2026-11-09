@@ -69,3 +69,10 @@ Current download: `/releases/YAAM-1.37.60-macOS.zip`, 32,521,038 bytes, SHA-256 
 Current download: `/releases/YAAM-1.37.61-macOS.zip`, 32,518,447 bytes, SHA-256 `eda312df1e75c266cc37d5b1acba85228b35564b151fcc9ac1a1d55668e695ef`. Corresponding source: `/releases/YAAM-1.37.61-source.zip`; release notes: `/updates/release-1.37.61.html`; GitHub: https://github.com/fact0real/yaam/releases/tag/v1.37.61 .
 
 The table constructs pinned and nearby horizontal cells, retains exact column positions, and exposes the complete filtered log without the 1,000-row loading boundary. Includes the complete 1.37.60 DXCC/Russia corrections and 1.37.59 QRZ follow-up changes. A 100,000-row/30-column production-rendering fixture, 2,800 geometry checks, DXCC regressions and Debug/Release builds cover the change. Measurements are fixture-specific; see the release notes. Non-notarized developer preview with signed publisher feed/archive. Activation is guarded against the prior 1.37.60 site and build 210; previous downloads/site directories remain available.
+
+
+## 1.37.62 (212) — security hardening for HamClock kiosk remote control
+
+Current download: `/releases/YAAM-1.37.62-macOS.zip`, 32,501,983 bytes, SHA-256 `cf42d16e1ec01cf70e381a9842c2a607db3aee30fdf84e31558eba38346d2d57`. Corresponding source: `/releases/YAAM-1.37.62-source.zip`; release notes: `/updates/release-1.37.62.html`; GitHub: https://github.com/fact0real/yaam/releases/tag/v1.37.62 .
+
+The HamClock Remote Web Server enforces token authentication on all telemetry and rotator control endpoints, eliminates wildcard CORS, validates azimuth bearings, and repairs connection lifecycle state handling to prevent socket leaks. Non-notarized developer preview with signed publisher feed/archive.
