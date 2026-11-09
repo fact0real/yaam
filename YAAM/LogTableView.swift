@@ -139,7 +139,6 @@ struct LogTableView: View {
     @State private var isRoverControlSheetPresented = false
     @State private var localSearchText: String = ""
     @State private var searchDebounceTask: Task<Void, Never>? = nil
-    @State private var displayLimit: Int = 1000
     @State private var showBackToTop: Bool = false
     @State private var tableScrollView: NSScrollView? = nil
 
@@ -966,7 +965,10 @@ struct LogTableView: View {
                 .background(Color(NSColor.textBackgroundColor))
             } else {
                 ZStack(alignment: .bottomTrailing) {
-                    ScrollView([.horizontal, .vertical], showsIndicators: true) {
+                    LogTableScrollViewport(
+                        columnWidths: currentUnpinned.map { columnWidths[$0] ?? defaultColumnWidth(for: $0) },
+                        pinnedWidth: utilityColumnWidth + currentPinned.reduce(0) { $0 + (columnWidths[$1] ?? defaultColumnWidth(for: $1)) }
+                    ) { columnWindow in
                         ZStack(alignment: .topLeading) {
                             ScrollViewAccessor { self.tableScrollView = $0 }
                                 .frame(width: 0, height: 0)
@@ -990,21 +992,23 @@ struct LogTableView: View {
                                             .frame(width: 1, height: 1)
                                             .id("logTableTopAnchor")
 
-                                        let renderedRecords = Array(visibleRecords.prefix(displayLimit))
+                                        let newlyConfirmedIDs = appState.allNewlyConfirmedRecordIDs
+                                        let todayConfirmedIDs = appState.todayConfirmedRecordIDs
+                                        let opportunityIndex = appState.confirmationOpportunityIndex
                                         let trackedRivalsSet = Set(appState.trackedRankCallsigns.map { $0.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() })
                                         let hasBatch = !appState.selectedRecordIDs.isEmpty
                                         let batchCount = appState.selectedRecordIDs.count
 
-                                        ForEach(renderedRecords) { record in
+                                        ForEach(visibleRecords) { record in
                                             let cleanCall = record["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
                                             LogRowView(
                                                 record: record,
                                                 isSelected: appState.selectedRecordIDs.contains(record.id),
-                                                isNewlyConfirmed: appState.isNewlyConfirmed(recordID: record.id),
-                                                isTodayConfirmed: appState.isTodayConfirmed(recordID: record.id),
+                                                isNewlyConfirmed: newlyConfirmedIDs.contains(record.id),
+                                                isTodayConfirmed: todayConfirmedIDs.contains(record.id),
                                                 ordinal: appState.filteredChronologicalOrdinal(for: record.id),
                                                 sentEmail: appState.emailHistoryByCallsign[cleanCall],
-                                                opportunity: appState.confirmationOpportunityIndex.opportunity(for: record.id),
+                                                opportunity: opportunityIndex.opportunity(for: record.id),
                                                 isEditingThisRow: editingCellID == record.id,
                                                 editingHeader: editingCellID == record.id ? editingHeader : nil,
                                                 editingText: $editingText,
@@ -1013,6 +1017,7 @@ struct LogTableView: View {
                                                 batchSelectionCount: batchCount,
                                                 pinnedHeaders: currentPinned,
                                                 unpinnedHeaders: currentUnpinned,
+                                                columnWindow: columnWindow,
                                                 columnWidths: columnWidths,
                                                 utilityColumnWidth: utilityColumnWidth,
                                                 onAction: { action in
@@ -1021,30 +1026,6 @@ struct LogTableView: View {
                                             )
                                             .equatable()
                                         }
-                                        if displayLimit < visibleRecords.count {
-                                            HStack(spacing: 8) {
-                                                Text("Showing \(min(displayLimit, visibleRecords.count).formatted()) of \(visibleRecords.count.formatted()) QSOs")
-                                                    .font(.caption)
-                                                    .foregroundColor(.secondary)
-                                                Button("Load Next 1000") {
-                                                    displayLimit += 1000
-                                                }
-                                                .buttonStyle(.bordered)
-                                                .controlSize(.small)
-                                                Button("Show All") {
-                                                    displayLimit = visibleRecords.count
-                                                }
-                                                .buttonStyle(.bordered)
-                                                .controlSize(.small)
-                                            }
-                                            .padding(.vertical, 10)
-                                            .frame(maxWidth: .infinity, alignment: .center)
-                                            .onAppear {
-                                                if displayLimit < visibleRecords.count {
-                                                    displayLimit += 500
-                                                }
-                                            }
-                                        }
                                     } header: {
                                         headerRowView(pinnedHeaders: currentPinned, unpinnedHeaders: currentUnpinned)
                                             .background(Color(NSColor.textBackgroundColor))
@@ -1052,7 +1033,6 @@ struct LogTableView: View {
                                 }
                             }
                         }
-                        .coordinateSpace(name: "logTableScrollSpace")
                         .onPreferenceChange(LogTableScrollStateKey.self) { state in
                             if showBackToTop != state.isScrolledDown {
                                 withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
@@ -1269,13 +1249,8 @@ struct LogTableView: View {
             if localSearchText != newQuery {
                 localSearchText = newQuery
             }
-            displayLimit = 1000
-        }
-        .onChange(of: appState.filterCriteria.isActive) { _, _ in
-            displayLimit = 1000
         }
         .onChange(of: appState.loadedFileURL) { _, _ in
-            displayLimit = 1000
             refreshHeaderCaches()
         }
         .onChange(of: appState.tableHeaders) { _, _ in
@@ -1860,6 +1835,7 @@ fileprivate struct LogRowView: View, Equatable {
     let batchSelectionCount: Int
     let pinnedHeaders: [String]
     let unpinnedHeaders: [String]
+    let columnWindow: LogTableColumnWindow
     let columnWidths: [String: CGFloat]
     let utilityColumnWidth: CGFloat
 
@@ -1884,6 +1860,7 @@ fileprivate struct LogRowView: View, Equatable {
         lhs.opportunity == rhs.opportunity &&
         lhs.pinnedHeaders == rhs.pinnedHeaders &&
         lhs.unpinnedHeaders == rhs.unpinnedHeaders &&
+        lhs.columnWindow == rhs.columnWindow &&
         lhs.columnWidths == rhs.columnWidths
     }
 
@@ -1968,9 +1945,11 @@ fileprivate struct LogRowView: View, Equatable {
 
             // Scrollable Trailing Cells
             HStack(spacing: 0) {
-                ForEach(unpinnedHeaders, id: \.self) { header in
+                Color.clear.frame(width: columnWindow.leadingWidth, height: 28)
+                ForEach(unpinnedHeaders[columnWindow.range], id: \.self) { header in
                     rowCell(header: header, call: call)
                 }
+                Color.clear.frame(width: columnWindow.trailingWidth, height: 28)
             }
             .zIndex(1)
         }
