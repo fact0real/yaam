@@ -243,7 +243,7 @@
       },
       {
         "title": "Visual statistics & QRZ Rank",
-        "description": "Explore logbook statistics, confirmation sources and band/mode coverage. Review configured QRZ Rank history, country context and tracked competitors using the external rank service."
+        "description": "Explore logbook statistics, confirmation sources and band/mode coverage. Worked and confirmed DXCC share one ADIF entity identity, including distinct Asiatic and European Russia. Compare local QRZ-confirmed entities separately from all-source confirmations and review unresolved identities. QRZ Rank provides configured ranking history, country context and tracked competitors."
       },
       {
         "title": "SKED operator directory",

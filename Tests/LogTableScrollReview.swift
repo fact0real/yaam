@@ -23,6 +23,7 @@ struct QSOConfirmationOpportunity: Equatable {
     let isConfirmed = false, hasCountryBandData = true, addsCountryBandCredit = true, addsGridCredit = false
     let band = "20m", country = "Fixture", grid: String? = "AA00"
 }
+enum LogDXCCEntity { static func countryLabel(_ fields: [String: String]) -> String { fields["COUNTRY"] ?? "" } }
 enum ConfirmationCreditColumn {
     static let countryBand = "CREDIT_BAND", grid = "CREDIT_GRID"
     static func isDerived(_ header: String) -> Bool { [countryBand, grid].contains(header) }

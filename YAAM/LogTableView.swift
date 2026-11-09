@@ -2015,7 +2015,7 @@ fileprivate struct LogRowView: View, Equatable {
     @ViewBuilder
     private func rowCell(header: String, call: String) -> some View {
         let w = columnWidths[header] ?? LogTableLayout.defaultColumnWidth(for: header)
-        let val = record[header]
+        let val = header == "COUNTRY" ? LogDXCCEntity.countryLabel(record.fields) : record[header]
         let isDerived = ConfirmationCreditColumn.isDerived(header)
         
         let cellBase = ZStack {

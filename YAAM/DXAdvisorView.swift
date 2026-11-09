@@ -1913,7 +1913,7 @@ struct DXAdvisorView: View {
         var callsignMap: [String: DXAdvisorCallsignAccumulator] = [:]
 
         for record in records {
-            let country = record["COUNTRY"].trimmingCharacters(in: .whitespacesAndNewlines)
+            let country = ConfirmationOpportunityIndex.normalizedCountry(for: record)
             let band = record["BAND"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
             let callsign = record["CALL"].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
             let isConfirmed = record.isConfirmed

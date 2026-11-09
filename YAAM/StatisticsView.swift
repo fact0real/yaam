@@ -32,6 +32,7 @@ struct StatisticsView: View {
     @State private var snapshot = StatisticsSnapshot.empty
     @State private var snapshotGeneration = 0
     @State private var isRefreshingSnapshot = false
+    @State private var showDXCCIssues = false
     @State private var followUpScope: StatisticsFollowUpScope = .creditOpportunities
     @State private var emailLookupRecordID: UUID?
     @State private var selectedCountryBandDetails: StatisticsCountryBandDetailSelection?
@@ -153,6 +154,12 @@ struct StatisticsView: View {
             )
             .environmentObject(appState)
         }
+        .sheet(isPresented: $showDXCCIssues) {
+            StatisticsDXCCIssuesView(issues: currentSnapshot.dxccSummary.issues, records: appState.qsoRecords) { record in
+                showDXCCIssues = false
+                showRecordInLog(record)
+            }
+        }
         .onAppear {
             appState.refreshOwnerQRZRankIfNeeded()
             if let cached = appState.cachedStatisticsSnapshot, cached.totalQSOCount > 0 {
@@ -246,11 +253,13 @@ struct StatisticsView: View {
                 spacing: 10
             ) {
                 StatBadgeCard(title: "Total QSOs", value: "\(stats.totalQSOCount)", icon: "antenna.radiowaves.left.and.right", color: .blue)
-                StatBadgeCard(title: "Confirmed", value: "\(stats.confirmedCount)", icon: "checkmark.seal.fill", color: .green)
+                StatBadgeCard(title: "Confirmed (all sources)", value: "\(stats.confirmedCount)", icon: "checkmark.seal.fill", color: .green)
                 StatBadgeCard(title: "Unconfirmed", value: "\(stats.unconfirmedCount)", icon: "clock.fill", color: .orange)
                 StatBadgeCard(title: "Confirmation Rate", value: String(format: "%.1f%%", stats.confirmationPercentage), icon: "percent", color: .teal)
-                StatBadgeCard(title: "DXCC Countries", value: "\(stats.dxccCountryCount)", icon: "globe.americas.fill", color: .purple)
-                StatBadgeCard(title: "Confirmed DXCC", value: "\(stats.confirmedDxccCountryCount)", icon: "checkmark.circle.fill", color: .mint)
+                StatBadgeCard(title: "Worked DXCC", value: "\(stats.dxccCountryCount)", icon: "globe.americas.fill", color: .purple)
+                StatBadgeCard(title: "Confirmed DXCC (all)", value: "\(stats.confirmedDxccCountryCount)", icon: "checkmark.circle.fill", color: .mint)
+                StatBadgeCard(title: "QRZ-confirmed DXCC", value: "\(stats.dxccSummary.qrzConfirmedCodes.count)", icon: "globe.badge.chevron.backward", color: .blue)
+                    .help("Entities confirmed by QRZ in this local log. QRZ's website uses its own records; use Reconcile to compare confirmation history.")
                 StatBadgeCard(title: "Worked 4-char Grids", value: "\(stats.workedGridCount)", icon: "square.grid.3x3.fill", color: .cyan)
                 StatBadgeCard(title: "Confirmed Grids", value: "\(stats.confirmedGridCount)", icon: "checkmark.square.fill", color: .green)
                 StatBadgeCard(
@@ -263,6 +272,21 @@ struct StatisticsView: View {
                 StatBadgeCard(title: "Active Modes", value: "\(stats.uniqueModeCount)", icon: "waveform", color: .pink)
             }
             
+            VStack(alignment: .leading, spacing: 5) {
+                Text("Counts use the active local log. All-source confirmations include LoTW, QRZ, eQSL and paper; QRZ-confirmed DXCC uses only QRZ evidence.")
+                    .font(.caption).foregroundStyle(.secondary)
+                HStack {
+                    Text("\(stats.dxccSummary.inferredCount) QSOs identified without a DXCC field · \(stats.dxccSummary.unresolvedCount) unresolved and excluded from DXCC totals")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    if !stats.dxccSummary.issues.isEmpty {
+                        Button("Review \(stats.dxccSummary.issues.count) DXCC issues…") { showDXCCIssues = true }
+                            .font(.caption)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
             ViewThatFits(in: .horizontal) {
                 statisticsTabPicker
                     .pickerStyle(.segmented)
@@ -2259,6 +2283,7 @@ nonisolated struct StatisticsSnapshot: Sendable {
     let unconfirmedCount: Int
     let confirmationPercentage: Double
     let dxccCountryCount: Int
+    let dxccSummary: DXCCStatisticsSummary
     let confirmedDxccCountryCount: Int
     let workedGridCount: Int
     let confirmedGridCount: Int
@@ -2280,6 +2305,7 @@ nonisolated struct StatisticsSnapshot: Sendable {
         unconfirmedCount: 0,
         confirmationPercentage: 0,
         dxccCountryCount: 0,
+        dxccSummary: DXCCStatisticsSummary(records: []),
         confirmedDxccCountryCount: 0,
         workedGridCount: 0,
         confirmedGridCount: 0,
@@ -2310,21 +2336,7 @@ nonisolated struct StatisticsSnapshot: Sendable {
         emailHistory: [EmailHistoryEntry] = []
     ) -> StatisticsSnapshot {
         guard !Task.isCancelled else { return .empty }
-        let availableCountries = Set(
-            records.compactMap { record -> String? in
-                let country = ConfirmationOpportunityIndex.normalizedCountry(for: record)
-                return country.isEmpty ? nil : country
-            }
-        )
-        guard !Task.isCancelled else { return .empty }
-        let confirmedDxccCountries = Set(
-            records.compactMap { record -> String? in
-                guard record.isConfirmed else { return nil }
-                let rawDXCC = record["DXCC"].trimmingCharacters(in: .whitespacesAndNewlines)
-                guard let dxccCode = Int(rawDXCC), dxccCode > 0 else { return nil }
-                return String(dxccCode)
-            }
-        )
+        let dxccSummary = DXCCStatisticsSummary(records: records)
 
         guard !Task.isCancelled else { return .empty }
         let workedGrids = Set(records.compactMap { fourCharacterGrid(for: $0) })
@@ -2393,8 +2405,9 @@ nonisolated struct StatisticsSnapshot: Sendable {
             confirmedCount: confirmedCount,
             unconfirmedCount: totalCount - confirmedCount,
             confirmationPercentage: confirmationPercentage,
-            dxccCountryCount: availableCountries.count,
-            confirmedDxccCountryCount: confirmedDxccCountries.count,
+            dxccCountryCount: dxccSummary.workedCodes.count,
+            dxccSummary: dxccSummary,
+            confirmedDxccCountryCount: dxccSummary.confirmedCodes.count,
             workedGridCount: workedGrids.count,
             confirmedGridCount: confirmedGrids.count,
             gridConfirmationPercentage: gridConfirmationPercentage,

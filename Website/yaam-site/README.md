@@ -57,3 +57,8 @@ The website feature reference matches this build. Sync All reviews per-provider 
 Current download: `/releases/YAAM-1.37.59-macOS.zip`, 32,475,322 bytes, SHA-256 `e16028c4b3ed406075d11ec18555b521156774d6d0c994461a57fa61ad60c7a0`. Corresponding source: `/releases/YAAM-1.37.59-source.zip`. Release notes: `/updates/release-1.37.59.html`.
 
 QRZ profile emails are checked automatically; only requests needing details with a published usable email can be selected. Bulk drafts receive their recipients atomically and combine request dates per callsign. Failed checks remain distinct from missing published emails; current no-email requests offer a prefilled rejection. The build also includes multi-file ADIF Live Sync from local 1.37.58. This remains a non-notarized developer preview with publisher-signed feed and archive.
+
+
+## 1.37.60 (210) — consistent DXCC identities
+
+Current download: `/releases/YAAM-1.37.60-macOS.zip`, 32,521,038 bytes, SHA-256 `7dd7421e1c54d0533a7ef4ff4419e6dd6104b24523cea6ce878875611b8f24ac`. Corresponding source: `/releases/YAAM-1.37.60-source.zip`. Release notes: `/updates/release-1.37.60.html`. Worked/confirmed counts and country/band views share an ADIF identity, missing codes use unambiguous country/operating-call evidence, and Russia entities remain distinct. Local QRZ confirmations are separate from all-source confirmations. Invalid/unresolved identities have a review list; original ADIF fields remain unchanged. Non-notarized preview, signed publisher feed/archive.

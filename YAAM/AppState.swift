@@ -2371,7 +2371,7 @@ class AppState: NSObject, ObservableObject {
         
         for record in qsoRecords {
             let band = record["BAND"].isEmpty ? "UNKNOWN" : record["BAND"].uppercased()
-            let country = record["COUNTRY"]
+            let country = ConfirmationOpportunityIndex.normalizedCountry(for: record)
             let confirmed = record.isConfirmed
             
             if bandMap[band] == nil {
@@ -2404,7 +2404,7 @@ class AppState: NSObject, ObservableObject {
         var countryMap: [String: (total: Int, confirmed: Int)] = [:]
         
         for record in qsoRecords {
-            let c = record["COUNTRY"].isEmpty ? "Unknown" : record["COUNTRY"]
+            let c = ConfirmationOpportunityIndex.countryFilterLabel(for: record)
             if countryMap[c] == nil { countryMap[c] = (total: 0, confirmed: 0) }
             countryMap[c]?.total += 1
             if record.isConfirmed { countryMap[c]?.confirmed += 1 }
@@ -2423,7 +2423,7 @@ class AppState: NSObject, ObservableObject {
 
         for record in qsoRecords {
             let band = record["BAND"].isEmpty ? "UNKNOWN" : record["BAND"].uppercased()
-            let country = record["COUNTRY"].isEmpty ? "Unknown" : record["COUNTRY"]
+            let country = ConfirmationOpportunityIndex.countryFilterLabel(for: record)
 
             if bandCountryMap[band] == nil {
                 bandCountryMap[band] = [:]

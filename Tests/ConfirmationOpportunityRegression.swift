@@ -81,7 +81,7 @@ struct ConfirmationOpportunityRegression {
         // Unknown country cards must remain filterable even when the ADIF country is blank,
         // and band filtering must use the same frequency fallback as Statistics.
         let unresolvedContact = QSORecordModel(fields: [
-            "CALL": "ZZ9ZZ",
+            "CALL": "QQ0UNKNOWN",
             "FREQ": "7.074",
             "MODE": "FT8"
         ])
