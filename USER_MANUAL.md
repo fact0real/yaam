@@ -330,6 +330,9 @@ The Digital Call Roster inspects every incoming FT8/FT4 decode against your logb
 
 ## 11. Logbook Table Modernization & Confirmation Credit Intelligence
 
+Scroll directly through the entire filtered log with the mouse, trackpad or scrollbar; there is no 1,000-row loading boundary. Date, time, callsign and QSL columns stay pinned during horizontal scrolling. Cells outside the horizontal viewport are created as they come into view.
+
+
 * **Centered Leaderboard Columns:** Centered formatting for `Band Rank`, `DXCC Rank`, and `QSO Rank`.
 * **UTC Chronological Ordering:** Filtered views cleanly indexed from 1 (most recent QSO) descending.
 * **Confirmation Credit Tracking:**

@@ -17,6 +17,10 @@
         "description": "Look up a callsign, inspect previous contacts and enter reports, frequency, mode and exchange data in a keyboard-oriented operating form. Digital Suite contact logging uses a fresh physical radio frequency readback or operator-confirmed manual entry, with visible missing-field explanations."
       },
       {
+        "title": "Continuous logbook scrolling",
+        "description": "Scroll directly through the entire filtered log without a 1,000-row loading boundary. Date, time, callsign and QSL columns stay pinned; only nearby horizontal cells are constructed as they come into view."
+      },
+      {
         "title": "Search, filters & bulk editing",
         "description": "Combine callsign, name, QTH, state, county, grid, notes, band, mode, DXCC, continent, date and confirmation criteria. Apply reviewed changes to selected records."
       },

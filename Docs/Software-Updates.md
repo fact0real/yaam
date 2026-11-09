@@ -55,3 +55,7 @@ The first update after the 1.37.56 website bootstrap uses the same pinned public
 ## 1.37.59 (209) publication
 
 QRZ Incoming follow-up fixes and the multi-file ADIF Live Sync work from local 1.37.58 use build 209 and the unchanged publisher public key. The release includes a corresponding source snapshot with a file-hash manifest; unrelated untracked analysis reports are excluded. Validation covers focused QRZ regressions, update-policy and Release-entitlement regressions, the optimized Release build, effective sandbox/no-debugger privileges, and authentic feed/archive acceptance with corrupted-copy rejection. Live UI and real QRZ/SMTP delivery were not completed. The website retains prior downloads; publication changes the versioned assets, signed feed and current-site symlink.
+
+## 1.37.61 (211) publication
+
+Logbook scrolling now constructs pinned/visible columns with exact offscreen spacing and represents the complete filtered log without incremental footer loading. Build 211 retains the publisher public key. Validation covers 2,800 geometry checks, the production row/viewport fixture with 100,000 invented contacts, Debug/Release builds, update policy and staged sandbox/no-debugger entitlements. Official Sparkle tools verify authentic archive/feed signatures and reject modified copies. The website and GitHub distribute identical immutable binaries and corresponding GPL source. This remains a non-notarized developer preview; no real station/logbook is used by the scroll fixture.

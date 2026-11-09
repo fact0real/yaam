@@ -50,7 +50,7 @@ struct ReviewTable: View {
     var widths: [CGFloat] { controls.headers.map { LogTableLayout.defaultColumnWidth(for: $0) } }
     var body: some View {
         VStack(spacing: 0) {
-            Text("Invented contacts · \(records.count) rows · \(baseline ? "baseline" : "optimized") · no services")
+            Text("Invented contacts · \(min(records.count, controls.rowLimit)) rows · \(baseline ? "baseline" : "optimized") · no services")
                 .font(.caption).padding(8)
             if baseline {
                 ScrollView([.horizontal, .vertical]) {
@@ -156,7 +156,7 @@ struct ReviewTable: View {
         RunLoop.main.run(until: Date().addingTimeInterval(0.1)); host.layoutSubtreeIfNeeded()
         let edited = host.bitmapImageRepForCachingDisplay(in: host.bounds)!
         host.cacheDisplay(in: host.bounds, to: edited)
-        try edited.representation(using: .png, properties: [:])!.write(to: out.appendingPathComponent("selected-editing.png"))
+        try edited.representation(using: .png, properties: [:])!.write(to: out.appendingPathComponent("\(baseline ? "baseline" : "optimized")-selected-editing.png"))
         controls.rowLimit = 0
         RunLoop.main.run(until: Date().addingTimeInterval(0.1)); host.layoutSubtreeIfNeeded()
         controls.rowLimit = 100000; controls.headers = trailing
