@@ -215,23 +215,25 @@ public struct SignalFootprintWorkspaceView: View {
 
             // Actions: Refresh, Simulate, Alerts
             HStack(spacing: 6) {
-                Button {
-                    engine.refreshNow()
-                } label: {
-                    HStack(spacing: 4) {
-                        if engine.isPolling {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Image(systemName: "arrow.clockwise")
+                TimelineView(.periodic(from: .now, by: 1.0)) { _ in
+                    Button {
+                        engine.refreshNow()
+                    } label: {
+                        HStack(spacing: 4) {
+                            if engine.isPolling {
+                                ProgressView().controlSize(.small)
+                            } else {
+                                Image(systemName: "arrow.clockwise")
+                            }
+                            Text(engine.isPolling ? "Fetching" : "\(engine.countdownSeconds)s")
+                                .font(.system(size: 11, design: .monospaced))
                         }
-                        Text(engine.isPolling ? "Fetching" : "\(engine.countdownSeconds)s")
-                            .font(.system(size: 11, design: .monospaced))
                     }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(engine.isPolling)
+                    .help("Refresh telemetry from PSKReporter now")
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .disabled(engine.isPolling)
-                .help("Refresh telemetry from PSKReporter now")
 
                 Button {
                     engine.loadSampleFootprintTelemetry()

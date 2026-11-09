@@ -91,8 +91,19 @@ public struct RoverModePillView: View {
             isHovered = hovering
         }
         .onAppear {
-            withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) {
-                pulseAnimation = true
+            if roverEngine.isRoverActive {
+                withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) {
+                    pulseAnimation = true
+                }
+            }
+        }
+        .onChange(of: roverEngine.isRoverActive) { _, isActive in
+            if isActive {
+                withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) {
+                    pulseAnimation = true
+                }
+            } else {
+                pulseAnimation = false
             }
         }
         .help(

@@ -2133,10 +2133,12 @@ final class FT8EngineService: ObservableObject {
                     self.qsoStreamItems.append(.status(id: UUID(), time: Date(), text: "SWR protection: TX stopped and disarmed (above 2.5).", isMilestone: true))
                 }
 
-                // UI telemetry does not drive slot scheduling. Five updates per
-                // second keep the countdown smooth without relaying out the
-                // entire station view ten times a second.
-                try? await Task.sleep(for: .milliseconds(200))
+                // UI telemetry does not drive slot scheduling. When completely idle,
+                // update once per second to conserve CPU. When operating, armed, or
+                // transmitting, 5 updates per second keep the countdown smooth.
+                let isIdle = self.state == .idle && !self.transmitArmed && !self.isCallingCQContinually && !self.autoSequenceEnabled && !self.autoHunterEnabled
+                let sleepMs = isIdle ? 1000 : 200
+                try? await Task.sleep(for: .milliseconds(sleepMs))
             }
         }
     }

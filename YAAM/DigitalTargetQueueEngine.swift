@@ -68,7 +68,15 @@ public final class DigitalTargetQueueEngine: ObservableObject {
 
     @Published public var queue: [QueuedTarget] = []
     @Published public var activeTarget: QueuedTarget? = nil
-    @Published public var isAutoPilotActive: Bool = false
+    @Published public var isAutoPilotActive: Bool = false {
+        didSet {
+            if isAutoPilotActive {
+                startPrecisionCycleTimer()
+            } else {
+                stopPrecisionCycleTimer()
+            }
+        }
+    }
     @Published public var secondsRemainingInCycle: Double = 15.0
     @Published public var lastDispatchMessage: String = ""
 
@@ -76,7 +84,7 @@ public final class DigitalTargetQueueEngine: ObservableObject {
     private let queueLock = NSLock()
 
     private init() {
-        startPrecisionCycleTimer()
+        // Precision cycle timer is only started when auto-pilot is actively armed.
     }
 
     deinit {
@@ -142,6 +150,12 @@ public final class DigitalTargetQueueEngine: ObservableObject {
     }
 
     // MARK: - Cycle Synchronization & Automatic Dispatch
+
+    private func stopPrecisionCycleTimer() {
+        syncTimer?.cancel()
+        syncTimer = nil
+        secondsRemainingInCycle = 15.0
+    }
 
     private func startPrecisionCycleTimer() {
         syncTimer?.cancel()

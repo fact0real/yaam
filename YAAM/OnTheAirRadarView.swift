@@ -174,21 +174,23 @@ public struct OnTheAirHUDPopoverView: View {
 
                 Spacer(minLength: 12)
 
-                Button {
-                    service.refreshNow()
-                } label: {
-                    HStack(spacing: 4) {
-                        if service.isPolling {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Image(systemName: "arrow.clockwise")
+                TimelineView(.periodic(from: .now, by: 1.0)) { _ in
+                    Button {
+                        service.refreshNow()
+                    } label: {
+                        HStack(spacing: 4) {
+                            if service.isPolling {
+                                ProgressView().controlSize(.small)
+                            } else {
+                                Image(systemName: "arrow.clockwise")
+                            }
+                            Text("Refresh (\(service.countdownSeconds)s)")
                         }
-                        Text("Refresh (\(service.countdownSeconds)s)")
                     }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(service.isPolling)
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .disabled(service.isPolling)
             }
 
             Divider()

@@ -125,6 +125,7 @@ public final class SatelliteTrackingEngine: ObservableObject {
     @Published public var selectedSatelliteID: String = "ISS" {
         didSet {
             UserDefaults.standard.set(selectedSatelliteID, forKey: "selectedSatelliteID")
+            lastGroundTrackCalculationDate = .distantPast
             calculateCurrentTelemetry()
         }
     }
@@ -137,6 +138,7 @@ public final class SatelliteTrackingEngine: ObservableObject {
 
     private var homeCoordinate: GeoCoordinate = GeoCoordinate(latitude: 0, longitude: 0) // Neutral origin until a station is configured.
     private var timerCancellable: AnyCancellable?
+    private var lastGroundTrackCalculationDate: Date = .distantPast
 
     private init() {
         self.satellites = Self.bundledDefaultSatellites()
@@ -232,8 +234,11 @@ public final class SatelliteTrackingEngine: ObservableObject {
             nextPass: upcomingPasses.first
         )
 
-        // Generate smooth ground track for +/- 45 minutes
-        generateGroundTrack(satellite: sat, centerDate: now)
+        // Generate smooth ground track for +/- 45 minutes periodically (every 30s) or on satellite switch
+        if now.timeIntervalSince(lastGroundTrackCalculationDate) >= 30.0 {
+            lastGroundTrackCalculationDate = now
+            generateGroundTrack(satellite: sat, centerDate: now)
+        }
     }
 
     public struct PropagatedState: Sendable {

@@ -195,8 +195,11 @@ public final class WaitAndPounceEngine: ObservableObject {
             UserDefaults.standard.set(isEnabled, forKey: "waitAndPounceEnabled")
             if !isEnabled {
                 haltAndDisarm()
-            } else if activeTarget != nil {
-                status = .hunting(mode: huntMode.shortLabel)
+            } else {
+                updateCycleTimerCadence()
+                if activeTarget != nil {
+                    status = .hunting(mode: huntMode.shortLabel)
+                }
             }
         }
     }
@@ -268,7 +271,9 @@ public final class WaitAndPounceEngine: ObservableObject {
         self.voiceAnnouncementsEnabled = UserDefaults.standard.object(forKey: "waitAndPounceVoiceEnabled") as? Bool ?? true
 
         rebuildWatchlist()
-        startPrecisionCycleTimer()
+        if isEnabled {
+            updateCycleTimerCadence()
+        }
     }
 
     deinit {
@@ -326,6 +331,7 @@ public final class WaitAndPounceEngine: ObservableObject {
         self.activeTarget = nil
         self.currentAttempt = 0
         self.targetArmScheduled = false
+        updateCycleTimerCadence()
         if isEnabled {
             self.status = .hunting(mode: huntMode.shortLabel)
         } else {
@@ -542,6 +548,7 @@ public final class WaitAndPounceEngine: ObservableObject {
         guard isEnabled else { return }
 
         self.targetArmScheduled = true
+        updateCycleTimerCadence()
         let deltaHz = calculateTxFrequency(for: target)
         self.status = .armed(target: target.callsign, deltaHz: deltaHz, secondsRemaining: secondsRemainingInCycle)
         self.logEvent("⚡️ ARMED TO POUNCE on \(target.callsign) (\(triggerReason)) on \(deltaHz) Hz!")
@@ -586,10 +593,26 @@ public final class WaitAndPounceEngine: ObservableObject {
 
     // MARK: - Precision 15-Second Slot Synchronization
 
-    private func startPrecisionCycleTimer() {
+    private func updateCycleTimerCadence() {
+        guard isEnabled else {
+            stopCycleTimer()
+            return
+        }
+        let intervalMs: Int = targetArmScheduled ? 50 : 500
+        startCycleTimer(repeatingMilliseconds: intervalMs)
+    }
+
+    private func stopCycleTimer() {
+        cycleTimer?.cancel()
+        cycleTimer = nil
+        secondsRemainingInCycle = 15.0
+        cycleProgressPercentage = 0.0
+    }
+
+    private func startCycleTimer(repeatingMilliseconds: Int) {
         cycleTimer?.cancel()
         let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .userInteractive))
-        timer.schedule(deadline: .now(), repeating: .milliseconds(50))
+        timer.schedule(deadline: .now(), repeating: .milliseconds(repeatingMilliseconds))
         timer.setEventHandler { [weak self] in
             let now = Date().timeIntervalSince1970
             let period = 15.0 // FT8 cycle
@@ -620,10 +643,12 @@ public final class WaitAndPounceEngine: ObservableObject {
     private func executePounceDispatch() {
         guard let target = activeTarget, isEnabled else {
             self.targetArmScheduled = false
+            updateCycleTimerCadence()
             return
         }
 
         self.targetArmScheduled = false
+        updateCycleTimerCadence()
         self.currentAttempt += 1
 
         let txHz = calculateTxFrequency(for: target)
@@ -721,16 +746,22 @@ public final class WaitAndPounceEngine: ObservableObject {
     public func haltAndDisarm() {
         self.targetArmScheduled = false
         self.status = .idle
+        stopCycleTimer()
         self.logEvent("🛑 EMERGENCY HALT: Transmission disarmed")
 
         // Halt WSJT-X
         NotificationCenter.default.post(name: .init("WaitAndPounceHaltTx"), object: nil)
     }
 
-    private func logEvent(_ msg: String) {
+    private static let eventLogTimeFormatter: DateFormatter = {
         let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "HH:mm:ss"
-        let timestamp = formatter.string(from: Date())
+        return formatter
+    }()
+
+    private func logEvent(_ msg: String) {
+        let timestamp = Self.eventLogTimeFormatter.string(from: Date())
         let full = "[\(timestamp)] \(msg)"
         self.lastEventMessage = msg
         self.eventLog.insert(full, at: 0)

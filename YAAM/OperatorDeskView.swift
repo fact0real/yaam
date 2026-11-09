@@ -17,6 +17,22 @@ private let clusterUTCTimeFormatter: DateFormatter = {
     return formatter
 }()
 
+private let quickLogUTCTimeFormatter: DateFormatter = {
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.timeZone = TimeZone(secondsFromGMT: 0)
+    formatter.dateFormat = "HH:mm:ss"
+    return formatter
+}()
+
+private let quickLogUTCDateFormatter: DateFormatter = {
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.timeZone = TimeZone(secondsFromGMT: 0)
+    formatter.dateFormat = "yyyy-MM-dd"
+    return formatter
+}()
+
 struct OperatorDeskView: View {
     @EnvironmentObject private var appState: AppState
 
@@ -371,17 +387,11 @@ private struct QuickLogPanel: View {
     @State private var lastESMExecutionTime: Date = Date.distantPast
 
     private var currentUTCTimeString: String {
-        let formatter = DateFormatter()
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
-        formatter.dateFormat = "HH:mm:ss"
-        return formatter.string(from: currentTime)
+        quickLogUTCTimeFormatter.string(from: currentTime)
     }
 
     private var currentUTCDateString: String {
-        let formatter = DateFormatter()
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter.string(from: currentTime)
+        quickLogUTCDateFormatter.string(from: currentTime)
     }
 
     private enum Field: Hashable {

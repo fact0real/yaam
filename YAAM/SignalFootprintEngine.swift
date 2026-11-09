@@ -181,7 +181,10 @@ public final class SignalFootprintEngine: ObservableObject {
         }
     }
     @Published public var isPolling: Bool = false
-    @Published public var countdownSeconds: Int = 300
+    public private(set) var nextPollDate: Date = Date().addingTimeInterval(300)
+    public var countdownSeconds: Int {
+        max(0, Int(ceil(nextPollDate.timeIntervalSinceNow)))
+    }
     @Published public var pollIntervalSeconds: Int = 300 // 5 minutes
     @Published public var lastPollTime: Date?
     @Published public var sessionMaxDistanceKm: Double = 0.0
@@ -238,7 +241,8 @@ public final class SignalFootprintEngine: ObservableObject {
         }
 
         if isChanged && !cleanCall.isEmpty && cleanCall != "DEFAULT" && cleanCall != "NOCALL" {
-            countdownSeconds = 3 // Fast poll after callsign change
+            nextPollDate = Date().addingTimeInterval(3)
+            startPollerLoop()
         }
     }
 
@@ -247,22 +251,22 @@ public final class SignalFootprintEngine: ObservableObject {
         pollerTask?.cancel()
         pollerTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
                 guard let self = self else { return }
 
                 guard !self.stationCallsign.isEmpty,
                       self.stationCallsign != "DEFAULT",
                       self.stationCallsign != "NOCALL" else {
+                    try? await Task.sleep(nanoseconds: 5_000_000_000)
                     continue
                 }
 
-                if !self.isPolling && !self.isSimulatedData {
-                    if self.countdownSeconds > 0 {
-                        self.countdownSeconds -= 1
-                    } else {
-                        self.countdownSeconds = self.pollIntervalSeconds
-                        await self.fetchFootprintTelemetry()
-                    }
+                let remaining = max(1, Int(ceil(self.nextPollDate.timeIntervalSinceNow)))
+                try? await Task.sleep(nanoseconds: UInt64(remaining) * 1_000_000_000)
+                guard !Task.isCancelled else { return }
+
+                if !self.isPolling && !self.isSimulatedData && !self.stationCallsign.isEmpty {
+                    self.nextPollDate = Date().addingTimeInterval(Double(self.pollIntervalSeconds))
+                    await self.fetchFootprintTelemetry()
                 }
             }
         }
@@ -272,9 +276,10 @@ public final class SignalFootprintEngine: ObservableObject {
     public func refreshNow() {
         guard !isPolling, !stationCallsign.isEmpty else { return }
         isSimulatedData = false
-        countdownSeconds = pollIntervalSeconds
+        nextPollDate = Date().addingTimeInterval(Double(pollIntervalSeconds))
         Task { @MainActor in
             await self.fetchFootprintTelemetry()
+            self.startPollerLoop()
         }
     }
 
