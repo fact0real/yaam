@@ -76,3 +76,10 @@ The table constructs pinned and nearby horizontal cells, retains exact column po
 Current download: `/releases/YAAM-1.37.62-macOS.zip`, 32,501,983 bytes, SHA-256 `cf42d16e1ec01cf70e381a9842c2a607db3aee30fdf84e31558eba38346d2d57`. Corresponding source: `/releases/YAAM-1.37.62-source.zip`; release notes: `/updates/release-1.37.62.html`; GitHub: https://github.com/fact0real/yaam/releases/tag/v1.37.62 .
 
 The HamClock Remote Web Server enforces token authentication on all telemetry and rotator control endpoints, eliminates wildcard CORS, validates azimuth bearings, and repairs connection lifecycle state handling to prevent socket leaks. Non-notarized developer preview with signed publisher feed/archive.
+
+
+## 1.37.63 (213) — complete active DXCC catalog
+
+Current download: `/releases/YAAM-1.37.63-macOS.zip`, 32,534,278 bytes, SHA-256 `19e2d0aa25e556d496f8e3ee22487452f597b152f21382a4f123eda834df450f`. Corresponding source: `/releases/YAAM-1.37.63-source.zip`; release notes: `/updates/release-1.37.63.html`; GitHub: https://github.com/fact0real/yaam/releases/tag/v1.37.63 .
+
+The station workspace now lists all 340 active DXCC entities from the bundled ADIF-coded CTY data. This build also improves background CPU behavior and reports SMTP credential-vault access failures. Non-notarized developer preview with signed publisher feed/archive.

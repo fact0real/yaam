@@ -26,9 +26,10 @@ nonisolated struct MacCredentialRootKeyStore: CredentialRootKeyStore {
         var result: CFTypeRef?
         let status = SecItemCopyMatching(request as CFDictionary, &result)
         if status == errSecItemNotFound { return nil }
-        guard status == errSecSuccess, let data = result as? Data, data.count == 32 else {
-            throw ProtectedCredentialStorage.Failure.keyUnavailable
+        guard status == errSecSuccess else {
+            throw ProtectedCredentialStorage.Failure.keychain(status)
         }
+        guard let data = result as? Data, data.count == 32 else { throw ProtectedCredentialStorage.Failure.keyUnavailable }
         return data
     }
     func create(_ proposed: Data) throws -> Data {
@@ -37,7 +38,7 @@ nonisolated struct MacCredentialRootKeyStore: CredentialRootKeyStore {
         request[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         let status = SecItemAdd(request as CFDictionary, nil)
         if status == errSecDuplicateItem, let existing = try read() { return existing }
-        guard status == errSecSuccess else { throw ProtectedCredentialStorage.Failure.keyUnavailable }
+        guard status == errSecSuccess else { throw ProtectedCredentialStorage.Failure.keychain(status) }
         guard try read() == proposed else { throw ProtectedCredentialStorage.Failure.keyUnavailable }
         return proposed
     }
@@ -46,10 +47,13 @@ nonisolated struct MacCredentialRootKeyStore: CredentialRootKeyStore {
 /// The owner serializes access. Tests supply an isolated directory and an in-memory key store.
 nonisolated struct ProtectedCredentialStorage {
     enum Failure: LocalizedError {
-        case keyUnavailable, unreadableVault
+        case keyUnavailable, keychain(OSStatus), unreadableVault
         var errorDescription: String? {
             switch self {
             case .keyUnavailable: return "The credential key is unavailable in the macOS Keychain. Unlock the login Keychain and retry. If its key was removed, restore it or re-enter credentials; the saved vault has been preserved."
+            case .keychain(let status):
+                let detail = SecCopyErrorMessageString(status, nil) as String? ?? "Security error \(status)"
+                return "The credential vault could not access its key in the macOS Keychain (\(detail), code \(status)). Unlock the login Keychain and retry. The saved vault has been preserved."
             case .unreadableVault: return "The saved credential vault could not be decrypted. It has been preserved; restore the matching key/vault or re-enter credentials in a fresh installation."
             }
         }

@@ -6668,6 +6668,10 @@ class AppState: NSObject, ObservableObject {
         
         guard !host.isEmpty, !user.isEmpty, !pass.isEmpty else {
             if playSound { playActivitySound(.failure) }
+            if pass.isEmpty, let reason = CredentialVault.accessFailureMessage, !reason.isEmpty {
+                completion(false, "SMTP CREDENTIAL UNAVAILABLE: \(reason)")
+                return
+            }
             completion(false, "SMTP MISSING: Check Preferences for Host, User, and Pass.")
             return
         }

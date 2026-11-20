@@ -699,7 +699,7 @@ Warm 73,
                     Button("Remove Password", role: .destructive) {
                         let removed = CredentialVault.delete(.smtpPassword)
                         if removed { smtpPass = "" }
-                        saveStatus = removed ? "Removed" : "Keychain could not remove this password"
+                        saveStatus = removed ? "Removed" : credentialSaveFailure("The password could not be removed from the credential vault.")
                     }
 
                     if !saveStatus.isEmpty {
@@ -729,7 +729,12 @@ Warm 73,
         let cleanPassword = smtpPass.replacingOccurrences(of: " ", with: "")
         let didSave = cleanPassword.isEmpty || CredentialVault.set(cleanPassword, for: .smtpPassword)
         if didSave, !cleanPassword.isEmpty { smtpPass = "" }
-        saveStatus = didSave ? "Saved" : "Keychain could not save this password"
+        saveStatus = didSave ? "Saved" : credentialSaveFailure("The password could not be saved.")
         if didSave, closeWhenFinished { dismiss() }
+    }
+
+    private func credentialSaveFailure(_ fallback: String) -> String {
+        if let reason = CredentialVault.accessFailureMessage, !reason.isEmpty { return "\(fallback) \(reason)" }
+        return "\(fallback) Check Settings > Data Safety & Backups for credential vault status."
     }
 }

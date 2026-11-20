@@ -69,3 +69,7 @@ Logbook scrolling now constructs pinned/visible columns with exact offscreen spa
 ## 1.37.62 (212) publication
 
 HamClock Remote Web Server incorporates secure token authentication and connection lifecycle fixes. Build 212 retains the publisher public key. Mutating antenna rotator commands require valid authentication tokens, wildcard CORS is removed from rotator endpoints, and disconnected TCP sockets are cleanly purged from memory. Validation covers 4 focused security regression checks (`HamClockServerSecurityRegression`), the complete review regression suite, Debug and optimized Release builds, update-policy validation and staged sandbox entitlements. Official Sparkle tools verify authentic archive/feed signatures and reject modified copies. The website and GitHub distribute identical immutable binaries and corresponding GPL source. This remains a non-notarized developer preview; no real station/hardware is operated by the security test fixture.
+
+## 1.37.63 (213) publication
+
+The station workspace uses the bundled ADIF-coded CTY file for its complete 340-entity active DXCC list, keeping subdivisions with a shared ADIF code together. Build 213 also includes background CPU improvements and clearer SMTP credential-vault access errors. The published binary is an ad-hoc-signed, non-notarized developer preview with the same Sparkle public key. The website and GitHub provide the identical signed-update ZIP and corresponding GPL source.

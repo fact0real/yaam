@@ -422,17 +422,62 @@ public enum DXCCDatabase {
         entry("D4", "Cape Verde", "CV", "🇨🇻", "AF", 35, 46)
     ].sorted { $0.prefix.count > $1.prefix.count }
 
+    /// The prefix table above is a fast fallback resolver, not the full DXCC list.
+    /// The bundled CTY file has one ADIF-coded header for every active entity.
     public nonisolated static let allEntities: [DXCCEntityInfo] = {
-        var seen = Set<String>()
-        var list: [DXCCEntityInfo] = []
-        for entry in entries {
-            if !seen.contains(entry.entity.entityName) {
-                seen.insert(entry.entity.entityName)
-                list.append(entry.entity)
-            }
+        let knownByName = entries.reduce(into: [String: DXCCEntityInfo]()) { result, entry in
+            let key = CountryNameNormalizer.canonicalKey(entry.entity.entityName)
+            if result[key] == nil { result[key] = entry.entity }
         }
-        return list.sorted { $0.entityName.localizedStandardCompare($1.entityName) == .orderedAscending }
+        let complete = bundledCTYEntities()
+        let list = complete.map { code, entity in
+            let name = code == 390 ? "Turkey" : canonicalCountryName(entity.name)
+            let known = knownByName[CountryNameNormalizer.canonicalKey(name)]
+            return DXCCEntityInfo(
+                entityName: known?.entityName ?? name,
+                countryCode: known?.countryCode ?? "--",
+                flagEmoji: known?.flagEmoji ?? countryToFlag(name),
+                continent: code == 13 ? "AN" : entity.metadata.continent,
+                cqZone: entity.metadata.cqZone,
+                ituZone: entity.metadata.ituZone
+            )
+        }
+        return (list.isEmpty ? Array(knownByName.values) : list)
+            .sorted { $0.entityName.localizedStandardCompare($1.entityName) == .orderedAscending }
     }()
+
+    private struct CTYMetadata {
+        let continent: String
+        let cqZone: Int
+        let ituZone: Int
+    }
+
+    private nonisolated static func bundledCTYEntities() -> [Int: (name: String, metadata: CTYMetadata)] {
+        let url = Bundle.main.url(forResource: "cty_wt", withExtension: "dat")
+            ?? URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Resources/cty_wt.dat")
+        guard let data = try? String(contentsOf: url, encoding: .utf8) else { return [:] }
+        var result: [Int: (name: String, metadata: CTYMetadata)] = [:]
+        var pendingCode: Int?
+        for rawLine in data.components(separatedBy: .newlines) {
+            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            if line.hasPrefix("# ADIF ") {
+                pendingCode = Int(line.dropFirst(7))
+                continue
+            }
+            guard let code = pendingCode, !line.isEmpty, !line.hasPrefix("#"),
+                  rawLine.first?.isWhitespace == false else { continue }
+            let fields = line.split(separator: ":", omittingEmptySubsequences: false)
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+            // Asterisk prefixes are regional/WAE subdivisions that share an
+            // ADIF code with their parent entity (for example Sicily/Italy).
+            if fields.count >= 8, !fields[7].hasPrefix("*"),
+               let cq = Int(fields[1]), let itu = Int(fields[2]) {
+                result[code] = (fields[0], CTYMetadata(continent: fields[3], cqZone: cq, ituZone: itu))
+            }
+            pendingCode = nil
+        }
+        return result
+    }
 
     public nonisolated static let allEntityNames: [String] = {
         allEntities.map(\.entityName)

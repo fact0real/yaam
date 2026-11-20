@@ -33,6 +33,23 @@ struct CallsignEntityRegression {
     }
 
     static func main() {
+        let catalog = DXCCDatabase.allEntities
+        check("all 340 active DXCC entities appear in the catalog", catalog.count == 340, "\(catalog.count)")
+        check("entity names are unique", Set(catalog.map(\.entityName)).count == catalog.count)
+        for name in ["Banaba Island", "Temotu Province", "South Cook Islands", "ITU HQ", "United Nations HQ", "Antarctica"] {
+            check("\(name) appears in the complete catalog", catalog.contains { $0.entityName == name })
+        }
+        check("Antarctica has its own continent", catalog.first { $0.entityName == "Antarctica" }?.continent == "AN")
+        check("deleted Kingman Reef stays out of the active catalog", !catalog.contains { $0.entityName == "Kingman Reef" })
+        for name in ["Austria", "Italy", "Scotland", "Svalbard", "Turkey"] {
+            check("\(name) is not replaced by a CTY subdivision", catalog.contains { $0.entityName == name })
+        }
+        for name in ["North Korea", "Bouvet Island", "South Sudan", "San Felix & San Ambrosio", "Peter 1 Island"] {
+            check("\(name) keeps its DXCC display name", catalog.contains { $0.entityName == name })
+        }
+        check("Turkey uses its Asian DXCC listing", catalog.first { $0.entityName == "Turkey" }?.continent == "AS")
+        check("Italy uses its own DXCC continent", catalog.first { $0.entityName == "Italy" }?.continent == "EU")
+
         // 1. The shared rule
         for call in ["EA3JIC/MM", "EP2AES/AM", "GM/EA3JIC/MM", "ea3jic/mm "] {
             check("\(call) is maritime or aeronautical mobile: in no DXCC entity", CallsignEntityRule.isOutsideAnyEntity(call))

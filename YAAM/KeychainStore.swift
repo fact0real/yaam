@@ -464,6 +464,13 @@ nonisolated enum KeychainStore {
 // MARK: - CredentialVault
 
 nonisolated enum CredentialVault {
+    static var accessFailureMessage: String? {
+        if !isVaultSessionUnlocked {
+            return "The credential vault is locked. Unlock it in Settings > Data Safety & Backups, then retry."
+        }
+        return KeychainStore.storageFailure
+    }
+
     static func prewarm() {
         KeychainStore.prewarm()
     }

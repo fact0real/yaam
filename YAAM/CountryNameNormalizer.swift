@@ -38,8 +38,10 @@ nonisolated enum CountryNameNormalizer {
         ]),
         ("North Korea", [
             "Democratic People's Republic of Korea", "Korea, D.P.R. of",
-            "Korea DPR", "DPRK"
+            "Korea DPR", "DPRK", "DPR of Korea"
         ]),
+        ("Bouvet Island", ["Bouvet", "Bouvet Is."]),
+        ("South Sudan", ["Republic of South Sudan"]),
         ("Kosovo", [
             "Republic of Kosovo", "Kosova", "Republic of Kosova",
             "Republic of Kosovë", "Kosovë", "Z6", "Z60", "Z61"
@@ -90,6 +92,7 @@ nonisolated enum CountryNameNormalizer {
         ("Trinidad and Tobago", ["Trinidad & Tobago"]),
         ("United Arab Emirates", ["UAE", "U.A.E."]),
         ("United Nations HQ", ["United Nations Hq", "UN HQ", "United Nations Headquarters"]),
+        ("ITU HQ", ["Itu Hq", "International Telecommunication Union HQ"]),
         ("Isle of Man", ["Isle Of Man"]),
         ("Franz Josef Land", ["Franz Joseph Land", "Franz-Josef Land", "Franz Josef Lnd"]),
         ("San Andres and Providencia", [
